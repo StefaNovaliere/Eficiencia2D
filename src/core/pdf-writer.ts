@@ -90,7 +90,7 @@ function buildContent(walls: Wall[], scaleDenom: number, paper: string): string 
   return cs;
 }
 
-export function generatePdf(walls: Wall[], scaleDenom: number, paper: string): Uint8Array {
+export function generatePdf(walls: Wall[], scaleDenom: number, paper: string): string {
   const pSize = PAPERS[paper] ?? PAPERS.A3;
   const pw = (pSize.w * 72 / 25.4).toFixed(2);
   const ph = (pSize.h * 72 / 25.4).toFixed(2);
@@ -138,8 +138,5 @@ export function generatePdf(walls: Wall[], scaleDenom: number, paper: string): U
   emit(`trailer\n<< /Size ${offsets.length + 1} /Root 1 0 R >>\n`);
   emit(`startxref\n${xrefOff}\n%%EOF\n`);
 
-  const full = parts.join("");
-  const bytes = new Uint8Array(full.length);
-  for (let i = 0; i < full.length; i++) bytes[i] = full.charCodeAt(i);
-  return bytes;
+  return parts.join("");
 }

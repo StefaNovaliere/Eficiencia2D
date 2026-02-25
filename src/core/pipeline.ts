@@ -80,10 +80,10 @@ export function runPipeline(
   }
 
   if (opts.formats.includes("pdf")) {
-    const pdfBytes = generatePdf(walls, opts.scaleDenom, opts.paper);
+    const pdfContent = generatePdf(walls, opts.scaleDenom, opts.paper);
     files.push({
       name: `${stem}.pdf`,
-      blob: new Blob([pdfBytes.buffer], { type: "application/pdf" }),
+      blob: new Blob([pdfContent], { type: "application/pdf" }),
     });
   }
 
