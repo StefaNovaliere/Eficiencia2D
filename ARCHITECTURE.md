@@ -1,67 +1,86 @@
 # Eficiencia2D - Architecture
 
-## Data Flow
+## Deployment Modes
+
+### Mode A: Vercel (Free Tier) — Client-Side Processing
+Everything runs in the browser. Zero server cost. Vercel serves static assets only.
 
 ```
-[Browser]                [Server]                    [Translator]
+[Browser]
+   |
+   |  User drops .skp or .obj file
+   |
+   |  ┌─────────────────────────────────────┐
+   |  │  File.arrayBuffer()                 │
+   |  │  SkpParser.parse() / ObjParser()    │
+   |  │  WallExtractor.extract()            │
+   |  │  DxfWriter.generate()               │
+   |  │  PdfWriter.generate()               │
+   |  └─────────────────────────────────────┘
+   |
+   |  Blob download (DXF + PDF)
+   ▼
+```
+
+### Mode B: Self-Hosted — Server-Side C++ Processing
+For maximum .skp compatibility using the SketchUp C API SDK.
+See `translator-cpp/` and `backend-selfhosted/`.
+
+```
+[Browser]                [FastAPI]                   [C++ Translator]
    |                        |                            |
    |  POST /api/upload      |                            |
    |  (binary .skp stream)  |                            |
-   |----------------------->|                            |
-   |                        |  Save to temp file         |
-   |                        |  spawn: skp_translator     |
-   |                        |  --input model.skp         |
-   |                        |  --format dxf,pdf          |
-   |                        |  --scale 100               |
-   |                        |  --paper A3                |
+   |----------------------->|  spawn: skp_translator     |
    |                        |--------------------------->|
-   |                        |                            |
    |                        |        SUModelCreateFromFile
    |                        |        WallExtractor::run()
-   |                        |        DxfWriter::write()
-   |                        |        PdfWriter::write()
-   |                        |                            |
    |                        |  exit 0 + output files     |
    |                        |<---------------------------|
-   |                        |                            |
-   |                        |  Zip outputs               |
    |  200 OK (zip stream)   |                            |
    |<-----------------------|                            |
 ```
 
-## Components
+## Client-Side Processing Pipeline (Mode A)
 
-### 1. Translator Engine (C++)
-- **Links against**: SketchUp C API SDK (`slapi/`)
-- **Entry point**: `main.cpp` - CLI argument parsing
-- **Core class**: `WallExtractor` - traverses SUModel, filters vertical faces
-- **Output**: `DxfWriter` and `PdfWriter` produce annotated 2D projections
-- **Wall detection logic**:
-  1. Iterate all entities (recursing into groups/components with transform accumulation)
-  2. Filter faces whose normal is perpendicular to Z (|normal.z| < epsilon)
-  3. Filter by area > 1.5 m² (eliminates trim, baseboards, noise)
-  4. Preserve inner loops (openings) but skip component instances inside them
-  5. Project 3D vertices onto the wall's local 2D plane
+### Parser Layer
+- **`skp-parser.ts`**: Reads .skp binary format (ZIP-wrapped modern or legacy).
+  Scans binary for vertex arrays using structural pattern matching.
+  Best-effort — may not handle all .skp versions.
+- **`obj-parser.ts`**: Parses Wavefront .obj (text). Reliable fallback.
+  SketchUp exports .obj natively: File → Export → 3D Model → OBJ.
 
-### 2. Backend (Python FastAPI)
-- Receives multipart upload of `.skp` binary
-- Validates file header (SKP magic bytes)
-- Saves to temp directory, invokes translator subprocess
-- Streams back zipped results
-- No intermediate format conversion - raw binary in, 2D files out
+### Wall Extraction (`wall-extractor.ts`)
+Same algorithm as the C++ version:
+1. Filter faces where |normal.z| < 0.08 (vertical)
+2. Filter faces with area > 1.5 m² (no noise)
+3. Compute wall-local 2D coordinate system (u = horizontal, v = up)
+4. Project outer loop + inner loops (openings) to 2D
+5. Compute bounding-box dimensions
 
-### 3. Frontend (Next.js / React)
-- Single-page upload interface
-- Paper size selector (A3, A1)
-- Scale selector (1:50, 1:100)
-- Drag-and-drop upload with progress
-- Download link for zipped results
+### Output Writers
+- **`dxf-writer.ts`**: DXF with WALLS / OPENINGS / DIMENSIONS layers
+- **`pdf-writer.ts`**: Raw PDF operators, Helvetica font, no dependencies
+
+## Self-Hosted Components (Mode B)
+
+### C++ Translator (`translator-cpp/`)
+- Links against SketchUp C API SDK
+- `WallExtractor` class with recursive entity traversal + transform accumulation
+- Full .skp support including inner loops (opening preservation)
+
+### Python Backend (`backend-selfhosted/`)
+- FastAPI endpoint receives .skp binary
+- Spawns C++ translator as subprocess with timeout
+- Returns zipped DXF + PDF
 
 ## Key Design Decisions
 
-1. **Binary-first**: No XML/JSON intermediate. SUModelCreateFromFile reads .skp directly.
-2. **Subprocess isolation**: C++ translator runs as a child process with timeout.
-   Crashes don't take down the server.
-3. **Stream-oriented**: Large files are streamed, not buffered entirely in memory.
-4. **Transform accumulation**: Nested groups/components are handled by composing
-   transformation matrices down the hierarchy.
+1. **Client-first for Vercel**: No server processing needed for the free tier.
+   The file never leaves the user's machine. No upload size limits.
+2. **Dual-mode**: Same wall extraction algorithm in both TypeScript and C++.
+   The C++ path gives full SDK-level .skp support for self-hosted deployments.
+3. **Zero dependencies for output**: Both DXF and PDF writers generate raw
+   format bytes — no external libraries needed.
+4. **OBJ as reliable fallback**: When .skp binary parsing hits edge cases,
+   the user can export .obj from SketchUp (free, one click) for perfect results.
