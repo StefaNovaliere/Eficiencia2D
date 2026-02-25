@@ -1,8 +1,7 @@
-# Frontend (not needed for backend Docker build)
+# Build artifacts
 node_modules/
 .next/
 out/
-src/
 
 # Git / IDE
 .git/
