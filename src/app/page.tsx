@@ -5,7 +5,11 @@ export default function Home() {
     <main className="main">
       <h1 className="title">Eficiencia2D</h1>
       <p className="subtitle">
-        Upload a raw <code>.skp</code> file. Get dimensioned 2D plans instantly.
+        Sube tu archivo <code>.skp</code> o <code>.obj</code> y obtén planos
+        2D acotados al instante.
+      </p>
+      <p className="privacy-note">
+        100% en el navegador — tu archivo nunca sale de tu máquina.
       </p>
       <UploadForm />
     </main>
