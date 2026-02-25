@@ -48,3 +48,19 @@
 - **Fecha**: 2026-02-25
 - **Problema**: Railway estaba configurado con builder "Railpack" (default) y detectaba el proyecto como Next.js frontend. El backend FastAPI nunca se buildeaba ni ejecutaba, así que `POST /api/upload` devolvía 404 desde railway-edge. Esto también causaba error de CORS porque railway-edge no envía headers `Access-Control-Allow-Origin`.
 - **Solución**: Agregar `railway.toml` en la raíz del proyecto con `builder = "dockerfile"` y `dockerfilePath = "backend-selfhosted/Dockerfile"` para que Railway use el Dockerfile del backend.
+
+## Error 10: Include incorrecto `SketchUpAPI/model/transformation.h` — no existe en el SDK
+- **Fecha**: 2026-02-25
+- **Problema**: `translator-cpp/include/transform.h` incluía `<SketchUpAPI/model/transformation.h>`, pero ese header no existe en el SketchUp SDK. La struct `SUTransformation` está definida en `<SketchUpAPI/geometry.h>`. Esto causaba `fatal error: SketchUpAPI/model/transformation.h: No such file or directory` durante la compilación en Docker/Railway.
+- **Solución**: Cambiar el include a `<SketchUpAPI/geometry.h>`.
+
+## Error 11 (BLOQUEANTE): SDK de SketchUp no tiene binarios para Linux — solo Windows/macOS
+- **Fecha**: 2026-02-25
+- **Problema**: El directorio `SDK/binaries/sketchup/x64/` contiene solo archivos Windows (`.dll`, `.lib`). El SketchUp C SDK **no se distribuye oficialmente para Linux** — solo existe para Windows y macOS. El Dockerfile buildea sobre Ubuntu (Linux), así que CMake no encuentra `libSketchUpAPI.so` y el linker falla. Esto hace que sea **imposible** compilar y ejecutar el translator C++ en un contenedor Docker Linux.
+- **Impacto**: El backend completo no puede funcionar en Railway (ni en ningún host Linux) con la arquitectura actual.
+- **Opciones a evaluar**:
+  1. **Parseo alternativo en Python**: Usar librerías Python open-source que parsean `.skp` sin el SDK de C++ (ej: el formato `.skp` es un ZIP con protobuf).
+  2. **API de conversión en la nube**: Usar un servicio externo para convertir `.skp` a un formato parseable (ej: `.obj`, `.gltf`) y luego generar los planos 2D.
+  3. **Windows container o VM**: Correr el backend en un host Windows (Azure Functions, AWS Windows, etc.) donde el SDK sí funciona.
+  4. **Wine en Docker**: Ejecutar el translator compilado para Windows dentro de Wine en un contenedor Linux (frágil y complejo).
+  5. **Replantear flujo**: Aceptar solo `.obj` (no `.skp`) y procesarlo con herramientas que sí funcionan en Linux.
