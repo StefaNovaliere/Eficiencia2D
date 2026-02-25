@@ -15,6 +15,7 @@
 //   For files it cannot handle, the UI falls back to .obj upload.
 // ============================================================================
 
+import pako from "pako";
 import { type Face3D, type Vec3, cross, normalize, sub } from "./types";
 
 /** Inches to metres conversion. */
@@ -44,17 +45,25 @@ function readI32(dv: DataView, off: number): number {
   return dv.getInt32(off, true);
 }
 
+/** Represents a candidate ZIP entry with its raw data and metadata. */
+interface ZipEntry {
+  method: number;
+  compressedSize: number;
+  uncompressedSize: number;
+  dataStart: number;
+}
+
 /**
  * Extract the inner binary payload from a ZIP-wrapped .skp.
  * We look for the largest embedded file (the model data).
+ * Supports both STORED (method 0) and DEFLATE (method 8) entries.
  */
 function unzipSkpPayload(buf: ArrayBuffer): ArrayBuffer {
   const u8 = new Uint8Array(buf);
 
   // Simple ZIP local-file-header scanner.
-  // We find all embedded files and return the largest (the model binary).
-  let bestOffset = -1;
-  let bestSize = 0;
+  // We find all embedded files and pick the largest (the model binary).
+  const entries: ZipEntry[] = [];
   let pos = 0;
 
   while (pos + 30 < u8.length) {
@@ -62,19 +71,15 @@ function unzipSkpPayload(buf: ArrayBuffer): ArrayBuffer {
     if (u8[pos] === 0x50 && u8[pos + 1] === 0x4b &&
         u8[pos + 2] === 0x03 && u8[pos + 3] === 0x04) {
       const dv = new DataView(buf, pos, 30);
+      const method = dv.getUint16(8, true);
       const compressedSize = dv.getUint32(18, true);
       const uncompressedSize = dv.getUint32(22, true);
       const nameLen = dv.getUint16(26, true);
       const extraLen = dv.getUint16(28, true);
       const dataStart = pos + 30 + nameLen + extraLen;
 
-      // We only handle STORED (method 0) entries; compressed entries would
-      // need inflate, which requires a library.  Most .skp ZIP wrappers
-      // use STORED for the main binary payload.
-      const method = dv.getUint16(8, true);
-      if (method === 0 && uncompressedSize > bestSize) {
-        bestSize = uncompressedSize;
-        bestOffset = dataStart;
+      if (method === 0 || method === 8) {
+        entries.push({ method, compressedSize, uncompressedSize, dataStart });
       }
 
       pos = dataStart + compressedSize;
@@ -83,8 +88,31 @@ function unzipSkpPayload(buf: ArrayBuffer): ArrayBuffer {
     }
   }
 
-  if (bestOffset >= 0 && bestOffset + bestSize <= buf.byteLength) {
-    return buf.slice(bestOffset, bestOffset + bestSize);
+  // Pick the entry with the largest uncompressed size (the model binary).
+  let best: ZipEntry | null = null;
+  for (const entry of entries) {
+    if (!best || entry.uncompressedSize > best.uncompressedSize) {
+      best = entry;
+    }
+  }
+
+  if (best && best.dataStart + best.compressedSize <= buf.byteLength) {
+    if (best.method === 0) {
+      // STORED — uncompressed data, just slice it out.
+      return buf.slice(best.dataStart, best.dataStart + best.uncompressedSize);
+    }
+
+    // DEFLATE — decompress using pako.
+    const compressed = new Uint8Array(buf, best.dataStart, best.compressedSize);
+    try {
+      const inflated = pako.inflateRaw(compressed);
+      return inflated.buffer.slice(
+        inflated.byteOffset,
+        inflated.byteOffset + inflated.byteLength,
+      );
+    } catch {
+      // Decompression failed — fall through to raw buffer.
+    }
   }
 
   // If we couldn't extract, return the whole buffer and hope it's parseable.
@@ -184,7 +212,7 @@ export function parseSkp(buffer: ArrayBuffer): SkpParseResult {
     version = "zip-wrapped (SketchUp 2021+)";
     payload = unzipSkpPayload(buffer);
     if (payload === buffer) {
-      warnings.push("ZIP extraction found no STORED entries; trying raw parse.");
+      warnings.push("ZIP extraction found no usable entries; trying raw parse.");
     }
   } else if (isSkpMagic(buffer)) {
     version = "legacy binary";
