@@ -28,3 +28,23 @@
 - **Fecha**: 2026-02-25
 - **Problema**: `page.tsx` decía "100% en el navegador — tu archivo nunca sale de tu máquina" pero después del refactor el archivo SÍ se envía al servidor backend.
 - **Solución**: Actualizar el texto a "Tu archivo se envía a nuestro servidor para procesarlo y se elimina inmediatamente después."
+
+## Error 6: Caracteres corruptos `########` en layout.tsx
+- **Fecha**: 2026-02-25
+- **Problema**: `src/app/layout.tsx` en `main` tenía `########` en la línea 3 (restos de un merge malo). Esto causaba `Expected ident` syntax error durante `next build` en Vercel.
+- **Solución**: Eliminar la línea corrupta. El archivo ya estaba limpio en el feature branch.
+
+## Error 7: `.dockerignore` excluía `src/` — Railway no encontraba Next.js app dir
+- **Fecha**: 2026-02-25
+- **Problema**: El `.dockerignore` en la raíz tenía `src/` para excluir el frontend del build del backend Docker. Pero Railpack (builder de Railway) lo usaba para el build del frontend, eliminando toda la carpeta `src/app/`. Next.js fallaba con `Couldn't find any 'pages' or 'app' directory`.
+- **Solución**: Eliminar `src/` del `.dockerignore` raíz. El backend ya tiene su propio `.dockerignore` en `backend-selfhosted/`.
+
+## Error 8: `NEXT_PUBLIC_API_URL` sin protocolo `https://` — fetch iba a ruta relativa
+- **Fecha**: 2026-02-25
+- **Problema**: La variable `NEXT_PUBLIC_API_URL` en Vercel estaba configurada como `eficiencia2d-production.up.railway.app` (sin `https://`). El browser interpretaba eso como ruta relativa y hacía POST a `https://vercel-domain.app/eficiencia2d-production.up.railway.app/api/upload`, retornando 405 Method Not Allowed.
+- **Solución**: Agregar auto-prepend de `https://` en `UploadForm.tsx` cuando falta el protocolo. También se recomienda corregir la variable en Vercel.
+
+## Error 9: Railway devuelve 404 — buildea frontend en vez de backend Docker
+- **Fecha**: 2026-02-25
+- **Problema**: Railway estaba configurado con builder "Railpack" (default) y detectaba el proyecto como Next.js frontend. El backend FastAPI nunca se buildeaba ni ejecutaba, así que `POST /api/upload` devolvía 404 desde railway-edge. Esto también causaba error de CORS porque railway-edge no envía headers `Access-Control-Allow-Origin`.
+- **Solución**: Agregar `railway.toml` en la raíz del proyecto con `builder = "dockerfile"` y `dockerfilePath = "backend-selfhosted/Dockerfile"` para que Railway use el Dockerfile del backend.
