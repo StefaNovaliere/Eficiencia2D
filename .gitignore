@@ -21,5 +21,10 @@ Thumbs.db
 /tmp/
 *.zip
 
+# Env files (secrets)
+.env
+.env.local
+.env.production
+
 # Vercel
 .vercel
