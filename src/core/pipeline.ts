@@ -83,7 +83,7 @@ export function runPipeline(
     const pdfBytes = generatePdf(walls, opts.scaleDenom, opts.paper);
     files.push({
       name: `${stem}.pdf`,
-      blob: new Blob([pdfBytes], { type: "application/pdf" }),
+      blob: new Blob([pdfBytes.buffer], { type: "application/pdf" }),
     });
   }
 
