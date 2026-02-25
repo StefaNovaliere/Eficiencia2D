@@ -1,0 +1,22 @@
+# C++ build
+translator/build/
+translator/third_party/sketchup-sdk/
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+
+# Node / Next.js
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temp
+/tmp/
+*.zip
