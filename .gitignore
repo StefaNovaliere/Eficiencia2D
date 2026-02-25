@@ -1,6 +1,5 @@
-# C++ build (self-hosted mode)
+# C++ build artifacts (self-hosted mode)
 translator-cpp/build/
-translator-cpp/third_party/sketchup-sdk/
 
 # Python (self-hosted mode)
 __pycache__/
