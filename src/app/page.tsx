@@ -9,7 +9,8 @@ export default function Home() {
         2D acotados al instante.
       </p>
       <p className="privacy-note">
-        100% en el navegador — tu archivo nunca sale de tu máquina.
+        Tu archivo se envía a nuestro servidor para procesarlo y se elimina
+        inmediatamente después.
       </p>
       <UploadForm />
     </main>

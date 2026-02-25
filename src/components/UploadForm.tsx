@@ -1,10 +1,10 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import { runPipeline } from "@/core/pipeline";
-import type { OutputFile, PipelineOptions } from "@/core/types";
 
-type Status = "idle" | "processing" | "done" | "error";
+type Status = "idle" | "uploading" | "done" | "error";
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 export default function UploadForm() {
   const [file, setFile] = useState<File | null>(null);
@@ -12,9 +12,6 @@ export default function UploadForm() {
   const [paper, setPaper] = useState<"A3" | "A1">("A3");
   const [formats, setFormats] = useState<("dxf" | "pdf")[]>(["dxf", "pdf"]);
   const [status, setStatus] = useState<Status>("idle");
-  const [wallCount, setWallCount] = useState(0);
-  const [outputs, setOutputs] = useState<OutputFile[]>([]);
-  const [warnings, setWarnings] = useState<string[]>([]);
   const [error, setError] = useState("");
   const dropRef = useRef<HTMLDivElement>(null);
 
@@ -43,33 +40,41 @@ export default function UploadForm() {
   const handleSubmit = async () => {
     if (!file || formats.length === 0) return;
 
-    setStatus("processing");
+    setStatus("uploading");
     setError("");
-    setWarnings([]);
-    setOutputs([]);
-    setWallCount(0);
 
     try {
-      const buffer = await file.arrayBuffer();
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("scale", String(scale));
+      formData.append("paper", paper);
+      formData.append("formats", formats.join(","));
 
-      // Run pipeline (synchronous — fast enough for typical models).
-      const opts: PipelineOptions = { scaleDenom: scale, paper, formats };
-      const result = runPipeline(file.name, buffer, opts);
+      const res = await fetch(`${API_URL}/api/upload`, {
+        method: "POST",
+        body: formData,
+      });
 
-      setWallCount(result.walls.length);
-      setWarnings(result.warnings);
-
-      if (result.files.length > 0) {
-        setOutputs(result.files);
-        setStatus("done");
-      } else {
-        setError(
-          result.warnings.length > 0
-            ? result.warnings.join(" ")
-            : "No se generaron archivos de salida.",
-        );
-        setStatus("error");
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        const detail = body?.detail ?? `Error del servidor (${res.status})`;
+        throw new Error(detail);
       }
+
+      // The backend returns a ZIP — trigger browser download.
+      const blob = await res.blob();
+      const disposition = res.headers.get("Content-Disposition");
+      const filenameMatch = disposition?.match(/filename="?([^"]+)"?/);
+      const zipName = filenameMatch?.[1] ?? `${file.name.replace(/\.[^.]+$/, "")}_planos.zip`;
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = zipName;
+      a.click();
+      URL.revokeObjectURL(url);
+
+      setStatus("done");
     } catch (err: unknown) {
       setError(
         err instanceof Error ? err.message : "Error desconocido al procesar.",
@@ -78,22 +83,10 @@ export default function UploadForm() {
     }
   };
 
-  const downloadFile = (f: OutputFile) => {
-    const url = URL.createObjectURL(f.blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = f.name;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
   const reset = () => {
     setFile(null);
     setStatus("idle");
-    setOutputs([]);
-    setWarnings([]);
     setError("");
-    setWallCount(0);
   };
 
   return (
@@ -174,10 +167,10 @@ export default function UploadForm() {
       {status !== "done" ? (
         <button
           className="submit-btn"
-          disabled={!file || formats.length === 0 || status === "processing"}
+          disabled={!file || formats.length === 0 || status === "uploading"}
           onClick={handleSubmit}
         >
-          {status === "processing" ? "Procesando..." : "Generar Planos"}
+          {status === "uploading" ? "Procesando..." : "Generar Planos"}
         </button>
       ) : (
         <button className="submit-btn reset-btn" onClick={reset}>
@@ -186,41 +179,18 @@ export default function UploadForm() {
       )}
 
       {/* Processing indicator */}
-      {status === "processing" && (
+      {status === "uploading" && (
         <div className="progress-bar">
           <div className="progress-fill progress-indeterminate" />
         </div>
       )}
 
-      {/* Results */}
+      {/* Success */}
       {status === "done" && (
         <div className="results">
           <p className="results-summary">
-            {wallCount} muro{wallCount !== 1 ? "s" : ""} detectado
-            {wallCount !== 1 ? "s" : ""}
+            Archivo ZIP descargado con tus planos.
           </p>
-          <div className="download-list">
-            {outputs.map((f) => (
-              <button
-                key={f.name}
-                className="download-link"
-                onClick={() => downloadFile(f)}
-              >
-                Descargar {f.name}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Warnings */}
-      {warnings.length > 0 && (
-        <div className="warnings">
-          {warnings.map((w, i) => (
-            <p key={i} className="warning-msg">
-              {w}
-            </p>
-          ))}
         </div>
       )}
 
