@@ -4,7 +4,11 @@ import { useCallback, useRef, useState } from "react";
 
 type Status = "idle" | "uploading" | "done" | "error";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
+const RAW_API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
+const API_URL =
+  RAW_API_URL && !/^https?:\/\//.test(RAW_API_URL)
+    ? `https://${RAW_API_URL}`
+    : RAW_API_URL;
 
 export default function UploadForm() {
   const [file, setFile] = useState<File | null>(null);
