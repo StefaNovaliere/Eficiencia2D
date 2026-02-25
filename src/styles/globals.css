@@ -8,6 +8,7 @@
   --accent-hover: #2563eb;
   --error: #ef4444;
   --success: #22c55e;
+  --warning: #f59e0b;
 }
 
 * {
@@ -31,7 +32,7 @@ body {
 }
 
 .title {
-  font-size: 2rem;
+  font-size: 2.2rem;
   font-weight: 700;
   letter-spacing: -0.02em;
 }
@@ -49,9 +50,16 @@ body {
   font-size: 0.9em;
 }
 
+.privacy-note {
+  margin-top: 6px;
+  font-size: 0.8rem;
+  color: var(--success);
+  opacity: 0.8;
+}
+
 /* Upload card */
 .upload-card {
-  margin-top: 40px;
+  margin-top: 36px;
   text-align: left;
 }
 
@@ -148,6 +156,15 @@ body {
   cursor: not-allowed;
 }
 
+.reset-btn {
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.reset-btn:hover:not(:disabled) {
+  background: var(--border);
+}
+
 /* Progress */
 .progress-bar {
   margin-top: 12px;
@@ -163,22 +180,61 @@ body {
   transition: width 0.3s ease;
 }
 
-/* Download link */
+.progress-indeterminate {
+  width: 30%;
+  animation: indeterminate 1.2s ease-in-out infinite;
+}
+
+@keyframes indeterminate {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(430%); }
+}
+
+/* Results */
+.results {
+  margin-top: 20px;
+}
+
+.results-summary {
+  font-size: 0.9rem;
+  color: var(--success);
+  margin-bottom: 12px;
+  text-align: center;
+}
+
+.download-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .download-link {
   display: block;
-  margin-top: 20px;
   padding: 14px;
   text-align: center;
   background: var(--success);
   color: #fff;
   font-weight: 600;
   border-radius: 10px;
-  text-decoration: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.95rem;
   transition: opacity 0.15s;
 }
 
 .download-link:hover {
   opacity: 0.9;
+}
+
+/* Warnings */
+.warnings {
+  margin-top: 16px;
+}
+
+.warning-msg {
+  color: var(--warning);
+  font-size: 0.85rem;
+  margin-bottom: 4px;
 }
 
 /* Error */
