@@ -1,0 +1,21 @@
+# Frontend (not needed for backend Docker build)
+node_modules/
+.next/
+out/
+src/
+
+# Git / IDE
+.git/
+.vercel/
+.DS_Store
+
+# Python caches
+__pycache__/
+*.pyc
+.venv/
+
+# C++ build artifacts (we rebuild inside Docker)
+translator-cpp/build/
+
+# Tests
+backend-selfhosted/tests/
