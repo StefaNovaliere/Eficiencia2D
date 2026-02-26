@@ -1,17 +1,17 @@
 """
-PDF Writer — Python port of src/core/pdf-writer.ts.
+PDF Writer
 
-Generates a minimal, self-contained PDF from projected Wall[] data.
+Generates a multi-page PDF where each page is one facade elevation.
 No external dependencies -- writes raw PDF operators.
 
 Paper sizes: A3 (420x297 mm), A1 (841x594 mm).
-Walls are drawn with solid strokes; openings with dashes.
-Dimension annotations use built-in Helvetica.
+Facade polygons are drawn with solid strokes.
+Title and dimension annotations use built-in Helvetica.
 """
 
 from __future__ import annotations
 
-from .types import Wall
+from .types import Facade
 
 PAPERS: dict[str, tuple[float, float]] = {
     "A3": (420, 297),
@@ -21,85 +21,106 @@ PAPERS: dict[str, tuple[float, float]] = {
 MM_TO_PT = 72 / 25.4
 
 
-def _m_to_pts(m: float, scale_denom: int) -> float:
-    return (m / scale_denom) * 1000 * MM_TO_PT
-
-
-def _build_content(walls: list[Wall], scale_denom: int, paper: str) -> str:
+def _build_page_content(facade: Facade, scale_denom: int, paper: str) -> str:
+    """Build the PDF content stream for one facade page."""
     w_mm, h_mm = PAPERS.get(paper, PAPERS["A3"])
+    page_w = w_mm * MM_TO_PT
     page_h = h_mm * MM_TO_PT
-    margin = 30.0
-    gap = _m_to_pts(1.5, scale_denom)
+    margin = 40.0
+    font_size = 10
+
+    # Compute scale: fit the facade into the printable area.
+    avail_w = page_w - 2 * margin
+    avail_h = page_h - 2 * margin - 30  # reserve space for title
+
+    # Scale from model units to PDF points using the drawing scale.
+    def m_to_pts(m: float) -> float:
+        return (m / scale_denom) * 1000 * MM_TO_PT
+
+    facade_w_pts = m_to_pts(facade.width)
+    facade_h_pts = m_to_pts(facade.height)
+
+    # If the facade doesn't fit at the requested scale, shrink to fit.
+    fit_scale = 1.0
+    if facade_w_pts > avail_w and facade_w_pts > 0:
+        fit_scale = min(fit_scale, avail_w / facade_w_pts)
+    if facade_h_pts > avail_h and facade_h_pts > 0:
+        fit_scale = min(fit_scale, avail_h / facade_h_pts)
+
+    effective_w = facade_w_pts * fit_scale
+    effective_h = facade_h_pts * fit_scale
+
+    # Center on page.
+    ox = (page_w - effective_w) / 2
+    oy = margin + (avail_h - effective_h) / 2
+
+    def tx(vx: float) -> float:
+        return ox + m_to_pts(vx) * fit_scale
+
+    def ty(vy: float) -> float:
+        return oy + m_to_pts(vy) * fit_scale
 
     cs = ""
-    cursor_x = margin
-    font_size = 8
 
-    for wall in walls:
-        w_pts = _m_to_pts(wall.width, scale_denom)
-        h_pts = _m_to_pts(wall.height, scale_denom)
-        base_y = (page_h - h_pts) / 2
+    # Draw all facade polygons.
+    cs += "0.4 w\n"
+    for poly in facade.polygons:
+        verts = poly.vertices
+        if len(verts) < 3:
+            continue
+        cs += f"{tx(verts[0].x):.4f} {ty(verts[0].y):.4f} m\n"
+        for i in range(1, len(verts)):
+            cs += f"{tx(verts[i].x):.4f} {ty(verts[i].y):.4f} l\n"
+        cs += "s\n"
 
-        def tx(vx: float) -> float:
-            return cursor_x + _m_to_pts(vx, scale_denom)
+    # Title above the drawing.
+    cs += "BT\n"
+    cs += f"/F1 {font_size + 2} Tf\n"
+    cs += f"{page_w / 2:.2f} {oy + effective_h + 16:.2f} Td\n"
+    cs += f"({facade.label}) Tj\n"
+    cs += "ET\n"
 
-        def ty(vy: float) -> float:
-            return base_y + _m_to_pts(vy, scale_denom)
+    # Width dimension below.
+    cs += "BT\n"
+    cs += f"/F1 {font_size} Tf\n"
+    cs += f"{page_w / 2:.2f} {oy - 16:.2f} Td\n"
+    cs += f"({facade.width:.2f} m) Tj\n"
+    cs += "ET\n"
 
-        # Outer boundary (solid).
-        cs += "0.3 w\n"
-        ov = wall.outer.vertices
-        if ov:
-            cs += f"{tx(ov[0].x):.4f} {ty(ov[0].y):.4f} m\n"
-            for i in range(1, len(ov)):
-                cs += f"{tx(ov[i].x):.4f} {ty(ov[i].y):.4f} l\n"
-            cs += "s\n"
+    # Height dimension to the right.
+    cs += "BT\n"
+    cs += f"/F1 {font_size} Tf\n"
+    cs += f"{ox + effective_w + 8:.2f} {oy + effective_h / 2:.2f} Td\n"
+    cs += f"({facade.height:.2f} m) Tj\n"
+    cs += "ET\n"
 
-        # Openings (dashed).
-        cs += "[4 2] 0 d\n"
-        for opening in wall.openings:
-            iv = opening.vertices
-            if not iv:
-                continue
-            cs += f"{tx(iv[0].x):.4f} {ty(iv[0].y):.4f} m\n"
-            for i in range(1, len(iv)):
-                cs += f"{tx(iv[i].x):.4f} {ty(iv[i].y):.4f} l\n"
-            cs += "s\n"
-        cs += "[] 0 d\n"
-
-        # Wall label.
-        cs += "BT\n"
-        cs += f"/F1 {font_size} Tf\n"
-        cs += f"{cursor_x + w_pts / 2:.2f} {base_y + h_pts + 12:.2f} Td\n"
-        cs += f"({wall.label}) Tj\n"
-        cs += "ET\n"
-
-        # Width dimension.
-        cs += "BT\n"
-        cs += f"/F1 {font_size} Tf\n"
-        cs += f"{cursor_x + w_pts / 2:.2f} {base_y - 14:.2f} Td\n"
-        cs += f"({wall.width:.2f} m) Tj\n"
-        cs += "ET\n"
-
-        # Height dimension.
-        cs += "BT\n"
-        cs += f"/F1 {font_size} Tf\n"
-        cs += f"{cursor_x + w_pts + 6:.2f} {base_y + h_pts / 2:.2f} Td\n"
-        cs += f"({wall.height:.2f} m) Tj\n"
-        cs += "ET\n"
-
-        cursor_x += w_pts + gap
+    # Scale annotation in bottom-right corner.
+    cs += "BT\n"
+    cs += f"/F1 {font_size - 2} Tf\n"
+    cs += f"{page_w - margin:.2f} {margin / 2:.2f} Td\n"
+    if fit_scale < 0.999:
+        cs += f"(Escala: ajustada para caber en {paper}) Tj\n"
+    else:
+        cs += f"(Escala: 1:{scale_denom}) Tj\n"
+    cs += "ET\n"
 
     return cs
 
 
-def generate_pdf(walls: list[Wall], scale_denom: int, paper: str) -> str:
+def generate_pdf(facades: list[Facade], scale_denom: int, paper: str) -> str:
+    """Generate a multi-page PDF, one page per facade."""
     w_mm, h_mm = PAPERS.get(paper, PAPERS["A3"])
     pw = f"{w_mm * MM_TO_PT:.2f}"
     ph = f"{h_mm * MM_TO_PT:.2f}"
 
-    content = _build_content(walls, scale_denom, paper)
+    num_pages = len(facades)
 
+    # Build content streams for each page.
+    page_contents: list[str] = []
+    for facade in facades:
+        page_contents.append(_build_page_content(facade, scale_denom, paper))
+
+    # Build the PDF structure.
     parts: list[str] = []
     offsets: list[int] = []
     cursor = 0
@@ -115,39 +136,50 @@ def generate_pdf(walls: list[Wall], scale_denom: int, paper: str) -> str:
     offsets.append(cursor)
     emit("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n")
 
-    # Object 2: Pages
+    # Object 2: Pages (parent of all page objects)
+    # Page objects start at obj 4, each page takes 2 objects (Page + Stream).
+    # Font is at obj 3.
+    page_obj_ids = [4 + i * 2 for i in range(num_pages)]
+    kids = " ".join(f"{pid} 0 R" for pid in page_obj_ids)
     offsets.append(cursor)
-    emit("2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n")
+    emit(f"2 0 obj\n<< /Type /Pages /Kids [{kids}] /Count {num_pages} >>\nendobj\n")
 
-    # Object 3: Page
+    # Object 3: Font
     offsets.append(cursor)
-    emit(
-        f"3 0 obj\n<< /Type /Page /Parent 2 0 R "
-        f"/MediaBox [0 0 {pw} {ph}] "
-        f"/Contents 4 0 R "
-        f"/Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n"
-    )
+    emit("3 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n")
 
-    # Object 4: Content stream
-    offsets.append(cursor)
-    emit(
-        f"4 0 obj\n<< /Length {len(content)} >>\n"
-        f"stream\n{content}endstream\nendobj\n"
-    )
+    # Page objects: each page = Page object + Content stream object.
+    for i in range(num_pages):
+        page_id = 4 + i * 2
+        stream_id = page_id + 1
+        content = page_contents[i]
 
-    # Object 5: Font
-    offsets.append(cursor)
-    emit("5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n")
+        # Page object
+        offsets.append(cursor)
+        emit(
+            f"{page_id} 0 obj\n<< /Type /Page /Parent 2 0 R "
+            f"/MediaBox [0 0 {pw} {ph}] "
+            f"/Contents {stream_id} 0 R "
+            f"/Resources << /Font << /F1 3 0 R >> >> >>\nendobj\n"
+        )
+
+        # Content stream
+        offsets.append(cursor)
+        emit(
+            f"{stream_id} 0 obj\n<< /Length {len(content)} >>\n"
+            f"stream\n{content}endstream\nendobj\n"
+        )
 
     # Xref
+    total_objs = len(offsets) + 1  # +1 for obj 0
     xref_off = cursor
-    emit(f"xref\n0 {len(offsets) + 1}\n")
+    emit(f"xref\n0 {total_objs}\n")
     emit("0000000000 65535 f \n")
     for off in offsets:
         emit(f"{off:010d} 00000 n \n")
 
     # Trailer
-    emit(f"trailer\n<< /Size {len(offsets) + 1} /Root 1 0 R >>\n")
+    emit(f"trailer\n<< /Size {total_objs} /Root 1 0 R >>\n")
     emit(f"startxref\n{xref_off}\n%%EOF\n")
 
     return "".join(parts)

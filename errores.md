@@ -88,3 +88,13 @@
   - Para cada grupo, sumar las áreas de todos los triángulos y verificar el threshold contra el área total fusionada.
   - Proyectar todos los vértices del grupo al espacio 2D local del muro y computar el bounding box como contorno rectangular.
   - Resultado: un modelo con 8476 triángulos ahora produce muros rectangulares correctos con dimensiones reales.
+
+## Error 14: Arquitectura "muros individuales" no genera planos de fachada
+- **Fecha**: 2026-02-26
+- **Problema**: El pipeline extraía "muros individuales" (cada segmento coplanar por separado) y los dibujaba dispersos por la página. El usuario esperaba **1 plano de fachada por lado del edificio** — si tiene 4 lados, 4 vistas de elevación donde cada una muestra toda la geometría de ese lado posicionada correctamente.
+- **Solución**: Rediseño completo de la arquitectura:
+  - Nuevo tipo `Facade` reemplaza a `Wall`: contiene todos los polígonos 2D proyectados de un lado completo del edificio.
+  - Nuevo `facade_extractor.py` reemplaza a `wall_extractor.py`: agrupa caras verticales por dirección horizontal (clustering por normal), no por coplanaridad. Produce N fachadas (típicamente 4 para edificio rectangular).
+  - `pdf_writer.py` reescrito: genera PDF multi-página, una página por fachada. Auto-escala para caber en el papel. Título, dimensiones y escala por página.
+  - `dxf_writer.py` reescrito: genera un DXF separado por fachada con todos los polígonos de esa vista.
+  - `pipeline.py` reescrito: genera N archivos DXF (uno por fachada) + 1 PDF multi-página. Nombres descriptivos como `model_Fachada_Norte.dxf`.

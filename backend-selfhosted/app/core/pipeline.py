@@ -2,12 +2,16 @@
 Processing Pipeline
 
 Orchestrates the full flow:
-  File (bytes) -> Parser -> WallExtractor -> DXF/PDF Writers -> file contents
+  File (bytes) -> Parser -> FacadeExtractor -> DXF/PDF Writers
+
+Output:
+  - One DXF file per facade (e.g. "model_Fachada_Norte.dxf")
+  - One multi-page PDF with all facades (one page per facade)
 
 Handles auto-detection of:
   - File format (.skp vs .obj)
-  - Coordinate system (Y-up vs Z-up) — done in wall_extractor
-  - Unit scale — OBJ files may be in inches, cm, mm, or meters
+  - Coordinate system (Y-up vs Z-up) -- done in facade_extractor
+  - Unit scale -- OBJ files may be in inches, cm, mm, or meters
 """
 
 from __future__ import annotations
@@ -20,8 +24,8 @@ from .dxf_writer import generate_dxf
 from .obj_parser import parse_obj
 from .pdf_writer import generate_pdf
 from .skp_parser import parse_skp
-from .wall_extractor import extract_walls
-from .types import Face3D, Vec3, Wall
+from .facade_extractor import extract_facades
+from .types import Face3D, Facade, Vec2, Vec3, Loop2D
 
 
 @dataclass
@@ -32,34 +36,19 @@ class OutputFile:
 
 @dataclass
 class PipelineResult:
-    walls: list[Wall]
+    facades: list[Facade]
     files: list[OutputFile]
     warnings: list[str] = field(default_factory=list)
-
-
-def _estimate_model_height(faces: list[Face3D]) -> float:
-    """Estimate the height range of the model (max - min across all axes)."""
-    if not faces:
-        return 0.0
-    coords: list[float] = []
-    for face in faces[:500]:
-        for v in face.vertices:
-            coords.extend([v.x, v.y, v.z])
-    return max(coords) - min(coords) if coords else 0.0
 
 
 def _guess_unit_scale(faces: list[Face3D]) -> float:
     """Guess a conversion factor to bring coordinates into meters.
 
     Heuristic based on the model's bounding-box span:
-      - If span < 1 → likely already in meters (small object), scale=1
-      - If span ~1-100 → likely meters, scale=1
-      - If span ~100-1000 → likely centimeters, scale=0.01
-      - If span ~1000-10000 → likely millimeters, scale=0.001
-      - If span > 10000 → likely some tiny unit, scale down proportionally
-
-    This is a best-effort heuristic. Architectural models are typically
-    5-50m in span.
+      - If span <= 100  -> likely meters, scale=1
+      - If span <= 1000 -> likely centimeters, scale=0.01
+      - If span <= 50000 -> likely millimeters, scale=0.001
+      - Larger -> normalize to ~20m span
     """
     if not faces:
         return 1.0
@@ -80,40 +69,37 @@ def _guess_unit_scale(faces: list[Face3D]) -> float:
     if span <= 0:
         return 1.0
     if span <= 100:
-        # Likely meters — reasonable architectural scale.
         return 1.0
     if span <= 1000:
-        # Likely centimeters.
         return 0.01
     if span <= 50000:
-        # Likely millimeters.
         return 0.001
-    # Very large numbers — possibly some sub-mm unit.
-    return 1.0 / span * 20.0  # normalize to ~20m span
+    return 1.0 / span * 20.0
 
 
-def _scale_walls(walls: list[Wall], s: float) -> list[Wall]:
-    """Scale all wall dimensions by factor s."""
+def _scale_facades(facades: list[Facade], s: float) -> list[Facade]:
+    """Scale all facade dimensions by factor s."""
     if s == 1.0:
-        return walls
-    result: list[Wall] = []
-    for w in walls:
-        from .types import Loop2D, Vec2
-        outer = Loop2D(vertices=[Vec2(v.x * s, v.y * s) for v in w.outer.vertices])
-        openings = [
-            Loop2D(vertices=[Vec2(v.x * s, v.y * s) for v in op.vertices])
-            for op in w.openings
+        return facades
+    result: list[Facade] = []
+    for f in facades:
+        polygons = [
+            Loop2D(vertices=[Vec2(v.x * s, v.y * s) for v in poly.vertices])
+            for poly in f.polygons
         ]
-        result.append(Wall(
-            label=w.label,
-            normal=w.normal,
-            vertices3d=[Vec3(v.x * s, v.y * s, v.z * s) for v in w.vertices3d],
-            outer=outer,
-            openings=openings,
-            width=w.width * s,
-            height=w.height * s,
+        result.append(Facade(
+            label=f.label,
+            direction=f.direction,
+            polygons=polygons,
+            width=f.width * s,
+            height=f.height * s,
         ))
     return result
+
+
+def _sanitize_label(label: str) -> str:
+    """Make a label safe for filenames."""
+    return label.replace(" ", "_")
 
 
 def run_pipeline(
@@ -123,16 +109,7 @@ def run_pipeline(
     paper: str = "A3",
     formats: set[str] | None = None,
 ) -> PipelineResult:
-    """Run the full processing pipeline on a file.
-
-    Parameters
-    ----------
-    file_name : Original filename (used to detect format and name outputs).
-    data      : Raw file contents.
-    scale_denom : 50 or 100.
-    paper     : "A3" or "A1".
-    formats   : Set of output formats, e.g. {"dxf", "pdf"}.
-    """
+    """Run the full processing pipeline on a file."""
     if formats is None:
         formats = {"dxf", "pdf"}
 
@@ -154,39 +131,43 @@ def run_pipeline(
         warnings.extend(result.warnings)
     else:
         warnings.append(f"Unsupported file format: .{ext}. Use .skp or .obj.")
-        return PipelineResult(walls=[], files=[], warnings=warnings)
+        return PipelineResult(facades=[], files=[], warnings=warnings)
 
     if not faces:
-        return PipelineResult(walls=[], files=[], warnings=warnings)
+        return PipelineResult(facades=[], files=[], warnings=warnings)
 
-    # --- 2. Extract walls (auto-detects up axis) ---
-    walls = extract_walls(faces)
+    # --- 2. Extract facades (auto-detects up axis) ---
+    facades = extract_facades(faces)
 
-    if not walls:
+    if not facades:
         warnings.append(
-            f"Found {len(faces)} face(s) but none qualified as walls. "
-            "Check that the model contains vertical surfaces larger than 1.5 m\u00b2."
+            f"Found {len(faces)} face(s) but could not identify any building facades. "
+            "Check that the model contains vertical surfaces."
         )
-        return PipelineResult(walls=walls, files=[], warnings=warnings)
+        return PipelineResult(facades=facades, files=[], warnings=warnings)
 
-    # --- 3. Normalize units for DXF/PDF output ---
-    # The writers expect dimensions in meters.
-    # For .skp files, the parser already converts inches -> meters.
-    # For .obj files, we guess the unit from the coordinate scale.
+    # --- 3. Normalize units ---
     if ext == "obj":
         unit_scale = _guess_unit_scale(faces)
         if unit_scale != 1.0:
-            walls = _scale_walls(walls, unit_scale)
+            facades = _scale_facades(facades, unit_scale)
 
     # --- 4. Generate outputs ---
     files: list[OutputFile] = []
 
+    # One DXF per facade.
     if "dxf" in formats:
-        dxf_text = generate_dxf(walls, scale_denom)
-        files.append(OutputFile(name=f"{stem}.dxf", content=dxf_text))
+        for facade in facades:
+            dxf_text = generate_dxf(facade, scale_denom)
+            safe_label = _sanitize_label(facade.label)
+            files.append(OutputFile(
+                name=f"{stem}_{safe_label}.dxf",
+                content=dxf_text,
+            ))
 
+    # One multi-page PDF with all facades.
     if "pdf" in formats:
-        pdf_content = generate_pdf(walls, scale_denom, paper)
-        files.append(OutputFile(name=f"{stem}.pdf", content=pdf_content))
+        pdf_content = generate_pdf(facades, scale_denom, paper)
+        files.append(OutputFile(name=f"{stem}_fachadas.pdf", content=pdf_content))
 
-    return PipelineResult(walls=walls, files=files, warnings=warnings)
+    return PipelineResult(facades=facades, files=files, warnings=warnings)
