@@ -1,5 +1,3 @@
-# C++ build artifacts (self-hosted mode)
-translator-cpp/build/
 
 # Python (self-hosted mode)
 __pycache__/
