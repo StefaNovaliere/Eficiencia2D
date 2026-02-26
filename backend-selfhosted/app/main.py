@@ -8,12 +8,14 @@ No external C++ translator or SketchUp SDK required.
 """
 
 import io
+import logging
 import os
+import traceback
 import zipfile
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from .config import (
     MAX_UPLOAD_BYTES,
@@ -23,10 +25,12 @@ from .config import (
 )
 from .core.pipeline import run_pipeline
 
+logger = logging.getLogger("eficiencia2d")
+
 app = FastAPI(
     title="Eficiencia2D",
     description="Upload a .skp or .obj file, get 2D architectural plans instantly.",
-    version="0.2.0",
+    version="0.3.0",
 )
 
 _allowed_origins = os.getenv("CORS_ORIGINS", "*").split(",")
@@ -38,13 +42,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Catch unhandled exceptions so CORS headers are still sent."""
+    logger.error("Unhandled error: %s\n%s", exc, traceback.format_exc())
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"Error interno del servidor: {exc}"},
+    )
+
 # Accepted file extensions.
 _VALID_EXTENSIONS = {"skp", "obj"}
 
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "mode": "python-pipeline", "version": "0.2.0"}
+    return {"status": "ok", "mode": "python-pipeline", "version": "0.3.0"}
 
 
 @app.post("/api/upload")
@@ -102,14 +116,22 @@ async def upload_file(
 
     # --- Run the Python pipeline ---
     want_plan = include_plan.lower() in ("true", "1", "yes")
-    result = run_pipeline(
-        file_name=filename,
-        data=contents,
-        scale_denom=scale,
-        paper=paper,
-        formats=requested,
-        include_plan=want_plan,
-    )
+    try:
+        result = run_pipeline(
+            file_name=filename,
+            data=contents,
+            scale_denom=scale,
+            paper=paper,
+            formats=requested,
+            include_plan=want_plan,
+        )
+    except Exception as exc:
+        logger.error("Pipeline error for %s: %s", filename, exc, exc_info=True)
+        raise HTTPException(
+            500,
+            f"Error procesando el archivo: {exc}. "
+            "Si es un .skp, intenta exportar como .obj desde SketchUp.",
+        )
 
     if not result.files:
         detail = "No output files generated."

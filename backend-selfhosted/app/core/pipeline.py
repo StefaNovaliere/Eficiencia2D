@@ -6,7 +6,9 @@ Orchestrates the full flow:
 
 Output:
   - One DXF file per facade (e.g. "model_Fachada_Norte.dxf")
-  - One multi-page PDF with all facades (one page per facade)
+  - One DXF per floor plan (e.g. "model_Planta_Nivel_1.dxf")
+  - One DXF per component sheet (e.g. "model_Pisos.dxf", "model_Paredes.dxf")
+  - One multi-page PDF with all views
 
 Handles auto-detection of:
   - File format (.skp vs .obj)
@@ -20,13 +22,22 @@ import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .dxf_writer import generate_dxf, generate_plan_dxf
+from .dxf_writer import generate_dxf, generate_plan_dxf, generate_component_dxf
 from .obj_parser import parse_obj
 from .pdf_writer import generate_pdf
-from .plan_extractor import extract_floor_plan
+from .plan_extractor import extract_floor_plans, extract_components
 from .skp_parser import parse_skp
 from .facade_extractor import extract_facades
-from .types import Face3D, Facade, FloorPlan, Vec2, Vec3, Loop2D, Segment2D
+from .types import (
+    ComponentSheet,
+    Face3D,
+    Facade,
+    FloorPlan,
+    Loop2D,
+    Segment2D,
+    Vec2,
+    Vec3,
+)
 
 
 @dataclass
@@ -98,23 +109,45 @@ def _scale_facades(facades: list[Facade], s: float) -> list[Facade]:
     return result
 
 
-def _scale_floor_plan(plan: FloorPlan, s: float) -> FloorPlan:
-    """Scale a floor plan's dimensions by factor s."""
+def _scale_floor_plans(plans: list[FloorPlan], s: float) -> list[FloorPlan]:
+    """Scale all floor plan dimensions by factor s."""
     if s == 1.0:
-        return plan
-    segments = [
-        Segment2D(
-            a=Vec2(seg.a.x * s, seg.a.y * s),
-            b=Vec2(seg.b.x * s, seg.b.y * s),
-        )
-        for seg in plan.segments
-    ]
-    return FloorPlan(
-        label=plan.label,
-        segments=segments,
-        width=plan.width * s,
-        height=plan.height * s,
-    )
+        return plans
+    result: list[FloorPlan] = []
+    for p in plans:
+        segments = [
+            Segment2D(
+                a=Vec2(seg.a.x * s, seg.a.y * s),
+                b=Vec2(seg.b.x * s, seg.b.y * s),
+            )
+            for seg in p.segments
+        ]
+        result.append(FloorPlan(
+            label=p.label,
+            segments=segments,
+            width=p.width * s,
+            height=p.height * s,
+        ))
+    return result
+
+
+def _scale_component_sheets(sheets: list[ComponentSheet], s: float) -> list[ComponentSheet]:
+    """Scale all component sheet dimensions by factor s."""
+    if s == 1.0:
+        return sheets
+    result: list[ComponentSheet] = []
+    for sh in sheets:
+        components = [
+            Loop2D(vertices=[Vec2(v.x * s, v.y * s) for v in comp.vertices])
+            for comp in sh.components
+        ]
+        result.append(ComponentSheet(
+            label=sh.label,
+            components=components,
+            width=sh.width * s,
+            height=sh.height * s,
+        ))
+    return result
 
 
 def _sanitize_label(label: str) -> str:
@@ -135,8 +168,8 @@ def run_pipeline(
     Parameters
     ----------
     include_plan : bool
-        If True, generate a floor plan (top-down view) in addition
-        to the facade elevation views.
+        If True, generate floor plans (one per floor level) +
+        component decomposition sheets in addition to facade elevations.
     """
     if formats is None:
         formats = {"dxf", "pdf"}
@@ -174,32 +207,36 @@ def run_pipeline(
         )
         return PipelineResult(facades=facades, files=[], warnings=warnings)
 
-    # --- 2b. Extract floor plan (optional) ---
-    floor_plan: FloorPlan | None = None
+    # --- 2b. Extract floor plans + component decomposition (optional) ---
+    floor_plans: list[FloorPlan] = []
+    component_sheets: list[ComponentSheet] = []
+
     if include_plan:
-        floor_plan = extract_floor_plan(faces)
+        floor_plans = extract_floor_plans(faces)
+        component_sheets = extract_components(faces)
 
     # --- 3. Normalize units ---
     if ext == "obj":
         unit_scale = _guess_unit_scale(faces)
         if unit_scale != 1.0:
             facades = _scale_facades(facades, unit_scale)
-            if floor_plan is not None:
-                floor_plan = _scale_floor_plan(floor_plan, unit_scale)
+            floor_plans = _scale_floor_plans(floor_plans, unit_scale)
+            component_sheets = _scale_component_sheets(component_sheets, unit_scale)
 
     # --- 4. Generate outputs ---
     files: list[OutputFile] = []
 
-    # Floor plan DXF.
-    if "dxf" in formats and floor_plan is not None:
-        plan_dxf = generate_plan_dxf(floor_plan, scale_denom)
-        files.append(OutputFile(
-            name=f"{stem}_Planta.dxf",
-            content=plan_dxf,
-        ))
-
-    # One DXF per facade.
     if "dxf" in formats:
+        # Floor plan DXFs.
+        for plan in floor_plans:
+            plan_dxf = generate_plan_dxf(plan, scale_denom)
+            safe_label = _sanitize_label(plan.label)
+            files.append(OutputFile(
+                name=f"{stem}_{safe_label}.dxf",
+                content=plan_dxf,
+            ))
+
+        # One DXF per facade.
         for facade in facades:
             dxf_text = generate_dxf(facade, scale_denom)
             safe_label = _sanitize_label(facade.label)
@@ -208,9 +245,22 @@ def run_pipeline(
                 content=dxf_text,
             ))
 
-    # One multi-page PDF with floor plan + all facades.
+        # Component decomposition DXFs.
+        for sheet in component_sheets:
+            comp_dxf = generate_component_dxf(sheet, scale_denom)
+            safe_label = _sanitize_label(sheet.label)
+            files.append(OutputFile(
+                name=f"{stem}_{safe_label}.dxf",
+                content=comp_dxf,
+            ))
+
+    # One multi-page PDF with everything.
     if "pdf" in formats:
-        pdf_content = generate_pdf(facades, scale_denom, paper, floor_plan=floor_plan)
+        pdf_content = generate_pdf(
+            facades, scale_denom, paper,
+            floor_plans=floor_plans if floor_plans else None,
+            component_sheets=component_sheets if component_sheets else None,
+        )
         files.append(OutputFile(name=f"{stem}_planos.pdf", content=pdf_content))
 
     return PipelineResult(facades=facades, files=files, warnings=warnings)
