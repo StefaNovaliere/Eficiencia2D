@@ -15,11 +15,12 @@ export default function UploadForm() {
   const [scale, setScale] = useState(100);
   const [paper, setPaper] = useState<"A3" | "A1">("A3");
   const [formats, setFormats] = useState<("dxf" | "pdf")[]>(["dxf", "pdf"]);
+  const [includePlan, setIncludePlan] = useState(false);
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState("");
   const dropRef = useRef<HTMLDivElement>(null);
 
-  const accept = ".skp,.obj";
+  const accept = ".skp,.obj,.mtl";
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -44,6 +45,14 @@ export default function UploadForm() {
   const handleSubmit = async () => {
     if (!file || formats.length === 0) return;
 
+    // .mtl files are material definitions — they don't contain geometry.
+    const ext = file.name.split(".").pop()?.toLowerCase();
+    if (ext === "mtl") {
+      setError("Los archivos .mtl solo contienen materiales, no geometría. Sube el archivo .obj correspondiente.");
+      setStatus("error");
+      return;
+    }
+
     setStatus("uploading");
     setError("");
 
@@ -53,6 +62,7 @@ export default function UploadForm() {
       formData.append("scale", String(scale));
       formData.append("paper", paper);
       formData.append("formats", formats.join(","));
+      formData.append("include_plan", includePlan ? "true" : "false");
 
       const res = await fetch(`${API_URL}/api/upload`, {
         method: "POST",
@@ -115,10 +125,15 @@ export default function UploadForm() {
             {file.name} ({(file.size / 1e6).toFixed(1)} MB)
           </p>
         ) : (
-          <p>
-            Arrastra un archivo <strong>.skp</strong> o <strong>.obj</strong>{" "}
-            aquí, o haz clic para buscar
-          </p>
+          <>
+            <p>
+              Arrastra un archivo <strong>.skp</strong> o <strong>.obj</strong>{" "}
+              aquí, o haz clic para buscar
+            </p>
+            <p className="hint-text">
+              Los archivos .mtl no son necesarios — solo se usa la geometría del .obj
+            </p>
+          </>
         )}
       </div>
 
@@ -163,6 +178,18 @@ export default function UploadForm() {
               onChange={() => toggleFormat("pdf")}
             />
             PDF
+          </label>
+        </fieldset>
+
+        <fieldset className="format-group">
+          <legend>Vistas</legend>
+          <label>
+            <input
+              type="checkbox"
+              checked={includePlan}
+              onChange={() => setIncludePlan((prev) => !prev)}
+            />
+            Planta (vista superior)
           </label>
         </fieldset>
       </div>

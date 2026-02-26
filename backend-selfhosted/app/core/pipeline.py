@@ -20,12 +20,13 @@ import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .dxf_writer import generate_dxf
+from .dxf_writer import generate_dxf, generate_plan_dxf
 from .obj_parser import parse_obj
 from .pdf_writer import generate_pdf
+from .plan_extractor import extract_floor_plan
 from .skp_parser import parse_skp
 from .facade_extractor import extract_facades
-from .types import Face3D, Facade, Vec2, Vec3, Loop2D
+from .types import Face3D, Facade, FloorPlan, Vec2, Vec3, Loop2D, Segment2D
 
 
 @dataclass
@@ -97,6 +98,25 @@ def _scale_facades(facades: list[Facade], s: float) -> list[Facade]:
     return result
 
 
+def _scale_floor_plan(plan: FloorPlan, s: float) -> FloorPlan:
+    """Scale a floor plan's dimensions by factor s."""
+    if s == 1.0:
+        return plan
+    segments = [
+        Segment2D(
+            a=Vec2(seg.a.x * s, seg.a.y * s),
+            b=Vec2(seg.b.x * s, seg.b.y * s),
+        )
+        for seg in plan.segments
+    ]
+    return FloorPlan(
+        label=plan.label,
+        segments=segments,
+        width=plan.width * s,
+        height=plan.height * s,
+    )
+
+
 def _sanitize_label(label: str) -> str:
     """Make a label safe for filenames."""
     return label.replace(" ", "_")
@@ -108,8 +128,16 @@ def run_pipeline(
     scale_denom: int = 100,
     paper: str = "A3",
     formats: set[str] | None = None,
+    include_plan: bool = False,
 ) -> PipelineResult:
-    """Run the full processing pipeline on a file."""
+    """Run the full processing pipeline on a file.
+
+    Parameters
+    ----------
+    include_plan : bool
+        If True, generate a floor plan (top-down view) in addition
+        to the facade elevation views.
+    """
     if formats is None:
         formats = {"dxf", "pdf"}
 
@@ -146,14 +174,29 @@ def run_pipeline(
         )
         return PipelineResult(facades=facades, files=[], warnings=warnings)
 
+    # --- 2b. Extract floor plan (optional) ---
+    floor_plan: FloorPlan | None = None
+    if include_plan:
+        floor_plan = extract_floor_plan(faces)
+
     # --- 3. Normalize units ---
     if ext == "obj":
         unit_scale = _guess_unit_scale(faces)
         if unit_scale != 1.0:
             facades = _scale_facades(facades, unit_scale)
+            if floor_plan is not None:
+                floor_plan = _scale_floor_plan(floor_plan, unit_scale)
 
     # --- 4. Generate outputs ---
     files: list[OutputFile] = []
+
+    # Floor plan DXF.
+    if "dxf" in formats and floor_plan is not None:
+        plan_dxf = generate_plan_dxf(floor_plan, scale_denom)
+        files.append(OutputFile(
+            name=f"{stem}_Planta.dxf",
+            content=plan_dxf,
+        ))
 
     # One DXF per facade.
     if "dxf" in formats:
@@ -165,9 +208,9 @@ def run_pipeline(
                 content=dxf_text,
             ))
 
-    # One multi-page PDF with all facades.
+    # One multi-page PDF with floor plan + all facades.
     if "pdf" in formats:
-        pdf_content = generate_pdf(facades, scale_denom, paper)
-        files.append(OutputFile(name=f"{stem}_fachadas.pdf", content=pdf_content))
+        pdf_content = generate_pdf(facades, scale_denom, paper, floor_plan=floor_plan)
+        files.append(OutputFile(name=f"{stem}_planos.pdf", content=pdf_content))
 
     return PipelineResult(facades=facades, files=files, warnings=warnings)
