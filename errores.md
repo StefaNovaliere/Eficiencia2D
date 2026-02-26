@@ -79,3 +79,12 @@
   - `obj_parser.py`: Eliminar conversión hardcodeada `* INCHES_TO_M`. Las coordenadas se leen tal cual.
   - `wall_extractor.py`: Auto-detectar eje vertical probando tanto Y-up como Z-up, y eligiendo el que produce más muros. El threshold de área se adapta al tamaño del bounding box del modelo (escala adaptativa).
   - `pipeline.py`: Agregar `_guess_unit_scale()` que estima si el modelo está en metros, centímetros o milímetros analizando el span del bounding box, y aplica la conversión antes de generar DXF/PDF.
+
+## Error 13: Muros triangulados se mostraban como triángulos gigantes individuales
+- **Fecha**: 2026-02-26
+- **Problema**: Modelos 3D típicos (como "Tower-House Design") están **triangulados**: cada pared es un conjunto de muchos triángulos coplanares. El extractor trataba cada triángulo individual como un "muro" separado, produciendo PDFs con triángulos diagonales sin sentido en vez de rectángulos de muros. Solo 5 triángulos aleatorios pasaban el filtro de área.
+- **Solución**: Implementar **fusión de caras coplanares** en `wall_extractor.py`:
+  - Después de filtrar caras verticales, agrupar triángulos que comparten el mismo plano (misma dirección de normal dentro de ~10°, y misma distancia al origen dentro de 0.2% de la diagonal del modelo).
+  - Para cada grupo, sumar las áreas de todos los triángulos y verificar el threshold contra el área total fusionada.
+  - Proyectar todos los vértices del grupo al espacio 2D local del muro y computar el bounding box como contorno rectangular.
+  - Resultado: un modelo con 8476 triángulos ahora produce muros rectangulares correctos con dimensiones reales.

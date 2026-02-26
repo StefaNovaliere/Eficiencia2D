@@ -6,11 +6,10 @@ Takes Face3D[] from either parser and produces Wall[] ready for export.
 Algorithm:
   1. Auto-detect the vertical axis (Y-up vs Z-up) by testing both.
   2. Filter faces whose normal is perpendicular to the up axis (vertical).
-  3. Filter by area > threshold (rejects trim, baseboards, noise).
-     The threshold adapts to the model's coordinate scale.
-  4. Compute a local 2D coordinate system on the wall plane.
-  5. Project outer vertices (and inner loops / openings) to 2D.
-  6. Compute bounding-box dimensions for annotation.
+  3. Group coplanar faces into wall surfaces (handles triangulated meshes).
+  4. For each coplanar group, compute the merged 2D bounding rectangle.
+  5. Filter groups by area > threshold.
+  6. Produce Wall objects with bounding-box outlines and dimensions.
 """
 
 from __future__ import annotations
@@ -33,6 +32,11 @@ from .types import (
 )
 
 VERTICAL_EPSILON = 0.15
+
+# Tolerance for grouping coplanar faces: normals must be within this
+# angular distance, and plane distances within this linear distance.
+NORMAL_DOT_THRESHOLD = 0.985  # ~10 degrees
+PLANE_DIST_TOLERANCE_FRAC = 0.002  # 0.2% of model diagonal
 
 
 def _get_up_component(normal: Vec3, up_axis: Literal["Y", "Z"]) -> float:
@@ -70,25 +74,13 @@ def _compute_wall_axes(normal: Vec3, up_axis: Literal["Y", "Z"]) -> tuple[Vec3, 
     return u_axis, v_axis
 
 
-def _project_loop(
-    pts: list[Vec3], origin: Vec3, u_axis: Vec3, v_axis: Vec3
-) -> Loop2D:
-    vertices: list[Vec2] = []
-    for p in pts:
-        rel = sub(p, origin)
-        vertices.append(Vec2(dot(rel, u_axis), dot(rel, v_axis)))
-    return Loop2D(vertices=vertices)
-
-
-def _compute_model_scale(faces: list[Face3D]) -> float:
-    """Estimate the model's bounding box diagonal to adapt area threshold."""
+def _compute_model_diagonal(faces: list[Face3D]) -> float:
+    """Estimate the model's bounding box diagonal."""
     if not faces:
         return 1.0
     min_x = min_y = min_z = float("inf")
     max_x = max_y = max_z = float("-inf")
-    # Sample up to 500 faces for speed.
-    sample = faces[:500]
-    for face in sample:
+    for face in faces[:1000]:
         for v in face.vertices:
             min_x = min(min_x, v.x)
             min_y = min(min_y, v.y)
@@ -102,56 +94,135 @@ def _compute_model_scale(faces: list[Face3D]) -> float:
     return math.sqrt(dx * dx + dy * dy + dz * dz)
 
 
+def _plane_distance(normal: Vec3, point: Vec3) -> float:
+    """Signed distance from origin to the plane defined by normal and point."""
+    return dot(normal, point)
+
+
+def _group_coplanar_faces(
+    faces: list[Face3D], plane_dist_tol: float
+) -> list[list[Face3D]]:
+    """Group faces that lie on the same plane (same normal + same offset).
+
+    Uses a greedy approach: for each face, check existing groups.
+    Two faces are coplanar if:
+      - Their normals point in the same direction (dot > threshold) or
+        opposite direction (dot < -threshold)
+      - Their plane distances (dot(normal, point)) are within tolerance
+    """
+    groups: list[tuple[Vec3, float, list[Face3D]]] = []
+    # Each group: (representative_normal, representative_dist, faces_list)
+
+    for face in faces:
+        n = face.normal
+        d = _plane_distance(n, face.vertices[0])
+        placed = False
+
+        for g_normal, g_dist, g_faces in groups:
+            dp = dot(n, g_normal)
+            if dp > NORMAL_DOT_THRESHOLD:
+                # Same direction -- check plane distance.
+                if abs(d - g_dist) < plane_dist_tol:
+                    g_faces.append(face)
+                    placed = True
+                    break
+            elif dp < -NORMAL_DOT_THRESHOLD:
+                # Opposite direction (back-face) -- negate for comparison.
+                if abs(-d - g_dist) < plane_dist_tol:
+                    g_faces.append(face)
+                    placed = True
+                    break
+
+        if not placed:
+            groups.append((n, d, [face]))
+
+    return [g[2] for g in groups]
+
+
 def _extract_walls_with_axis(
     faces: list[Face3D],
     up_axis: Literal["Y", "Z"],
     min_area: float,
+    plane_dist_tol: float,
 ) -> list[Wall]:
     """Extract walls assuming a specific up axis."""
+
+    # 1. Filter vertical faces.
+    vertical_faces: list[Face3D] = []
+    for face in faces:
+        up_comp = _get_up_component(face.normal, up_axis)
+        if abs(up_comp) <= VERTICAL_EPSILON:
+            vertical_faces.append(face)
+
+    if not vertical_faces:
+        return []
+
+    # 2. Group coplanar vertical faces into wall surfaces.
+    groups = _group_coplanar_faces(vertical_faces, plane_dist_tol)
+
+    # 3. For each group, merge into a single wall.
     walls: list[Wall] = []
     counter = 0
 
-    for face in faces:
-        # 1. Verticality check: the face normal's component along
-        #    the up axis should be near zero (wall is vertical).
-        up_comp = _get_up_component(face.normal, up_axis)
-        if abs(up_comp) > VERTICAL_EPSILON:
+    for group in groups:
+        # Compute representative normal (average of group).
+        avg_nx = sum(f.normal.x for f in group) / len(group)
+        avg_ny = sum(f.normal.y for f in group) / len(group)
+        avg_nz = sum(f.normal.z for f in group) / len(group)
+        rep_normal = normalize(Vec3(avg_nx, avg_ny, avg_nz))
+
+        # Compute wall axes.
+        u_axis, v_axis = _compute_wall_axes(rep_normal, up_axis)
+
+        # Collect ALL vertices from all faces in the group.
+        all_verts_3d: list[Vec3] = []
+        total_area = 0.0
+        for face in group:
+            all_verts_3d.extend(face.vertices)
+            total_area += _polygon_area_3d(face.vertices)
+
+        # Area check on the total merged area.
+        if total_area < min_area:
             continue
 
-        # 2. Area check.
-        area = _polygon_area_3d(face.vertices)
-        if area < min_area:
+        # Project all vertices to the wall's local 2D space.
+        origin = all_verts_3d[0]
+        all_2d: list[Vec2] = []
+        for v in all_verts_3d:
+            rel = sub(v, origin)
+            all_2d.append(Vec2(dot(rel, u_axis), dot(rel, v_axis)))
+
+        # Compute bounding box in 2D.
+        min_u = min(p.x for p in all_2d)
+        max_u = max(p.x for p in all_2d)
+        min_v = min(p.y for p in all_2d)
+        max_v = max(p.y for p in all_2d)
+
+        width = max_u - min_u
+        height = max_v - min_v
+
+        # Skip degenerate walls (very thin or very short).
+        if width < 0.01 or height < 0.01:
             continue
 
-        # 3. Compute local coordinate system.
-        u_axis, v_axis = _compute_wall_axes(face.normal, up_axis)
-        origin = face.vertices[0]
-
-        # 4. Project outer loop.
-        outer = _project_loop(face.vertices, origin, u_axis, v_axis)
-
-        # 5. Project inner loops (openings).
-        openings = [
-            _project_loop(loop, origin, u_axis, v_axis)
-            for loop in face.inner_loops
-        ]
-
-        # 6. Bounding box.
-        min_u = min(v.x for v in outer.vertices)
-        max_u = max(v.x for v in outer.vertices)
-        min_v = min(v.y for v in outer.vertices)
-        max_v = max(v.y for v in outer.vertices)
+        # Build the outer boundary as the bounding rectangle.
+        outer = Loop2D(vertices=[
+            Vec2(min_u, min_v),
+            Vec2(max_u, min_v),
+            Vec2(max_u, max_v),
+            Vec2(min_u, max_v),
+        ])
 
         counter += 1
         walls.append(
             Wall(
                 label=f"Muro_{counter:03d}",
-                normal=face.normal,
-                vertices3d=face.vertices,
+                normal=rep_normal,
+                vertices3d=all_verts_3d,
                 outer=outer,
-                openings=openings,
-                width=max_u - min_u,
-                height=max_v - min_v,
+                openings=[],
+                width=width,
+                height=height,
             )
         )
 
@@ -163,22 +234,21 @@ def extract_walls(faces: list[Face3D]) -> list[Wall]:
     if not faces:
         return []
 
-    # Estimate model scale to compute an adaptive area threshold.
-    # If the model diagonal is ~10 (meters), threshold ~ 1.5 m².
-    # If the diagonal is ~1000 (centimeters or inches), threshold scales up.
-    diag = _compute_model_scale(faces)
+    # Estimate model diagonal for adaptive thresholds.
+    diag = _compute_model_diagonal(faces)
 
-    # Heuristic: assume "architectural scale" means the diagonal should be
-    # roughly 5-50 meters. We scale the area threshold proportionally.
-    # A 10m-diagonal model → threshold 1.5 m².
-    # A 1000-unit model (cm) → threshold 1.5 * (1000/10)^2 = 15000 units².
+    # Adaptive area threshold: scale proportionally to model size.
+    # A 10-unit diagonal model -> threshold 1.5 units^2.
     ref_diag = 10.0
     scale_factor = (diag / ref_diag) ** 2 if diag > 0 else 1.0
     min_area = 1.5 * scale_factor
 
+    # Plane distance tolerance: fraction of model diagonal.
+    plane_dist_tol = max(diag * PLANE_DIST_TOLERANCE_FRAC, 0.01)
+
     # Try both up-axis conventions and pick the one that yields more walls.
-    walls_z = _extract_walls_with_axis(faces, "Z", min_area)
-    walls_y = _extract_walls_with_axis(faces, "Y", min_area)
+    walls_z = _extract_walls_with_axis(faces, "Z", min_area, plane_dist_tol)
+    walls_y = _extract_walls_with_axis(faces, "Y", min_area, plane_dist_tol)
 
     if len(walls_y) > len(walls_z):
         return walls_y
