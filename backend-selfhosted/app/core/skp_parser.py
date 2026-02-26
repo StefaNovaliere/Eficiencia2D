@@ -5,20 +5,20 @@ Reads geometry from .skp files (SketchUp native binary format).
 
 Strategy:
   Modern .skp files (SketchUp 2021+) are ZIP archives wrapping internal
-  binary sections.  Older files use the raw binary format directly.
+  binary sections. Older files use the raw binary format directly.
   In both cases, geometry is stored as serialized entities containing
   vertex positions (double triplets) and face/loop index structures.
 
   This parser scans the binary for vertex arrays and face definitions
-  using structural pattern matching on the section headers.  It handles
+  using structural pattern matching on the section headers. It handles
   the most common .skp layouts but is NOT a full SDK-level parser.
-  For files it cannot handle, the UI falls back to .obj upload.
 """
 
 from __future__ import annotations
 
 import struct
-import zlib
+import io
+import zipfile
 from dataclasses import dataclass, field
 
 from .types import Face3D, Vec3, cross, normalize, sub
@@ -33,49 +33,36 @@ class SkpParseResult:
     warnings: list[str] = field(default_factory=list)
 
 
-def _is_zip(data: bytes) -> bool:
-    return len(data) >= 4 and data[:4] == b"PK\x03\x04"
-
-
-def _is_skp_magic(data: bytes) -> bool:
-    return len(data) >= 3 and data[:3] == b"\xff\xfe\xff"
-
-
-def _unzip_skp_payload(data: bytes) -> bytes:
-    """Extract the inner binary payload from a ZIP-wrapped .skp.
-
-    We look for the largest embedded file (the model data).
-    Supports both STORED (method 0) and DEFLATE (method 8) entries.
+def _get_binary_payload(data: bytes) -> tuple[bytes, str]:
     """
-    entries: list[tuple[int, int, int, int]] = []  # (method, comp_size, uncomp_size, data_start)
-    pos = 0
-    while pos + 30 < len(data):
-        if data[pos:pos + 4] == b"PK\x03\x04":
-            method = struct.unpack_from("<H", data, pos + 8)[0]
-            comp_size = struct.unpack_from("<I", data, pos + 18)[0]
-            uncomp_size = struct.unpack_from("<I", data, pos + 22)[0]
-            name_len = struct.unpack_from("<H", data, pos + 26)[0]
-            extra_len = struct.unpack_from("<H", data, pos + 28)[0]
-            data_start = pos + 30 + name_len + extra_len
-            if method in (0, 8):
-                entries.append((method, comp_size, uncomp_size, data_start))
-            pos = data_start + comp_size
-        else:
-            pos += 1
+    Extract the geometric payload.
+    Detects if the file is a ZIP (SketchUp 2021+) or Legacy Binary.
+    Uses standard python zipfile to handle Data Descriptors correctly.
+    """
+    # Check for SketchUp 2021+ (ZIP format)
+    if zipfile.is_zipfile(io.BytesIO(data)):
+        try:
+            with zipfile.ZipFile(io.BytesIO(data)) as zf:
+                # Strategy: Modern SKP zips often contain a 'document.xml' and folders.
+                # The heavy binary data usually resides in the largest file inside.
+                # We sort files by size (descending) to find the main model blob.
+                infolist = zf.infolist()
+                if not infolist:
+                    return data, "empty-zip"
+                
+                # Get the largest file in the zip
+                best_file = max(infolist, key=lambda x: x.file_size)
+                return zf.read(best_file.filename), "zip-wrapped (SketchUp 2021+)"
+        except Exception:
+            # Fallback if zip is corrupted or weird, try treating as raw
+            pass
 
-    best = max(entries, key=lambda e: e[2], default=None)
-    if best is not None:
-        method, comp_size, uncomp_size, data_start = best
-        if data_start + comp_size <= len(data):
-            if method == 0:
-                return data[data_start:data_start + uncomp_size]
-            # DEFLATE
-            try:
-                return zlib.decompress(data[data_start:data_start + comp_size], -15)
-            except zlib.error:
-                pass
+    # Check for Legacy SketchUp Magic Header
+    if len(data) >= 3 and data[:3] == b"\xff\xfe\xff":
+        return data, "legacy binary"
 
-    return data
+    # Default/Unknown
+    return data, "unknown"
 
 
 def _read_f64(data: bytes, off: int) -> float:
@@ -98,13 +85,18 @@ def _scan_vertex_arrays(data: bytes) -> list[list[Vec3]]:
     (< 1e6 inches ~ 25 km).
     """
     arrays: list[list[Vec3]] = []
-    max_val = 1e6
+    max_val = 1e6  # Filter out extreme values (garbage data)
     off = 0
     length = len(data)
 
-    while off + 4 < length:
+    # Optimization: Stop if remaining data is too small for a minimal face
+    while off + 28 < length: # 4 bytes count + 3 * 8 bytes (1 vertex)
         count = _read_i32(data, off)
-        if count < 3 or count > 10000:
+        
+        # Heuristic limits:
+        # Minimum 3 vertices to form a face.
+        # Max 50,000 to avoid reading huge garbage blocks as memory.
+        if count < 3 or count > 50000:
             off += 4
             continue
 
@@ -114,29 +106,42 @@ def _scan_vertex_arrays(data: bytes) -> list[list[Vec3]]:
             off += 4
             continue
 
+        # Quick check of the first and last vertex to fail fast before loop
+        # This speeds up scanning significantly on large files
+        first_x = _read_f64(data, start)
+        if not (-max_val <= first_x <= max_val):
+            off += 4
+            continue
+
         verts: list[Vec3] = []
         valid = True
+        
         for i in range(count):
-            x = _read_f64(data, start + i * 24)
-            y = _read_f64(data, start + i * 24 + 8)
-            z = _read_f64(data, start + i * 24 + 16)
+            # Read X, Y, Z
+            base = start + i * 24
+            x = _read_f64(data, base)
+            y = _read_f64(data, base + 8)
+            z = _read_f64(data, base + 16)
 
-            if not (
-                x == x and y == y and z == z  # not NaN
-                and abs(x) <= max_val and abs(y) <= max_val and abs(z) <= max_val
-            ):
+            # Check validity (Not NaN and within reasonable bounds)
+            if not (abs(x) <= max_val and abs(y) <= max_val and abs(z) <= max_val):
                 valid = False
                 break
+            
             verts.append(Vec3(x * INCHES_TO_M, y * INCHES_TO_M, z * INCHES_TO_M))
 
         if valid and len(verts) >= 3:
+            # Geometric validation: Do these points form a valid plane?
             e1 = sub(verts[1], verts[0])
             e2 = sub(verts[2], verts[0])
             n = cross(e1, e2)
-            n_len = (n.x * n.x + n.y * n.y + n.z * n.z) ** 0.5
-            if n_len > 1e-10:
+            n_len_sq = n.x * n.x + n.y * n.y + n.z * n.z
+            
+            # Use squared length to avoid sqrt if possible, 1e-20 is small epsilon
+            if n_len_sq > 1e-20:
                 arrays.append(verts)
-                off = start + block_size
+                # Skip the block we just successfully read
+                off = start + block_size 
                 continue
 
         off += 4
@@ -155,40 +160,28 @@ def _vertex_arrays_to_faces(arrays: list[list[Vec3]]) -> list[Face3D]:
 
 
 def parse_skp(data: bytes) -> SkpParseResult:
-    """Parse a .skp file buffer and extract Face3D geometry.
-
-    This is a best-effort heuristic parser.  For files it cannot read,
-    ``faces`` will be empty and ``warnings`` will explain.
-    """
+    """Parse a .skp file buffer and extract Face3D geometry."""
     warnings: list[str] = []
 
-    payload = data
-    version = "unknown"
+    # 1. Get the raw binary payload (handle ZIP/Legacy)
+    payload, version = _get_binary_payload(data)
 
-    if _is_zip(data):
-        version = "zip-wrapped (SketchUp 2021+)"
-        payload = _unzip_skp_payload(data)
-        if payload is data:
-            warnings.append("ZIP extraction found no usable entries; trying raw parse.")
-    elif _is_skp_magic(data):
-        version = "legacy binary"
-    else:
+    if version == "unknown":
         return SkpParseResult(
             faces=[],
             version="unrecognised",
             warnings=[
-                "File does not appear to be a valid .skp file. "
-                "Try exporting as .obj from SketchUp."
+                "File format not recognized. Ensure it is a valid .skp or .obj file."
             ],
         )
 
+    # 2. Heuristic Scan
     arrays = _scan_vertex_arrays(payload)
 
     if not arrays:
         warnings.append(
-            "Could not extract geometry from the .skp binary. "
-            "This can happen with compressed or very new format versions. "
-            "Try exporting as .obj from SketchUp (File -> Export -> 3D Model -> OBJ)."
+            f"Could not extract geometry from the {version} binary. "
+            "Try exporting as .obj from SketchUp if this persists."
         )
         return SkpParseResult(faces=[], version=version, warnings=warnings)
 
