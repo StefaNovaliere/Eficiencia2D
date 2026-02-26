@@ -170,6 +170,37 @@ def test_upload_obj_centimeters():
     assert resp.status_code == 200
 
 
+def test_upload_obj_triangulated_wall():
+    """A wall made of multiple coplanar triangles should be merged into one wall."""
+    # 4m x 3m wall (Y-up), split into 4 triangles.
+    lines = [
+        "# Triangulated wall",
+        "v 0 0 0",
+        "v 4 0 0",
+        "v 4 3 0",
+        "v 0 3 0",
+        "v 2 1.5 0",  # center vertex
+        "f 1 2 5",
+        "f 2 3 5",
+        "f 3 4 5",
+        "f 4 1 5",
+    ]
+    obj_data = "\n".join(lines).encode("utf-8")
+    resp = client.post(
+        "/api/upload",
+        files={"file": ("tri_wall.obj", io.BytesIO(obj_data), "application/octet-stream")},
+        data={"scale": "100", "paper": "A3", "formats": "dxf"},
+    )
+    assert resp.status_code == 200
+    zf = zipfile.ZipFile(io.BytesIO(resp.content))
+    names = zf.namelist()
+    assert "tri_wall.dxf" in names
+    # Verify the DXF content shows a single merged wall, not 4 separate ones.
+    dxf = zf.read("tri_wall.dxf").decode("utf-8")
+    assert dxf.count("Muro_001") == 1
+    assert "Muro_002" not in dxf
+
+
 def test_upload_obj_no_walls():
     """An .obj with no faces at all should return 422."""
     lines = [
