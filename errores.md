@@ -71,3 +71,11 @@
   - `Dockerfile` simplificado: single-stage `python:3.12-slim`, sin compilación C++, sin SDK, sin `libstdc++6`.
   - El backend ahora acepta tanto `.skp` como `.obj`.
   - **Limitación**: El parser `.skp` es heurístico (no tiene acceso al SDK oficial). Para modelos complejos que el parser no pueda leer, el usuario debe exportar como `.obj` desde SketchUp (File → Export → 3D Model → OBJ).
+
+## Error 12: OBJ wall extractor rechazaba todos los muros — asumía Z-up y pulgadas
+- **Fecha**: 2026-02-26
+- **Problema**: El pipeline asumía que todos los archivos `.obj` usaban la convención Z-up (SketchUp) y coordenadas en pulgadas. Pero el estándar OBJ usa Y-up, y los modelos pueden estar en metros, centímetros o milímetros. Un modelo "Tower-House Design" de 8476 caras devolvía 422 porque: (1) el parser multiplicaba todo por 0.0254 haciendo las áreas microscópicas, y (2) el extractor buscaba `abs(normal.z) < 0.08` pero las paredes tenían normales con Z≠0 porque Y era el eje vertical.
+- **Solución**:
+  - `obj_parser.py`: Eliminar conversión hardcodeada `* INCHES_TO_M`. Las coordenadas se leen tal cual.
+  - `wall_extractor.py`: Auto-detectar eje vertical probando tanto Y-up como Z-up, y eligiendo el que produce más muros. El threshold de área se adapta al tamaño del bounding box del modelo (escala adaptativa).
+  - `pipeline.py`: Agregar `_guess_unit_scale()` que estima si el modelo está en metros, centímetros o milímetros analizando el span del bounding box, y aplica la conversión antes de generar DXF/PDF.

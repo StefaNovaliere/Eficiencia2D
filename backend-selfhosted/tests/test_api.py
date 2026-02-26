@@ -6,7 +6,6 @@ SketchUp SDK required.
 """
 
 import io
-import struct
 import zipfile
 
 import pytest
@@ -71,26 +70,43 @@ def test_upload_rejects_unsupported_format():
     assert "unsupported" in resp.json()["detail"].lower()
 
 
-def _make_obj_with_wall() -> bytes:
-    """Create a minimal .obj with a vertical rectangular wall (4m x 3m)."""
-    # Coordinates in inches (SketchUp default).
-    # 4m = 157.48 inches, 3m = 118.11 inches
-    w = 157.48
-    h = 118.11
+def _make_obj_wall_z_up() -> bytes:
+    """Create an OBJ with a vertical wall in Z-up convention (4m x 3m).
+
+    Wall on XZ plane, normal pointing along Y.
+    Coordinates in meters.
+    """
     lines = [
-        "# Minimal wall for testing",
-        f"v 0 0 0",
-        f"v {w} 0 0",
-        f"v {w} 0 {h}",
-        f"v 0 0 {h}",
+        "# Z-up wall: 4m wide, 3m tall",
+        "v 0 0 0",
+        "v 4 0 0",
+        "v 4 0 3",
+        "v 0 0 3",
         "f 1 2 3 4",
     ]
     return "\n".join(lines).encode("utf-8")
 
 
-def test_upload_obj_produces_zip():
-    """Upload a valid .obj wall and get a ZIP back."""
-    obj_data = _make_obj_with_wall()
+def _make_obj_wall_y_up() -> bytes:
+    """Create an OBJ with a vertical wall in Y-up convention (4m x 3m).
+
+    Wall on XY plane, normal pointing along Z.
+    Coordinates in meters.
+    """
+    lines = [
+        "# Y-up wall: 4m wide, 3m tall",
+        "v 0 0 0",
+        "v 4 0 0",
+        "v 4 3 0",
+        "v 0 3 0",
+        "f 1 2 3 4",
+    ]
+    return "\n".join(lines).encode("utf-8")
+
+
+def test_upload_obj_z_up_produces_zip():
+    """Upload a valid Z-up .obj wall and get a ZIP back."""
+    obj_data = _make_obj_wall_z_up()
     resp = client.post(
         "/api/upload",
         files={"file": ("house.obj", io.BytesIO(obj_data), "application/octet-stream")},
@@ -98,17 +114,31 @@ def test_upload_obj_produces_zip():
     )
     assert resp.status_code == 200
     assert resp.headers["content-type"] == "application/zip"
-
-    # Verify the ZIP contains expected files.
     zf = zipfile.ZipFile(io.BytesIO(resp.content))
     names = zf.namelist()
     assert "house.dxf" in names
     assert "house.pdf" in names
 
 
+def test_upload_obj_y_up_produces_zip():
+    """Upload a valid Y-up .obj wall and get a ZIP back."""
+    obj_data = _make_obj_wall_y_up()
+    resp = client.post(
+        "/api/upload",
+        files={"file": ("tower.obj", io.BytesIO(obj_data), "application/octet-stream")},
+        data={"scale": "100", "paper": "A3", "formats": "dxf,pdf"},
+    )
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "application/zip"
+    zf = zipfile.ZipFile(io.BytesIO(resp.content))
+    names = zf.namelist()
+    assert "tower.dxf" in names
+    assert "tower.pdf" in names
+
+
 def test_upload_obj_dxf_only():
     """Request only DXF format."""
-    obj_data = _make_obj_with_wall()
+    obj_data = _make_obj_wall_z_up()
     resp = client.post(
         "/api/upload",
         files={"file": ("house.obj", io.BytesIO(obj_data), "application/octet-stream")},
@@ -121,21 +151,37 @@ def test_upload_obj_dxf_only():
     assert "house.pdf" not in names
 
 
-def test_upload_obj_no_walls():
-    """An .obj with only a horizontal face (floor) should return 422."""
-    # Horizontal square on the XY plane (normal = Z) -- not a wall.
+def test_upload_obj_centimeters():
+    """An OBJ in centimeters (wall 400cm x 300cm) should still work."""
     lines = [
+        "# Y-up wall in cm: 400cm wide, 300cm tall",
         "v 0 0 0",
-        "v 100 0 0",
-        "v 100 100 0",
-        "v 0 100 0",
+        "v 400 0 0",
+        "v 400 300 0",
+        "v 0 300 0",
         "f 1 2 3 4",
     ]
     obj_data = "\n".join(lines).encode("utf-8")
     resp = client.post(
         "/api/upload",
-        files={"file": ("floor.obj", io.BytesIO(obj_data), "application/octet-stream")},
+        files={"file": ("cm_model.obj", io.BytesIO(obj_data), "application/octet-stream")},
+        data={"scale": "100", "paper": "A3", "formats": "dxf"},
+    )
+    assert resp.status_code == 200
+
+
+def test_upload_obj_no_walls():
+    """An .obj with no faces at all should return 422."""
+    lines = [
+        "# Only vertices, no faces",
+        "v 0 0 0",
+        "v 1 0 0",
+        "v 1 1 0",
+    ]
+    obj_data = "\n".join(lines).encode("utf-8")
+    resp = client.post(
+        "/api/upload",
+        files={"file": ("empty.obj", io.BytesIO(obj_data), "application/octet-stream")},
         data={"scale": "100", "paper": "A3", "formats": "dxf"},
     )
     assert resp.status_code == 422
-    assert "no output" in resp.json()["detail"].lower() or "wall" in resp.json()["detail"].lower()
