@@ -1,5 +1,5 @@
 """
-OBJ Parser — Python port of src/core/obj-parser.ts.
+OBJ Parser
 
 Parses Wavefront .obj text format -- the reliable fallback.
 SketchUp exports .obj natively: File -> Export -> 3D Model -> OBJ.
@@ -10,6 +10,9 @@ This parser handles:
   - g/o (group names -- used as labels)
   - Negative vertex indices
   - Faces with vertex/texture/normal index formats (v, v/vt, v/vt/vn, v//vn)
+
+OBJ files have no standard unit. Coordinates are read as-is (no conversion).
+The pipeline handles unit/scale detection separately.
 """
 
 from __future__ import annotations
@@ -18,8 +21,6 @@ import math
 from dataclasses import dataclass, field
 
 from .types import Face3D, Vec3, cross, normalize, sub
-
-INCHES_TO_M = 0.0254
 
 
 @dataclass
@@ -43,9 +44,9 @@ def parse_obj(text: str) -> ObjParseResult:
 
         if keyword == "v":
             try:
-                x = float(parts[1]) * INCHES_TO_M
-                y = float(parts[2]) * INCHES_TO_M
-                z = float(parts[3]) * INCHES_TO_M
+                x = float(parts[1])
+                y = float(parts[2])
+                z = float(parts[3])
             except (IndexError, ValueError):
                 continue
             if math.isfinite(x) and math.isfinite(y) and math.isfinite(z):
