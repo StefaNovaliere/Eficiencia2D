@@ -223,3 +223,62 @@ def test_centimeter_model():
         data={"scale": "100", "paper": "A3", "formats": "dxf"},
     )
     assert resp.status_code == 200
+
+
+def test_include_plan_adds_floor_plan():
+    """include_plan=true should add a Planta DXF + the PDF includes the plan."""
+    obj_data = _make_box_y_up()
+    resp = client.post(
+        "/api/upload",
+        files={"file": ("house.obj", io.BytesIO(obj_data), "application/octet-stream")},
+        data={"scale": "100", "paper": "A3", "formats": "dxf,pdf", "include_plan": "true"},
+    )
+    assert resp.status_code == 200
+    zf = zipfile.ZipFile(io.BytesIO(resp.content))
+    names = zf.namelist()
+
+    # Should have 4 facade DXFs + 1 plan DXF + 1 PDF.
+    dxf_files = [n for n in names if n.endswith(".dxf")]
+    pdf_files = [n for n in names if n.endswith(".pdf")]
+    plan_dxfs = [n for n in dxf_files if "Planta" in n]
+    assert len(plan_dxfs) == 1, f"Expected 1 plan DXF, got {plan_dxfs}"
+    assert len(dxf_files) == 5, f"Expected 5 DXFs (4 facades + 1 plan), got {dxf_files}"
+    assert len(pdf_files) == 1
+
+    # The plan DXF should contain LINE entities (wall segments).
+    plan_content = zf.read(plan_dxfs[0]).decode("utf-8")
+    assert "LINE" in plan_content
+
+    # The PDF should contain "Planta" label.
+    pdf_content = zf.read(pdf_files[0]).decode("latin-1")
+    assert "Planta" in pdf_content
+
+
+def test_include_plan_false_no_floor_plan():
+    """include_plan=false should NOT add a floor plan."""
+    obj_data = _make_box_y_up()
+    resp = client.post(
+        "/api/upload",
+        files={"file": ("house.obj", io.BytesIO(obj_data), "application/octet-stream")},
+        data={"scale": "100", "paper": "A3", "formats": "dxf", "include_plan": "false"},
+    )
+    assert resp.status_code == 200
+    zf = zipfile.ZipFile(io.BytesIO(resp.content))
+    names = zf.namelist()
+    plan_dxfs = [n for n in names if "Planta" in n]
+    assert len(plan_dxfs) == 0
+
+
+def test_floor_plan_z_up():
+    """Floor plan should work with Z-up models too."""
+    obj_data = _make_box_z_up()
+    resp = client.post(
+        "/api/upload",
+        files={"file": ("house.obj", io.BytesIO(obj_data), "application/octet-stream")},
+        data={"scale": "100", "paper": "A3", "formats": "dxf", "include_plan": "true"},
+    )
+    assert resp.status_code == 200
+    zf = zipfile.ZipFile(io.BytesIO(resp.content))
+    names = zf.namelist()
+    plan_dxfs = [n for n in names if "Planta" in n]
+    assert len(plan_dxfs) == 1

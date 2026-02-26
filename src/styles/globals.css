@@ -80,6 +80,12 @@ body {
   color: var(--muted);
 }
 
+.hint-text {
+  font-size: 0.75rem;
+  opacity: 0.6;
+  margin-top: 8px;
+}
+
 .file-name {
   color: var(--text) !important;
   font-weight: 500;
