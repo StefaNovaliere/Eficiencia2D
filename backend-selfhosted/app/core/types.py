@@ -61,10 +61,24 @@ class FloorPlan:
     Each vertical face in the 3D model projects to a line segment
     when viewed from above.
     """
-    label: str                  # "Planta"
+    label: str                  # "Planta", "Planta Nivel 1", etc.
     segments: list[Segment2D]   # Wall outlines as line segments
     width: float                # Bounding box width (model units)
     height: float               # Bounding box height (model units)
+
+
+@dataclass
+class ComponentSheet:
+    """A sheet showing multiple components of one type laid out together.
+
+    Used for the exploded/decomposition view:
+      - "Pisos"   — all floor slabs projected as polygons
+      - "Paredes" — all wall faces projected and laid out side-by-side
+    """
+    label: str                  # "Pisos", "Paredes"
+    components: list[Loop2D]    # Each component is a 2D polygon
+    width: float                # Overall bounding box width
+    height: float               # Overall bounding box height
 
 
 # --- Vector math helpers ---
