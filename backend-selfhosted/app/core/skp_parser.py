@@ -104,7 +104,7 @@ def _scan_vertex_arrays(data: bytes) -> list[list[Vec3]]:
 
         block_size = count * 3 * 8
         start = off + 4
-        if start + block_size > data_len:
+        if start + block_size > length:
             off += 4
             continue
 
@@ -152,7 +152,7 @@ def _scan_vertex_arrays(data: bytes) -> list[list[Vec3]]:
     # that look like face data (groups of exactly 3 or 4 sequential vertices).
     if len(arrays) < 3:
         off = 0
-        while off + 72 <= data_len:  # need at least 3 * 24 bytes for a triangle
+        while off + 72 <= length:  # need at least 3 * 24 bytes for a triangle
             verts = []
             valid = True
             # Try reading 3 vertices (triangle).
@@ -178,7 +178,7 @@ def _scan_vertex_arrays(data: bytes) -> list[list[Vec3]]:
                 n_len = (n.x * n.x + n.y * n.y + n.z * n.z) ** 0.5
                 if n_len > 1e-10:
                     # Check for 4th vertex (quad).
-                    if off + 96 <= data_len:
+                    if off + 96 <= length:
                         x4 = _read_f64(data, off + 72)
                         y4 = _read_f64(data, off + 80)
                         z4 = _read_f64(data, off + 88)

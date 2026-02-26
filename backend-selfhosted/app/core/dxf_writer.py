@@ -8,7 +8,7 @@ and dimension annotations on the "DIMENSIONS" layer.
 
 from __future__ import annotations
 
-from .types import Facade, FloorPlan, Loop2D, Segment2D
+from .types import ComponentSheet, Facade, FloorPlan, Loop2D, Segment2D
 
 
 def _header() -> str:
@@ -110,6 +110,47 @@ def generate_dxf(facade: Facade, scale_denom: int) -> str:
         facade.height * 0.5 * s,
         text_h,
         f"{facade.height:.2f} m",
+        "DIMENSIONS",
+    )
+
+    out += _footer()
+    return out
+
+
+def generate_component_dxf(sheet: ComponentSheet, scale_denom: int) -> str:
+    """Generate a DXF file for a component decomposition sheet."""
+    s = 1.0 / scale_denom
+    text_h = 0.15 * s
+    out = _header()
+
+    # Draw all component polygons.
+    for comp in sheet.components:
+        out += _polyline(comp, s, "FACADE")
+
+    # Title above.
+    out += _text_entity(
+        sheet.width * 0.5 * s,
+        (sheet.height + 0.5) * s,
+        text_h * 1.5,
+        sheet.label,
+        "DIMENSIONS",
+    )
+
+    # Width dimension below.
+    out += _text_entity(
+        sheet.width * 0.5 * s,
+        -0.4 * s,
+        text_h,
+        f"{sheet.width:.2f} m",
+        "DIMENSIONS",
+    )
+
+    # Height dimension to the right.
+    out += _text_entity(
+        (sheet.width + 0.3) * s,
+        sheet.height * 0.5 * s,
+        text_h,
+        f"{sheet.height:.2f} m",
         "DIMENSIONS",
     )
 
