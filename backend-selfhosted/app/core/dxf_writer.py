@@ -1,16 +1,14 @@
 """
-DXF Writer — Python port of src/core/dxf-writer.ts.
+DXF Writer
 
-Generates an AutoCAD-compatible DXF file from projected Wall[] data.
-Walls go on the "WALLS" layer, openings on "OPENINGS" (dashed),
-and dimension annotations on "DIMENSIONS".
+Generates an AutoCAD-compatible DXF file for a single facade.
+Each polygon from the facade is drawn on the "FACADE" layer.
+Dimension annotations go on the "DIMENSIONS" layer.
 """
 
 from __future__ import annotations
 
-from .types import Loop2D, Wall
-
-GAP_M = 2.0
+from .types import Facade, Loop2D
 
 
 def _header() -> str:
@@ -21,9 +19,8 @@ def _header() -> str:
         "0", "ENDSEC",
         # Tables -- layer definitions
         "0", "SECTION", "2", "TABLES",
-        "0", "TABLE", "2", "LAYER", "70", "3",
-        "0", "LAYER", "2", "WALLS",      "70", "0", "62", "7",  "6", "CONTINUOUS",
-        "0", "LAYER", "2", "OPENINGS",   "70", "0", "62", "1",  "6", "DASHED",
+        "0", "TABLE", "2", "LAYER", "70", "2",
+        "0", "LAYER", "2", "FACADE",     "70", "0", "62", "7",  "6", "CONTINUOUS",
         "0", "LAYER", "2", "DIMENSIONS", "70", "0", "62", "3",  "6", "CONTINUOUS",
         "0", "ENDTAB",
         "0", "ENDSEC",
@@ -36,7 +33,7 @@ def _footer() -> str:
     return "0\nENDSEC\n0\nEOF\n"
 
 
-def _polyline(loop: Loop2D, ox: float, oy: float, s: float, layer: str) -> str:
+def _polyline(loop: Loop2D, s: float, layer: str) -> str:
     if not loop.vertices:
         return ""
     lines = [
@@ -47,9 +44,9 @@ def _polyline(loop: Loop2D, ox: float, oy: float, s: float, layer: str) -> str:
     ]
     for v in loop.vertices:
         lines.append("10")
-        lines.append(str((v.x + ox) * s))
+        lines.append(str(v.x * s))
         lines.append("20")
-        lines.append(str((v.y + oy) * s))
+        lines.append(str(v.y * s))
     return "\n".join(lines) + "\n"
 
 
@@ -67,48 +64,42 @@ def _text_entity(x: float, y: float, h: float, text: str, layer: str) -> str:
     ]) + "\n"
 
 
-def generate_dxf(walls: list[Wall], scale_denom: int) -> str:
+def generate_dxf(facade: Facade, scale_denom: int) -> str:
+    """Generate a DXF file for a single facade."""
     s = 1.0 / scale_denom
     text_h = 0.15 * s
     out = _header()
-    ox = 0.0
 
-    for wall in walls:
-        # Outer boundary.
-        out += _polyline(wall.outer, ox, 0, s, "WALLS")
+    # Draw all polygons.
+    for poly in facade.polygons:
+        out += _polyline(poly, s, "FACADE")
 
-        # Openings.
-        for opening in wall.openings:
-            out += _polyline(opening, ox, 0, s, "OPENINGS")
+    # Title above.
+    out += _text_entity(
+        facade.width * 0.5 * s,
+        (facade.height + 0.5) * s,
+        text_h * 1.5,
+        facade.label,
+        "DIMENSIONS",
+    )
 
-        # Dimension: width below.
-        out += _text_entity(
-            (ox + wall.width * 0.5) * s,
-            -0.4 * s,
-            text_h,
-            f"{wall.width:.2f} m",
-            "DIMENSIONS",
-        )
+    # Width dimension below.
+    out += _text_entity(
+        facade.width * 0.5 * s,
+        -0.4 * s,
+        text_h,
+        f"{facade.width:.2f} m",
+        "DIMENSIONS",
+    )
 
-        # Dimension: height to the right.
-        out += _text_entity(
-            (ox + wall.width + 0.3) * s,
-            wall.height * 0.5 * s,
-            text_h,
-            f"{wall.height:.2f} m",
-            "DIMENSIONS",
-        )
-
-        # Wall label above.
-        out += _text_entity(
-            (ox + wall.width * 0.5) * s,
-            (wall.height + 0.3) * s,
-            text_h,
-            wall.label,
-            "DIMENSIONS",
-        )
-
-        ox += wall.width + GAP_M
+    # Height dimension to the right.
+    out += _text_entity(
+        (facade.width + 0.3) * s,
+        facade.height * 0.5 * s,
+        text_h,
+        f"{facade.height:.2f} m",
+        "DIMENSIONS",
+    )
 
     out += _footer()
     return out
