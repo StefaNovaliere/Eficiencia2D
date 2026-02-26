@@ -47,6 +47,26 @@ class Facade:
     height: float               # Overall bounding box height (model units)
 
 
+@dataclass
+class Segment2D:
+    """A line segment in 2D space."""
+    a: Vec2
+    b: Vec2
+
+
+@dataclass
+class FloorPlan:
+    """Top-down plan view of the building showing wall outlines.
+
+    Each vertical face in the 3D model projects to a line segment
+    when viewed from above.
+    """
+    label: str                  # "Planta"
+    segments: list[Segment2D]   # Wall outlines as line segments
+    width: float                # Bounding box width (model units)
+    height: float               # Bounding box height (model units)
+
+
 # --- Vector math helpers ---
 
 
