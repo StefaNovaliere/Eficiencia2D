@@ -53,6 +53,7 @@ async def upload_file(
     scale: int = Form(100),
     paper: str = Form("A3"),
     formats: str = Form("dxf,pdf"),
+    include_plan: str = Form("false"),
 ):
     """
     Accept a .skp or .obj upload and return a ZIP of the 2D outputs.
@@ -63,6 +64,7 @@ async def upload_file(
     scale : 50 | 100  (denominator -- 1:50 or 1:100)
     paper : A3 | A1
     formats : comma-separated subset of {dxf, pdf}
+    include_plan : "true" | "false" -- include a floor plan (top-down view)
     """
 
     # --- Validate parameters ---
@@ -99,12 +101,14 @@ async def upload_file(
             )
 
     # --- Run the Python pipeline ---
+    want_plan = include_plan.lower() in ("true", "1", "yes")
     result = run_pipeline(
         file_name=filename,
         data=contents,
         scale_denom=scale,
         paper=paper,
         formats=requested,
+        include_plan=want_plan,
     )
 
     if not result.files:
