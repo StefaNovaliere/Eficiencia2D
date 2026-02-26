@@ -1,6 +1,5 @@
 """
 Shared geometry types for the Eficiencia2D processing pipeline.
-Port of src/core/types.ts to Python.
 """
 
 from __future__ import annotations
@@ -35,14 +34,17 @@ class Face3D:
 
 
 @dataclass
-class Wall:
-    label: str
-    normal: Vec3
-    vertices3d: list[Vec3]
-    outer: Loop2D
-    openings: list[Loop2D]
-    width: float
-    height: float
+class Facade:
+    """One elevation view of the building (e.g. North, South, East, West).
+
+    Contains all projected 2D polygons visible from that direction,
+    positioned in their correct relative locations.
+    """
+    label: str                  # "Fachada Norte", "Fachada Este", etc.
+    direction: Vec3             # Outward normal of the facade plane
+    polygons: list[Loop2D]      # Projected face outlines in local 2D
+    width: float                # Overall bounding box width (model units)
+    height: float               # Overall bounding box height (model units)
 
 
 # --- Vector math helpers ---

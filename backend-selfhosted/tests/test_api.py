@@ -1,7 +1,7 @@
 """
 Tests for the FastAPI upload endpoint.
 
-These tests run against the pure-Python pipeline -- no C++ translator or
+Tests run against the pure-Python pipeline -- no C++ translator or
 SketchUp SDK required.
 """
 
@@ -25,7 +25,6 @@ def test_health():
 
 
 def test_upload_rejects_non_skp():
-    """A non-.skp file should be rejected at the header check."""
     fake = io.BytesIO(b"this is not a skp file at all")
     resp = client.post(
         "/api/upload",
@@ -59,7 +58,6 @@ def test_upload_rejects_invalid_paper():
 
 
 def test_upload_rejects_unsupported_format():
-    """A .stl file should be rejected."""
     fake = io.BytesIO(b"solid model\n")
     resp = client.post(
         "/api/upload",
@@ -70,75 +68,105 @@ def test_upload_rejects_unsupported_format():
     assert "unsupported" in resp.json()["detail"].lower()
 
 
-def _make_obj_wall_z_up() -> bytes:
-    """Create an OBJ with a vertical wall in Z-up convention (4m x 3m).
+def _make_box_y_up() -> bytes:
+    """Create a simple box (4-sided building) in Y-up convention.
 
-    Wall on XZ plane, normal pointing along Y.
-    Coordinates in meters.
+    4 vertical walls forming a 6m x 4m x 3m box.
+    Y is up, so walls have normals in XZ plane.
     """
     lines = [
-        "# Z-up wall: 4m wide, 3m tall",
-        "v 0 0 0",
-        "v 4 0 0",
-        "v 4 0 3",
-        "v 0 0 3",
-        "f 1 2 3 4",
+        "# Box building 6x4x3m, Y-up",
+        # Vertices of the box
+        "v 0 0 0",     # 1: front-left-bottom
+        "v 6 0 0",     # 2: front-right-bottom
+        "v 6 0 4",     # 3: back-right-bottom
+        "v 0 0 4",     # 4: back-left-bottom
+        "v 0 3 0",     # 5: front-left-top
+        "v 6 3 0",     # 6: front-right-top
+        "v 6 3 4",     # 7: back-right-top
+        "v 0 3 4",     # 8: back-left-top
+        # Front wall (normal -Z)
+        "f 1 2 6 5",
+        # Right wall (normal +X)
+        "f 2 3 7 6",
+        # Back wall (normal +Z)
+        "f 3 4 8 7",
+        # Left wall (normal -X)
+        "f 4 1 5 8",
     ]
     return "\n".join(lines).encode("utf-8")
 
 
-def _make_obj_wall_y_up() -> bytes:
-    """Create an OBJ with a vertical wall in Y-up convention (4m x 3m).
+def _make_box_z_up() -> bytes:
+    """Create a simple box in Z-up convention.
 
-    Wall on XY plane, normal pointing along Z.
-    Coordinates in meters.
+    4 vertical walls forming a 6m x 4m x 3m box.
+    Z is up, so walls have normals in XY plane.
     """
     lines = [
-        "# Y-up wall: 4m wide, 3m tall",
-        "v 0 0 0",
-        "v 4 0 0",
-        "v 4 3 0",
-        "v 0 3 0",
-        "f 1 2 3 4",
+        "# Box building 6x4x3m, Z-up",
+        "v 0 0 0",     # 1
+        "v 6 0 0",     # 2
+        "v 6 4 0",     # 3
+        "v 0 4 0",     # 4
+        "v 0 0 3",     # 5
+        "v 6 0 3",     # 6
+        "v 6 4 3",     # 7
+        "v 0 4 3",     # 8
+        # Front wall (normal -Y)
+        "f 1 2 6 5",
+        # Right wall (normal +X)
+        "f 2 3 7 6",
+        # Back wall (normal +Y)
+        "f 3 4 8 7",
+        # Left wall (normal -X)
+        "f 4 1 5 8",
     ]
     return "\n".join(lines).encode("utf-8")
 
 
-def test_upload_obj_z_up_produces_zip():
-    """Upload a valid Z-up .obj wall and get a ZIP back."""
-    obj_data = _make_obj_wall_z_up()
+def test_box_y_up_produces_4_facades():
+    """A 4-sided box should produce 4 facade DXFs + 1 multi-page PDF."""
+    obj_data = _make_box_y_up()
     resp = client.post(
         "/api/upload",
         files={"file": ("house.obj", io.BytesIO(obj_data), "application/octet-stream")},
         data={"scale": "100", "paper": "A3", "formats": "dxf,pdf"},
     )
     assert resp.status_code == 200
-    assert resp.headers["content-type"] == "application/zip"
     zf = zipfile.ZipFile(io.BytesIO(resp.content))
     names = zf.namelist()
-    assert "house.dxf" in names
-    assert "house.pdf" in names
+
+    # Should have 4 DXFs (one per facade) + 1 PDF.
+    dxf_files = [n for n in names if n.endswith(".dxf")]
+    pdf_files = [n for n in names if n.endswith(".pdf")]
+    assert len(dxf_files) == 4, f"Expected 4 DXFs, got {dxf_files}"
+    assert len(pdf_files) == 1, f"Expected 1 PDF, got {pdf_files}"
+
+    # PDF should contain "Fachada" labels.
+    pdf_content = zf.read(pdf_files[0]).decode("latin-1")
+    assert "Fachada" in pdf_content
 
 
-def test_upload_obj_y_up_produces_zip():
-    """Upload a valid Y-up .obj wall and get a ZIP back."""
-    obj_data = _make_obj_wall_y_up()
+def test_box_z_up_produces_4_facades():
+    """Z-up box also produces 4 facades."""
+    obj_data = _make_box_z_up()
     resp = client.post(
         "/api/upload",
-        files={"file": ("tower.obj", io.BytesIO(obj_data), "application/octet-stream")},
+        files={"file": ("house.obj", io.BytesIO(obj_data), "application/octet-stream")},
         data={"scale": "100", "paper": "A3", "formats": "dxf,pdf"},
     )
     assert resp.status_code == 200
-    assert resp.headers["content-type"] == "application/zip"
     zf = zipfile.ZipFile(io.BytesIO(resp.content))
     names = zf.namelist()
-    assert "tower.dxf" in names
-    assert "tower.pdf" in names
+
+    dxf_files = [n for n in names if n.endswith(".dxf")]
+    assert len(dxf_files) == 4, f"Expected 4 DXFs, got {dxf_files}"
 
 
-def test_upload_obj_dxf_only():
-    """Request only DXF format."""
-    obj_data = _make_obj_wall_z_up()
+def test_dxf_only():
+    """Request only DXF format -- no PDF in output."""
+    obj_data = _make_box_y_up()
     resp = client.post(
         "/api/upload",
         files={"file": ("house.obj", io.BytesIO(obj_data), "application/octet-stream")},
@@ -147,19 +175,46 @@ def test_upload_obj_dxf_only():
     assert resp.status_code == 200
     zf = zipfile.ZipFile(io.BytesIO(resp.content))
     names = zf.namelist()
-    assert "house.dxf" in names
-    assert "house.pdf" not in names
+    assert all(n.endswith(".dxf") for n in names)
 
 
-def test_upload_obj_centimeters():
-    """An OBJ in centimeters (wall 400cm x 300cm) should still work."""
+def test_pdf_only():
+    """Request only PDF format -- no DXF in output."""
+    obj_data = _make_box_y_up()
+    resp = client.post(
+        "/api/upload",
+        files={"file": ("house.obj", io.BytesIO(obj_data), "application/octet-stream")},
+        data={"scale": "100", "paper": "A3", "formats": "pdf"},
+    )
+    assert resp.status_code == 200
+    zf = zipfile.ZipFile(io.BytesIO(resp.content))
+    names = zf.namelist()
+    assert len(names) == 1
+    assert names[0].endswith(".pdf")
+
+
+def test_upload_obj_no_faces():
+    """An .obj with no faces should return 422."""
+    lines = ["v 0 0 0", "v 1 0 0", "v 1 1 0"]
+    obj_data = "\n".join(lines).encode("utf-8")
+    resp = client.post(
+        "/api/upload",
+        files={"file": ("empty.obj", io.BytesIO(obj_data), "application/octet-stream")},
+        data={"scale": "100", "paper": "A3", "formats": "dxf"},
+    )
+    assert resp.status_code == 422
+
+
+def test_centimeter_model():
+    """An OBJ in centimeters should work (unit auto-detection)."""
     lines = [
-        "# Y-up wall in cm: 400cm wide, 300cm tall",
-        "v 0 0 0",
-        "v 400 0 0",
-        "v 400 300 0",
-        "v 0 300 0",
-        "f 1 2 3 4",
+        "# Y-up box in cm (600x400x300 cm)",
+        "v 0 0 0", "v 600 0 0", "v 600 0 400", "v 0 0 400",
+        "v 0 300 0", "v 600 300 0", "v 600 300 400", "v 0 300 400",
+        "f 1 2 6 5",
+        "f 2 3 7 6",
+        "f 3 4 8 7",
+        "f 4 1 5 8",
     ]
     obj_data = "\n".join(lines).encode("utf-8")
     resp = client.post(
@@ -168,51 +223,3 @@ def test_upload_obj_centimeters():
         data={"scale": "100", "paper": "A3", "formats": "dxf"},
     )
     assert resp.status_code == 200
-
-
-def test_upload_obj_triangulated_wall():
-    """A wall made of multiple coplanar triangles should be merged into one wall."""
-    # 4m x 3m wall (Y-up), split into 4 triangles.
-    lines = [
-        "# Triangulated wall",
-        "v 0 0 0",
-        "v 4 0 0",
-        "v 4 3 0",
-        "v 0 3 0",
-        "v 2 1.5 0",  # center vertex
-        "f 1 2 5",
-        "f 2 3 5",
-        "f 3 4 5",
-        "f 4 1 5",
-    ]
-    obj_data = "\n".join(lines).encode("utf-8")
-    resp = client.post(
-        "/api/upload",
-        files={"file": ("tri_wall.obj", io.BytesIO(obj_data), "application/octet-stream")},
-        data={"scale": "100", "paper": "A3", "formats": "dxf"},
-    )
-    assert resp.status_code == 200
-    zf = zipfile.ZipFile(io.BytesIO(resp.content))
-    names = zf.namelist()
-    assert "tri_wall.dxf" in names
-    # Verify the DXF content shows a single merged wall, not 4 separate ones.
-    dxf = zf.read("tri_wall.dxf").decode("utf-8")
-    assert dxf.count("Muro_001") == 1
-    assert "Muro_002" not in dxf
-
-
-def test_upload_obj_no_walls():
-    """An .obj with no faces at all should return 422."""
-    lines = [
-        "# Only vertices, no faces",
-        "v 0 0 0",
-        "v 1 0 0",
-        "v 1 1 0",
-    ]
-    obj_data = "\n".join(lines).encode("utf-8")
-    resp = client.post(
-        "/api/upload",
-        files={"file": ("empty.obj", io.BytesIO(obj_data), "application/octet-stream")},
-        data={"scale": "100", "paper": "A3", "formats": "dxf"},
-    )
-    assert resp.status_code == 422
