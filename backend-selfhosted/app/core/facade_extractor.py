@@ -182,7 +182,7 @@ def _extract_facades_with_axis(
                 all_u.append(u)
                 all_v.append(vv)
             if len(pts_2d) >= 3:
-                polygons.append(Loop2D(vertices=pts_2d))
+                polygons.append(Loop2D(vertices=pts_2d, panel_id=face.panel_id))
 
         if not polygons or not all_u:
             continue
@@ -203,9 +203,10 @@ def _extract_facades_with_axis(
         normalized_polygons: list[Loop2D] = []
         for poly in polygons:
             normalized_polygons.append(
-                Loop2D(vertices=[
-                    Vec2(p.x - min_u, p.y - min_v) for p in poly.vertices
-                ])
+                Loop2D(
+                    vertices=[Vec2(p.x - min_u, p.y - min_v) for p in poly.vertices],
+                    panel_id=poly.panel_id,
+                )
             )
 
         label = _direction_label(direction, up_axis)
