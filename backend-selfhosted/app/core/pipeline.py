@@ -21,6 +21,7 @@ import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .cutting_sheet import generate_cutting_sheet_dxf, pack_panels
 from .dxf_writer import generate_dxf, generate_component_dxf
 from .obj_parser import parse_obj
 from .pdf_writer import generate_pdf
@@ -139,6 +140,7 @@ def run_pipeline(
     paper: str = "A3",
     formats: set[str] | None = None,
     include_plan: bool = False,
+    include_cutting_sheet: bool = False,
 ) -> PipelineResult:
     """Run the full processing pipeline on a file.
 
@@ -147,6 +149,9 @@ def run_pipeline(
     include_plan : bool
         If True, generate component decomposition sheets with reference IDs
         in addition to facade elevations.
+    include_cutting_sheet : bool
+        If True, generate cutting-sheet DXF files (plancha de corte) with
+        panels packed onto 1000x600mm sheets for laser cutting.
     """
     if formats is None:
         formats = {"dxf", "pdf"}
@@ -177,14 +182,8 @@ def run_pipeline(
     # --- 2. Decomposition FIRST (tags Face3D.panel_id for facade labeling) ---
     component_sheets: list[ComponentSheet] = []
 
-    if include_plan:
-        # For Plancha paper: 2mm physical gap → model units.
-        # For A3/A1: comfortable 0.5m model-unit gap.
-        if paper == "Plancha":
-            gap = 0.002 * scale_denom
-        else:
-            gap = 0.5
-        component_sheets = extract_components(faces, gap=gap)
+    if include_plan or include_cutting_sheet:
+        component_sheets = extract_components(faces, gap=0.5)
 
     # --- 3. Extract facades (picks up panel_id from tagged faces) ---
     facades = extract_facades(faces)
@@ -229,5 +228,20 @@ def run_pipeline(
             component_sheets=component_sheets if component_sheets else None,
         )
         files.append(OutputFile(name=f"{stem}_planos.pdf", content=pdf_content))
+
+    # --- 6. Cutting sheets (plancha de corte) ---
+    if include_cutting_sheet and component_sheets:
+        all_panels: list[PanelInfo] = []
+        for sh in component_sheets:
+            all_panels.extend(sh.panels)
+
+        cutting_sheets = pack_panels(all_panels, scale_denom)
+        for i, cs in enumerate(cutting_sheets, start=1):
+            dxf_text = generate_cutting_sheet_dxf(cs, sheet_index=i)
+            suffix = f"_{i}" if len(cutting_sheets) > 1 else ""
+            files.append(OutputFile(
+                name=f"{stem}_Plancha_de_Corte{suffix}.dxf",
+                content=dxf_text,
+            ))
 
     return PipelineResult(facades=facades, files=files, warnings=warnings)
