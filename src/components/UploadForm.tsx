@@ -13,7 +13,7 @@ const API_URL =
 export default function UploadForm() {
   const [file, setFile] = useState<File | null>(null);
   const [scale, setScale] = useState(100);
-  const [paper, setPaper] = useState<"A3" | "A1">("A3");
+  const [paper, setPaper] = useState<"A3" | "A1" | "Plancha">("A3");
   const [formats, setFormats] = useState<("dxf" | "pdf")[]>(["dxf", "pdf"]);
   const [includePlan, setIncludePlan] = useState(false);
   const [status, setStatus] = useState<Status>("idle");
@@ -154,10 +154,11 @@ export default function UploadForm() {
           Papel
           <select
             value={paper}
-            onChange={(e) => setPaper(e.target.value as "A3" | "A1")}
+            onChange={(e) => setPaper(e.target.value as "A3" | "A1" | "Plancha")}
           >
             <option value="A3">A3</option>
             <option value="A1">A1</option>
+            <option value="Plancha">Plancha (1000x600mm)</option>
           </select>
         </label>
 
@@ -189,7 +190,7 @@ export default function UploadForm() {
               checked={includePlan}
               onChange={() => setIncludePlan((prev) => !prev)}
             />
-            Planta (vista superior)
+            Descomposición
           </label>
         </fieldset>
       </div>
