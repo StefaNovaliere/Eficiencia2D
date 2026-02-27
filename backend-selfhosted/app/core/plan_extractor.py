@@ -213,12 +213,18 @@ def _make_slab_panels(
 # Grid layout
 # ---------------------------------------------------------------------------
 
+LABEL_SPACE = 0.4  # model-units of vertical space above each panel for its label
+
+
 def _layout_panels_grid(
     panels: list[PanelInfo],
     gap: float = 0.5,
     max_cols: int = 5,
 ) -> tuple[list[PanelInfo], float, float]:
     """Lay out panels in a grid, left-to-right then top-to-bottom.
+
+    Reserves LABEL_SPACE above each panel row for reference IDs and
+    LABEL_SPACE below for dimensions, so labels don't overlap.
 
     Returns (laid_out_panels, total_width, total_height).
     """
@@ -227,7 +233,7 @@ def _layout_panels_grid(
 
     laid: list[PanelInfo] = []
     row_x = 0.0
-    row_y = 0.0
+    row_y = LABEL_SPACE  # start with bottom label space
     row_h = 0.0
     col = 0
     total_w = 0.0
@@ -236,7 +242,8 @@ def _layout_panels_grid(
         pw, ph = panel.width, panel.height
 
         if col >= max_cols and col > 0:
-            row_y += row_h + gap
+            # Move to next row: current row height + top label + gap + bottom label
+            row_y += row_h + LABEL_SPACE + gap + LABEL_SPACE
             row_x = 0.0
             row_h = 0.0
             col = 0
@@ -257,7 +264,7 @@ def _layout_panels_grid(
         row_h = max(row_h, ph)
         col += 1
 
-    total_h = row_y + row_h
+    total_h = row_y + row_h + LABEL_SPACE  # include top label space
     return laid, total_w, total_h
 
 
