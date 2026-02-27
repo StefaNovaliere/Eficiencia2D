@@ -24,6 +24,7 @@ class Vec2:
 @dataclass
 class Loop2D:
     vertices: list[Vec2]
+    panel_id: str | None = None  # Reference ID carried from Face3D
 
 
 @dataclass
@@ -31,6 +32,7 @@ class Face3D:
     vertices: list[Vec3]
     normal: Vec3
     inner_loops: list[list[Vec3]] = field(default_factory=list)
+    panel_id: str | None = None  # Set by decomposition (e.g. "A1", "B2")
 
 
 @dataclass
@@ -48,35 +50,24 @@ class Facade:
 
 
 @dataclass
-class Segment2D:
-    """A line segment in 2D space."""
-    a: Vec2
-    b: Vec2
-
-
-@dataclass
-class FloorPlan:
-    """Top-down plan view of the building showing wall outlines.
-
-    Each vertical face in the 3D model projects to a line segment
-    when viewed from above.
-    """
-    label: str                  # "Planta", "Planta Nivel 1", etc.
-    segments: list[Segment2D]   # Wall outlines as line segments
-    width: float                # Bounding box width (model units)
-    height: float               # Bounding box height (model units)
+class PanelInfo:
+    """A single panel in the decomposition with a reference ID."""
+    ref_id: str          # "A1", "A2", "B1", etc.
+    outline: Loop2D      # Positioned rectangle on the layout sheet
+    width: float         # Panel width in model units
+    height: float        # Panel height in model units
 
 
 @dataclass
 class ComponentSheet:
-    """A sheet showing multiple components of one type laid out together.
+    """A sheet showing decomposed panels of one type laid out together.
 
-    Used for the exploded/decomposition view:
-      - "Pisos"   — all floor slabs projected as polygons
-      - "Paredes" — all wall faces projected and laid out side-by-side
+    Used for the cutting sheet / decomposition view:
+      - "Descomposicion Paredes" — all wall panels with ref IDs
+      - "Descomposicion Pisos"   — all floor slab panels with ref IDs
     """
-    label: str                  # "Pisos", "Paredes"
-    components: list[Loop2D]    # Each component is a 2D polygon
+    label: str                  # "Descomposicion Paredes", etc.
+    panels: list[PanelInfo]     # Each panel with ref_id, outline, dimensions
     width: float                # Overall bounding box width
     height: float               # Overall bounding box height
 

@@ -76,7 +76,6 @@ def _make_box_y_up() -> bytes:
     """
     lines = [
         "# Box building 6x4x3m, Y-up",
-        # Vertices of the box
         "v 0 0 0",     # 1: front-left-bottom
         "v 6 0 0",     # 2: front-right-bottom
         "v 6 0 4",     # 3: back-right-bottom
@@ -137,7 +136,6 @@ def test_box_y_up_produces_4_facades():
     zf = zipfile.ZipFile(io.BytesIO(resp.content))
     names = zf.namelist()
 
-    # Should have 4 DXFs (one per facade) + 1 PDF.
     dxf_files = [n for n in names if n.endswith(".dxf")]
     pdf_files = [n for n in names if n.endswith(".pdf")]
     assert len(dxf_files) == 4, f"Expected 4 DXFs, got {dxf_files}"
@@ -225,8 +223,8 @@ def test_centimeter_model():
     assert resp.status_code == 200
 
 
-def test_include_plan_adds_per_floor_decomposition():
-    """include_plan=true should add per-floor component decomposition (no section cuts)."""
+def test_include_plan_adds_decomposition():
+    """include_plan=true should add component decomposition with ref IDs."""
     obj_data = _make_box_y_up()
     resp = client.post(
         "/api/upload",
@@ -240,15 +238,14 @@ def test_include_plan_adds_per_floor_decomposition():
     dxf_files = [n for n in names if n.endswith(".dxf")]
     pdf_files = [n for n in names if n.endswith(".pdf")]
     facade_dxfs = [n for n in dxf_files if "Fachada" in n]
-    component_dxfs = [n for n in dxf_files if "Piso" in n or "Plano" in n]
+    component_dxfs = [n for n in dxf_files if "Descomposicion" in n]
 
-    # Must have 4 facades and at least some component sheets.
     assert len(facade_dxfs) == 4, f"Expected 4 facade DXFs, got {facade_dxfs}"
     assert len(pdf_files) == 1
 
-    # No more section-cut "Planta" pages.
-    planta_dxfs = [n for n in dxf_files if "Planta_Nivel" in n]
-    assert len(planta_dxfs) == 0, f"Should not have section-cut Planta DXFs, got {planta_dxfs}"
+    # Should have at least walls decomposition.
+    paredes_dxfs = [n for n in component_dxfs if "Paredes" in n]
+    assert len(paredes_dxfs) >= 1, f"Expected Descomposicion Paredes DXF, got {component_dxfs}"
 
 
 def test_include_plan_false_no_decomposition():
@@ -262,7 +259,7 @@ def test_include_plan_false_no_decomposition():
     assert resp.status_code == 200
     zf = zipfile.ZipFile(io.BytesIO(resp.content))
     names = zf.namelist()
-    component_dxfs = [n for n in names if "Piso" in n or "Plano" in n]
+    component_dxfs = [n for n in names if "Descomposicion" in n]
     assert len(component_dxfs) == 0
 
 
@@ -282,14 +279,9 @@ def test_decomposition_z_up():
 
 
 def _make_multistory_y_up() -> bytes:
-    """Create a 2-story building (Y-up) with floor slabs and interior walls.
-
-    Floor 1: 0-3m, Floor 2: 3-6m.
-    Includes a floor slab at y=3 and an interior wall.
-    """
+    """Create a 2-story building (Y-up) with floor slabs and interior walls."""
     lines = [
         "# 2-story building 8x6x6m, Y-up",
-        # Ground floor outer walls
         "v 0 0 0",   # 1
         "v 8 0 0",   # 2
         "v 8 0 6",   # 3
@@ -298,7 +290,6 @@ def _make_multistory_y_up() -> bytes:
         "v 8 3 0",   # 6
         "v 8 3 6",   # 7
         "v 0 3 6",   # 8
-        # Second floor outer walls
         "v 0 6 0",   # 9
         "v 8 6 0",   # 10
         "v 8 6 6",   # 11
@@ -309,20 +300,20 @@ def _make_multistory_y_up() -> bytes:
         "v 4 3 6",   # 15
         "v 4 0 6",   # 16
         # Floor slab at y=3
-        "v 0 3 0",   # 17 (= 5)
-        "v 8 3 0",   # 18 (= 6)
-        "v 8 3 6",   # 19 (= 7)
-        "v 0 3 6",   # 20 (= 8)
+        "v 0 3 0",   # 17
+        "v 8 3 0",   # 18
+        "v 8 3 6",   # 19
+        "v 0 3 6",   # 20
         # Ground floor walls
-        "f 1 2 6 5",     # front
-        "f 2 3 7 6",     # right
-        "f 3 4 8 7",     # back
-        "f 4 1 5 8",     # left
+        "f 1 2 6 5",
+        "f 2 3 7 6",
+        "f 3 4 8 7",
+        "f 4 1 5 8",
         # Second floor walls
-        "f 5 6 10 9",    # front
-        "f 6 7 11 10",   # right
-        "f 7 8 12 11",   # back
-        "f 8 5 9 12",    # left
+        "f 5 6 10 9",
+        "f 6 7 11 10",
+        "f 7 8 12 11",
+        "f 8 5 9 12",
         # Interior wall
         "f 13 16 15 14",
         # Floor slab at y=3 (horizontal)
@@ -331,8 +322,8 @@ def _make_multistory_y_up() -> bytes:
     return "\n".join(lines).encode("utf-8")
 
 
-def test_multistory_per_floor_decomposition():
-    """A 2-story building should produce per-floor decomposition sheets."""
+def test_multistory_decomposition():
+    """A 2-story building should produce decomposition sheets with ref IDs."""
     obj_data = _make_multistory_y_up()
     resp = client.post(
         "/api/upload",
@@ -346,16 +337,66 @@ def test_multistory_per_floor_decomposition():
     facade_dxfs = [n for n in names if "Fachada" in n]
     assert len(facade_dxfs) >= 4, f"Expected 4+ facade DXFs, got {facade_dxfs}"
 
-    # Component sheets should have per-floor labels like "Piso_1_-_Plano_Vertical".
-    piso_dxfs = [n for n in names if "Piso" in n]
-    assert len(piso_dxfs) >= 1, f"Expected per-floor decomposition DXFs, got {names}"
+    # Should have "Descomposicion_Paredes" sheet.
+    paredes_dxfs = [n for n in names if "Descomposicion_Paredes" in n]
+    assert len(paredes_dxfs) >= 1, f"Expected Paredes DXF, got {names}"
 
-    # No section-cut "Planta" DXFs.
-    planta_dxfs = [n for n in names if "Planta_Nivel" in n]
-    assert len(planta_dxfs) == 0, f"Should not have section-cut Planta DXFs, got {planta_dxfs}"
-
-    # PDF should contain per-floor labels.
+    # PDF should contain "Descomposicion" labels.
     pdf_files = [n for n in names if n.endswith(".pdf")]
     assert len(pdf_files) == 1
     pdf_content = zf.read(pdf_files[0]).decode("latin-1")
-    assert "Piso" in pdf_content
+    assert "Descomposicion" in pdf_content
+
+
+def test_plancha_paper_accepted():
+    """Plancha should be accepted as a valid paper option."""
+    obj_data = _make_box_y_up()
+    resp = client.post(
+        "/api/upload",
+        files={"file": ("house.obj", io.BytesIO(obj_data), "application/octet-stream")},
+        data={"scale": "100", "paper": "Plancha", "formats": "pdf"},
+    )
+    assert resp.status_code == 200
+
+
+def test_dxf_has_laser_layers():
+    """DXF output should use CORTE/MARCA/GRABADO layers."""
+    obj_data = _make_box_y_up()
+    resp = client.post(
+        "/api/upload",
+        files={"file": ("house.obj", io.BytesIO(obj_data), "application/octet-stream")},
+        data={"scale": "100", "paper": "A3", "formats": "dxf"},
+    )
+    assert resp.status_code == 200
+    zf = zipfile.ZipFile(io.BytesIO(resp.content))
+    names = zf.namelist()
+    dxf_files = [n for n in names if n.endswith(".dxf")]
+    assert len(dxf_files) > 0
+
+    dxf_content = zf.read(dxf_files[0]).decode("utf-8")
+    assert "CORTE" in dxf_content
+    assert "MARCA" in dxf_content
+    assert "GRABADO" in dxf_content
+    # Old layers should NOT be present.
+    assert "FACADE" not in dxf_content
+    assert "DIMENSIONS" not in dxf_content
+
+
+def test_panel_reference_ids_in_component_dxf():
+    """Component decomposition DXF should contain panel reference IDs."""
+    obj_data = _make_box_y_up()
+    resp = client.post(
+        "/api/upload",
+        files={"file": ("house.obj", io.BytesIO(obj_data), "application/octet-stream")},
+        data={"scale": "100", "paper": "A3", "formats": "dxf", "include_plan": "true"},
+    )
+    assert resp.status_code == 200
+    zf = zipfile.ZipFile(io.BytesIO(resp.content))
+    names = zf.namelist()
+    component_dxfs = [n for n in names if "Descomposicion" in n]
+
+    if component_dxfs:
+        dxf_content = zf.read(component_dxfs[0]).decode("utf-8")
+        # Should contain at least one reference ID (A1 for walls or B1 for slabs).
+        assert "A1" in dxf_content or "B1" in dxf_content, \
+            f"Expected panel reference IDs in component DXF"
