@@ -6,7 +6,7 @@ or component decomposition sheet.
 
 No external dependencies -- writes raw PDF operators.
 
-Paper sizes: A3 (420x297 mm), A1 (841x594 mm), Plancha (1000x600 mm).
+Paper sizes: A3 (420x297 mm), A1 (841x594 mm).
 """
 
 from __future__ import annotations
@@ -16,7 +16,6 @@ from .types import ComponentSheet, Facade
 PAPERS: dict[str, tuple[float, float]] = {
     "A3": (420, 297),
     "A1": (841, 594),
-    "Plancha": (1000, 600),
 }
 
 MM_TO_PT = 72 / 25.4
@@ -72,16 +71,23 @@ def _build_page_content(facade: Facade, scale_denom: int, paper: str) -> str:
         cs += "s\n"
 
         # Panel reference ID at centroid (red).
+        # Only label polygons large enough to be readable.
         if poly.panel_id:
-            cx = sum(tx(v.x) for v in verts) / len(verts)
-            cy = sum(ty(v.y) for v in verts) / len(verts)
-            cs += "BT\n"
-            cs += f"/F1 {font_size - 2} Tf\n"
-            cs += "1 0 0 rg\n"  # red text
-            cs += f"{cx:.2f} {cy:.2f} Td\n"
-            cs += f"({poly.panel_id}) Tj\n"
-            cs += "0 0 0 rg\n"  # reset to black
-            cs += "ET\n"
+            xs = [tx(v.x) for v in verts]
+            ys = [ty(v.y) for v in verts]
+            poly_w_pt = max(xs) - min(xs)
+            poly_h_pt = max(ys) - min(ys)
+            if poly_w_pt > 8 and poly_h_pt > 8:
+                cx = sum(xs) / len(xs)
+                cy = sum(ys) / len(ys)
+                label_size = min(font_size - 2, max(4, poly_h_pt * 0.2))
+                cs += "BT\n"
+                cs += f"/F1 {label_size:.1f} Tf\n"
+                cs += "1 0 0 rg\n"  # red text
+                cs += f"{cx:.2f} {cy:.2f} Td\n"
+                cs += f"({poly.panel_id}) Tj\n"
+                cs += "0 0 0 rg\n"  # reset to black
+                cs += "ET\n"
 
     # Title above the drawing.
     cs += "BT\n"
@@ -171,21 +177,27 @@ def _build_component_content(sheet: ComponentSheet, scale_denom: int, paper: str
         # Reference ID above panel (red = mark).
         cx = sum(tx(v.x) for v in verts) / len(verts)
         max_y_pt = max(ty(v.y) for v in verts)
+        min_y_pt = min(ty(v.y) for v in verts)
+        panel_h_pt = max_y_pt - min_y_pt
+
+        # Scale label size to panel, clamped to readable range.
+        label_size = min(font_size, max(5, panel_h_pt * 0.15))
+
         cs += "BT\n"
-        cs += f"/F1 {font_size} Tf\n"
+        cs += f"/F1 {label_size:.1f} Tf\n"
         cs += "1 0 0 rg\n"  # red
-        cs += f"{cx:.2f} {max_y_pt + 4:.2f} Td\n"
+        cs += f"{cx:.2f} {max_y_pt + 3:.2f} Td\n"
         cs += f"({panel.ref_id}) Tj\n"
         cs += "0 0 0 rg\n"  # reset
         cs += "ET\n"
 
         # Dimensions below panel (red = mark).
-        min_y_pt = min(ty(v.y) for v in verts)
         dim_text = f"{panel.width:.2f} x {panel.height:.2f}"
+        dim_size = min(font_size - 2, max(4, panel_h_pt * 0.10))
         cs += "BT\n"
-        cs += f"/F1 {font_size - 2} Tf\n"
+        cs += f"/F1 {dim_size:.1f} Tf\n"
         cs += "1 0 0 rg\n"
-        cs += f"{cx:.2f} {min_y_pt - 10:.2f} Td\n"
+        cs += f"{cx:.2f} {min_y_pt - dim_size - 2:.2f} Td\n"
         cs += f"({dim_text}) Tj\n"
         cs += "0 0 0 rg\n"
         cs += "ET\n"

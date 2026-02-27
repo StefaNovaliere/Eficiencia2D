@@ -71,7 +71,8 @@ def _text_entity(x: float, y: float, h: float, text: str, layer: str) -> str:
 def generate_dxf(facade: Facade, scale_denom: int) -> str:
     """Generate a DXF file for a single facade with panel reference IDs."""
     s = 1.0 / scale_denom
-    text_h = 0.15 * s
+    # Text height in DXF units: ~2.5mm on paper at the given scale.
+    text_h = 2.5 / 1000.0  # 2.5mm in meters (DXF units match model meters * s)
     out = _header()
 
     # Draw all polygons on CORTE layer (black = cut).
@@ -79,10 +80,18 @@ def generate_dxf(facade: Facade, scale_denom: int) -> str:
         out += _polyline(poly, s, "CORTE")
 
         # Panel reference ID at centroid (red = mark).
+        # Only label polygons large enough to be readable.
         if poly.panel_id and poly.vertices:
-            cx = sum(v.x for v in poly.vertices) / len(poly.vertices)
-            cy = sum(v.y for v in poly.vertices) / len(poly.vertices)
-            out += _text_entity(cx * s, cy * s, text_h, poly.panel_id, "MARCA")
+            xs = [v.x for v in poly.vertices]
+            ys = [v.y for v in poly.vertices]
+            poly_w = (max(xs) - min(xs)) * s
+            poly_h = (max(ys) - min(ys)) * s
+            # Skip labels for tiny polygons (< 5mm on paper in either dim).
+            if poly_w > 0.005 and poly_h > 0.005:
+                cx = sum(xs) / len(xs)
+                cy = sum(ys) / len(ys)
+                label_h = min(text_h, poly_h * 0.3)  # shrink for small panels
+                out += _text_entity(cx * s, cy * s, label_h, poly.panel_id, "MARCA")
 
     # Title above (blue = engrave).
     out += _text_entity(
@@ -124,7 +133,7 @@ def generate_component_dxf(sheet: ComponentSheet, scale_denom: int) -> str:
       - Dimensions below on MARCA layer (red = mark)
     """
     s = 1.0 / scale_denom
-    text_h = 0.15 * s
+    text_h = 2.5 / 1000.0  # 2.5mm on paper
     out = _header()
 
     for panel in sheet.panels:
@@ -135,13 +144,17 @@ def generate_component_dxf(sheet: ComponentSheet, scale_denom: int) -> str:
             cx = sum(v.x for v in panel.outline.vertices) / len(panel.outline.vertices)
             max_y = max(v.y for v in panel.outline.vertices)
             min_y = min(v.y for v in panel.outline.vertices)
+            panel_h_dxf = (max_y - min_y) * s
+
+            # Scale label to panel height, clamped to readable range.
+            label_h = min(text_h, max(text_h * 0.5, panel_h_dxf * 0.12))
 
             # Reference ID above panel (red = mark).
-            out += _text_entity(cx * s, (max_y + 0.1) * s, text_h, panel.ref_id, "MARCA")
+            out += _text_entity(cx * s, (max_y + 0.15) * s, label_h, panel.ref_id, "MARCA")
 
             # Dimensions below panel (red = mark).
             dim_text = f"{panel.width:.2f} x {panel.height:.2f}"
-            out += _text_entity(cx * s, (min_y - 0.15) * s, text_h * 0.8, dim_text, "MARCA")
+            out += _text_entity(cx * s, (min_y - 0.25) * s, label_h * 0.8, dim_text, "MARCA")
 
     # Title above (blue = engrave).
     out += _text_entity(

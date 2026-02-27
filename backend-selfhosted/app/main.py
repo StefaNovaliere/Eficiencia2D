@@ -68,6 +68,7 @@ async def upload_file(
     paper: str = Form("A3"),
     formats: str = Form("dxf,pdf"),
     include_plan: str = Form("false"),
+    include_cutting_sheet: str = Form("false"),
 ):
     """
     Accept a .skp or .obj upload and return a ZIP of the 2D outputs.
@@ -78,7 +79,8 @@ async def upload_file(
     scale : 50 | 100  (denominator -- 1:50 or 1:100)
     paper : A3 | A1
     formats : comma-separated subset of {dxf, pdf}
-    include_plan : "true" | "false" -- include a floor plan (top-down view)
+    include_plan : "true" | "false" -- include component decomposition sheets
+    include_cutting_sheet : "true" | "false" -- include plancha de corte DXF
     """
 
     # --- Validate parameters ---
@@ -116,6 +118,7 @@ async def upload_file(
 
     # --- Run the Python pipeline ---
     want_plan = include_plan.lower() in ("true", "1", "yes")
+    want_cutting = include_cutting_sheet.lower() in ("true", "1", "yes")
     try:
         result = run_pipeline(
             file_name=filename,
@@ -124,6 +127,7 @@ async def upload_file(
             paper=paper,
             formats=requested,
             include_plan=want_plan,
+            include_cutting_sheet=want_cutting,
         )
     except Exception as exc:
         logger.error("Pipeline error for %s: %s", filename, exc, exc_info=True)
