@@ -241,7 +241,7 @@ def test_include_plan_adds_floor_plan_and_components():
     pdf_files = [n for n in names if n.endswith(".pdf")]
     plan_dxfs = [n for n in dxf_files if "Planta" in n]
     facade_dxfs = [n for n in dxf_files if "Fachada" in n]
-    component_dxfs = [n for n in dxf_files if "Paredes" in n or "Pisos" in n]
+    component_dxfs = [n for n in dxf_files if "Descomposicion" in n]
 
     # Must have at least 1 plan, 4 facades, and some component sheets.
     assert len(plan_dxfs) >= 1, f"Expected at least 1 plan DXF, got {plan_dxfs}"
@@ -253,10 +253,10 @@ def test_include_plan_adds_floor_plan_and_components():
     plan_content = zf.read(plan_dxfs[0]).decode("utf-8")
     assert "LINE" in plan_content
 
-    # The PDF should contain both "Planta" and "Paredes" labels.
+    # The PDF should contain "Planta" and "Descomposicion" labels.
     pdf_content = zf.read(pdf_files[0]).decode("latin-1")
     assert "Planta" in pdf_content
-    assert "Paredes" in pdf_content
+    assert "Descomposicion" in pdf_content
 
 
 def test_include_plan_false_no_floor_plan():
@@ -271,7 +271,7 @@ def test_include_plan_false_no_floor_plan():
     zf = zipfile.ZipFile(io.BytesIO(resp.content))
     names = zf.namelist()
     plan_dxfs = [n for n in names if "Planta" in n]
-    component_dxfs = [n for n in names if "Paredes" in n or "Pisos" in n]
+    component_dxfs = [n for n in names if "Descomposicion" in n]
     assert len(plan_dxfs) == 0
     assert len(component_dxfs) == 0
 
