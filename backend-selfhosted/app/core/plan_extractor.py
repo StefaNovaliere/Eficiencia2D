@@ -44,7 +44,14 @@ from .types import (
 
 VERTICAL_EPSILON = 0.20
 HORIZONTAL_EPSILON = 0.15  # |up_component_of_normal| > (1 - this) means horizontal
-FLOOR_CLUSTER_TOLERANCE = 0.30  # meters — group floors within this height
+FLOOR_CLUSTER_TOLERANCE = 0.50  # meters — group floors within this height
+
+# --- Floor detection thresholds ---
+# Only horizontal faces larger than this count for floor level detection.
+# This prevents window sills, countertops, stair treads, shelves, etc.
+# from being interpreted as distinct floor levels.
+MIN_SLAB_AREA_FOR_LEVEL = 3.0  # m² — structural slabs are large
+MIN_FLOOR_HEIGHT = 2.0  # m — real floors are at least ~2.5m apart
 
 # --- Filtering thresholds ---
 # Panels smaller than this are excluded from decomposition.
@@ -89,35 +96,61 @@ def _face_area_3d(face: Face3D) -> float:
 def _detect_floor_levels(
     faces: list[Face3D], up_axis: Literal["Y", "Z"]
 ) -> list[float]:
-    """Find distinct floor heights by looking at horizontal faces.
+    """Find distinct floor heights by looking at large horizontal faces only.
 
-    Horizontal faces are those whose normal is mostly aligned with the up axis.
-    We cluster their average heights to find distinct levels.
+    Only structural slabs (area >= MIN_SLAB_AREA_FOR_LEVEL) are considered.
+    This prevents window sills, countertops, stair treads, shelves, etc.
+    from being mistaken for floor levels.
+
+    After clustering, levels closer than MIN_FLOOR_HEIGHT are merged
+    (area-weighted average), because real building floors are >=2.5m apart.
     """
-    heights: list[float] = []
+    # Collect (height, area) pairs from large horizontal faces only.
+    height_area: list[tuple[float, float]] = []
 
     for face in faces:
         up_comp = abs(_get_up_component(face.normal, up_axis))
         if up_comp < (1.0 - HORIZONTAL_EPSILON):
             continue  # not horizontal
+        area = _face_area_3d(face)
+        if area < MIN_SLAB_AREA_FOR_LEVEL:
+            continue  # too small — not a structural slab
         avg_h = sum(_get_height(v, up_axis) for v in face.vertices) / len(face.vertices)
-        heights.append(avg_h)
+        height_area.append((avg_h, area))
 
-    if not heights:
+    if not height_area:
         return []
 
-    # Cluster heights.
-    heights.sort()
-    clusters: list[list[float]] = [[heights[0]]]
-    for h in heights[1:]:
-        if h - clusters[-1][-1] < FLOOR_CLUSTER_TOLERANCE:
-            clusters[-1].append(h)
+    # Sort by height and cluster.
+    height_area.sort(key=lambda x: x[0])
+    clusters: list[list[tuple[float, float]]] = [[height_area[0]]]
+    for ha in height_area[1:]:
+        if ha[0] - clusters[-1][-1][0] < FLOOR_CLUSTER_TOLERANCE:
+            clusters[-1].append(ha)
         else:
-            clusters.append([h])
+            clusters.append([ha])
 
-    # Return the average of each cluster.
-    levels = [sum(c) / len(c) for c in clusters]
-    return levels
+    # Area-weighted average per cluster.
+    levels: list[tuple[float, float]] = []  # (height, total_area)
+    for c in clusters:
+        total_area = sum(a for _, a in c)
+        weighted_h = sum(h * a for h, a in c) / total_area
+        levels.append((weighted_h, total_area))
+
+    # Merge levels that are too close (< MIN_FLOOR_HEIGHT apart).
+    # Real building floors are always >= 2.5m apart.
+    merged: list[tuple[float, float]] = [levels[0]]
+    for h, a in levels[1:]:
+        prev_h, prev_a = merged[-1]
+        if h - prev_h < MIN_FLOOR_HEIGHT:
+            # Merge: area-weighted average.
+            total = prev_a + a
+            new_h = (prev_h * prev_a + h * a) / total
+            merged[-1] = (new_h, total)
+        else:
+            merged.append((h, a))
+
+    return [h for h, _ in merged]
 
 
 def _assign_floor(
