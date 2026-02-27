@@ -339,14 +339,109 @@ def extract_floor_plans(faces: list[Face3D]) -> list[FloorPlan]:
 # Component decomposition
 # ---------------------------------------------------------------------------
 
+# Two faces are on the same plane if their normals are parallel
+# AND their distance-from-origin is the same.
+_COPLANAR_ANGLE_TOL = 0.15   # dot product deviation from 1.0
+_COPLANAR_DIST_TOL_FRAC = 0.005  # fraction of model diagonal
+
+
+def _plane_key(face: Face3D, n: Vec3, model_diag: float) -> tuple[float, float, float, float]:
+    """Return a hashable plane identifier (nx, ny, nz, d) for grouping."""
+    # Distance of the face plane from the origin.
+    d = dot(face.vertices[0], n)
+    tol = max(model_diag * _COPLANAR_DIST_TOL_FRAC, 0.1)
+    # Quantize to the tolerance so that close planes hash together.
+    d_q = round(d / tol) * tol
+    # Canonicalise normal direction (always pick the "positive" side).
+    if n.x < -0.01 or (abs(n.x) < 0.01 and n.y < -0.01) or (abs(n.x) < 0.01 and abs(n.y) < 0.01 and n.z < -0.01):
+        n = Vec3(-n.x, -n.y, -n.z)
+        d_q = -d_q
+    nx_q = round(n.x, 2)
+    ny_q = round(n.y, 2)
+    nz_q = round(n.z, 2)
+    return (nx_q, ny_q, nz_q, round(d_q, 3))
+
+
+def _group_coplanar(
+    faces: list[Face3D], model_diag: float
+) -> list[list[Face3D]]:
+    """Group faces that lie on the same plane."""
+    buckets: dict[tuple, list[Face3D]] = {}
+    for face in faces:
+        n = normalize(face.normal)
+        key = _plane_key(face, n, model_diag)
+        buckets.setdefault(key, []).append(face)
+    return list(buckets.values())
+
+
+def _compute_model_diagonal(faces: list[Face3D]) -> float:
+    if not faces:
+        return 1.0
+    mn = [float("inf")] * 3
+    mx = [float("-inf")] * 3
+    for f in faces:
+        for v in f.vertices:
+            mn[0] = min(mn[0], v.x); mn[1] = min(mn[1], v.y); mn[2] = min(mn[2], v.z)
+            mx[0] = max(mx[0], v.x); mx[1] = max(mx[1], v.y); mx[2] = max(mx[2], v.z)
+    return math.sqrt(sum((mx[i] - mn[i]) ** 2 for i in range(3)))
+
+
+def _layout_panels_grid(
+    panels: list[Loop2D],
+    panel_dims: list[tuple[float, float]],
+    gap: float = 0.5,
+    max_cols: int = 5,
+) -> tuple[list[Loop2D], float, float]:
+    """Lay out panels in a grid, left-to-right then top-to-bottom.
+
+    Returns (laid_out_panels, total_width, total_height).
+    """
+    if not panels:
+        return [], 0.0, 0.0
+
+    laid: list[Loop2D] = []
+    row_x = 0.0
+    row_y = 0.0
+    row_h = 0.0
+    col = 0
+    total_w = 0.0
+
+    for panel, (pw, ph) in zip(panels, panel_dims):
+        if col >= max_cols and col > 0:
+            # New row.
+            row_y += row_h + gap
+            row_x = 0.0
+            row_h = 0.0
+            col = 0
+
+        shifted = Loop2D(vertices=[
+            Vec2(v.x + row_x, v.y + row_y)
+            for v in panel.vertices
+        ])
+        laid.append(shifted)
+
+        row_x += pw + gap
+        total_w = max(total_w, row_x - gap)
+        row_h = max(row_h, ph)
+        col += 1
+
+    total_h = row_y + row_h
+    return laid, total_w, total_h
+
+
 def _extract_components_with_axis(
     faces: list[Face3D], up_axis: Literal["Y", "Z"]
 ) -> list[ComponentSheet]:
     """Decompose the model into component groups.
 
+    1. Classify faces as vertical (walls) or horizontal (slabs).
+    2. Group coplanar faces into panels.
+    3. For each panel, compute bounding-box rectangle in local 2D.
+    4. Layout panels in a grid with gaps (like a cutting sheet).
+
     Returns sheets for:
-      - "Pisos" (floor slabs) — all horizontal faces projected to ground plane
-      - "Paredes" (walls) — all vertical faces projected to their own 2D plane
+      - "Descomposicion Pisos"   — each floor slab as a separate rectangle
+      - "Descomposicion Paredes" — each wall panel as a separate rectangle
     """
     vertical_faces: list[Face3D] = []
     horizontal_faces: list[Face3D] = []
@@ -354,95 +449,99 @@ def _extract_components_with_axis(
     for face in faces:
         up_comp = abs(_get_up_component(face.normal, up_axis))
         if up_comp > (1.0 - HORIZONTAL_EPSILON):
-            if _face_area_3d(face) >= MIN_SLAB_AREA:
-                horizontal_faces.append(face)
+            horizontal_faces.append(face)
         elif up_comp <= VERTICAL_EPSILON:
             vertical_faces.append(face)
 
+    model_diag = _compute_model_diagonal(faces)
     sheets: list[ComponentSheet] = []
 
-    # --- Floor slabs ---
+    # --- Floor slabs: group coplanar horizontal faces → panels ---
     if horizontal_faces:
-        components: list[Loop2D] = []
-        for face in horizontal_faces:
-            pts = [_project_to_ground(v, up_axis) for v in face.vertices]
-            if len(pts) >= 3:
-                components.append(Loop2D(vertices=pts))
+        groups = _group_coplanar(horizontal_faces, model_diag)
+        panels: list[Loop2D] = []
+        dims: list[tuple[float, float]] = []
 
-        if components:
-            # Compute bounding box across all components.
-            all_x = [v.x for c in components for v in c.vertices]
-            all_y = [v.y for c in components for v in c.vertices]
-            min_x, max_x = min(all_x), max(all_x)
-            min_y, max_y = min(all_y), max(all_y)
+        for group in groups:
+            # Project all vertices to the ground plane → bounding box.
+            all_pts = [_project_to_ground(v, up_axis) for f in group for v in f.vertices]
+            if len(all_pts) < 3:
+                continue
+            min_x = min(p.x for p in all_pts)
+            max_x = max(p.x for p in all_pts)
+            min_y = min(p.y for p in all_pts)
+            max_y = max(p.y for p in all_pts)
+            w = max_x - min_x
+            h = max_y - min_y
+            if w < 0.01 or h < 0.01:
+                continue
+            # Normalize to (0,0) origin and make a rectangle.
+            rect = Loop2D(vertices=[
+                Vec2(0, 0), Vec2(w, 0), Vec2(w, h), Vec2(0, h),
+            ])
+            panels.append(rect)
+            dims.append((w, h))
 
-            # Normalize coordinates.
-            norm_components = [
-                Loop2D(vertices=[Vec2(v.x - min_x, v.y - min_y) for v in c.vertices])
-                for c in components
-            ]
-
+        if panels:
+            laid, tw, th = _layout_panels_grid(panels, dims, gap=0.5, max_cols=4)
             sheets.append(ComponentSheet(
-                label="Pisos",
-                components=norm_components,
-                width=max_x - min_x,
-                height=max_y - min_y,
+                label="Descomposicion Pisos",
+                components=laid,
+                width=tw,
+                height=th,
             ))
 
-    # --- Walls ---
+    # --- Walls: group coplanar vertical faces → panels ---
     if vertical_faces:
-        wall_components: list[Loop2D] = []
+        groups = _group_coplanar(vertical_faces, model_diag)
+        panels = []
+        dims = []
 
-        # Group walls and project each to its own local axes.
-        # Layout them side by side with a gap.
-        gap = 0.5  # meters between components
-        cursor_x = 0.0
-        total_height = 0.0
-
-        for face in vertical_faces:
-            # Local axes for this wall face.
+        for group in groups:
+            # Compute local 2D axes for this panel group.
+            rep_normal = normalize(group[0].normal)
             up_vec = Vec3(0, 1, 0) if up_axis == "Y" else Vec3(0, 0, 1)
-            u_axis = normalize(cross(up_vec, face.normal))
+            u_axis = normalize(cross(up_vec, rep_normal))
             v_axis = up_vec
 
             if length(u_axis) < 0.01:
                 continue
 
-            # Project face vertices to local 2D.
-            pts_2d: list[Vec2] = []
-            for v in face.vertices:
-                u = dot(v, u_axis)
-                vv = dot(v, v_axis)
-                pts_2d.append(Vec2(u, vv))
+            # Project ALL vertices of the group to local 2D → bounding box.
+            all_u: list[float] = []
+            all_v: list[float] = []
+            for face in group:
+                for v in face.vertices:
+                    all_u.append(dot(v, u_axis))
+                    all_v.append(dot(v, v_axis))
 
-            if len(pts_2d) < 3:
+            if not all_u:
                 continue
 
-            # Normalize this single wall to its own bbox.
-            min_u = min(p.x for p in pts_2d)
-            max_u = max(p.x for p in pts_2d)
-            min_v = min(p.y for p in pts_2d)
-            max_v = max(p.y for p in pts_2d)
-
+            min_u = min(all_u)
+            max_u = max(all_u)
+            min_v = min(all_v)
+            max_v = max(all_v)
             w = max_u - min_u
             h = max_v - min_v
 
             if w < 0.01 or h < 0.01:
                 continue
 
-            # Offset to layout position.
-            shifted = [Vec2(p.x - min_u + cursor_x, p.y - min_v) for p in pts_2d]
-            wall_components.append(Loop2D(vertices=shifted))
+            # Make a rectangle panel at (0,0).
+            rect = Loop2D(vertices=[
+                Vec2(0, 0), Vec2(w, 0), Vec2(w, h), Vec2(0, h),
+            ])
+            panels.append(rect)
+            dims.append((w, h))
 
-            cursor_x += w + gap
-            total_height = max(total_height, h)
-
-        if wall_components:
+        if panels:
+            laid, tw, th = _layout_panels_grid(panels, dims, gap=0.5, max_cols=4)
             sheets.append(ComponentSheet(
-                label="Paredes",
-                components=wall_components,
-                width=cursor_x - gap,  # remove trailing gap
-                height=total_height,
+                label="Descomposicion Paredes",
+                components=laid,
+                width=tw,
+                height=th,
             ))
 
     return sheets
