@@ -348,15 +348,81 @@ def test_multistory_decomposition():
     assert "Descomposicion" in pdf_content
 
 
-def test_plancha_paper_accepted():
-    """Plancha should be accepted as a valid paper option."""
+def test_plancha_paper_rejected():
+    """Plancha is no longer a valid paper size (it's a separate output)."""
     obj_data = _make_box_y_up()
     resp = client.post(
         "/api/upload",
         files={"file": ("house.obj", io.BytesIO(obj_data), "application/octet-stream")},
         data={"scale": "100", "paper": "Plancha", "formats": "pdf"},
     )
+    assert resp.status_code == 400
+
+
+def test_cutting_sheet_generated():
+    """include_cutting_sheet=true should produce a Plancha_de_Corte DXF."""
+    obj_data = _make_box_y_up()
+    resp = client.post(
+        "/api/upload",
+        files={"file": ("house.obj", io.BytesIO(obj_data), "application/octet-stream")},
+        data={
+            "scale": "100",
+            "paper": "A3",
+            "formats": "dxf",
+            "include_cutting_sheet": "true",
+        },
+    )
     assert resp.status_code == 200
+    zf = zipfile.ZipFile(io.BytesIO(resp.content))
+    names = zf.namelist()
+
+    cutting_dxfs = [n for n in names if "Plancha_de_Corte" in n]
+    assert len(cutting_dxfs) >= 1, f"Expected cutting sheet DXF, got {names}"
+
+    # The cutting sheet DXF should have proper layers.
+    dxf_content = zf.read(cutting_dxfs[0]).decode("utf-8")
+    assert "CORTE" in dxf_content
+    assert "GRABADO" in dxf_content
+    assert "MARCO" in dxf_content
+
+
+def test_cutting_sheet_has_panel_ids():
+    """Cutting sheet DXF should contain panel reference IDs."""
+    obj_data = _make_box_y_up()
+    resp = client.post(
+        "/api/upload",
+        files={"file": ("house.obj", io.BytesIO(obj_data), "application/octet-stream")},
+        data={
+            "scale": "100",
+            "paper": "A3",
+            "formats": "dxf",
+            "include_cutting_sheet": "true",
+        },
+    )
+    assert resp.status_code == 200
+    zf = zipfile.ZipFile(io.BytesIO(resp.content))
+    names = zf.namelist()
+    cutting_dxfs = [n for n in names if "Plancha_de_Corte" in n]
+    assert len(cutting_dxfs) >= 1
+
+    dxf_content = zf.read(cutting_dxfs[0]).decode("utf-8")
+    # Should contain at least A1 (wall panel).
+    assert "A1" in dxf_content, "Expected panel reference ID A1 in cutting sheet"
+
+
+def test_cutting_sheet_not_generated_by_default():
+    """Without include_cutting_sheet, no cutting sheet should appear."""
+    obj_data = _make_box_y_up()
+    resp = client.post(
+        "/api/upload",
+        files={"file": ("house.obj", io.BytesIO(obj_data), "application/octet-stream")},
+        data={"scale": "100", "paper": "A3", "formats": "dxf"},
+    )
+    assert resp.status_code == 200
+    zf = zipfile.ZipFile(io.BytesIO(resp.content))
+    names = zf.namelist()
+    cutting_dxfs = [n for n in names if "Plancha_de_Corte" in n]
+    assert len(cutting_dxfs) == 0
 
 
 def test_dxf_has_laser_layers():

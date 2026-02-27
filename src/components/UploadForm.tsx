@@ -13,9 +13,10 @@ const API_URL =
 export default function UploadForm() {
   const [file, setFile] = useState<File | null>(null);
   const [scale, setScale] = useState(100);
-  const [paper, setPaper] = useState<"A3" | "A1" | "Plancha">("A3");
+  const [paper, setPaper] = useState<"A3" | "A1">("A3");
   const [formats, setFormats] = useState<("dxf" | "pdf")[]>(["dxf", "pdf"]);
   const [includePlan, setIncludePlan] = useState(false);
+  const [includeCuttingSheet, setIncludeCuttingSheet] = useState(false);
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState("");
   const dropRef = useRef<HTMLDivElement>(null);
@@ -63,6 +64,7 @@ export default function UploadForm() {
       formData.append("paper", paper);
       formData.append("formats", formats.join(","));
       formData.append("include_plan", includePlan ? "true" : "false");
+      formData.append("include_cutting_sheet", includeCuttingSheet ? "true" : "false");
 
       const res = await fetch(`${API_URL}/api/upload`, {
         method: "POST",
@@ -154,11 +156,10 @@ export default function UploadForm() {
           Papel
           <select
             value={paper}
-            onChange={(e) => setPaper(e.target.value as "A3" | "A1" | "Plancha")}
+            onChange={(e) => setPaper(e.target.value as "A3" | "A1")}
           >
             <option value="A3">A3</option>
             <option value="A1">A1</option>
-            <option value="Plancha">Plancha (1000x600mm)</option>
           </select>
         </label>
 
@@ -183,7 +184,7 @@ export default function UploadForm() {
         </fieldset>
 
         <fieldset className="format-group">
-          <legend>Vistas</legend>
+          <legend>Extras</legend>
           <label>
             <input
               type="checkbox"
@@ -191,6 +192,14 @@ export default function UploadForm() {
               onChange={() => setIncludePlan((prev) => !prev)}
             />
             Descomposición
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={includeCuttingSheet}
+              onChange={() => setIncludeCuttingSheet((prev) => !prev)}
+            />
+            Plancha de corte
           </label>
         </fieldset>
       </div>
