@@ -2,11 +2,11 @@
 Processing Pipeline
 
 Orchestrates the full flow:
-  File (bytes) -> Parser -> FacadeExtractor -> DXF/PDF Writers
+  File (bytes) -> Parser -> Decomposition -> FacadeExtractor -> DXF/PDF Writers
 
 Output:
   - One DXF file per facade (e.g. "model_Fachada_Norte.dxf")
-  - One DXF per component sheet (e.g. "model_Piso_1_Plano_Vertical.dxf")
+  - One DXF per component sheet (e.g. "model_Descomposicion_Paredes.dxf")
   - One multi-page PDF with all views
 
 Handles auto-detection of:
@@ -32,6 +32,7 @@ from .types import (
     Face3D,
     Facade,
     Loop2D,
+    PanelInfo,
     Vec2,
     Vec3,
 )
@@ -51,14 +52,7 @@ class PipelineResult:
 
 
 def _guess_unit_scale(faces: list[Face3D]) -> float:
-    """Guess a conversion factor to bring coordinates into meters.
-
-    Heuristic based on the model's bounding-box span:
-      - If span <= 100  -> likely meters, scale=1
-      - If span <= 1000 -> likely centimeters, scale=0.01
-      - If span <= 50000 -> likely millimeters, scale=0.001
-      - Larger -> normalize to ~20m span
-    """
+    """Guess a conversion factor to bring coordinates into meters."""
     if not faces:
         return 1.0
 
@@ -93,7 +87,10 @@ def _scale_facades(facades: list[Facade], s: float) -> list[Facade]:
     result: list[Facade] = []
     for f in facades:
         polygons = [
-            Loop2D(vertices=[Vec2(v.x * s, v.y * s) for v in poly.vertices])
+            Loop2D(
+                vertices=[Vec2(v.x * s, v.y * s) for v in poly.vertices],
+                panel_id=poly.panel_id,
+            )
             for poly in f.polygons
         ]
         result.append(Facade(
@@ -112,13 +109,18 @@ def _scale_component_sheets(sheets: list[ComponentSheet], s: float) -> list[Comp
         return sheets
     result: list[ComponentSheet] = []
     for sh in sheets:
-        components = [
-            Loop2D(vertices=[Vec2(v.x * s, v.y * s) for v in comp.vertices])
-            for comp in sh.components
+        scaled_panels = [
+            PanelInfo(
+                ref_id=p.ref_id,
+                outline=Loop2D(vertices=[Vec2(v.x * s, v.y * s) for v in p.outline.vertices]),
+                width=p.width * s,
+                height=p.height * s,
+            )
+            for p in sh.panels
         ]
         result.append(ComponentSheet(
             label=sh.label,
-            components=components,
+            panels=scaled_panels,
             width=sh.width * s,
             height=sh.height * s,
         ))
@@ -143,8 +145,8 @@ def run_pipeline(
     Parameters
     ----------
     include_plan : bool
-        If True, generate floor plans (one per floor level) +
-        component decomposition sheets in addition to facade elevations.
+        If True, generate component decomposition sheets with reference IDs
+        in addition to facade elevations.
     """
     if formats is None:
         formats = {"dxf", "pdf"}
@@ -172,7 +174,19 @@ def run_pipeline(
     if not faces:
         return PipelineResult(facades=[], files=[], warnings=warnings)
 
-    # --- 2. Extract facades (auto-detects up axis) ---
+    # --- 2. Decomposition FIRST (tags Face3D.panel_id for facade labeling) ---
+    component_sheets: list[ComponentSheet] = []
+
+    if include_plan:
+        # For Plancha paper: 2mm physical gap → model units.
+        # For A3/A1: comfortable 0.5m model-unit gap.
+        if paper == "Plancha":
+            gap = 0.002 * scale_denom
+        else:
+            gap = 0.5
+        component_sheets = extract_components(faces, gap=gap)
+
+    # --- 3. Extract facades (picks up panel_id from tagged faces) ---
     facades = extract_facades(faces)
 
     if not facades:
@@ -182,24 +196,17 @@ def run_pipeline(
         )
         return PipelineResult(facades=facades, files=[], warnings=warnings)
 
-    # --- 2b. Extract per-floor component decomposition (optional) ---
-    component_sheets: list[ComponentSheet] = []
-
-    if include_plan:
-        component_sheets = extract_components(faces)
-
-    # --- 3. Normalize units ---
+    # --- 4. Normalize units ---
     if ext == "obj":
         unit_scale = _guess_unit_scale(faces)
         if unit_scale != 1.0:
             facades = _scale_facades(facades, unit_scale)
             component_sheets = _scale_component_sheets(component_sheets, unit_scale)
 
-    # --- 4. Generate outputs ---
+    # --- 5. Generate outputs ---
     files: list[OutputFile] = []
 
     if "dxf" in formats:
-        # One DXF per facade.
         for facade in facades:
             dxf_text = generate_dxf(facade, scale_denom)
             safe_label = _sanitize_label(facade.label)
@@ -208,7 +215,6 @@ def run_pipeline(
                 content=dxf_text,
             ))
 
-        # Component decomposition DXFs.
         for sheet in component_sheets:
             comp_dxf = generate_component_dxf(sheet, scale_denom)
             safe_label = _sanitize_label(sheet.label)
@@ -217,7 +223,6 @@ def run_pipeline(
                 content=comp_dxf,
             ))
 
-    # One multi-page PDF with everything.
     if "pdf" in formats:
         pdf_content = generate_pdf(
             facades, scale_denom, paper,

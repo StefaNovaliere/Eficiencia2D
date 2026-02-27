@@ -8,5 +8,5 @@ TEMP_DIR = os.getenv("TEMP_DIR", "/tmp/eficiencia2d")
 
 # Valid options.
 VALID_SCALES = {50, 100}
-VALID_PAPERS = {"A3", "A1"}
+VALID_PAPERS = {"A3", "A1", "Plancha"}
 VALID_FORMATS = {"dxf", "pdf"}

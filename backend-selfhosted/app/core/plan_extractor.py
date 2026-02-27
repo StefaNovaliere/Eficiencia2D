@@ -1,27 +1,20 @@
 """
-Component Decomposition — Per-floor vertical & horizontal plane breakdown.
+Component Decomposition — Walls & slabs with reference IDs.
 
-Takes Face3D[] and produces ComponentSheet[] — decomposed by floor level,
-with separate sheets for vertical planes (walls) and horizontal planes (slabs).
+Takes Face3D[] and produces ComponentSheet[] with PanelInfo items.
+Each panel gets a unique reference ID (A1, A2... for walls; B1, B2... for slabs)
+that links the cutting sheet to the facade elevation views.
 
-Output example for a 2-story building:
-  - "Piso 1 - Plano Horizontal"  (floor slabs at level 1)
-  - "Piso 1 - Plano Vertical"    (wall panels belonging to floor 1)
-  - "Piso 2 - Plano Horizontal"  (floor slabs at level 2)
-  - "Piso 2 - Plano Vertical"    (wall panels belonging to floor 2)
+Output:
+  - "Descomposicion Paredes" — all wall panels with ref IDs (A1, A2...)
+  - "Descomposicion Pisos"   — all slab panels with ref IDs (B1, B2...)
+
+Side effect: tags each Face3D.panel_id so facade extraction can carry
+the reference IDs through to the elevation views.
 
 Filtering:
   - Panels smaller than MIN_PANEL_AREA are excluded (furniture, doors, etc.)
   - Panels with any dimension smaller than MIN_PANEL_DIM are excluded
-
-Algorithm:
-  1. Auto-detect the vertical axis (Y-up vs Z-up).
-  2. Classify faces as vertical (walls) or horizontal (slabs).
-  3. Detect floor levels by clustering horizontal face heights.
-  4. Assign faces to floors based on height ranges.
-  5. For each floor, group coplanar faces into panels.
-  6. Filter out small panels (furniture, doors, windows, etc.).
-  7. Layout panels in a grid (like a cutting sheet).
 """
 
 from __future__ import annotations
@@ -33,6 +26,7 @@ from .types import (
     ComponentSheet,
     Face3D,
     Loop2D,
+    PanelInfo,
     Vec2,
     Vec3,
     cross,
@@ -44,28 +38,14 @@ from .types import (
 
 VERTICAL_EPSILON = 0.20
 HORIZONTAL_EPSILON = 0.15  # |up_component_of_normal| > (1 - this) means horizontal
-FLOOR_CLUSTER_TOLERANCE = 0.50  # meters — group floors within this height
-
-# --- Floor detection thresholds ---
-# Only horizontal faces larger than this count for floor level detection.
-# This prevents window sills, countertops, stair treads, shelves, etc.
-# from being interpreted as distinct floor levels.
-MIN_SLAB_AREA_FOR_LEVEL = 3.0  # m² — structural slabs are large
-MIN_FLOOR_HEIGHT = 2.0  # m — real floors are at least ~2.5m apart
 
 # --- Filtering thresholds ---
-# Panels smaller than this are excluded from decomposition.
-# This removes furniture, doors, windows, small trim, etc.
-MIN_PANEL_AREA = 0.4  # m² — a small wall panel is ~0.5m², furniture is < 0.3m²
+MIN_PANEL_AREA = 0.4  # m² — panels smaller than this are excluded
 MIN_PANEL_DIM = 0.25  # m  — minimum width or height of a panel
 
 
 def _get_up_component(normal: Vec3, up_axis: Literal["Y", "Z"]) -> float:
     return normal.y if up_axis == "Y" else normal.z
-
-
-def _get_height(v: Vec3, up_axis: Literal["Y", "Z"]) -> float:
-    return v.y if up_axis == "Y" else v.z
 
 
 def _project_to_ground(v: Vec3, up_axis: Literal["Y", "Z"]) -> Vec2:
@@ -90,129 +70,6 @@ def _face_area_3d(face: Face3D) -> float:
 
 
 # ---------------------------------------------------------------------------
-# Floor level detection
-# ---------------------------------------------------------------------------
-
-def _detect_floor_levels(
-    faces: list[Face3D], up_axis: Literal["Y", "Z"]
-) -> list[float]:
-    """Find distinct floor heights by looking at large horizontal faces only.
-
-    Only structural slabs (area >= MIN_SLAB_AREA_FOR_LEVEL) are considered.
-    This prevents window sills, countertops, stair treads, shelves, etc.
-    from being mistaken for floor levels.
-
-    After clustering, levels closer than MIN_FLOOR_HEIGHT are merged
-    (area-weighted average), because real building floors are >=2.5m apart.
-    """
-    # Collect (height, area) pairs from large horizontal faces only.
-    height_area: list[tuple[float, float]] = []
-
-    for face in faces:
-        up_comp = abs(_get_up_component(face.normal, up_axis))
-        if up_comp < (1.0 - HORIZONTAL_EPSILON):
-            continue  # not horizontal
-        area = _face_area_3d(face)
-        if area < MIN_SLAB_AREA_FOR_LEVEL:
-            continue  # too small — not a structural slab
-        avg_h = sum(_get_height(v, up_axis) for v in face.vertices) / len(face.vertices)
-        height_area.append((avg_h, area))
-
-    if not height_area:
-        return []
-
-    # Sort by height and cluster.
-    height_area.sort(key=lambda x: x[0])
-    clusters: list[list[tuple[float, float]]] = [[height_area[0]]]
-    for ha in height_area[1:]:
-        if ha[0] - clusters[-1][-1][0] < FLOOR_CLUSTER_TOLERANCE:
-            clusters[-1].append(ha)
-        else:
-            clusters.append([ha])
-
-    # Area-weighted average per cluster.
-    levels: list[tuple[float, float]] = []  # (height, total_area)
-    for c in clusters:
-        total_area = sum(a for _, a in c)
-        weighted_h = sum(h * a for h, a in c) / total_area
-        levels.append((weighted_h, total_area))
-
-    # Merge levels that are too close (< MIN_FLOOR_HEIGHT apart).
-    # Real building floors are always >= 2.5m apart.
-    merged: list[tuple[float, float]] = [levels[0]]
-    for h, a in levels[1:]:
-        prev_h, prev_a = merged[-1]
-        if h - prev_h < MIN_FLOOR_HEIGHT:
-            # Merge: area-weighted average.
-            total = prev_a + a
-            new_h = (prev_h * prev_a + h * a) / total
-            merged[-1] = (new_h, total)
-        else:
-            merged.append((h, a))
-
-    return [h for h, _ in merged]
-
-
-def _assign_floor(
-    face: Face3D,
-    floor_ranges: list[tuple[float, float, int]],
-    up_axis: Literal["Y", "Z"],
-) -> int:
-    """Assign a face to a floor index based on its vertical position.
-
-    floor_ranges is a list of (min_h, max_h, floor_index) tuples.
-    Returns the floor index, or -1 if no match.
-    """
-    face_heights = [_get_height(v, up_axis) for v in face.vertices]
-    face_mid = (min(face_heights) + max(face_heights)) / 2.0
-
-    for min_h, max_h, idx in floor_ranges:
-        if min_h - 0.5 <= face_mid <= max_h + 0.5:
-            return idx
-    return -1
-
-
-def _compute_floor_ranges(
-    levels: list[float],
-    all_faces: list[Face3D],
-    up_axis: Literal["Y", "Z"],
-) -> list[tuple[float, float, int]]:
-    """Compute height ranges for each floor.
-
-    Each floor spans from one level to the next.
-    The bottom floor starts at the model's minimum height.
-    The top floor extends to the model's maximum height.
-    """
-    if not levels:
-        return []
-
-    # Find model vertical extent.
-    all_h = [_get_height(v, up_axis) for f in all_faces for v in f.vertices]
-    if not all_h:
-        return []
-
-    model_min = min(all_h)
-    model_max = max(all_h)
-
-    ranges: list[tuple[float, float, int]] = []
-
-    for i, level in enumerate(levels):
-        if i == 0:
-            floor_min = model_min
-        else:
-            floor_min = (levels[i - 1] + level) / 2.0
-
-        if i == len(levels) - 1:
-            floor_max = model_max
-        else:
-            floor_max = (level + levels[i + 1]) / 2.0
-
-        ranges.append((floor_min, floor_max, i))
-
-    return ranges
-
-
-# ---------------------------------------------------------------------------
 # Coplanar grouping
 # ---------------------------------------------------------------------------
 
@@ -224,7 +81,6 @@ def _plane_key(face: Face3D, n: Vec3, model_diag: float) -> tuple[float, float, 
     d = dot(face.vertices[0], n)
     tol = max(model_diag * _COPLANAR_DIST_TOL_FRAC, 0.1)
     d_q = round(d / tol) * tol
-    # Canonicalise normal direction.
     if n.x < -0.01 or (abs(n.x) < 0.01 and n.y < -0.01) or (abs(n.x) < 0.01 and abs(n.y) < 0.01 and n.z < -0.01):
         n = Vec3(-n.x, -n.y, -n.z)
         d_q = -d_q
@@ -259,69 +115,23 @@ def _compute_model_diagonal(faces: list[Face3D]) -> float:
 
 
 # ---------------------------------------------------------------------------
-# Grid layout
-# ---------------------------------------------------------------------------
-
-def _layout_panels_grid(
-    panels: list[Loop2D],
-    panel_dims: list[tuple[float, float]],
-    gap: float = 0.5,
-    max_cols: int = 5,
-) -> tuple[list[Loop2D], float, float]:
-    """Lay out panels in a grid, left-to-right then top-to-bottom.
-
-    Returns (laid_out_panels, total_width, total_height).
-    """
-    if not panels:
-        return [], 0.0, 0.0
-
-    laid: list[Loop2D] = []
-    row_x = 0.0
-    row_y = 0.0
-    row_h = 0.0
-    col = 0
-    total_w = 0.0
-
-    for panel, (pw, ph) in zip(panels, panel_dims):
-        if col >= max_cols and col > 0:
-            row_y += row_h + gap
-            row_x = 0.0
-            row_h = 0.0
-            col = 0
-
-        shifted = Loop2D(vertices=[
-            Vec2(v.x + row_x, v.y + row_y)
-            for v in panel.vertices
-        ])
-        laid.append(shifted)
-
-        row_x += pw + gap
-        total_w = max(total_w, row_x - gap)
-        row_h = max(row_h, ph)
-        col += 1
-
-    total_h = row_y + row_h
-    return laid, total_w, total_h
-
-
-# ---------------------------------------------------------------------------
-# Panel creation from face groups (with size filtering)
+# Panel creation from face groups (with size filtering and ref IDs)
 # ---------------------------------------------------------------------------
 
 def _make_wall_panels(
-    groups: list[list[Face3D]], up_axis: Literal["Y", "Z"]
-) -> tuple[list[Loop2D], list[tuple[float, float]]]:
-    """Convert wall face groups into 2D rectangle panels.
+    groups: list[list[Face3D]], up_axis: Literal["Y", "Z"], prefix: str = "A"
+) -> tuple[list[PanelInfo], dict[int, str]]:
+    """Convert wall face groups into panels with reference IDs.
 
-    Filters out panels that are too small (furniture, doors, etc.).
-    Returns (panels, panel_dimensions).
+    Returns (panels, group_index_to_panel_id) for face tagging.
     """
-    panels: list[Loop2D] = []
-    dims: list[tuple[float, float]] = []
+    panels: list[PanelInfo] = []
+    group_to_id: dict[int, str] = {}
+    counter = 1
 
     up_vec = Vec3(0, 1, 0) if up_axis == "Y" else Vec3(0, 0, 1)
 
-    for group in groups:
+    for gi, group in enumerate(groups):
         rep_normal = normalize(group[0].normal)
         u_axis = normalize(cross(up_vec, rep_normal))
         v_axis = up_vec
@@ -342,33 +152,35 @@ def _make_wall_panels(
         w = max(all_u) - min(all_u)
         h = max(all_v) - min(all_v)
 
-        # Filter small panels (furniture, doors, windows, trim).
         if w < MIN_PANEL_DIM or h < MIN_PANEL_DIM:
             continue
         if w * h < MIN_PANEL_AREA:
             continue
 
+        ref_id = f"{prefix}{counter}"
+        counter += 1
+        group_to_id[gi] = ref_id
+
         rect = Loop2D(vertices=[
             Vec2(0, 0), Vec2(w, 0), Vec2(w, h), Vec2(0, h),
         ])
-        panels.append(rect)
-        dims.append((w, h))
+        panels.append(PanelInfo(ref_id=ref_id, outline=rect, width=w, height=h))
 
-    return panels, dims
+    return panels, group_to_id
 
 
 def _make_slab_panels(
-    groups: list[list[Face3D]], up_axis: Literal["Y", "Z"]
-) -> tuple[list[Loop2D], list[tuple[float, float]]]:
-    """Convert slab face groups into 2D rectangle panels.
+    groups: list[list[Face3D]], up_axis: Literal["Y", "Z"], prefix: str = "B"
+) -> tuple[list[PanelInfo], dict[int, str]]:
+    """Convert slab face groups into panels with reference IDs.
 
-    Filters out panels that are too small (furniture, doors, etc.).
-    Returns (panels, panel_dimensions).
+    Returns (panels, group_index_to_panel_id) for face tagging.
     """
-    panels: list[Loop2D] = []
-    dims: list[tuple[float, float]] = []
+    panels: list[PanelInfo] = []
+    group_to_id: dict[int, str] = {}
+    counter = 1
 
-    for group in groups:
+    for gi, group in enumerate(groups):
         all_pts = [_project_to_ground(v, up_axis) for f in group for v in f.vertices]
         if len(all_pts) < 3:
             continue
@@ -380,35 +192,111 @@ def _make_slab_panels(
         w = max_x - min_x
         h = max_y - min_y
 
-        # Filter small panels.
         if w < MIN_PANEL_DIM or h < MIN_PANEL_DIM:
             continue
         if w * h < MIN_PANEL_AREA:
             continue
 
+        ref_id = f"{prefix}{counter}"
+        counter += 1
+        group_to_id[gi] = ref_id
+
         rect = Loop2D(vertices=[
             Vec2(0, 0), Vec2(w, 0), Vec2(w, h), Vec2(0, h),
         ])
-        panels.append(rect)
-        dims.append((w, h))
+        panels.append(PanelInfo(ref_id=ref_id, outline=rect, width=w, height=h))
 
-    return panels, dims
+    return panels, group_to_id
 
 
 # ---------------------------------------------------------------------------
-# Main: per-floor component decomposition
+# Grid layout
+# ---------------------------------------------------------------------------
+
+def _layout_panels_grid(
+    panels: list[PanelInfo],
+    gap: float = 0.5,
+    max_cols: int = 5,
+) -> tuple[list[PanelInfo], float, float]:
+    """Lay out panels in a grid, left-to-right then top-to-bottom.
+
+    Returns (laid_out_panels, total_width, total_height).
+    """
+    if not panels:
+        return [], 0.0, 0.0
+
+    laid: list[PanelInfo] = []
+    row_x = 0.0
+    row_y = 0.0
+    row_h = 0.0
+    col = 0
+    total_w = 0.0
+
+    for panel in panels:
+        pw, ph = panel.width, panel.height
+
+        if col >= max_cols and col > 0:
+            row_y += row_h + gap
+            row_x = 0.0
+            row_h = 0.0
+            col = 0
+
+        shifted = PanelInfo(
+            ref_id=panel.ref_id,
+            outline=Loop2D(vertices=[
+                Vec2(v.x + row_x, v.y + row_y)
+                for v in panel.outline.vertices
+            ]),
+            width=panel.width,
+            height=panel.height,
+        )
+        laid.append(shifted)
+
+        row_x += pw + gap
+        total_w = max(total_w, row_x - gap)
+        row_h = max(row_h, ph)
+        col += 1
+
+    total_h = row_y + row_h
+    return laid, total_w, total_h
+
+
+# ---------------------------------------------------------------------------
+# Tag faces with panel IDs
+# ---------------------------------------------------------------------------
+
+def _tag_faces(
+    groups: list[list[Face3D]], group_to_id: dict[int, str]
+) -> None:
+    """Set panel_id on each Face3D that belongs to a valid panel."""
+    for gi, group in enumerate(groups):
+        ref_id = group_to_id.get(gi)
+        if ref_id is None:
+            continue
+        for face in group:
+            face.panel_id = ref_id
+
+
+def _clear_panel_ids(faces: list[Face3D]) -> None:
+    """Reset all panel_id tags on faces."""
+    for face in faces:
+        face.panel_id = None
+
+
+# ---------------------------------------------------------------------------
+# Main: component decomposition
 # ---------------------------------------------------------------------------
 
 def _extract_components_with_axis(
-    faces: list[Face3D], up_axis: Literal["Y", "Z"]
+    faces: list[Face3D], up_axis: Literal["Y", "Z"], gap: float = 0.5
 ) -> list[ComponentSheet]:
-    """Decompose the model into per-floor vertical and horizontal planes.
+    """Decompose the model into wall and slab panels.
 
-    For each detected floor level, creates:
-      - "Piso N - Plano Horizontal" (slab panels)
-      - "Piso N - Plano Vertical" (wall panels)
+    Creates two sheets:
+      - "Descomposicion Paredes" (walls, IDs: A1, A2...)
+      - "Descomposicion Pisos" (slabs, IDs: B1, B2...)
 
-    Small panels (furniture, doors, windows) are filtered out.
+    Tags each Face3D.panel_id with its reference ID.
     """
     vertical_faces: list[Face3D] = []
     horizontal_faces: list[Face3D] = []
@@ -421,85 +309,68 @@ def _extract_components_with_axis(
             vertical_faces.append(face)
 
     model_diag = _compute_model_diagonal(faces)
-
-    # Detect floor levels.
-    levels = _detect_floor_levels(faces, up_axis)
-
-    if not levels:
-        # Fallback: single floor using model height range.
-        all_h = [_get_height(v, up_axis) for f in faces for v in f.vertices]
-        if all_h:
-            levels = [(min(all_h) + max(all_h)) / 2.0]
-        else:
-            return []
-
-    # Compute floor height ranges.
-    floor_ranges = _compute_floor_ranges(levels, faces, up_axis)
-
-    if not floor_ranges:
-        return []
-
-    num_floors = len(levels)
     sheets: list[ComponentSheet] = []
 
-    for floor_min, floor_max, floor_idx in floor_ranges:
-        if num_floors == 1:
-            floor_label = "Piso 1"
-        else:
-            floor_label = f"Piso {floor_idx + 1}"
+    # --- Walls ---
+    wall_groups: list[list[Face3D]] = []
+    if vertical_faces:
+        wall_groups = _group_coplanar(vertical_faces, model_diag)
+        panels, group_to_id = _make_wall_panels(wall_groups, up_axis, prefix="A")
+        _tag_faces(wall_groups, group_to_id)
 
-        # --- Horizontal planes (slabs) for this floor ---
-        floor_slabs = [
-            f for f in horizontal_faces
-            if _assign_floor(f, [(floor_min, floor_max, floor_idx)], up_axis) == floor_idx
-        ]
+        if panels:
+            laid, tw, th = _layout_panels_grid(panels, gap=gap, max_cols=4)
+            sheets.append(ComponentSheet(
+                label="Descomposicion Paredes",
+                panels=laid,
+                width=tw,
+                height=th,
+            ))
 
-        if floor_slabs:
-            groups = _group_coplanar(floor_slabs, model_diag)
-            panels, dims = _make_slab_panels(groups, up_axis)
+    # --- Slabs ---
+    slab_groups: list[list[Face3D]] = []
+    if horizontal_faces:
+        slab_groups = _group_coplanar(horizontal_faces, model_diag)
+        panels, group_to_id = _make_slab_panels(slab_groups, up_axis, prefix="B")
+        _tag_faces(slab_groups, group_to_id)
 
-            if panels:
-                laid, tw, th = _layout_panels_grid(panels, dims, gap=0.5, max_cols=4)
-                sheets.append(ComponentSheet(
-                    label=f"{floor_label} - Plano Horizontal",
-                    components=laid,
-                    width=tw,
-                    height=th,
-                ))
-
-        # --- Vertical planes (walls) for this floor ---
-        floor_walls = [
-            f for f in vertical_faces
-            if _assign_floor(f, [(floor_min, floor_max, floor_idx)], up_axis) == floor_idx
-        ]
-
-        if floor_walls:
-            groups = _group_coplanar(floor_walls, model_diag)
-            panels, dims = _make_wall_panels(groups, up_axis)
-
-            if panels:
-                laid, tw, th = _layout_panels_grid(panels, dims, gap=0.5, max_cols=4)
-                sheets.append(ComponentSheet(
-                    label=f"{floor_label} - Plano Vertical",
-                    components=laid,
-                    width=tw,
-                    height=th,
-                ))
+        if panels:
+            laid, tw, th = _layout_panels_grid(panels, gap=gap, max_cols=4)
+            sheets.append(ComponentSheet(
+                label="Descomposicion Pisos",
+                panels=laid,
+                width=tw,
+                height=th,
+            ))
 
     return sheets
 
 
-def extract_components(faces: list[Face3D]) -> list[ComponentSheet]:
-    """Extract per-floor component decomposition, auto-detecting up axis."""
+def extract_components(faces: list[Face3D], gap: float = 0.5) -> list[ComponentSheet]:
+    """Extract component decomposition, auto-detecting up axis.
+
+    Side effect: sets Face3D.panel_id on each face that belongs to a panel.
+    This allows the facade extractor to carry reference IDs through.
+    """
     if not faces:
         return []
 
-    sheets_z = _extract_components_with_axis(faces, "Z")
-    sheets_y = _extract_components_with_axis(faces, "Y")
+    # Try both axes — but only tag faces for the winner.
+    _clear_panel_ids(faces)
+    sheets_z = _extract_components_with_axis(faces, "Z", gap)
+    count_z = sum(len(s.panels) for s in sheets_z)
 
-    count_z = sum(len(s.components) for s in sheets_z)
-    count_y = sum(len(s.components) for s in sheets_y)
+    # Save Z tags, then try Y.
+    z_tags = {id(f): f.panel_id for f in faces}
+    _clear_panel_ids(faces)
+    sheets_y = _extract_components_with_axis(faces, "Y", gap)
+    count_y = sum(len(s.panels) for s in sheets_y)
 
     if count_y > count_z:
+        # Y wins — tags are already set from the Y run.
         return sheets_y
-    return sheets_z
+    else:
+        # Z wins — restore Z tags.
+        for face in faces:
+            face.panel_id = z_tags.get(id(face))
+        return sheets_z
