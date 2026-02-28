@@ -1,7 +1,11 @@
 """
 DXF Writer
 
-Generates AutoCAD-compatible DXF files for facades and component sheets.
+Generates AutoCAD-compatible DXF files using ``ezdxf`` for facades
+and component decomposition sheets.
+
+Using ezdxf guarantees structurally valid DXF (proper header, tables,
+entities section, and EOF).
 
 Layers follow laser-cutter conventions:
   - CORTE   (color 7 / black) — cut lines (panel/polygon outlines)
@@ -11,159 +15,157 @@ Layers follow laser-cutter conventions:
 
 from __future__ import annotations
 
-from .types import ComponentSheet, Facade, Loop2D
+import io
+
+import ezdxf
+from ezdxf.enums import TextEntityAlignment
+
+from .types import ComponentSheet, Facade
 
 
-def _header() -> str:
-    return "\n".join([
-        "0", "SECTION", "2", "HEADER",
-        "9", "$ACADVER", "1", "AC1015",
-        "9", "$INSUNITS", "70", "6",
-        "0", "ENDSEC",
-        # Tables -- layer definitions
-        "0", "SECTION", "2", "TABLES",
-        "0", "TABLE", "2", "LAYER", "70", "3",
-        "0", "LAYER", "2", "CORTE",    "70", "0", "62", "7", "6", "CONTINUOUS",
-        "0", "LAYER", "2", "MARCA",    "70", "0", "62", "1", "6", "CONTINUOUS",
-        "0", "LAYER", "2", "GRABADO",  "70", "0", "62", "5", "6", "CONTINUOUS",
-        "0", "ENDTAB",
-        "0", "ENDSEC",
-        # Begin entities
-        "0", "SECTION", "2", "ENTITIES",
-    ]) + "\n"
+def _new_doc() -> ezdxf.document.Drawing:
+    """Create a new DXF R2010 document with laser-cutter layers."""
+    doc = ezdxf.new("R2010")
+    doc.layers.add("CORTE", color=7)       # black — cut lines
+    doc.layers.add("MARCA", color=1)       # red — marks / labels
+    doc.layers.add("GRABADO", color=5)     # blue — engrave / titles
+    return doc
 
 
-def _footer() -> str:
-    return "0\nENDSEC\n0\nEOF\n"
+def _doc_to_string(doc: ezdxf.document.Drawing) -> str:
+    """Serialize an ezdxf document to a DXF text string."""
+    stream = io.StringIO()
+    doc.write(stream)
+    return stream.getvalue()
 
 
-def _polyline(loop: Loop2D, s: float, layer: str) -> str:
-    if not loop.vertices:
-        return ""
-    lines = [
-        "0", "LWPOLYLINE",
-        "8", layer,
-        "90", str(len(loop.vertices)),
-        "70", "1",  # closed
-    ]
-    for v in loop.vertices:
-        lines.append("10")
-        lines.append(str(v.x * s))
-        lines.append("20")
-        lines.append(str(v.y * s))
-    return "\n".join(lines) + "\n"
-
-
-def _text_entity(x: float, y: float, h: float, text: str, layer: str) -> str:
-    return "\n".join([
-        "0", "TEXT",
-        "8", layer,
-        "10", str(x),
-        "20", str(y),
-        "40", str(h),
-        "1", text,
-        "72", "1",  # center-aligned
-        "11", str(x),
-        "21", str(y),
-    ]) + "\n"
-
+# ---------------------------------------------------------------------------
+# Facade DXF
+# ---------------------------------------------------------------------------
 
 def generate_dxf(facade: Facade, scale_denom: int) -> str:
-    """Generate a DXF file for a single facade with panel reference IDs."""
+    """Generate a valid DXF file for a single facade elevation."""
     s = 1.0 / scale_denom
-    # Text height in DXF units: ~2.5mm on paper at the given scale.
-    text_h = 2.5 / 1000.0  # 2.5mm in meters (DXF units match model meters * s)
-    out = _header()
+    text_h = 2.5 / 1000.0  # 2.5 mm expressed in meters (DXF model-space units)
 
-    # Draw all polygons on CORTE layer (black = cut).
+    doc = _new_doc()
+    msp = doc.modelspace()
+
     for poly in facade.polygons:
-        out += _polyline(poly, s, "CORTE")
+        if not poly.vertices or len(poly.vertices) < 3:
+            continue
 
-        # Panel reference ID at centroid (red = mark).
-        # Only label polygons large enough to be readable.
-        if poly.panel_id and poly.vertices:
+        # Polygon outline on CORTE layer.
+        pts = [(v.x * s, v.y * s) for v in poly.vertices]
+        msp.add_lwpolyline(pts, close=True, dxfattribs={"layer": "CORTE"})
+
+        # Panel reference ID at centroid on MARCA layer.
+        if poly.panel_id:
             xs = [v.x for v in poly.vertices]
             ys = [v.y for v in poly.vertices]
             poly_w = (max(xs) - min(xs)) * s
             poly_h = (max(ys) - min(ys)) * s
-            # Skip labels for tiny polygons (< 5mm on paper in either dim).
+            # Skip labels on polygons smaller than ~5 mm on paper.
             if poly_w > 0.005 and poly_h > 0.005:
-                cx = sum(xs) / len(xs)
-                cy = sum(ys) / len(ys)
-                label_h = min(text_h, poly_h * 0.3)  # shrink for small panels
-                out += _text_entity(cx * s, cy * s, label_h, poly.panel_id, "MARCA")
+                cx = sum(xs) / len(xs) * s
+                cy = sum(ys) / len(ys) * s
+                lh = min(text_h, poly_h * 0.3)
+                t = msp.add_text(
+                    poly.panel_id, height=lh,
+                    dxfattribs={"layer": "MARCA"},
+                )
+                t.set_placement((cx, cy), align=TextEntityAlignment.MIDDLE_CENTER)
 
-    # Title above (blue = engrave).
-    out += _text_entity(
-        facade.width * 0.5 * s,
-        (facade.height + 0.5) * s,
-        text_h * 1.5,
-        facade.label,
-        "GRABADO",
+    # Title above drawing on GRABADO.
+    t = msp.add_text(
+        facade.label, height=text_h * 1.5,
+        dxfattribs={"layer": "GRABADO"},
+    )
+    t.set_placement(
+        (facade.width * 0.5 * s, (facade.height + 0.5) * s),
+        align=TextEntityAlignment.BOTTOM_CENTER,
     )
 
-    # Width dimension below (red = mark).
-    out += _text_entity(
-        facade.width * 0.5 * s,
-        -0.4 * s,
-        text_h,
-        f"{facade.width:.2f} m",
-        "MARCA",
+    # Width dimension below on MARCA.
+    t = msp.add_text(
+        f"{facade.width:.2f} m", height=text_h,
+        dxfattribs={"layer": "MARCA"},
+    )
+    t.set_placement(
+        (facade.width * 0.5 * s, -0.4 * s),
+        align=TextEntityAlignment.TOP_CENTER,
     )
 
-    # Height dimension to the right (red = mark).
-    out += _text_entity(
-        (facade.width + 0.3) * s,
-        facade.height * 0.5 * s,
-        text_h,
-        f"{facade.height:.2f} m",
-        "MARCA",
+    # Height dimension to the right on MARCA.
+    t = msp.add_text(
+        f"{facade.height:.2f} m", height=text_h,
+        dxfattribs={"layer": "MARCA"},
+    )
+    t.set_placement(
+        ((facade.width + 0.3) * s, facade.height * 0.5 * s),
+        align=TextEntityAlignment.MIDDLE_LEFT,
     )
 
-    out += _footer()
-    return out
+    return _doc_to_string(doc)
 
+
+# ---------------------------------------------------------------------------
+# Component-sheet DXF (decomposition)
+# ---------------------------------------------------------------------------
 
 def generate_component_dxf(sheet: ComponentSheet, scale_denom: int) -> str:
-    """Generate a DXF file for a component decomposition sheet.
-
-    Each panel has:
-      - Outline on CORTE layer (black = cut)
-      - Reference ID above on MARCA layer (red = mark)
-      - Dimensions below on MARCA layer (red = mark)
-    """
+    """Generate a valid DXF file for a component decomposition sheet."""
     s = 1.0 / scale_denom
-    text_h = 2.5 / 1000.0  # 2.5mm on paper
-    out = _header()
+    text_h = 2.5 / 1000.0
+
+    doc = _new_doc()
+    msp = doc.modelspace()
 
     for panel in sheet.panels:
-        # Panel outline (black = cut).
-        out += _polyline(panel.outline, s, "CORTE")
+        if not panel.outline.vertices:
+            continue
 
-        if panel.outline.vertices:
-            cx = sum(v.x for v in panel.outline.vertices) / len(panel.outline.vertices)
-            max_y = max(v.y for v in panel.outline.vertices)
-            min_y = min(v.y for v in panel.outline.vertices)
-            panel_h_dxf = (max_y - min_y) * s
+        # Panel outline on CORTE.
+        pts = [(v.x * s, v.y * s) for v in panel.outline.vertices]
+        msp.add_lwpolyline(pts, close=True, dxfattribs={"layer": "CORTE"})
 
-            # Scale label to panel height, clamped to readable range.
-            label_h = min(text_h, max(text_h * 0.5, panel_h_dxf * 0.12))
+        verts = panel.outline.vertices
+        cx = sum(v.x for v in verts) / len(verts) * s
+        max_y = max(v.y for v in verts) * s
+        min_y = min(v.y for v in verts) * s
+        panel_h_dxf = max_y - min_y
 
-            # Reference ID above panel (red = mark).
-            out += _text_entity(cx * s, (max_y + 0.15) * s, label_h, panel.ref_id, "MARCA")
+        lh = min(text_h, max(text_h * 0.5, panel_h_dxf * 0.12))
 
-            # Dimensions below panel (red = mark).
-            dim_text = f"{panel.width:.2f} x {panel.height:.2f}"
-            out += _text_entity(cx * s, (min_y - 0.25) * s, label_h * 0.8, dim_text, "MARCA")
+        # Reference ID above panel on MARCA.
+        t = msp.add_text(
+            panel.ref_id, height=lh,
+            dxfattribs={"layer": "MARCA"},
+        )
+        t.set_placement(
+            (cx, max_y + 0.15 * s),
+            align=TextEntityAlignment.BOTTOM_CENTER,
+        )
 
-    # Title above (blue = engrave).
-    out += _text_entity(
-        sheet.width * 0.5 * s,
-        (sheet.height + 0.5) * s,
-        text_h * 1.5,
-        sheet.label,
-        "GRABADO",
+        # Dimensions below panel on MARCA.
+        dim_text = f"{panel.width:.2f} x {panel.height:.2f}"
+        t = msp.add_text(
+            dim_text, height=lh * 0.8,
+            dxfattribs={"layer": "MARCA"},
+        )
+        t.set_placement(
+            (cx, min_y - 0.25 * s),
+            align=TextEntityAlignment.TOP_CENTER,
+        )
+
+    # Title above on GRABADO.
+    t = msp.add_text(
+        sheet.label, height=text_h * 1.5,
+        dxfattribs={"layer": "GRABADO"},
+    )
+    t.set_placement(
+        (sheet.width * 0.5 * s, (sheet.height + 0.5) * s),
+        align=TextEntityAlignment.BOTTOM_CENTER,
     )
 
-    out += _footer()
-    return out
+    return _doc_to_string(doc)
