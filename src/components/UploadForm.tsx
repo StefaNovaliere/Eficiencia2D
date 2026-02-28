@@ -57,6 +57,10 @@ export default function UploadForm() {
     setStatus("uploading");
     setError("");
 
+    // 5-minute timeout — large models can take a while to process.
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5 * 60 * 1000);
+
     try {
       const formData = new FormData();
       formData.append("file", file);
@@ -69,7 +73,10 @@ export default function UploadForm() {
       const res = await fetch(`${API_URL}/api/upload`, {
         method: "POST",
         body: formData,
+        signal: controller.signal,
       });
+
+      clearTimeout(timeout);
 
       if (!res.ok) {
         const body = await res.json().catch(() => null);
@@ -92,9 +99,22 @@ export default function UploadForm() {
 
       setStatus("done");
     } catch (err: unknown) {
-      setError(
-        err instanceof Error ? err.message : "Error desconocido al procesar.",
-      );
+      clearTimeout(timeout);
+      if (err instanceof DOMException && err.name === "AbortError") {
+        setError(
+          "El servidor tardó demasiado (más de 5 minutos). " +
+          "Intenta simplificar el modelo en SketchUp eliminando muebles y detalles internos.",
+        );
+      } else if (err instanceof TypeError && err.message === "Failed to fetch") {
+        setError(
+          "Error de conexión con el servidor. El archivo puede ser demasiado " +
+          "grande para procesar. Intenta con un modelo más simple o inténtalo de nuevo.",
+        );
+      } else {
+        setError(
+          err instanceof Error ? err.message : "Error desconocido al procesar.",
+        );
+      }
       setStatus("error");
     }
   };
