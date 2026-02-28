@@ -76,6 +76,7 @@ async def upload_file(
     formats: str = Form("dxf,pdf"),
     include_plan: str = Form("false"),
     include_cutting_sheet: str = Form("false"),
+    include_floor_plans: str = Form("false"),
 ):
     """
     Accept a .skp or .obj upload and return a ZIP of the 2D outputs.
@@ -88,6 +89,7 @@ async def upload_file(
     formats : comma-separated subset of {dxf, pdf}
     include_plan : "true" | "false" -- include component decomposition sheets
     include_cutting_sheet : "true" | "false" -- include plancha de corte DXF
+    include_floor_plans : "true" | "false" -- include horizontal section-cut floor plans
     """
 
     # --- Validate parameters ---
@@ -124,14 +126,15 @@ async def upload_file(
             )
 
     logger.info(
-        "Processing %s (%s, %.1f MB, scale=1:%d, plan=%s, cutting=%s)",
+        "Processing %s (%s, %.1f MB, scale=1:%d, plan=%s, cutting=%s, floors=%s)",
         filename, ext, len(contents) / 1e6, scale,
-        include_plan, include_cutting_sheet,
+        include_plan, include_cutting_sheet, include_floor_plans,
     )
 
     # --- Run the pipeline in a thread so we don't block the event loop ---
     want_plan = include_plan.lower() in ("true", "1", "yes")
     want_cutting = include_cutting_sheet.lower() in ("true", "1", "yes")
+    want_floors = include_floor_plans.lower() in ("true", "1", "yes")
 
     loop = asyncio.get_running_loop()
     try:
@@ -145,6 +148,7 @@ async def upload_file(
                 formats=requested,
                 include_plan=want_plan,
                 include_cutting_sheet=want_cutting,
+                include_floor_plans=want_floors,
             ),
         )
     except Exception as exc:

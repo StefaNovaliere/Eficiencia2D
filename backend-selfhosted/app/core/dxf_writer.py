@@ -20,6 +20,7 @@ import io
 import ezdxf
 from ezdxf.enums import TextEntityAlignment
 
+from .floor_plan_extractor import FloorPlan
 from .types import ComponentSheet, Facade
 
 
@@ -166,6 +167,59 @@ def generate_component_dxf(sheet: ComponentSheet, scale_denom: int) -> str:
     t.set_placement(
         (sheet.width * 0.5 * s, (sheet.height + 0.5) * s),
         align=TextEntityAlignment.BOTTOM_CENTER,
+    )
+
+    return _doc_to_string(doc)
+
+
+# ---------------------------------------------------------------------------
+# Floor plan DXF (horizontal section cuts)
+# ---------------------------------------------------------------------------
+
+def generate_floor_plan_dxf(plan: FloorPlan, scale_denom: int) -> str:
+    """Generate a valid DXF file for a floor plan (horizontal section cut)."""
+    s = 1.0 / scale_denom
+    text_h = 2.5 / 1000.0
+
+    doc = _new_doc()
+    msp = doc.modelspace()
+
+    # Draw wall-cut line segments on CORTE layer.
+    for seg_a, seg_b in plan.segments:
+        msp.add_line(
+            (seg_a.x * s, seg_a.y * s),
+            (seg_b.x * s, seg_b.y * s),
+            dxfattribs={"layer": "CORTE"},
+        )
+
+    # Title above the drawing on GRABADO.
+    t = msp.add_text(
+        plan.label, height=text_h * 1.5,
+        dxfattribs={"layer": "GRABADO"},
+    )
+    t.set_placement(
+        (plan.width * 0.5 * s, (plan.height + 0.5) * s),
+        align=TextEntityAlignment.BOTTOM_CENTER,
+    )
+
+    # Width dimension below on MARCA.
+    t = msp.add_text(
+        f"{plan.width:.2f} m", height=text_h,
+        dxfattribs={"layer": "MARCA"},
+    )
+    t.set_placement(
+        (plan.width * 0.5 * s, -0.4 * s),
+        align=TextEntityAlignment.TOP_CENTER,
+    )
+
+    # Height dimension to the right on MARCA.
+    t = msp.add_text(
+        f"{plan.height:.2f} m", height=text_h,
+        dxfattribs={"layer": "MARCA"},
+    )
+    t.set_placement(
+        ((plan.width + 0.3) * s, plan.height * 0.5 * s),
+        align=TextEntityAlignment.MIDDLE_LEFT,
     )
 
     return _doc_to_string(doc)
