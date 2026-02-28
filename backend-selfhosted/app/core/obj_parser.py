@@ -22,6 +22,11 @@ from dataclasses import dataclass, field
 
 from .types import Face3D, Vec3, cross, normalize, sub
 
+# Safety limit: cap face count to prevent OOM on large models.
+# 100K faces is enough for any realistic building; beyond that it's likely
+# furniture, fixtures, or over-tessellated geometry.
+MAX_FACES = 100_000
+
 
 @dataclass
 class ObjParseResult:
@@ -33,6 +38,7 @@ def parse_obj(text: str) -> ObjParseResult:
     warnings: list[str] = []
     vertices: list[Vec3] = []
     faces: list[Face3D] = []
+    total_faces_in_file = 0
 
     for raw_line in text.splitlines():
         line = raw_line.strip()
@@ -53,6 +59,11 @@ def parse_obj(text: str) -> ObjParseResult:
                 vertices.append(Vec3(x, y, z))
 
         elif keyword == "f":
+            total_faces_in_file += 1
+
+            if len(faces) >= MAX_FACES:
+                continue  # keep counting total but stop storing
+
             idx_list: list[int] = []
             for i in range(1, len(parts)):
                 token = parts[i].split("/")[0]
@@ -86,5 +97,12 @@ def parse_obj(text: str) -> ObjParseResult:
 
     if not faces:
         warnings.append("No faces found in the .obj file.")
+    elif total_faces_in_file > MAX_FACES:
+        warnings.append(
+            f"Modelo muy grande ({total_faces_in_file:,} caras). "
+            f"Se procesaron las primeras {MAX_FACES:,} para evitar timeout. "
+            "Considera simplificar el modelo en SketchUp (eliminar muebles, "
+            "fixtures y detalles internos)."
+        )
 
     return ObjParseResult(faces=faces, warnings=warnings)
