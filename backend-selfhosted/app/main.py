@@ -7,11 +7,13 @@ and returns a ZIP of the generated 2D plan files.
 No external C++ translator or SketchUp SDK required.
 """
 
+import asyncio
 import io
 import logging
 import os
 import traceback
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -27,10 +29,15 @@ from .core.pipeline import run_pipeline
 
 logger = logging.getLogger("eficiencia2d")
 
+# Thread pool for CPU-bound pipeline work.  Running the geometry pipeline
+# in a thread keeps uvicorn's async event loop free so it can still respond
+# to Railway health-checks and keep the H2 connection alive.
+_executor = ThreadPoolExecutor(max_workers=2)
+
 app = FastAPI(
     title="Eficiencia2D",
     description="Upload a .skp or .obj file, get 2D architectural plans instantly.",
-    version="0.3.0",
+    version="0.4.0",
 )
 
 _allowed_origins = os.getenv("CORS_ORIGINS", "*").split(",")
@@ -58,7 +65,7 @@ _VALID_EXTENSIONS = {"skp", "obj"}
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "mode": "python-pipeline", "version": "0.3.0"}
+    return {"status": "ok", "mode": "python-pipeline", "version": "0.4.0"}
 
 
 @app.post("/api/upload")
@@ -116,18 +123,29 @@ async def upload_file(
                 "Invalid file: does not appear to be a valid .skp SketchUp file.",
             )
 
-    # --- Run the Python pipeline ---
+    logger.info(
+        "Processing %s (%s, %.1f MB, scale=1:%d, plan=%s, cutting=%s)",
+        filename, ext, len(contents) / 1e6, scale,
+        include_plan, include_cutting_sheet,
+    )
+
+    # --- Run the pipeline in a thread so we don't block the event loop ---
     want_plan = include_plan.lower() in ("true", "1", "yes")
     want_cutting = include_cutting_sheet.lower() in ("true", "1", "yes")
+
+    loop = asyncio.get_running_loop()
     try:
-        result = run_pipeline(
-            file_name=filename,
-            data=contents,
-            scale_denom=scale,
-            paper=paper,
-            formats=requested,
-            include_plan=want_plan,
-            include_cutting_sheet=want_cutting,
+        result = await loop.run_in_executor(
+            _executor,
+            lambda: run_pipeline(
+                file_name=filename,
+                data=contents,
+                scale_denom=scale,
+                paper=paper,
+                formats=requested,
+                include_plan=want_plan,
+                include_cutting_sheet=want_cutting,
+            ),
         )
     except Exception as exc:
         logger.error("Pipeline error for %s: %s", filename, exc, exc_info=True)
@@ -136,6 +154,9 @@ async def upload_file(
             f"Error procesando el archivo: {exc}. "
             "Si es un .skp, intenta exportar como .obj desde SketchUp.",
         )
+
+    if result.warnings:
+        logger.warning("Pipeline warnings for %s: %s", filename, result.warnings)
 
     if not result.files:
         detail = "No output files generated."
