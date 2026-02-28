@@ -621,3 +621,132 @@ def test_floor_plans_with_simple_box():
     # At minimum, facades should be present.
     facade_dxfs = [n for n in names if "Fachada" in n]
     assert len(facade_dxfs) >= 1
+
+
+def _make_multistory_multi_slab_y_up() -> bytes:
+    """4-story building where each floor has MULTIPLE slab panels.
+
+    This tests that the gap-based grouping correctly merges several slabs
+    at the same (or nearly same) elevation into one floor level, instead
+    of counting each slab as a separate floor.
+
+    Floors at y=0, y=3, y=6, y=9.  Each floor has 2 side-by-side slabs
+    (left half 0-5 in X, right half 5-10 in X), plus exterior walls.
+    """
+    lines = [
+        "# 4-story building, 10x8m footprint, 3m per floor, Y-up",
+        # Outer vertices for walls (only the ground and top)
+        "v 0 0 0",    # 1
+        "v 10 0 0",   # 2
+        "v 10 0 8",   # 3
+        "v 0 0 8",    # 4
+        "v 0 12 0",   # 5
+        "v 10 12 0",  # 6
+        "v 10 12 8",  # 7
+        "v 0 12 8",   # 8
+        # Interior wall at x=5 (full height)
+        "v 5 0 0",    # 9
+        "v 5 12 0",   # 10
+        "v 5 12 8",   # 11
+        "v 5 0 8",    # 12
+        # -- Slab vertices for 4 floors, 2 slabs each --
+        # Floor 0 (y=0): left slab
+        "v 0 0 0",    # 13
+        "v 5 0 0",    # 14
+        "v 5 0 8",    # 15
+        "v 0 0 8",    # 16
+        # Floor 0 (y=0): right slab
+        "v 5 0 0",    # 17
+        "v 10 0 0",   # 18
+        "v 10 0 8",   # 19
+        "v 5 0 8",    # 20
+        # Floor 1 (y=3): left slab
+        "v 0 3 0",    # 21
+        "v 5 3 0",    # 22
+        "v 5 3 8",    # 23
+        "v 0 3 8",    # 24
+        # Floor 1 (y=3): right slab
+        "v 5 3 0",    # 25
+        "v 10 3 0",   # 26
+        "v 10 3 8",   # 27
+        "v 5 3 8",    # 28
+        # Floor 2 (y=6): left slab
+        "v 0 6 0",    # 29
+        "v 5 6 0",    # 30
+        "v 5 6 8",    # 31
+        "v 0 6 8",    # 32
+        # Floor 2 (y=6): right slab
+        "v 5 6 0",    # 33
+        "v 10 6 0",   # 34
+        "v 10 6 8",   # 35
+        "v 5 6 8",    # 36
+        # Floor 3 (y=9): left slab
+        "v 0 9 0",    # 37
+        "v 5 9 0",    # 38
+        "v 5 9 8",    # 39
+        "v 0 9 8",    # 40
+        # Floor 3 (y=9): right slab
+        "v 5 9 0",    # 41
+        "v 10 9 0",   # 42
+        "v 10 9 8",   # 43
+        "v 5 9 8",    # 44
+        # Roof (y=12): left slab
+        "v 0 12 0",   # 45
+        "v 5 12 0",   # 46
+        "v 5 12 8",   # 47
+        "v 0 12 8",   # 48
+        # Roof (y=12): right slab
+        "v 5 12 0",   # 49
+        "v 10 12 0",  # 50
+        "v 10 12 8",  # 51
+        "v 5 12 8",   # 52
+        # Exterior walls
+        "f 1 2 6 5",
+        "f 2 3 7 6",
+        "f 3 4 8 7",
+        "f 4 1 5 8",
+        # Interior wall
+        "f 9 12 11 10",
+        # All slabs (2 per floor x 5 levels = 10 horizontal faces)
+        "f 13 14 15 16",
+        "f 17 18 19 20",
+        "f 21 22 23 24",
+        "f 25 26 27 28",
+        "f 29 30 31 32",
+        "f 33 34 35 36",
+        "f 37 38 39 40",
+        "f 41 42 43 44",
+        "f 45 46 47 48",
+        "f 49 50 51 52",
+    ]
+    return "\n".join(lines).encode("utf-8")
+
+
+def test_floor_detection_merges_slabs_same_level():
+    """Multiple slabs at the same elevation should merge into one floor.
+
+    The building has 5 slab levels (y=0,3,6,9,12), each with 2 slabs.
+    Gap-based detection should produce exactly 5 floors, NOT 10.
+    """
+    obj_data = _make_multistory_multi_slab_y_up()
+    resp = client.post(
+        "/api/upload",
+        files={"file": ("building.obj", io.BytesIO(obj_data), "application/octet-stream")},
+        data={
+            "scale": "100",
+            "paper": "A3",
+            "formats": "dxf",
+            "include_floor_plans": "true",
+        },
+    )
+    assert resp.status_code == 200
+    zf = zipfile.ZipFile(io.BytesIO(resp.content))
+    names = zf.namelist()
+
+    floor_dxfs = [n for n in names if "Planta_Piso" in n]
+    # 5 slab levels detected (y=0,3,6,9,12), but the roof at y=12
+    # produces no floor plan (no walls above it), so 4 useful plans.
+    # The key test: NOT 10 (one per slab panel).
+    assert len(floor_dxfs) == 4, (
+        f"Expected 4 floor plans (roof has no walls above), got {len(floor_dxfs)}: {floor_dxfs}"
+    )
