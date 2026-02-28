@@ -22,7 +22,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .cutting_sheet import generate_cutting_sheet_dxf, pack_panels
-from .dxf_writer import generate_dxf, generate_component_dxf
+from .dxf_writer import generate_dxf, generate_component_dxf, generate_floor_plan_dxf
+from .floor_plan_extractor import FloorPlan, extract_floor_plans
 from .obj_parser import parse_obj
 from .pdf_writer import generate_pdf
 from .plan_extractor import extract_components
@@ -128,6 +129,26 @@ def _scale_component_sheets(sheets: list[ComponentSheet], s: float) -> list[Comp
     return result
 
 
+def _scale_floor_plans(plans: list[FloorPlan], s: float) -> list[FloorPlan]:
+    """Scale all floor plan dimensions by factor s."""
+    if s == 1.0:
+        return plans
+    result: list[FloorPlan] = []
+    for p in plans:
+        scaled_segs = [
+            (Vec2(a.x * s, a.y * s), Vec2(b.x * s, b.y * s))
+            for a, b in p.segments
+        ]
+        result.append(FloorPlan(
+            label=p.label,
+            segments=scaled_segs,
+            width=p.width * s,
+            height=p.height * s,
+            elevation=p.elevation * s,
+        ))
+    return result
+
+
 def _sanitize_label(label: str) -> str:
     """Make a label safe for filenames."""
     return label.replace(" ", "_")
@@ -141,6 +162,7 @@ def run_pipeline(
     formats: set[str] | None = None,
     include_plan: bool = False,
     include_cutting_sheet: bool = False,
+    include_floor_plans: bool = False,
 ) -> PipelineResult:
     """Run the full processing pipeline on a file.
 
@@ -152,6 +174,9 @@ def run_pipeline(
     include_cutting_sheet : bool
         If True, generate cutting-sheet DXF files (plancha de corte) with
         panels packed onto 1000x600mm sheets for laser cutting.
+    include_floor_plans : bool
+        If True, generate horizontal section-cut floor plans showing interior
+        wall layout for each detected floor level.
     """
     if formats is None:
         formats = {"dxf", "pdf"}
@@ -195,12 +220,23 @@ def run_pipeline(
         )
         return PipelineResult(facades=facades, files=[], warnings=warnings)
 
+    # --- 3b. Floor plans (horizontal section cuts) ---
+    floor_plans: list[FloorPlan] = []
+    if include_floor_plans:
+        floor_plans = extract_floor_plans(faces)
+        if not floor_plans:
+            warnings.append(
+                "No se detectaron niveles de piso. El modelo necesita losas "
+                "horizontales grandes (>2 m²) para detectar los pisos."
+            )
+
     # --- 4. Normalize units ---
     if ext == "obj":
         unit_scale = _guess_unit_scale(faces)
         if unit_scale != 1.0:
             facades = _scale_facades(facades, unit_scale)
             component_sheets = _scale_component_sheets(component_sheets, unit_scale)
+            floor_plans = _scale_floor_plans(floor_plans, unit_scale)
 
     # --- 5. Generate outputs ---
     files: list[OutputFile] = []
@@ -222,8 +258,19 @@ def run_pipeline(
                 content=comp_dxf,
             ))
 
+        for plan in floor_plans:
+            plan_dxf = generate_floor_plan_dxf(plan, scale_denom)
+            safe_label = _sanitize_label(plan.label)
+            files.append(OutputFile(
+                name=f"{stem}_{safe_label}.dxf",
+                content=plan_dxf,
+            ))
+
     if "pdf" in formats:
-        pdf_content = generate_pdf(facades, scale_denom, paper)
+        pdf_content = generate_pdf(
+            facades, scale_denom, paper,
+            floor_plans=floor_plans if floor_plans else None,
+        )
         files.append(OutputFile(name=f"{stem}_planos.pdf", content=pdf_content))
 
     # --- 6. Cutting sheets (plancha de corte) ---
