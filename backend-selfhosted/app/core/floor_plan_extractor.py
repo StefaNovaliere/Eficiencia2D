@@ -22,7 +22,8 @@ from .types import Face3D, Vec2, Vec3, cross, length, normalize, sub
 
 # --- Detection thresholds ---
 MIN_SLAB_AREA = 2.0       # m² — only slabs larger than this count as floors
-FLOOR_CLUSTER_TOL = 0.50  # m — merge floor levels within this distance
+MIN_FLOOR_GAP = 2.0       # m — minimum vertical gap between distinct floors;
+                          #     slabs closer than this are on the same level
 CUT_HEIGHT = 1.0          # m above each floor slab
 HORIZONTAL_EPSILON = 0.15
 VERTICAL_EPSILON = 0.20
@@ -81,7 +82,15 @@ def _project_top_down(v: Vec3, up_axis: Literal["Y", "Z"]) -> Vec2:
 def _detect_floor_levels(
     faces: list[Face3D], up_axis: Literal["Y", "Z"]
 ) -> list[float]:
-    """Detect floor elevations from large horizontal slab faces."""
+    """Detect floor elevations from large horizontal slab faces.
+
+    Uses gap-based grouping: all slab elevations are sorted, and wherever
+    the gap between consecutive elevations exceeds MIN_FLOOR_GAP (~2 m) a
+    new floor level is created.  This correctly merges the many small slab
+    panels that make up a single floor (different rooms, balconies, etc.)
+    while keeping actually distinct stories separate (typically 2.5-3.5 m
+    apart).
+    """
     elevations: list[tuple[float, float]] = []  # (elevation, area)
 
     for face in faces:
@@ -101,34 +110,18 @@ def _detect_floor_levels(
     # Sort by elevation.
     elevations.sort(key=lambda t: t[0])
 
-    # Cluster close elevations (area-weighted average).
-    clusters: list[tuple[float, float]] = []  # (weighted_elev, total_area)
-    for elev, area in elevations:
-        if clusters and abs(elev - clusters[-1][0] / clusters[-1][1] * clusters[-1][1]) < FLOOR_CLUSTER_TOL:
-            # Merge: area-weighted
-            old_sum, old_area = clusters[-1]
-            clusters[-1] = (old_sum + elev * area, old_area + area)
-        else:
-            clusters.append((elev * area, area))
+    # Gap-based grouping: split into floors wherever consecutive gap > MIN_FLOOR_GAP.
+    groups: list[list[tuple[float, float]]] = [[elevations[0]]]
+    for i in range(1, len(elevations)):
+        if elevations[i][0] - elevations[i - 1][0] >= MIN_FLOOR_GAP:
+            groups.append([])  # start a new floor
+        groups[-1].append(elevations[i])
 
-    # Actually, let me do a simpler clustering: compare with the cluster average.
-    clusters2: list[list[tuple[float, float]]] = []
-    for elev, area in elevations:
-        merged = False
-        for cluster in clusters2:
-            avg_elev = sum(e * a for e, a in cluster) / sum(a for _, a in cluster)
-            if abs(elev - avg_elev) < FLOOR_CLUSTER_TOL:
-                cluster.append((elev, area))
-                merged = True
-                break
-        if not merged:
-            clusters2.append([(elev, area)])
-
-    # Compute area-weighted average for each cluster.
+    # Area-weighted average elevation per group.
     levels: list[float] = []
-    for cluster in clusters2:
-        total_area = sum(a for _, a in cluster)
-        avg = sum(e * a for e, a in cluster) / total_area
+    for group in groups:
+        total_area = sum(a for _, a in group)
+        avg = sum(e * a for e, a in group) / total_area
         levels.append(avg)
 
     levels.sort()
