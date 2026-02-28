@@ -74,24 +74,41 @@ def _build_page_content(facade: Facade, scale_denom: int, paper: str) -> str:
             cs += f"{tx(verts[i].x):.4f} {ty(verts[i].y):.4f} l\n"
         cs += "s\n"
 
-        # Panel reference ID at centroid (red).
-        # Only label polygons large enough to be readable.
-        if poly.panel_id:
-            xs = [tx(v.x) for v in verts]
-            ys = [ty(v.y) for v in verts]
-            poly_w_pt = max(xs) - min(xs)
-            poly_h_pt = max(ys) - min(ys)
-            if poly_w_pt > 8 and poly_h_pt > 8:
-                cx = sum(xs) / len(xs)
-                cy = sum(ys) / len(ys)
-                label_size = min(font_size - 2, max(4, poly_h_pt * 0.2))
-                cs += "BT\n"
-                cs += f"/F1 {label_size:.1f} Tf\n"
-                cs += "1 0 0 rg\n"  # red text
-                cs += f"{cx:.2f} {cy:.2f} Td\n"
-                cs += f"({poly.panel_id}) Tj\n"
-                cs += "0 0 0 rg\n"  # reset to black
-                cs += "ET\n"
+    # Panel reference IDs: one label per unique panel_id.
+    # Group all polygons by panel_id, compute the combined bounding box,
+    # and place a single label at its center.
+    panel_groups: dict[str, tuple[float, float, float, float]] = {}
+    for poly in facade.polygons:
+        if not poly.panel_id:
+            continue
+        xs = [tx(v.x) for v in poly.vertices]
+        ys = [ty(v.y) for v in poly.vertices]
+        pid = poly.panel_id
+        if pid not in panel_groups:
+            panel_groups[pid] = (min(xs), min(ys), max(xs), max(ys))
+        else:
+            old = panel_groups[pid]
+            panel_groups[pid] = (
+                min(old[0], min(xs)),
+                min(old[1], min(ys)),
+                max(old[2], max(xs)),
+                max(old[3], max(ys)),
+            )
+
+    for pid, (x0, y0, x1, y1) in panel_groups.items():
+        pw_pt = x1 - x0
+        ph_pt = y1 - y0
+        if pw_pt > 8 and ph_pt > 8:
+            cx = (x0 + x1) / 2
+            cy = (y0 + y1) / 2
+            label_size = min(font_size - 2, max(4, min(pw_pt, ph_pt) * 0.25))
+            cs += "BT\n"
+            cs += f"/F1 {label_size:.1f} Tf\n"
+            cs += "1 0 0 rg\n"  # red text
+            cs += f"{cx:.2f} {cy:.2f} Td\n"
+            cs += f"({pid}) Tj\n"
+            cs += "0 0 0 rg\n"  # reset to black
+            cs += "ET\n"
 
     # Title above the drawing.
     cs += "BT\n"
