@@ -52,30 +52,45 @@ def generate_dxf(facade: Facade, scale_denom: int) -> str:
     doc = _new_doc()
     msp = doc.modelspace()
 
+    # Draw all polygon outlines on CORTE layer.
     for poly in facade.polygons:
         if not poly.vertices or len(poly.vertices) < 3:
             continue
-
-        # Polygon outline on CORTE layer.
         pts = [(v.x * s, v.y * s) for v in poly.vertices]
         msp.add_lwpolyline(pts, close=True, dxfattribs={"layer": "CORTE"})
 
-        # Panel reference ID at centroid on MARCA layer.
-        if poly.panel_id:
-            xs = [v.x for v in poly.vertices]
-            ys = [v.y for v in poly.vertices]
-            poly_w = (max(xs) - min(xs)) * s
-            poly_h = (max(ys) - min(ys)) * s
-            # Skip labels on polygons smaller than ~5 mm on paper.
-            if poly_w > 0.005 and poly_h > 0.005:
-                cx = sum(xs) / len(xs) * s
-                cy = sum(ys) / len(ys) * s
-                lh = min(text_h, poly_h * 0.3)
-                t = msp.add_text(
-                    poly.panel_id, height=lh,
-                    dxfattribs={"layer": "MARCA"},
-                )
-                t.set_placement((cx, cy), align=TextEntityAlignment.MIDDLE_CENTER)
+    # Panel reference IDs: one label per unique panel_id.
+    # Group polygons by panel_id and compute combined bounding box.
+    panel_groups: dict[str, tuple[float, float, float, float]] = {}
+    for poly in facade.polygons:
+        if not poly.panel_id:
+            continue
+        xs = [v.x for v in poly.vertices]
+        ys = [v.y for v in poly.vertices]
+        pid = poly.panel_id
+        if pid not in panel_groups:
+            panel_groups[pid] = (min(xs), min(ys), max(xs), max(ys))
+        else:
+            old = panel_groups[pid]
+            panel_groups[pid] = (
+                min(old[0], min(xs)),
+                min(old[1], min(ys)),
+                max(old[2], max(xs)),
+                max(old[3], max(ys)),
+            )
+
+    for pid, (x0, y0, x1, y1) in panel_groups.items():
+        pw = (x1 - x0) * s
+        ph = (y1 - y0) * s
+        if pw > 0.005 and ph > 0.005:
+            cx = (x0 + x1) / 2 * s
+            cy = (y0 + y1) / 2 * s
+            lh = min(text_h, min(pw, ph) * 0.3)
+            t = msp.add_text(
+                pid, height=lh,
+                dxfattribs={"layer": "MARCA"},
+            )
+            t.set_placement((cx, cy), align=TextEntityAlignment.MIDDLE_CENTER)
 
     # Title above drawing on GRABADO.
     t = msp.add_text(
