@@ -467,3 +467,157 @@ def test_panel_reference_ids_in_component_dxf():
         # Should contain at least one reference ID (A1 for walls or B1 for slabs).
         assert "A1" in dxf_content or "B1" in dxf_content, \
             f"Expected panel reference IDs in component DXF"
+
+
+def _make_multistory_with_slabs_y_up() -> bytes:
+    """Create a 2-story building (Y-up) with large floor slabs for detection.
+
+    The floor slab must be > 2 m² (MIN_SLAB_AREA) for floor detection.
+    Building: 8x6m footprint, 2 floors each 3m tall.
+    Ground slab at y=0, mid slab at y=3, roof slab at y=6.
+    Interior wall at x=4 (ground floor only).
+    """
+    lines = [
+        "# 2-story building 8x6x6m, Y-up with slabs",
+        # Outer vertices
+        "v 0 0 0",   # 1
+        "v 8 0 0",   # 2
+        "v 8 0 6",   # 3
+        "v 0 0 6",   # 4
+        "v 0 3 0",   # 5
+        "v 8 3 0",   # 6
+        "v 8 3 6",   # 7
+        "v 0 3 6",   # 8
+        "v 0 6 0",   # 9
+        "v 8 6 0",   # 10
+        "v 8 6 6",   # 11
+        "v 0 6 6",   # 12
+        # Interior wall at x=4 (ground floor)
+        "v 4 0 0",   # 13
+        "v 4 3 0",   # 14
+        "v 4 3 6",   # 15
+        "v 4 0 6",   # 16
+        # Ground slab at y=0 (8x6 = 48 m²)
+        "v 0 0 0",   # 17
+        "v 8 0 0",   # 18
+        "v 8 0 6",   # 19
+        "v 0 0 6",   # 20
+        # Mid slab at y=3 (8x6 = 48 m²)
+        "v 0 3 0",   # 21
+        "v 8 3 0",   # 22
+        "v 8 3 6",   # 23
+        "v 0 3 6",   # 24
+        # Roof slab at y=6 (8x6 = 48 m²)
+        "v 0 6 0",   # 25
+        "v 8 6 0",   # 26
+        "v 8 6 6",   # 27
+        "v 0 6 6",   # 28
+        # Ground floor walls
+        "f 1 2 6 5",
+        "f 2 3 7 6",
+        "f 3 4 8 7",
+        "f 4 1 5 8",
+        # Second floor walls
+        "f 5 6 10 9",
+        "f 6 7 11 10",
+        "f 7 8 12 11",
+        "f 8 5 9 12",
+        # Interior wall
+        "f 13 16 15 14",
+        # Ground slab (horizontal, normal up)
+        "f 17 18 19 20",
+        # Mid-floor slab (horizontal, normal up)
+        "f 21 22 23 24",
+        # Roof slab (horizontal, normal up)
+        "f 25 26 27 28",
+    ]
+    return "\n".join(lines).encode("utf-8")
+
+
+def test_floor_plans_generated():
+    """include_floor_plans=true should produce floor plan DXFs and PDF pages."""
+    obj_data = _make_multistory_with_slabs_y_up()
+    resp = client.post(
+        "/api/upload",
+        files={"file": ("building.obj", io.BytesIO(obj_data), "application/octet-stream")},
+        data={
+            "scale": "100",
+            "paper": "A3",
+            "formats": "dxf,pdf",
+            "include_floor_plans": "true",
+        },
+    )
+    assert resp.status_code == 200
+    zf = zipfile.ZipFile(io.BytesIO(resp.content))
+    names = zf.namelist()
+
+    # Should have floor plan DXFs with "Planta_Piso" in name.
+    floor_dxfs = [n for n in names if "Planta_Piso" in n]
+    assert len(floor_dxfs) >= 1, f"Expected floor plan DXFs, got {names}"
+
+    # PDF should contain "Planta Piso" label.
+    pdf_files = [n for n in names if n.endswith(".pdf")]
+    assert len(pdf_files) == 1
+    pdf_content = zf.read(pdf_files[0]).decode("latin-1")
+    assert "Planta Piso" in pdf_content
+
+
+def test_floor_plans_not_generated_by_default():
+    """Without include_floor_plans, no floor plans should appear."""
+    obj_data = _make_multistory_with_slabs_y_up()
+    resp = client.post(
+        "/api/upload",
+        files={"file": ("building.obj", io.BytesIO(obj_data), "application/octet-stream")},
+        data={"scale": "100", "paper": "A3", "formats": "dxf,pdf"},
+    )
+    assert resp.status_code == 200
+    zf = zipfile.ZipFile(io.BytesIO(resp.content))
+    names = zf.namelist()
+    floor_dxfs = [n for n in names if "Planta_Piso" in n]
+    assert len(floor_dxfs) == 0
+
+
+def test_floor_plan_dxf_has_laser_layers():
+    """Floor plan DXFs should use CORTE/MARCA/GRABADO layers."""
+    obj_data = _make_multistory_with_slabs_y_up()
+    resp = client.post(
+        "/api/upload",
+        files={"file": ("building.obj", io.BytesIO(obj_data), "application/octet-stream")},
+        data={
+            "scale": "100",
+            "paper": "A3",
+            "formats": "dxf",
+            "include_floor_plans": "true",
+        },
+    )
+    assert resp.status_code == 200
+    zf = zipfile.ZipFile(io.BytesIO(resp.content))
+    names = zf.namelist()
+    floor_dxfs = [n for n in names if "Planta_Piso" in n]
+    assert len(floor_dxfs) >= 1
+
+    dxf_content = zf.read(floor_dxfs[0]).decode("utf-8")
+    assert "CORTE" in dxf_content
+    assert "GRABADO" in dxf_content
+
+
+def test_floor_plans_with_simple_box():
+    """A simple 4-wall box with floor plans enabled should still succeed."""
+    obj_data = _make_box_y_up()
+    resp = client.post(
+        "/api/upload",
+        files={"file": ("house.obj", io.BytesIO(obj_data), "application/octet-stream")},
+        data={
+            "scale": "100",
+            "paper": "A3",
+            "formats": "dxf",
+            "include_floor_plans": "true",
+        },
+    )
+    # Should succeed regardless of whether floor plans are detected.
+    assert resp.status_code == 200
+    zf = zipfile.ZipFile(io.BytesIO(resp.content))
+    names = zf.namelist()
+    # At minimum, facades should be present.
+    facade_dxfs = [n for n in names if "Fachada" in n]
+    assert len(facade_dxfs) >= 1

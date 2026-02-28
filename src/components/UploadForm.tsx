@@ -17,6 +17,7 @@ export default function UploadForm() {
   const [formats, setFormats] = useState<("dxf" | "pdf")[]>(["dxf", "pdf"]);
   const [includePlan, setIncludePlan] = useState(false);
   const [includeCuttingSheet, setIncludeCuttingSheet] = useState(false);
+  const [includeFloorPlans, setIncludeFloorPlans] = useState(false);
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState("");
   const dropRef = useRef<HTMLDivElement>(null);
@@ -69,6 +70,7 @@ export default function UploadForm() {
       formData.append("formats", formats.join(","));
       formData.append("include_plan", includePlan ? "true" : "false");
       formData.append("include_cutting_sheet", includeCuttingSheet ? "true" : "false");
+      formData.append("include_floor_plans", includeFloorPlans ? "true" : "false");
 
       const res = await fetch(`${API_URL}/api/upload`, {
         method: "POST",
@@ -220,6 +222,14 @@ export default function UploadForm() {
               onChange={() => setIncludeCuttingSheet((prev) => !prev)}
             />
             Plancha de corte
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={includeFloorPlans}
+              onChange={() => setIncludeFloorPlans((prev) => !prev)}
+            />
+            Plantas de piso
           </label>
         </fieldset>
       </div>
