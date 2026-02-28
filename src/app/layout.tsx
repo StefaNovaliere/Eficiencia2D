@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import "@/styles/globals.css";
-########
 export const metadata: Metadata = {
   title: "Eficiencia2D — Planos Arquitectónicos al Instante",
   description:

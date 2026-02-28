@@ -28,3 +28,73 @@
 - **Fecha**: 2026-02-25
 - **Problema**: `page.tsx` decía "100% en el navegador — tu archivo nunca sale de tu máquina" pero después del refactor el archivo SÍ se envía al servidor backend.
 - **Solución**: Actualizar el texto a "Tu archivo se envía a nuestro servidor para procesarlo y se elimina inmediatamente después."
+
+## Error 6: Caracteres corruptos `########` en layout.tsx
+- **Fecha**: 2026-02-25
+- **Problema**: `src/app/layout.tsx` en `main` tenía `########` en la línea 3 (restos de un merge malo). Esto causaba `Expected ident` syntax error durante `next build` en Vercel.
+- **Solución**: Eliminar la línea corrupta. El archivo ya estaba limpio en el feature branch.
+
+## Error 7: `.dockerignore` excluía `src/` — Railway no encontraba Next.js app dir
+- **Fecha**: 2026-02-25
+- **Problema**: El `.dockerignore` en la raíz tenía `src/` para excluir el frontend del build del backend Docker. Pero Railpack (builder de Railway) lo usaba para el build del frontend, eliminando toda la carpeta `src/app/`. Next.js fallaba con `Couldn't find any 'pages' or 'app' directory`.
+- **Solución**: Eliminar `src/` del `.dockerignore` raíz. El backend ya tiene su propio `.dockerignore` en `backend-selfhosted/`.
+
+## Error 8: `NEXT_PUBLIC_API_URL` sin protocolo `https://` — fetch iba a ruta relativa
+- **Fecha**: 2026-02-25
+- **Problema**: La variable `NEXT_PUBLIC_API_URL` en Vercel estaba configurada como `eficiencia2d-production.up.railway.app` (sin `https://`). El browser interpretaba eso como ruta relativa y hacía POST a `https://vercel-domain.app/eficiencia2d-production.up.railway.app/api/upload`, retornando 405 Method Not Allowed.
+- **Solución**: Agregar auto-prepend de `https://` en `UploadForm.tsx` cuando falta el protocolo. También se recomienda corregir la variable en Vercel.
+
+## Error 9: Railway devuelve 404 — buildea frontend en vez de backend Docker
+- **Fecha**: 2026-02-25
+- **Problema**: Railway estaba configurado con builder "Railpack" (default) y detectaba el proyecto como Next.js frontend. El backend FastAPI nunca se buildeaba ni ejecutaba, así que `POST /api/upload` devolvía 404 desde railway-edge. Esto también causaba error de CORS porque railway-edge no envía headers `Access-Control-Allow-Origin`.
+- **Solución**: Agregar `railway.toml` en la raíz del proyecto con `builder = "dockerfile"` y `dockerfilePath = "backend-selfhosted/Dockerfile"` para que Railway use el Dockerfile del backend.
+
+## Error 10: Include incorrecto `SketchUpAPI/model/transformation.h` — no existe en el SDK
+- **Fecha**: 2026-02-25
+- **Problema**: `translator-cpp/include/transform.h` incluía `<SketchUpAPI/model/transformation.h>`, pero ese header no existe en el SketchUp SDK. La struct `SUTransformation` está definida en `<SketchUpAPI/geometry.h>`. Esto causaba `fatal error: SketchUpAPI/model/transformation.h: No such file or directory` durante la compilación en Docker/Railway.
+- **Solución**: Cambiar el include a `<SketchUpAPI/geometry.h>`.
+
+## Error 11 (RESUELTO): SDK de SketchUp no tiene binarios para Linux — solo Windows/macOS
+- **Fecha**: 2026-02-25
+- **Problema**: El directorio `SDK/binaries/sketchup/x64/` contiene solo archivos Windows (`.dll`, `.lib`). El SketchUp C SDK **no se distribuye oficialmente para Linux** — solo existe para Windows y macOS. El Dockerfile buildea sobre Ubuntu (Linux), así que CMake no encuentra `libSketchUpAPI.so` y el linker falla. Esto hace que sea **imposible** compilar y ejecutar el translator C++ en un contenedor Docker Linux.
+- **Impacto**: El backend completo no puede funcionar en Railway (ni en ningún host Linux) con la arquitectura actual.
+- **Solución aplicada** (2026-02-26): **Opción 1 — Pipeline Python puro**. Se eliminó completamente el translator C++ y la dependencia del SketchUp SDK. Se portó toda la lógica de procesamiento de TypeScript (`src/core/`) a Python puro en `backend-selfhosted/app/core/`:
+  - `types.py` — Tipos geométricos compartidos (Vec3, Vec2, Face3D, Wall) y utilidades vectoriales.
+  - `skp_parser.py` — Parser heurístico de binarios `.skp` (escaneo de arrays de vértices Float64). Soporta formato ZIP-wrapped (SketchUp 2021+) y legacy binary.
+  - `obj_parser.py` — Parser de `.obj` Wavefront (formato texto, soporte completo de caras n-gon, índices negativos, formatos v/vt/vn).
+  - `wall_extractor.py` — Extractor de muros: filtra caras verticales (|normal.z| < 0.08), valida área > 1.5 m², proyecta a 2D con ejes locales del muro.
+  - `dxf_writer.py` — Generador DXF (AutoCAD 2000, capas WALLS/OPENINGS/DIMENSIONS).
+  - `pdf_writer.py` — Generador PDF minimal (sin dependencias, Helvetica built-in, tamaños A3/A1).
+  - `pipeline.py` — Orquestación: archivo → parser → extractor → writers → archivos de salida.
+  - `main.py` reescrito: ya no invoca subproceso C++, ejecuta el pipeline Python directamente en memoria.
+  - `config.py` simplificado: eliminadas las variables `TRANSLATOR_BIN` y `TRANSLATOR_TIMEOUT_S`.
+  - `Dockerfile` simplificado: single-stage `python:3.12-slim`, sin compilación C++, sin SDK, sin `libstdc++6`.
+  - El backend ahora acepta tanto `.skp` como `.obj`.
+  - **Limitación**: El parser `.skp` es heurístico (no tiene acceso al SDK oficial). Para modelos complejos que el parser no pueda leer, el usuario debe exportar como `.obj` desde SketchUp (File → Export → 3D Model → OBJ).
+
+## Error 12: OBJ wall extractor rechazaba todos los muros — asumía Z-up y pulgadas
+- **Fecha**: 2026-02-26
+- **Problema**: El pipeline asumía que todos los archivos `.obj` usaban la convención Z-up (SketchUp) y coordenadas en pulgadas. Pero el estándar OBJ usa Y-up, y los modelos pueden estar en metros, centímetros o milímetros. Un modelo "Tower-House Design" de 8476 caras devolvía 422 porque: (1) el parser multiplicaba todo por 0.0254 haciendo las áreas microscópicas, y (2) el extractor buscaba `abs(normal.z) < 0.08` pero las paredes tenían normales con Z≠0 porque Y era el eje vertical.
+- **Solución**:
+  - `obj_parser.py`: Eliminar conversión hardcodeada `* INCHES_TO_M`. Las coordenadas se leen tal cual.
+  - `wall_extractor.py`: Auto-detectar eje vertical probando tanto Y-up como Z-up, y eligiendo el que produce más muros. El threshold de área se adapta al tamaño del bounding box del modelo (escala adaptativa).
+  - `pipeline.py`: Agregar `_guess_unit_scale()` que estima si el modelo está en metros, centímetros o milímetros analizando el span del bounding box, y aplica la conversión antes de generar DXF/PDF.
+
+## Error 13: Muros triangulados se mostraban como triángulos gigantes individuales
+- **Fecha**: 2026-02-26
+- **Problema**: Modelos 3D típicos (como "Tower-House Design") están **triangulados**: cada pared es un conjunto de muchos triángulos coplanares. El extractor trataba cada triángulo individual como un "muro" separado, produciendo PDFs con triángulos diagonales sin sentido en vez de rectángulos de muros. Solo 5 triángulos aleatorios pasaban el filtro de área.
+- **Solución**: Implementar **fusión de caras coplanares** en `wall_extractor.py`:
+  - Después de filtrar caras verticales, agrupar triángulos que comparten el mismo plano (misma dirección de normal dentro de ~10°, y misma distancia al origen dentro de 0.2% de la diagonal del modelo).
+  - Para cada grupo, sumar las áreas de todos los triángulos y verificar el threshold contra el área total fusionada.
+  - Proyectar todos los vértices del grupo al espacio 2D local del muro y computar el bounding box como contorno rectangular.
+  - Resultado: un modelo con 8476 triángulos ahora produce muros rectangulares correctos con dimensiones reales.
+
+## Error 14: Arquitectura "muros individuales" no genera planos de fachada
+- **Fecha**: 2026-02-26
+- **Problema**: El pipeline extraía "muros individuales" (cada segmento coplanar por separado) y los dibujaba dispersos por la página. El usuario esperaba **1 plano de fachada por lado del edificio** — si tiene 4 lados, 4 vistas de elevación donde cada una muestra toda la geometría de ese lado posicionada correctamente.
+- **Solución**: Rediseño completo de la arquitectura:
+  - Nuevo tipo `Facade` reemplaza a `Wall`: contiene todos los polígonos 2D proyectados de un lado completo del edificio.
+  - Nuevo `facade_extractor.py` reemplaza a `wall_extractor.py`: agrupa caras verticales por dirección horizontal (clustering por normal), no por coplanaridad. Produce N fachadas (típicamente 4 para edificio rectangular).
+  - `pdf_writer.py` reescrito: genera PDF multi-página, una página por fachada. Auto-escala para caber en el papel. Título, dimensiones y escala por página.
+  - `dxf_writer.py` reescrito: genera un DXF separado por fachada con todos los polígonos de esa vista.
+  - `pipeline.py` reescrito: genera N archivos DXF (uno por fachada) + 1 PDF multi-página. Nombres descriptivos como `model_Fachada_Norte.dxf`.

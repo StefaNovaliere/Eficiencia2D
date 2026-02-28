@@ -1,37 +1,43 @@
 """
-Eficiencia2D — FastAPI backend.
+Eficiencia2D -- FastAPI backend.
 
-Receives a .skp binary upload, invokes the C++ translator subprocess,
-and returns a ZIP of the generated 2D files.
+Receives a .skp or .obj upload, processes it with the pure-Python pipeline,
+and returns a ZIP of the generated 2D plan files.
+
+No external C++ translator or SketchUp SDK required.
 """
 
 import asyncio
 import io
+import logging
 import os
-import shutil
-import tempfile
-import uuid
+import traceback
 import zipfile
-from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from .config import (
     MAX_UPLOAD_BYTES,
-    TEMP_DIR,
-    TRANSLATOR_BIN,
-    TRANSLATOR_TIMEOUT_S,
     VALID_FORMATS,
     VALID_PAPERS,
     VALID_SCALES,
 )
+from .core.pipeline import run_pipeline
+
+logger = logging.getLogger("eficiencia2d")
+
+# Thread pool for CPU-bound pipeline work.  Running the geometry pipeline
+# in a thread keeps uvicorn's async event loop free so it can still respond
+# to Railway health-checks and keep the H2 connection alive.
+_executor = ThreadPoolExecutor(max_workers=2)
 
 app = FastAPI(
     title="Eficiencia2D",
-    description="Upload a raw .skp file, get 2D architectural plans instantly.",
-    version="0.1.0",
+    description="Upload a .skp or .obj file, get 2D architectural plans instantly.",
+    version="0.4.0",
 )
 
 _allowed_origins = os.getenv("CORS_ORIGINS", "*").split(",")
@@ -43,40 +49,47 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# SKP file magic bytes: the first 8 bytes of any valid .skp file.
-_SKP_MAGIC = b"\xff\xfe\xff\x0e\x53\x6b\x65\x74"  # "ÿþÿ.Sket"
 
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Catch unhandled exceptions so CORS headers are still sent."""
+    logger.error("Unhandled error: %s\n%s", exc, traceback.format_exc())
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"Error interno del servidor: {exc}"},
+    )
 
-def _validate_skp_header(data: bytes) -> None:
-    """Raise if the first bytes don't match the .skp magic."""
-    if len(data) < 8 or not data[:8].startswith(b"\xff\xfe\xff"):
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid file: does not appear to be a .skp SketchUp file.",
-        )
+# Accepted file extensions.
+_VALID_EXTENSIONS = {"skp", "obj"}
 
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "translator": os.path.isfile(TRANSLATOR_BIN)}
+    return {"status": "ok", "mode": "python-pipeline", "version": "0.4.0"}
 
 
 @app.post("/api/upload")
-async def upload_skp(
+async def upload_file(
     file: UploadFile = File(...),
     scale: int = Form(100),
     paper: str = Form("A3"),
     formats: str = Form("dxf,pdf"),
+    include_plan: str = Form("false"),
+    include_cutting_sheet: str = Form("false"),
+    include_floor_plans: str = Form("false"),
 ):
     """
-    Accept a .skp upload and return a ZIP of the 2D outputs.
+    Accept a .skp or .obj upload and return a ZIP of the 2D outputs.
 
     Parameters
     ----------
-    file : .skp binary upload
-    scale : 50 | 100  (denominator — 1:50 or 1:100)
+    file : .skp or .obj binary upload
+    scale : 50 | 100  (denominator -- 1:50 or 1:100)
     paper : A3 | A1
     formats : comma-separated subset of {dxf, pdf}
+    include_plan : "true" | "false" -- include component decomposition sheets
+    include_cutting_sheet : "true" | "false" -- include plancha de corte DXF
+    include_floor_plans : "true" | "false" -- include horizontal section-cut floor plans
     """
 
     # --- Validate parameters ---
@@ -93,92 +106,80 @@ async def upload_skp(
     contents = await file.read()
     if len(contents) > MAX_UPLOAD_BYTES:
         raise HTTPException(413, "File too large.")
-    _validate_skp_header(contents)
 
-    # --- Write to temp directory ---
-    job_id = uuid.uuid4().hex[:12]
-    job_dir = Path(TEMP_DIR) / job_id
-    job_dir.mkdir(parents=True, exist_ok=True)
+    filename = file.filename or "model.skp"
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
 
-    input_path = job_dir / "model.skp"
-    input_path.write_bytes(contents)
-
-    outdir = job_dir / "output"
-    outdir.mkdir(exist_ok=True)
-
-    # --- Invoke the C++ translator ---
-    cmd = [
-        TRANSLATOR_BIN,
-        "--input", str(input_path),
-        "--outdir", str(outdir),
-        "--scale", str(scale),
-        "--paper", paper,
-        "--format", ",".join(sorted(requested)),
-    ]
-
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await asyncio.wait_for(
-            proc.communicate(),
-            timeout=TRANSLATOR_TIMEOUT_S,
-        )
-    except asyncio.TimeoutError:
-        proc.kill()
-        _cleanup(job_dir)
-        raise HTTPException(504, "Translator timed out.")
-    except FileNotFoundError:
-        _cleanup(job_dir)
+    if ext not in _VALID_EXTENSIONS:
         raise HTTPException(
-            503,
-            "Translator binary not found. Is the server configured correctly?",
+            400,
+            f"Unsupported file format: .{ext}. Upload a .skp or .obj file.",
         )
 
-    if proc.returncode != 0:
-        detail = stderr.decode(errors="replace")[:500]
-        _cleanup(job_dir)
-        raise HTTPException(500, f"Translator failed (exit {proc.returncode}): {detail}")
+    # Basic header validation for .skp files.
+    if ext == "skp" and not contents[:3].startswith(b"\xff\xfe\xff"):
+        # Could also be a ZIP-wrapped .skp -- check PK header.
+        if not contents[:4] == b"PK\x03\x04":
+            raise HTTPException(
+                400,
+                "Invalid file: does not appear to be a valid .skp SketchUp file.",
+            )
 
-    # --- Parse stdout for output file paths ---
-    output_files: list[Path] = []
-    for line in stdout.decode().strip().splitlines():
-        if ":" in line:
-            _, path_str = line.split(":", 1)
-            p = Path(path_str.strip())
-            if p.is_file():
-                output_files.append(p)
+    logger.info(
+        "Processing %s (%s, %.1f MB, scale=1:%d, plan=%s, cutting=%s, floors=%s)",
+        filename, ext, len(contents) / 1e6, scale,
+        include_plan, include_cutting_sheet, include_floor_plans,
+    )
 
-    if not output_files:
-        _cleanup(job_dir)
-        raise HTTPException(500, "Translator produced no output files.")
+    # --- Run the pipeline in a thread so we don't block the event loop ---
+    want_plan = include_plan.lower() in ("true", "1", "yes")
+    want_cutting = include_cutting_sheet.lower() in ("true", "1", "yes")
+    want_floors = include_floor_plans.lower() in ("true", "1", "yes")
+
+    loop = asyncio.get_running_loop()
+    try:
+        result = await loop.run_in_executor(
+            _executor,
+            lambda: run_pipeline(
+                file_name=filename,
+                data=contents,
+                scale_denom=scale,
+                paper=paper,
+                formats=requested,
+                include_plan=want_plan,
+                include_cutting_sheet=want_cutting,
+                include_floor_plans=want_floors,
+            ),
+        )
+    except Exception as exc:
+        logger.error("Pipeline error for %s: %s", filename, exc, exc_info=True)
+        raise HTTPException(
+            500,
+            f"Error procesando el archivo: {exc}. "
+            "Si es un .skp, intenta exportar como .obj desde SketchUp.",
+        )
+
+    if result.warnings:
+        logger.warning("Pipeline warnings for %s: %s", filename, result.warnings)
+
+    if not result.files:
+        detail = "No output files generated."
+        if result.warnings:
+            detail += " " + " ".join(result.warnings)
+        raise HTTPException(422, detail)
 
     # --- ZIP the results and stream back ---
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-        for fp in output_files:
-            zf.write(fp, fp.name)
+        for out_file in result.files:
+            zf.writestr(out_file.name, out_file.content)
     zip_buffer.seek(0)
 
-    # Schedule cleanup after response is sent.
-    async def _stream_and_cleanup():
-        try:
-            yield zip_buffer.read()
-        finally:
-            _cleanup(job_dir)
-
-    stem = Path(file.filename or "model").stem
+    stem = filename.rsplit(".", 1)[0] if "." in filename else filename
     return StreamingResponse(
-        _stream_and_cleanup(),
+        iter([zip_buffer.read()]),
         media_type="application/zip",
         headers={
             "Content-Disposition": f'attachment; filename="{stem}_plans.zip"',
         },
     )
-
-
-def _cleanup(job_dir: Path) -> None:
-    """Remove the temporary job directory."""
-    shutil.rmtree(job_dir, ignore_errors=True)
