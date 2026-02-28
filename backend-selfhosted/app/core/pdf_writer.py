@@ -2,7 +2,10 @@
 PDF Writer
 
 Generates a multi-page PDF where each page is one facade elevation
-or component decomposition sheet.
+with panel reference IDs (A1, A2..., B1, B2...).
+
+Decomposition sheets are NOT included in the PDF — they live
+in the DXF files and the cutting-sheet output.
 
 No external dependencies -- writes raw PDF operators.
 
@@ -11,7 +14,7 @@ Paper sizes: A3 (420x297 mm), A1 (841x594 mm).
 
 from __future__ import annotations
 
-from .types import ComponentSheet, Facade
+from .types import Facade
 
 PAPERS: dict[str, tuple[float, float]] = {
     "A3": (420, 297),
@@ -123,116 +126,14 @@ def _build_page_content(facade: Facade, scale_denom: int, paper: str) -> str:
     return cs
 
 
-def _build_component_content(sheet: ComponentSheet, scale_denom: int, paper: str) -> str:
-    """Build the PDF content stream for a component decomposition sheet."""
-    w_mm, h_mm = PAPERS.get(paper, PAPERS["A3"])
-    page_w = w_mm * MM_TO_PT
-    page_h = h_mm * MM_TO_PT
-    margin = 40.0
-    font_size = 10
-
-    avail_w = page_w - 2 * margin
-    avail_h = page_h - 2 * margin - 30
-
-    def m_to_pts(m: float) -> float:
-        return (m / scale_denom) * 1000 * MM_TO_PT
-
-    sheet_w_pts = m_to_pts(sheet.width) if sheet.width > 0 else 1.0
-    sheet_h_pts = m_to_pts(sheet.height) if sheet.height > 0 else 1.0
-
-    fit_scale = 1.0
-    if sheet_w_pts > avail_w and sheet_w_pts > 0:
-        fit_scale = min(fit_scale, avail_w / sheet_w_pts)
-    if sheet_h_pts > avail_h and sheet_h_pts > 0:
-        fit_scale = min(fit_scale, avail_h / sheet_h_pts)
-
-    effective_w = sheet_w_pts * fit_scale
-    effective_h = sheet_h_pts * fit_scale
-
-    ox = (page_w - effective_w) / 2
-    oy = margin + (avail_h - effective_h) / 2
-
-    def tx(vx: float) -> float:
-        return ox + m_to_pts(vx) * fit_scale
-
-    def ty(vy: float) -> float:
-        return oy + m_to_pts(vy) * fit_scale
-
-    cs = ""
-
-    # Draw each panel with its reference ID.
-    cs += "0 0 0 RG\n"  # black stroke
-    cs += "0.4 w\n"
-    for panel in sheet.panels:
-        verts = panel.outline.vertices
-        if len(verts) < 3:
-            continue
-
-        # Panel outline (black = cut).
-        cs += f"{tx(verts[0].x):.4f} {ty(verts[0].y):.4f} m\n"
-        for i in range(1, len(verts)):
-            cs += f"{tx(verts[i].x):.4f} {ty(verts[i].y):.4f} l\n"
-        cs += "s\n"
-
-        # Reference ID above panel (red = mark).
-        cx = sum(tx(v.x) for v in verts) / len(verts)
-        max_y_pt = max(ty(v.y) for v in verts)
-        min_y_pt = min(ty(v.y) for v in verts)
-        panel_h_pt = max_y_pt - min_y_pt
-
-        # Scale label size to panel, clamped to readable range.
-        label_size = min(font_size, max(5, panel_h_pt * 0.15))
-
-        cs += "BT\n"
-        cs += f"/F1 {label_size:.1f} Tf\n"
-        cs += "1 0 0 rg\n"  # red
-        cs += f"{cx:.2f} {max_y_pt + 3:.2f} Td\n"
-        cs += f"({panel.ref_id}) Tj\n"
-        cs += "0 0 0 rg\n"  # reset
-        cs += "ET\n"
-
-        # Dimensions below panel (red = mark).
-        dim_text = f"{panel.width:.2f} x {panel.height:.2f}"
-        dim_size = min(font_size - 2, max(4, panel_h_pt * 0.10))
-        cs += "BT\n"
-        cs += f"/F1 {dim_size:.1f} Tf\n"
-        cs += "1 0 0 rg\n"
-        cs += f"{cx:.2f} {min_y_pt - dim_size - 2:.2f} Td\n"
-        cs += f"({dim_text}) Tj\n"
-        cs += "0 0 0 rg\n"
-        cs += "ET\n"
-
-    # Title.
-    cs += "BT\n"
-    cs += f"/F1 {font_size + 2} Tf\n"
-    cs += f"{page_w / 2:.2f} {oy + effective_h + 16:.2f} Td\n"
-    cs += f"({sheet.label}) Tj\n"
-    cs += "ET\n"
-
-    # Scale annotation.
-    cs += "BT\n"
-    cs += f"/F1 {font_size - 2} Tf\n"
-    cs += f"{page_w - margin:.2f} {margin / 2:.2f} Td\n"
-    if fit_scale < 0.999:
-        cs += f"(Escala: ajustada para caber en {paper}) Tj\n"
-    else:
-        cs += f"(Escala: 1:{scale_denom}) Tj\n"
-    cs += "ET\n"
-
-    return cs
-
-
 def generate_pdf(
     facades: list[Facade],
     scale_denom: int,
     paper: str,
-    component_sheets: list[ComponentSheet] | None = None,
 ) -> str:
-    """Generate a multi-page PDF.
+    """Generate a multi-page PDF with facade elevations only.
 
-    Page order:
-      1. Facade elevations (one per direction)
-      2. Component decomposition sheets (walls, slabs)
+    Each facade gets one page with panel reference IDs shown in red.
     """
     w_mm, h_mm = PAPERS.get(paper, PAPERS["A3"])
     pw = f"{w_mm * MM_TO_PT:.2f}"
@@ -242,10 +143,6 @@ def generate_pdf(
 
     for facade in facades:
         page_contents.append(_build_page_content(facade, scale_denom, paper))
-
-    if component_sheets:
-        for sheet in component_sheets:
-            page_contents.append(_build_component_content(sheet, scale_denom, paper))
 
     num_pages = len(page_contents)
 

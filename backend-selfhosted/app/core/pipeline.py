@@ -223,10 +223,7 @@ def run_pipeline(
             ))
 
     if "pdf" in formats:
-        pdf_content = generate_pdf(
-            facades, scale_denom, paper,
-            component_sheets=component_sheets if component_sheets else None,
-        )
+        pdf_content = generate_pdf(facades, scale_denom, paper)
         files.append(OutputFile(name=f"{stem}_planos.pdf", content=pdf_content))
 
     # --- 6. Cutting sheets (plancha de corte) ---

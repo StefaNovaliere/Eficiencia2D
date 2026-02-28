@@ -323,7 +323,7 @@ def _make_multistory_y_up() -> bytes:
 
 
 def test_multistory_decomposition():
-    """A 2-story building should produce decomposition sheets with ref IDs."""
+    """A 2-story building should produce decomposition DXFs (not in PDF)."""
     obj_data = _make_multistory_y_up()
     resp = client.post(
         "/api/upload",
@@ -337,15 +337,16 @@ def test_multistory_decomposition():
     facade_dxfs = [n for n in names if "Fachada" in n]
     assert len(facade_dxfs) >= 4, f"Expected 4+ facade DXFs, got {facade_dxfs}"
 
-    # Should have "Descomposicion_Paredes" sheet.
+    # Should have "Descomposicion_Paredes" DXF.
     paredes_dxfs = [n for n in names if "Descomposicion_Paredes" in n]
     assert len(paredes_dxfs) >= 1, f"Expected Paredes DXF, got {names}"
 
-    # PDF should contain "Descomposicion" labels.
+    # PDF should contain facades only (no Descomposicion pages).
     pdf_files = [n for n in names if n.endswith(".pdf")]
     assert len(pdf_files) == 1
     pdf_content = zf.read(pdf_files[0]).decode("latin-1")
-    assert "Descomposicion" in pdf_content
+    assert "Fachada" in pdf_content
+    assert "Descomposicion" not in pdf_content
 
 
 def test_plancha_paper_rejected():
