@@ -20,12 +20,25 @@ export default function UploadForm() {
   const [includeFloorPlans, setIncludeFloorPlans] = useState(false);
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState("");
+  const [dragActive, setDragActive] = useState(false);
   const dropRef = useRef<HTMLDivElement>(null);
 
   const accept = ".skp,.obj,.mtl";
 
+  const handleDrag = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === "dragenter" || e.type === "dragover") {
+      setDragActive(true);
+    } else if (e.type === "dragleave") {
+      setDragActive(false);
+    }
+  }, []);
+
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
     const f = e.dataTransfer.files[0];
     if (f) setFile(f);
   }, []);
@@ -47,7 +60,6 @@ export default function UploadForm() {
   const handleSubmit = async () => {
     if (!file || formats.length === 0) return;
 
-    // .mtl files are material definitions — they don't contain geometry.
     const ext = file.name.split(".").pop()?.toLowerCase();
     if (ext === "mtl") {
       setError("Los archivos .mtl solo contienen materiales, no geometría. Sube el archivo .obj correspondiente.");
@@ -58,7 +70,6 @@ export default function UploadForm() {
     setStatus("uploading");
     setError("");
 
-    // 5-minute timeout — large models can take a while to process.
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5 * 60 * 1000);
 
@@ -86,7 +97,6 @@ export default function UploadForm() {
         throw new Error(detail);
       }
 
-      // The backend returns a ZIP — trigger browser download.
       const blob = await res.blob();
       const disposition = res.headers.get("Content-Disposition");
       const filenameMatch = disposition?.match(/filename="?([^"]+)"?/);
@@ -132,8 +142,10 @@ export default function UploadForm() {
       {/* Drop zone */}
       <div
         ref={dropRef}
-        className="drop-zone"
-        onDragOver={(e) => e.preventDefault()}
+        className={`drop-zone ${dragActive ? "drop-zone--active" : ""} ${file ? "drop-zone--has-file" : ""}`}
+        onDragEnter={handleDrag}
+        onDragLeave={handleDrag}
+        onDragOver={handleDrag}
         onDrop={handleDrop}
         onClick={() => document.getElementById("file-input")?.click()}
       >
@@ -145,93 +157,104 @@ export default function UploadForm() {
           onChange={handleFileChange}
         />
         {file ? (
-          <p className="file-name">
-            {file.name} ({(file.size / 1e6).toFixed(1)} MB)
-          </p>
+          <div className="file-info">
+            <span className="file-icon">&#x1F4C4;</span>
+            <div>
+              <p className="file-name">{file.name}</p>
+              <p className="file-size">{(file.size / 1e6).toFixed(1)} MB</p>
+            </div>
+          </div>
         ) : (
-          <>
-            <p>
-              Arrastra un archivo <strong>.skp</strong> o <strong>.obj</strong>{" "}
-              aquí, o haz clic para buscar
+          <div className="drop-content">
+            <div className="drop-icon">
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="17 8 12 3 7 8" />
+                <line x1="12" y1="3" x2="12" y2="15" />
+              </svg>
+            </div>
+            <p className="drop-text">
+              Arrastra tu archivo aquí o <span className="drop-link">buscalo</span>
             </p>
-            <p className="hint-text">
-              Los archivos .mtl no son necesarios — solo se usa la geometría del .obj
-            </p>
-          </>
+            <p className="drop-hint">.skp o .obj</p>
+          </div>
         )}
       </div>
 
-      {/* Options row */}
-      <div className="options-row">
-        <label>
-          Escala
-          <select
-            value={scale}
-            onChange={(e) => setScale(Number(e.target.value))}
-          >
-            <option value={50}>1:50</option>
-            <option value={100}>1:100</option>
-          </select>
-        </label>
+      {/* Settings */}
+      <div className="settings">
+        <div className="settings-row">
+          <div className="setting-group">
+            <label className="setting-label">Escala</label>
+            <select
+              className="setting-select"
+              value={scale}
+              onChange={(e) => setScale(Number(e.target.value))}
+            >
+              <option value={50}>1:50</option>
+              <option value={100}>1:100</option>
+            </select>
+          </div>
 
-        <label>
-          Papel
-          <select
-            value={paper}
-            onChange={(e) => setPaper(e.target.value as "A3" | "A1")}
-          >
-            <option value="A3">A3</option>
-            <option value="A1">A1</option>
-          </select>
-        </label>
+          <div className="setting-group">
+            <label className="setting-label">Papel</label>
+            <select
+              className="setting-select"
+              value={paper}
+              onChange={(e) => setPaper(e.target.value as "A3" | "A1")}
+            >
+              <option value="A3">A3</option>
+              <option value="A1">A1</option>
+            </select>
+          </div>
 
-        <fieldset className="format-group">
-          <legend>Formatos</legend>
-          <label>
-            <input
-              type="checkbox"
-              checked={formats.includes("dxf")}
-              onChange={() => toggleFormat("dxf")}
-            />
-            DXF
-          </label>
-          <label>
-            <input
-              type="checkbox"
-              checked={formats.includes("pdf")}
-              onChange={() => toggleFormat("pdf")}
-            />
-            PDF
-          </label>
-        </fieldset>
+          <div className="setting-group">
+            <label className="setting-label">Formato</label>
+            <div className="chip-row">
+              <button
+                type="button"
+                className={`chip ${formats.includes("dxf") ? "chip--active" : ""}`}
+                onClick={() => toggleFormat("dxf")}
+              >
+                DXF
+              </button>
+              <button
+                type="button"
+                className={`chip ${formats.includes("pdf") ? "chip--active" : ""}`}
+                onClick={() => toggleFormat("pdf")}
+              >
+                PDF
+              </button>
+            </div>
+          </div>
+        </div>
 
-        <fieldset className="format-group">
-          <legend>Extras</legend>
-          <label>
+        <div className="extras-row">
+          <label className="toggle-label">
             <input
               type="checkbox"
               checked={includePlan}
               onChange={() => setIncludePlan((prev) => !prev)}
             />
-            Descomposición
+            <span className="toggle-text">Descomposición</span>
           </label>
-          <label>
+          <label className="toggle-label">
             <input
               type="checkbox"
               checked={includeCuttingSheet}
               onChange={() => setIncludeCuttingSheet((prev) => !prev)}
             />
-            Plancha de corte
+            <span className="toggle-text">Plancha de corte</span>
           </label>
-          <label>
+          <label className="toggle-label">
             <input
               type="checkbox"
               checked={includeFloorPlans}
               onChange={() => setIncludeFloorPlans((prev) => !prev)}
             />
-            Plantas de piso
+            <span className="toggle-text">Plantas de piso</span>
           </label>
-        </fieldset>
+        </div>
       </div>
 
       {/* Action button */}
@@ -241,7 +264,14 @@ export default function UploadForm() {
           disabled={!file || formats.length === 0 || status === "uploading"}
           onClick={handleSubmit}
         >
-          {status === "uploading" ? "Procesando..." : "Generar Planos"}
+          {status === "uploading" ? (
+            <>
+              <span className="spinner" />
+              Procesando...
+            </>
+          ) : (
+            "Generar Planos"
+          )}
         </button>
       ) : (
         <button className="submit-btn reset-btn" onClick={reset}>
@@ -258,10 +288,11 @@ export default function UploadForm() {
 
       {/* Success */}
       {status === "done" && (
-        <div className="results">
-          <p className="results-summary">
-            Archivo ZIP descargado con tus planos.
-          </p>
+        <div className="success-msg">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
+          ZIP descargado con tus planos.
         </div>
       )}
 
