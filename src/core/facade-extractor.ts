@@ -191,8 +191,9 @@ function extractWithAxis(faces: Face3D[], up: UpAxis): Facade[] {
   return facades;
 }
 
-export function extractFacades(faces: Face3D[]): Facade[] {
-  if (faces.length === 0) return [];
+/** Detect the model's up axis by comparing facade extraction results for Y vs Z. */
+export function detectUpAxis(faces: Face3D[]): "Y" | "Z" {
+  if (faces.length === 0) return "Z";
 
   const facadesZ = extractWithAxis(faces, "Z");
   const facadesY = extractWithAxis(faces, "Y");
@@ -200,5 +201,12 @@ export function extractFacades(faces: Face3D[]): Facade[] {
   const countZ = facadesZ.reduce((s, f) => s + f.polygons.length, 0);
   const countY = facadesY.reduce((s, f) => s + f.polygons.length, 0);
 
-  return countY > countZ ? facadesY : facadesZ;
+  return countY > countZ ? "Y" : "Z";
+}
+
+export function extractFacades(faces: Face3D[], upAxis?: "Y" | "Z"): Facade[] {
+  if (faces.length === 0) return [];
+
+  const up = upAxis ?? detectUpAxis(faces);
+  return extractWithAxis(faces, up);
 }
