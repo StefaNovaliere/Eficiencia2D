@@ -101,8 +101,13 @@ function packPanels(panels: CuttingPanel[]): CuttingSheet[] {
   return sheets;
 }
 
+/** Round to 2 decimal places to avoid long floats in DXF. */
+function r(n: number): string {
+  return Number(n.toFixed(2)).toString();
+}
+
 /** Generate a DXF string for one cutting sheet. */
-function sheetToDxf(sheet: CuttingSheet): string {
+function sheetToDxf(sheet: CuttingSheet, scaleDenom: number): string {
   const lines: string[] = [
     "0", "SECTION", "2", "HEADER",
     "9", "$ACADVER", "1", "AC1015",
@@ -120,19 +125,22 @@ function sheetToDxf(sheet: CuttingSheet): string {
     "0", "LAYER", "2", "LABELS",  "70", "0", "62", "5", "6", "CONTINUOUS",
     "0", "ENDTAB",
     "0", "ENDSEC",
+    // Empty BLOCKS section (required by AC1015 / DXF R2000).
+    "0", "SECTION", "2", "BLOCKS",
+    "0", "ENDSEC",
     "0", "SECTION", "2", "ENTITIES",
   ];
 
   // Draw sheet outline.
   const addLine = (x1: number, y1: number, x2: number, y2: number, layer: string) => {
     lines.push("0", "LINE", "8", layer,
-      "10", String(x1), "20", String(y1),
-      "11", String(x2), "21", String(y2));
+      "10", r(x1), "20", r(y1),
+      "11", r(x2), "21", r(y2));
   };
 
   const addText = (x: number, y: number, h: number, text: string, layer: string) => {
     lines.push("0", "TEXT", "8", layer,
-      "10", String(x), "20", String(y),
+      "10", r(x), "20", r(y),
       "40", String(h), "1", text);
   };
 
@@ -158,9 +166,11 @@ function sheetToDxf(sheet: CuttingSheet): string {
     // Panel label.
     addText(px + pw / 2, py + ph / 2, 8, panel.label, "LABELS");
 
-    // Dimensions.
-    addText(px + pw / 2, py - 5, 5, `${(pw / 1000).toFixed(2)} m`, "LABELS");
-    addText(px + pw + 3, py + ph / 2, 5, `${(ph / 1000).toFixed(2)} m`, "LABELS");
+    // Dimensions (real-world, not model-scale).
+    const realW = (pw / 1000) * scaleDenom;
+    const realH = (ph / 1000) * scaleDenom;
+    addText(px + pw / 2, py - 5, 5, `${realW.toFixed(2)} m`, "LABELS");
+    addText(px + pw + 3, py + ph / 2, 5, `${realH.toFixed(2)} m`, "LABELS");
   }
 
   lines.push("0", "ENDSEC", "0", "EOF");
@@ -178,6 +188,6 @@ export function generateCuttingSheets(
   const sheets = packPanels(panels);
   return sheets.map((sheet) => ({
     name: `Plancha_de_Corte${sheets.length > 1 ? `_${sheet.index}` : ""}.dxf`,
-    content: sheetToDxf(sheet),
+    content: sheetToDxf(sheet, scaleDenom),
   }));
 }
