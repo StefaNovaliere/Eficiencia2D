@@ -4,9 +4,7 @@
 // Generates AutoCAD-compatible DXF files.
 //
 // Layers:
-//   - EXTERIOR (color 7 / black) — exterior wall lines
-//   - INTERIOR (color 1 / red)   — interior wall lines
-//   - CORTE    (color 7 / black) — facade outlines
+//   - CORTE    (color 7 / black) — wall and facade outlines
 //   - TITULO   (color 5 / blue)  — titles and annotations
 //   - COTAS    (color 3 / green) — dimensions
 // ============================================================================
@@ -20,9 +18,12 @@ function dxfHeader(): string {
     "9", "$INSUNITS", "70", "6",
     "0", "ENDSEC",
     "0", "SECTION", "2", "TABLES",
-    "0", "TABLE", "2", "LAYER", "70", "5",
-    "0", "LAYER", "2", "EXTERIOR",  "70", "0", "62", "7",  "6", "CONTINUOUS",
-    "0", "LAYER", "2", "INTERIOR",  "70", "0", "62", "1",  "6", "CONTINUOUS",
+    // LTYPE table (required by Autodesk viewers).
+    "0", "TABLE", "2", "LTYPE", "70", "1",
+    "0", "LTYPE", "2", "CONTINUOUS", "70", "0", "3", "Solid line", "72", "65", "73", "0", "40", "0.0",
+    "0", "ENDTAB",
+    // LAYER table.
+    "0", "TABLE", "2", "LAYER", "70", "3",
     "0", "LAYER", "2", "CORTE",     "70", "0", "62", "7",  "6", "CONTINUOUS",
     "0", "LAYER", "2", "TITULO",    "70", "0", "62", "5",  "6", "CONTINUOUS",
     "0", "LAYER", "2", "COTAS",     "70", "0", "62", "3",  "6", "CONTINUOUS",
@@ -129,11 +130,10 @@ export function generateFloorPlanDxf(
   let out = dxfHeader();
 
   for (const seg of plan.segments) {
-    const layer = seg.isInterior ? "INTERIOR" : "EXTERIOR";
     out += dxfLine(
       seg.a.x * s, seg.a.y * s,
       seg.b.x * s, seg.b.y * s,
-      layer,
+      "CORTE",
     );
   }
 
