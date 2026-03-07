@@ -48,34 +48,6 @@ function guessUnitScale(faces: Face3D[]): number {
   return (1.0 / span) * 20.0;       // unknown large → normalize
 }
 
-function scaleFacades(facades: Facade[], s: number): Facade[] {
-  if (s === 1.0) return facades;
-  return facades.map((f) => ({
-    ...f,
-    polygons: f.polygons.map((p) => ({
-      ...p,
-      vertices: p.vertices.map((v) => ({ x: v.x * s, y: v.y * s })),
-    })),
-    width: f.width * s,
-    height: f.height * s,
-  }));
-}
-
-function scaleFloorPlans(plans: FloorPlan[], s: number): FloorPlan[] {
-  if (s === 1.0) return plans;
-  return plans.map((p) => ({
-    ...p,
-    segments: p.segments.map((seg) => ({
-      a: { x: seg.a.x * s, y: seg.a.y * s },
-      b: { x: seg.b.x * s, y: seg.b.y * s },
-      isInterior: seg.isInterior,
-    })),
-    width: p.width * s,
-    height: p.height * s,
-    elevation: p.elevation * s,
-  }));
-}
-
 export function runPipeline(
   fileName: string,
   buffer: ArrayBuffer,
@@ -103,21 +75,37 @@ export function runPipeline(
     return { facades: [], floorPlans: [], files: [], warnings };
   }
 
-  // --- 2. Detect up axis once (shared by facades and floor plans) ---
-  const upAxis = detectUpAxis(faces);
-
-  // --- 3. Extract facades ---
-  let facades = extractFacades(faces, upAxis);
-
-  // --- 4. Extract floor plans (using same axis as facades) ---
-  let floorPlans = extractFloorPlans(faces, upAxis);
-
-  // --- 5. Normalize units ---
+  // --- 2. Normalize units to metres BEFORE extraction ---
+  // This ensures all distance-based thresholds (floor gap, slab area, etc.)
+  // work correctly regardless of the source model's native unit.
   const unitScale = guessUnitScale(faces);
   if (unitScale !== 1.0) {
-    facades = scaleFacades(facades, unitScale);
-    floorPlans = scaleFloorPlans(floorPlans, unitScale);
+    faces = faces.map((f) => ({
+      ...f,
+      vertices: f.vertices.map((v) => ({
+        x: v.x * unitScale,
+        y: v.y * unitScale,
+        z: v.z * unitScale,
+      })),
+      innerLoops: f.innerLoops.map((loop) =>
+        loop.map((v) => ({
+          x: v.x * unitScale,
+          y: v.y * unitScale,
+          z: v.z * unitScale,
+        })),
+      ),
+      // Normals stay unchanged (they're unit directions).
+    }));
   }
+
+  // --- 3. Detect up axis once (shared by facades and floor plans) ---
+  const upAxis = detectUpAxis(faces);
+
+  // --- 4. Extract facades ---
+  const facades = extractFacades(faces, upAxis);
+
+  // --- 5. Extract floor plans (using same axis as facades) ---
+  const floorPlans = extractFloorPlans(faces, upAxis);
 
   if (facades.length === 0 && floorPlans.length === 0) {
     warnings.push(
