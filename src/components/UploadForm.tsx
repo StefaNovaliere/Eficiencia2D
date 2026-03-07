@@ -1,29 +1,20 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
+import { runPipeline } from "@/core/pipeline";
+import type { PipelineOptions } from "@/core/types";
 
-type Status = "idle" | "uploading" | "done" | "error";
-
-const RAW_API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
-const API_URL =
-  RAW_API_URL && !/^https?:\/\//.test(RAW_API_URL)
-    ? `https://${RAW_API_URL}`
-    : RAW_API_URL;
+type Status = "idle" | "processing" | "done" | "error";
 
 export default function UploadForm() {
   const [file, setFile] = useState<File | null>(null);
   const [scale, setScale] = useState(100);
-  const [paper, setPaper] = useState<"A3" | "A1">("A3");
-  const [formats, setFormats] = useState<("dxf" | "pdf")[]>(["dxf", "pdf"]);
-  const [includePlan, setIncludePlan] = useState(false);
-  const [includeCuttingSheet, setIncludeCuttingSheet] = useState(false);
-  const [includeFloorPlans, setIncludeFloorPlans] = useState(false);
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState("");
   const [dragActive, setDragActive] = useState(false);
   const dropRef = useRef<HTMLDivElement>(null);
 
-  const accept = ".skp,.obj,.mtl";
+  const accept = ".obj";
 
   const handleDrag = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -51,82 +42,69 @@ export default function UploadForm() {
     [],
   );
 
-  const toggleFormat = (fmt: "dxf" | "pdf") => {
-    setFormats((prev) =>
-      prev.includes(fmt) ? prev.filter((f) => f !== fmt) : [...prev, fmt],
-    );
-  };
-
   const handleSubmit = async () => {
-    if (!file || formats.length === 0) return;
+    if (!file) return;
 
     const ext = file.name.split(".").pop()?.toLowerCase();
     if (ext === "mtl") {
-      setError("Los archivos .mtl solo contienen materiales, no geometría. Sube el archivo .obj correspondiente.");
+      setError(
+        "Los archivos .mtl solo contienen materiales, no geometría. Subí el archivo .obj correspondiente.",
+      );
       setStatus("error");
       return;
     }
 
-    setStatus("uploading");
+    setStatus("processing");
     setError("");
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5 * 60 * 1000);
-
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-      formData.append("scale", String(scale));
-      formData.append("paper", paper);
-      formData.append("formats", formats.join(","));
-      formData.append("include_plan", includePlan ? "true" : "false");
-      formData.append("include_cutting_sheet", includeCuttingSheet ? "true" : "false");
-      formData.append("include_floor_plans", includeFloorPlans ? "true" : "false");
+      const buffer = await file.arrayBuffer();
 
-      const res = await fetch(`${API_URL}/api/upload`, {
-        method: "POST",
-        body: formData,
-        signal: controller.signal,
-      });
+      const opts: PipelineOptions = {
+        scaleDenom: scale,
+        paper: "A4",
+      };
 
-      clearTimeout(timeout);
+      // Run pipeline (synchronous, CPU-bound).
+      // Use setTimeout to let the UI update before heavy computation.
+      const result = await new Promise<ReturnType<typeof runPipeline>>(
+        (resolve) => {
+          setTimeout(() => {
+            resolve(runPipeline(file.name, buffer, opts));
+          }, 50);
+        },
+      );
 
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        const detail = body?.detail ?? `Error del servidor (${res.status})`;
-        throw new Error(detail);
+      if (result.files.length === 0) {
+        const msg =
+          result.warnings.length > 0
+            ? result.warnings.join(" ")
+            : "No se generaron archivos. Verificá que el modelo contenga geometría válida.";
+        throw new Error(msg);
       }
 
-      const blob = await res.blob();
-      const disposition = res.headers.get("Content-Disposition");
-      const filenameMatch = disposition?.match(/filename="?([^"]+)"?/);
-      const zipName = filenameMatch?.[1] ?? `${file.name.replace(/\.[^.]+$/, "")}_planos.zip`;
+      // Create ZIP and download.
+      const { default: JSZip } = await import("jszip");
+      const zip = new JSZip();
 
-      const url = URL.createObjectURL(blob);
+      for (const f of result.files) {
+        zip.file(f.name, f.blob);
+      }
+
+      const zipBlob = await zip.generateAsync({ type: "blob" });
+      const stem = file.name.replace(/\.[^.]+$/, "");
+      const url = URL.createObjectURL(zipBlob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = zipName;
+      a.download = `${stem}_planos.zip`;
       a.click();
       URL.revokeObjectURL(url);
 
       setStatus("done");
     } catch (err: unknown) {
-      clearTimeout(timeout);
-      if (err instanceof DOMException && err.name === "AbortError") {
-        setError(
-          "El servidor tardó demasiado (más de 5 minutos). " +
-          "Intenta simplificar el modelo en SketchUp eliminando muebles y detalles internos.",
-        );
-      } else if (err instanceof TypeError && err.message === "Failed to fetch") {
-        setError(
-          "Error de conexión con el servidor. El archivo puede ser demasiado " +
-          "grande para procesar. Intenta con un modelo más simple o inténtalo de nuevo.",
-        );
-      } else {
-        setError(
-          err instanceof Error ? err.message : "Error desconocido al procesar.",
-        );
-      }
+      setError(
+        err instanceof Error ? err.message : "Error desconocido al procesar.",
+      );
       setStatus("error");
     }
   };
@@ -167,16 +145,26 @@ export default function UploadForm() {
         ) : (
           <div className="drop-content">
             <div className="drop-icon">
-              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <svg
+                width="40"
+                height="40"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                 <polyline points="17 8 12 3 7 8" />
                 <line x1="12" y1="3" x2="12" y2="15" />
               </svg>
             </div>
             <p className="drop-text">
-              Arrastra tu archivo aquí o <span className="drop-link">buscalo</span>
+              Arrastra tu archivo aquí o{" "}
+              <span className="drop-link">buscalo</span>
             </p>
-            <p className="drop-hint">.skp o .obj</p>
+            <p className="drop-hint">.obj</p>
           </div>
         )}
       </div>
@@ -191,69 +179,25 @@ export default function UploadForm() {
               value={scale}
               onChange={(e) => setScale(Number(e.target.value))}
             >
+              <option value={20}>1:20</option>
+              <option value={25}>1:25</option>
               <option value={50}>1:50</option>
+              <option value={75}>1:75</option>
               <option value={100}>1:100</option>
+              <option value={125}>1:125</option>
+              <option value={150}>1:150</option>
+              <option value={200}>1:200</option>
+              <option value={250}>1:250</option>
+              <option value={500}>1:500</option>
             </select>
           </div>
 
           <div className="setting-group">
-            <label className="setting-label">Papel</label>
-            <select
-              className="setting-select"
-              value={paper}
-              onChange={(e) => setPaper(e.target.value as "A3" | "A1")}
-            >
-              <option value="A3">A3</option>
-              <option value="A1">A1</option>
-            </select>
-          </div>
-
-          <div className="setting-group">
-            <label className="setting-label">Formato</label>
+            <label className="setting-label">Formato de salida</label>
             <div className="chip-row">
-              <button
-                type="button"
-                className={`chip ${formats.includes("dxf") ? "chip--active" : ""}`}
-                onClick={() => toggleFormat("dxf")}
-              >
-                DXF
-              </button>
-              <button
-                type="button"
-                className={`chip ${formats.includes("pdf") ? "chip--active" : ""}`}
-                onClick={() => toggleFormat("pdf")}
-              >
-                PDF
-              </button>
+              <span className="chip chip--active">DXF + PDF</span>
             </div>
           </div>
-        </div>
-
-        <div className="extras-row">
-          <label className="toggle-label">
-            <input
-              type="checkbox"
-              checked={includePlan}
-              onChange={() => setIncludePlan((prev) => !prev)}
-            />
-            <span className="toggle-text">Descomposición</span>
-          </label>
-          <label className="toggle-label">
-            <input
-              type="checkbox"
-              checked={includeCuttingSheet}
-              onChange={() => setIncludeCuttingSheet((prev) => !prev)}
-            />
-            <span className="toggle-text">Plancha de corte</span>
-          </label>
-          <label className="toggle-label">
-            <input
-              type="checkbox"
-              checked={includeFloorPlans}
-              onChange={() => setIncludeFloorPlans((prev) => !prev)}
-            />
-            <span className="toggle-text">Plantas de piso</span>
-          </label>
         </div>
       </div>
 
@@ -261,10 +205,10 @@ export default function UploadForm() {
       {status !== "done" ? (
         <button
           className="submit-btn"
-          disabled={!file || formats.length === 0 || status === "uploading"}
+          disabled={!file || status === "processing"}
           onClick={handleSubmit}
         >
-          {status === "uploading" ? (
+          {status === "processing" ? (
             <>
               <span className="spinner" />
               Procesando...
@@ -280,7 +224,7 @@ export default function UploadForm() {
       )}
 
       {/* Processing indicator */}
-      {status === "uploading" && (
+      {status === "processing" && (
         <div className="progress-bar">
           <div className="progress-fill progress-indeterminate" />
         </div>
@@ -289,10 +233,19 @@ export default function UploadForm() {
       {/* Success */}
       {status === "done" && (
         <div className="success-msg">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <svg
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
             <polyline points="20 6 9 17 4 12" />
           </svg>
-          ZIP descargado con tus planos.
+          ZIP descargado con tus planos (DXF + PDF).
         </div>
       )}
 
