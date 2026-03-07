@@ -5,19 +5,17 @@
 // at ~1 m above the slab, producing a 2D plan view showing interior and
 // exterior wall layout.
 //
-// Interior walls (red): segments with a parallel partner nearby.
-// Exterior walls (black): segments without a parallel partner.
+// All wall segments are drawn uniformly in black (CORTE layer).
 // ============================================================================
 
 import type { Face3D, FloorPlan, FloorPlanSegment, Vec2, Vec3 } from "./types";
 import { cross, vlength, sub } from "./types";
 
-const MIN_SLAB_AREA = 2.0;
-const MIN_FLOOR_GAP = 2.0;
+const MIN_GROUP_AREA = 1.0; // m² — minimum *total* area for a floor-level group
+const MIN_FLOOR_GAP = 1.8; // m — minimum vertical gap between distinct floors
 const CUT_HEIGHT = 1.0;
-const HORIZONTAL_EPSILON = 0.15;
+const HORIZONTAL_EPSILON = 0.25;
 const VERTICAL_EPSILON = 0.20;
-const WALL_THICKNESS_MAX = 0.40; // m — max distance between parallel segments to count as same wall
 
 type UpAxis = "Y" | "Z";
 
@@ -43,13 +41,14 @@ function faceArea(face: Face3D): number {
 }
 
 function detectFloorLevels(faces: Face3D[], up: UpAxis): number[] {
+  // Collect ALL horizontal faces, even tiny triangulated mesh pieces.
   const elevations: Array<{ elev: number; area: number }> = [];
 
   for (const face of faces) {
     const upComp = Math.abs(getUp(face.normal, up));
     if (upComp < 1.0 - HORIZONTAL_EPSILON) continue;
     const area = faceArea(face);
-    if (area < MIN_SLAB_AREA) continue;
+    if (area < 0.01) continue; // skip degenerate only
     const elev =
       face.vertices.reduce((s, v) => s + getUp(v, up), 0) / face.vertices.length;
     elevations.push({ elev, area });
@@ -68,10 +67,14 @@ function detectFloorLevels(faces: Face3D[], up: UpAxis): number[] {
     groups[groups.length - 1].push(elevations[i]);
   }
 
-  const levels: number[] = groups.map((g) => {
+  // Filter: only keep groups whose *total* slab area is significant.
+  const levels: number[] = [];
+  for (const g of groups) {
     const totalArea = g.reduce((s, e) => s + e.area, 0);
-    return g.reduce((s, e) => s + e.elev * e.area, 0) / totalArea;
-  });
+    if (totalArea < MIN_GROUP_AREA) continue;
+    const avgElev = g.reduce((s, e) => s + e.elev * e.area, 0) / totalArea;
+    levels.push(avgElev);
+  }
 
   levels.sort((a, b) => a - b);
   return levels;
@@ -127,65 +130,15 @@ function intersectFaceWithPlane(
   return [];
 }
 
-/** Classify segments as interior or exterior based on parallel pairs. */
-function classifySegments(
+/** Convert raw segments to FloorPlanSegments (all drawn uniformly). */
+function toFloorPlanSegments(
   segments: Array<{ a: Vec2; b: Vec2 }>,
 ): FloorPlanSegment[] {
-  const result: FloorPlanSegment[] = [];
-
-  // For each segment, check if there's a nearby parallel segment.
-  // Parallel = similar direction vector, and midpoints are close.
-  const hasParallelPartner = new Array(segments.length).fill(false);
-
-  for (let i = 0; i < segments.length; i++) {
-    if (hasParallelPartner[i]) continue;
-
-    const ai = segments[i].a, bi = segments[i].b;
-    const dxi = bi.x - ai.x, dyi = bi.y - ai.y;
-    const lenI = Math.sqrt(dxi * dxi + dyi * dyi);
-    if (lenI < 1e-6) continue;
-    const nxi = dxi / lenI, nyi = dyi / lenI;
-    const midIx = (ai.x + bi.x) / 2, midIy = (ai.y + bi.y) / 2;
-
-    for (let j = i + 1; j < segments.length; j++) {
-      if (hasParallelPartner[j]) continue;
-
-      const aj = segments[j].a, bj = segments[j].b;
-      const dxj = bj.x - aj.x, dyj = bj.y - aj.y;
-      const lenJ = Math.sqrt(dxj * dxj + dyj * dyj);
-      if (lenJ < 1e-6) continue;
-      const nxj = dxj / lenJ, nyj = dyj / lenJ;
-
-      // Check parallelism (same or opposite direction).
-      const dp = Math.abs(nxi * nxj + nyi * nyj);
-      if (dp < 0.95) continue;
-
-      // Check perpendicular distance between midpoints.
-      const midJx = (aj.x + bj.x) / 2, midJy = (aj.y + bj.y) / 2;
-      const dmx = midJx - midIx, dmy = midJy - midIy;
-      // Perpendicular distance = |cross product with direction|
-      const perpDist = Math.abs(dmx * nyi - dmy * nxi);
-      // Along-direction distance
-      const alongDist = Math.abs(dmx * nxi + dmy * nyi);
-
-      // Segments must be close perpendicular (wall thickness) and overlap along their length.
-      if (perpDist < WALL_THICKNESS_MAX && alongDist < Math.max(lenI, lenJ) * 0.8) {
-        hasParallelPartner[i] = true;
-        hasParallelPartner[j] = true;
-        break;
-      }
-    }
-  }
-
-  for (let i = 0; i < segments.length; i++) {
-    result.push({
-      a: segments[i].a,
-      b: segments[i].b,
-      isInterior: hasParallelPartner[i],
-    });
-  }
-
-  return result;
+  return segments.map((s) => ({
+    a: s.a,
+    b: s.b,
+    isInterior: false, // all segments drawn uniformly in black
+  }));
 }
 
 function extractWithAxis(faces: Face3D[], up: UpAxis): FloorPlan[] {
@@ -232,7 +185,7 @@ function extractWithAxis(faces: Face3D[], up: UpAxis): FloorPlan[] {
       b: { x: s.b.x - minX, y: s.b.y - minY },
     }));
 
-    const classified = classifySegments(shifted);
+    const classified = toFloorPlanSegments(shifted);
 
     plans.push({
       label: `Piso ${idx + 1}`,

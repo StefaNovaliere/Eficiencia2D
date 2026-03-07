@@ -161,7 +161,7 @@ export function runPipeline(
 
   // Cutting sheets (plancha de corte).
   if (opts.includeCuttingSheet) {
-    const cuttingFiles = generateCuttingSheets(facades);
+    const cuttingFiles = generateCuttingSheets(facades, scaleDenom);
     for (const cf of cuttingFiles) {
       files.push({
         name: `${stem}_${cf.name}`,
