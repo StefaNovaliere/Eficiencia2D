@@ -1,108 +1,219 @@
 // ============================================================================
 // PDF Writer
 //
-// Generates a minimal, self-contained PDF from projected Wall[] data.
-// No external dependencies — writes raw PDF operators.
+// Generates a multi-page PDF:
+//   - One page per facade elevation
+//   - One page per floor plan (with interior walls in red, exterior in black)
 //
-// Paper sizes: A3 (420×297 mm), A1 (841×594 mm).
-// Walls are drawn with solid strokes; openings with dashes.
-// Dimension annotations use built-in Helvetica.
+// Paper: always A4 for facades and floor plans.
+// No external dependencies — writes raw PDF operators.
 // ============================================================================
 
-import type { Wall } from "./types";
+import type { Facade, FloorPlan } from "./types";
 
-const PAPERS: Record<string, { w: number; h: number }> = {
-  A3: { w: 420, h: 297 },
-  A1: { w: 841, h: 594 },
-};
+const A4 = { w: 297, h: 210 }; // landscape A4 in mm
+const MM_TO_PT = 72 / 25.4;
 
-/** Convert metres to PDF points at a given scale denominator. */
 function mToPts(m: number, scaleDenom: number): number {
-  return (m / scaleDenom) * 1000 * (72 / 25.4);
+  return (m / scaleDenom) * 1000 * MM_TO_PT;
 }
 
-function buildContent(walls: Wall[], scaleDenom: number, paper: string): string {
-  const pSize = PAPERS[paper] ?? PAPERS.A3;
-  const pageH = pSize.h * (72 / 25.4);
-  const margin = 30;
-  const gap = mToPts(1.5, scaleDenom);
+function buildFacadeContent(
+  facade: Facade,
+  scaleDenom: number,
+): string {
+  const pageW = A4.w * MM_TO_PT;
+  const pageH = A4.h * MM_TO_PT;
+  const margin = 40;
+  const fontSize = 10;
+
+  const availW = pageW - 2 * margin;
+  const availH = pageH - 2 * margin - 30;
+
+  const facadeWPts = mToPts(facade.width, scaleDenom);
+  const facadeHPts = mToPts(facade.height, scaleDenom);
+
+  let fitScale = 1.0;
+  if (facadeWPts > availW && facadeWPts > 0)
+    fitScale = Math.min(fitScale, availW / facadeWPts);
+  if (facadeHPts > availH && facadeHPts > 0)
+    fitScale = Math.min(fitScale, availH / facadeHPts);
+
+  const effectiveW = facadeWPts * fitScale;
+  const effectiveH = facadeHPts * fitScale;
+
+  const ox = (pageW - effectiveW) / 2;
+  const oy = margin + (availH - effectiveH) / 2;
+
+  const tx = (vx: number) => ox + mToPts(vx, scaleDenom) * fitScale;
+  const ty = (vy: number) => oy + mToPts(vy, scaleDenom) * fitScale;
 
   let cs = "";
-  let cursorX = margin;
-  const fontSize = 8;
 
-  for (const wall of walls) {
-    const wPts = mToPts(wall.width, scaleDenom);
-    const hPts = mToPts(wall.height, scaleDenom);
-    const baseY = (pageH - hPts) / 2;
-
-    const tx = (vx: number) => cursorX + mToPts(vx, scaleDenom);
-    const ty = (vy: number) => baseY + mToPts(vy, scaleDenom);
-
-    // Outer boundary (solid).
-    cs += "0.3 w\n";
-    const ov = wall.outer.vertices;
-    if (ov.length > 0) {
-      cs += `${tx(ov[0].x).toFixed(4)} ${ty(ov[0].y).toFixed(4)} m\n`;
-      for (let i = 1; i < ov.length; i++) {
-        cs += `${tx(ov[i].x).toFixed(4)} ${ty(ov[i].y).toFixed(4)} l\n`;
+  // Black stroke for facade lines.
+  cs += "0 0 0 RG\n0.4 w\n";
+  for (const poly of facade.polygons) {
+    const verts = poly.vertices;
+    if (verts.length < 2) continue;
+    if (verts.length === 2) {
+      cs += `${tx(verts[0].x).toFixed(4)} ${ty(verts[0].y).toFixed(4)} m\n`;
+      cs += `${tx(verts[1].x).toFixed(4)} ${ty(verts[1].y).toFixed(4)} l\n`;
+      cs += "S\n";
+    } else {
+      cs += `${tx(verts[0].x).toFixed(4)} ${ty(verts[0].y).toFixed(4)} m\n`;
+      for (let i = 1; i < verts.length; i++) {
+        cs += `${tx(verts[i].x).toFixed(4)} ${ty(verts[i].y).toFixed(4)} l\n`;
       }
       cs += "s\n";
     }
-
-    // Openings (dashed).
-    cs += "[4 2] 0 d\n";
-    for (const opening of wall.openings) {
-      const iv = opening.vertices;
-      if (iv.length === 0) continue;
-      cs += `${tx(iv[0].x).toFixed(4)} ${ty(iv[0].y).toFixed(4)} m\n`;
-      for (let i = 1; i < iv.length; i++) {
-        cs += `${tx(iv[i].x).toFixed(4)} ${ty(iv[i].y).toFixed(4)} l\n`;
-      }
-      cs += "s\n";
-    }
-    cs += "[] 0 d\n";
-
-    // Wall label.
-    cs += "BT\n";
-    cs += `/F1 ${fontSize} Tf\n`;
-    cs += `${(cursorX + wPts / 2).toFixed(2)} ${(baseY + hPts + 12).toFixed(2)} Td\n`;
-    cs += `(${wall.label}) Tj\n`;
-    cs += "ET\n";
-
-    // Width dimension.
-    cs += "BT\n";
-    cs += `/F1 ${fontSize} Tf\n`;
-    cs += `${(cursorX + wPts / 2).toFixed(2)} ${(baseY - 14).toFixed(2)} Td\n`;
-    cs += `(${wall.width.toFixed(2)} m) Tj\n`;
-    cs += "ET\n";
-
-    // Height dimension.
-    cs += "BT\n";
-    cs += `/F1 ${fontSize} Tf\n`;
-    cs += `${(cursorX + wPts + 6).toFixed(2)} ${(baseY + hPts / 2).toFixed(2)} Td\n`;
-    cs += `(${wall.height.toFixed(2)} m) Tj\n`;
-    cs += "ET\n";
-
-    cursorX += wPts + gap;
   }
+
+  // Title.
+  cs += "BT\n";
+  cs += `/F1 ${fontSize + 2} Tf\n`;
+  cs += `${(pageW / 2).toFixed(2)} ${(oy + effectiveH + 16).toFixed(2)} Td\n`;
+  cs += `(${facade.label}) Tj\n`;
+  cs += "ET\n";
+
+  // Width dimension.
+  cs += "BT\n";
+  cs += `/F1 ${fontSize} Tf\n`;
+  cs += `${(pageW / 2).toFixed(2)} ${(oy - 16).toFixed(2)} Td\n`;
+  cs += `(${facade.width.toFixed(2)} m) Tj\n`;
+  cs += "ET\n";
+
+  // Height dimension.
+  cs += "BT\n";
+  cs += `/F1 ${fontSize} Tf\n`;
+  cs += `${(ox + effectiveW + 8).toFixed(2)} ${(oy + effectiveH / 2).toFixed(2)} Td\n`;
+  cs += `(${facade.height.toFixed(2)} m) Tj\n`;
+  cs += "ET\n";
+
+  // Scale annotation.
+  cs += "BT\n";
+  cs += `/F1 ${fontSize - 2} Tf\n`;
+  cs += `${(pageW - margin).toFixed(2)} ${(margin / 2).toFixed(2)} Td\n`;
+  if (fitScale < 0.999) {
+    cs += `(Escala: ajustada para caber en A4) Tj\n`;
+  } else {
+    cs += `(Escala: 1:${scaleDenom}) Tj\n`;
+  }
+  cs += "ET\n";
 
   return cs;
 }
 
-export function generatePdf(walls: Wall[], scaleDenom: number, paper: string): string {
-  const pSize = PAPERS[paper] ?? PAPERS.A3;
-  const pw = (pSize.w * 72 / 25.4).toFixed(2);
-  const ph = (pSize.h * 72 / 25.4).toFixed(2);
+function buildFloorPlanContent(
+  plan: FloorPlan,
+  scaleDenom: number,
+): string {
+  const pageW = A4.w * MM_TO_PT;
+  const pageH = A4.h * MM_TO_PT;
+  const margin = 40;
+  const fontSize = 10;
 
-  const content = buildContent(walls, scaleDenom, paper);
+  const availW = pageW - 2 * margin;
+  const availH = pageH - 2 * margin - 30;
 
-  // Build PDF byte-by-byte so we can compute xref offsets.
+  const planWPts = mToPts(plan.width, scaleDenom);
+  const planHPts = mToPts(plan.height, scaleDenom);
+
+  let fitScale = 1.0;
+  if (planWPts > availW && planWPts > 0)
+    fitScale = Math.min(fitScale, availW / planWPts);
+  if (planHPts > availH && planHPts > 0)
+    fitScale = Math.min(fitScale, availH / planHPts);
+
+  const effectiveW = planWPts * fitScale;
+  const effectiveH = planHPts * fitScale;
+
+  const ox = (pageW - effectiveW) / 2;
+  const oy = margin + (availH - effectiveH) / 2;
+
+  const tx = (vx: number) => ox + mToPts(vx, scaleDenom) * fitScale;
+  const ty = (vy: number) => oy + mToPts(vy, scaleDenom) * fitScale;
+
+  let cs = "";
+
+  // Draw wall segments: exterior = black, interior = red.
+  for (const seg of plan.segments) {
+    if (seg.isInterior) {
+      cs += "1 0 0 RG\n"; // red
+    } else {
+      cs += "0 0 0 RG\n"; // black
+    }
+    cs += "0.6 w\n";
+    cs += `${tx(seg.a.x).toFixed(4)} ${ty(seg.a.y).toFixed(4)} m\n`;
+    cs += `${tx(seg.b.x).toFixed(4)} ${ty(seg.b.y).toFixed(4)} l\n`;
+    cs += "S\n";
+  }
+
+  // Reset to black.
+  cs += "0 0 0 RG\n";
+
+  // Title.
+  cs += "BT\n";
+  cs += `/F1 ${fontSize + 2} Tf\n`;
+  cs += `${(pageW / 2).toFixed(2)} ${(oy + effectiveH + 16).toFixed(2)} Td\n`;
+  cs += `(${plan.label}) Tj\n`;
+  cs += "ET\n";
+
+  // Width dimension.
+  cs += "BT\n";
+  cs += `/F1 ${fontSize} Tf\n`;
+  cs += `${(pageW / 2).toFixed(2)} ${(oy - 16).toFixed(2)} Td\n`;
+  cs += `(${plan.width.toFixed(2)} m) Tj\n`;
+  cs += "ET\n";
+
+  // Height dimension.
+  cs += "BT\n";
+  cs += `/F1 ${fontSize} Tf\n`;
+  cs += `${(ox + effectiveW + 8).toFixed(2)} ${(oy + effectiveH / 2).toFixed(2)} Td\n`;
+  cs += `(${plan.height.toFixed(2)} m) Tj\n`;
+  cs += "ET\n";
+
+  // Scale annotation.
+  cs += "BT\n";
+  cs += `/F1 ${fontSize - 2} Tf\n`;
+  cs += `${(pageW - margin).toFixed(2)} ${(margin / 2).toFixed(2)} Td\n`;
+  if (fitScale < 0.999) {
+    cs += `(Escala: ajustada para caber en A4) Tj\n`;
+  } else {
+    cs += `(Escala: 1:${scaleDenom}) Tj\n`;
+  }
+  cs += "ET\n";
+
+  return cs;
+}
+
+export function generatePdf(
+  facades: Facade[],
+  floorPlans: FloorPlan[],
+  scaleDenom: number,
+): string {
+  const pw = (A4.w * MM_TO_PT).toFixed(2);
+  const ph = (A4.h * MM_TO_PT).toFixed(2);
+
+  const pageContents: string[] = [];
+
+  for (const facade of facades) {
+    pageContents.push(buildFacadeContent(facade, scaleDenom));
+  }
+  for (const plan of floorPlans) {
+    pageContents.push(buildFloorPlanContent(plan, scaleDenom));
+  }
+
+  if (pageContents.length === 0) return "";
+
+  const numPages = pageContents.length;
   const parts: string[] = [];
   const offsets: number[] = [];
   let cursor = 0;
 
-  const emit = (s: string) => { parts.push(s); cursor += s.length; };
+  const emit = (s: string) => {
+    parts.push(s);
+    cursor += s.length;
+  };
 
   emit("%PDF-1.4\n");
 
@@ -111,31 +222,50 @@ export function generatePdf(walls: Wall[], scaleDenom: number, paper: string): s
   emit("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
 
   // Object 2: Pages
+  const pageObjIds = Array.from({ length: numPages }, (_, i) => 4 + i * 2);
+  const kids = pageObjIds.map((id) => `${id} 0 R`).join(" ");
   offsets.push(cursor);
-  emit("2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
+  emit(
+    `2 0 obj\n<< /Type /Pages /Kids [${kids}] /Count ${numPages} >>\nendobj\n`,
+  );
 
-  // Object 3: Page
+  // Object 3: Font
   offsets.push(cursor);
-  emit(`3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pw} ${ph}] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n`);
+  emit(
+    "3 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",
+  );
 
-  // Object 4: Content stream
-  offsets.push(cursor);
-  emit(`4 0 obj\n<< /Length ${content.length} >>\nstream\n${content}endstream\nendobj\n`);
+  // Pages and content streams.
+  for (let i = 0; i < numPages; i++) {
+    const pageId = 4 + i * 2;
+    const streamId = pageId + 1;
+    const content = pageContents[i];
 
-  // Object 5: Font
-  offsets.push(cursor);
-  emit("5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n");
+    offsets.push(cursor);
+    emit(
+      `${pageId} 0 obj\n<< /Type /Page /Parent 2 0 R ` +
+      `/MediaBox [0 0 ${pw} ${ph}] ` +
+      `/Contents ${streamId} 0 R ` +
+      `/Resources << /Font << /F1 3 0 R >> >> >>\nendobj\n`,
+    );
+
+    offsets.push(cursor);
+    emit(
+      `${streamId} 0 obj\n<< /Length ${content.length} >>\n` +
+      `stream\n${content}endstream\nendobj\n`,
+    );
+  }
 
   // Xref
+  const totalObjs = offsets.length + 1;
   const xrefOff = cursor;
-  emit(`xref\n0 ${offsets.length + 1}\n`);
+  emit(`xref\n0 ${totalObjs}\n`);
   emit("0000000000 65535 f \n");
   for (const off of offsets) {
     emit(`${String(off).padStart(10, "0")} 00000 n \n`);
   }
 
-  // Trailer
-  emit(`trailer\n<< /Size ${offsets.length + 1} /Root 1 0 R >>\n`);
+  emit(`trailer\n<< /Size ${totalObjs} /Root 1 0 R >>\n`);
   emit(`startxref\n${xrefOff}\n%%EOF\n`);
 
   return parts.join("");
