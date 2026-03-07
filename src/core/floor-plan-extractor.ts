@@ -246,9 +246,12 @@ function extractWithAxis(faces: Face3D[], up: UpAxis): FloorPlan[] {
   return plans;
 }
 
-export function extractFloorPlans(faces: Face3D[]): FloorPlan[] {
+export function extractFloorPlans(faces: Face3D[], upAxis?: "Y" | "Z"): FloorPlan[] {
   if (faces.length === 0) return [];
 
+  if (upAxis) return extractWithAxis(faces, upAxis);
+
+  // Fallback: try both and pick the one with more segments.
   const plansZ = extractWithAxis(faces, "Z");
   const plansY = extractWithAxis(faces, "Y");
 
