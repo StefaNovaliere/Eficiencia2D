@@ -13,8 +13,8 @@ export default function Home() {
       <UploadForm />
       <footer className="footer">
         <p>
-          Formatos soportados: <code>.skp</code> <code>.obj</code> &mdash;
-          Tu archivo se procesa y se elimina inmediatamente.
+          Formato soportado: <code>.obj</code> &mdash;
+          Tu archivo se procesa localmente en tu navegador.
         </p>
       </footer>
     </main>

@@ -1,112 +1,167 @@
 // ============================================================================
 // DXF Writer
 //
-// Generates an AutoCAD-compatible DXF file from projected Wall[] data.
-// Walls go on the "WALLS" layer, openings on "OPENINGS" (dashed),
-// and dimension annotations on "DIMENSIONS".
+// Generates AutoCAD-compatible DXF files.
+//
+// Layers:
+//   - EXTERIOR (color 7 / black) — exterior wall lines
+//   - INTERIOR (color 1 / red)   — interior wall lines
+//   - CORTE    (color 7 / black) — facade outlines
+//   - TITULO   (color 5 / blue)  — titles and annotations
+//   - COTAS    (color 3 / green) — dimensions
 // ============================================================================
 
-import type { Loop2D, Wall } from "./types";
+import type { Facade, FloorPlan } from "./types";
 
-const GAP_M = 2.0;
-
-function header(): string {
+function dxfHeader(): string {
   return [
     "0", "SECTION", "2", "HEADER",
     "9", "$ACADVER", "1", "AC1015",
     "9", "$INSUNITS", "70", "6",
     "0", "ENDSEC",
-    // Tables — layer definitions
     "0", "SECTION", "2", "TABLES",
-    "0", "TABLE", "2", "LAYER", "70", "3",
-    "0", "LAYER", "2", "WALLS",      "70", "0", "62", "7",  "6", "CONTINUOUS",
-    "0", "LAYER", "2", "OPENINGS",   "70", "0", "62", "1",  "6", "DASHED",
-    "0", "LAYER", "2", "DIMENSIONS", "70", "0", "62", "3",  "6", "CONTINUOUS",
+    "0", "TABLE", "2", "LAYER", "70", "5",
+    "0", "LAYER", "2", "EXTERIOR",  "70", "0", "62", "7",  "6", "CONTINUOUS",
+    "0", "LAYER", "2", "INTERIOR",  "70", "0", "62", "1",  "6", "CONTINUOUS",
+    "0", "LAYER", "2", "CORTE",     "70", "0", "62", "7",  "6", "CONTINUOUS",
+    "0", "LAYER", "2", "TITULO",    "70", "0", "62", "5",  "6", "CONTINUOUS",
+    "0", "LAYER", "2", "COTAS",     "70", "0", "62", "3",  "6", "CONTINUOUS",
     "0", "ENDTAB",
     "0", "ENDSEC",
-    // Begin entities
     "0", "SECTION", "2", "ENTITIES",
   ].join("\n") + "\n";
 }
 
-function footer(): string {
+function dxfFooter(): string {
   return "0\nENDSEC\n0\nEOF\n";
 }
 
-function polyline(loop: Loop2D, ox: number, oy: number, s: number, layer: string): string {
-  if (loop.vertices.length === 0) return "";
-  const lines: string[] = [
-    "0", "LWPOLYLINE",
-    "8", layer,
-    "90", String(loop.vertices.length),
-    "70", "1", // closed
-  ];
-  for (const v of loop.vertices) {
-    lines.push("10", String((v.x + ox) * s));
-    lines.push("20", String((v.y + oy) * s));
-  }
-  return lines.join("\n") + "\n";
-}
-
-function textEntity(x: number, y: number, h: number, text: string, layer: string): string {
+function dxfLine(
+  x1: number, y1: number,
+  x2: number, y2: number,
+  layer: string,
+): string {
   return [
-    "0", "TEXT",
+    "0", "LINE",
     "8", layer,
-    "10", String(x),
-    "20", String(y),
-    "40", String(h),
-    "1", text,
-    "72", "1", // center-aligned
-    "11", String(x),
-    "21", String(y),
+    "10", String(x1), "20", String(y1),
+    "11", String(x2), "21", String(y2),
   ].join("\n") + "\n";
 }
 
-export function generateDxf(walls: Wall[], scaleDenom: number): string {
+function dxfText(
+  x: number, y: number, h: number, text: string, layer: string,
+): string {
+  return [
+    "0", "TEXT",
+    "8", layer,
+    "10", String(x), "20", String(y),
+    "40", String(h),
+    "1", text,
+    "72", "1",
+    "11", String(x), "21", String(y),
+  ].join("\n") + "\n";
+}
+
+export function generateFacadeDxf(facade: Facade, scaleDenom: number): string {
   const s = 1 / scaleDenom;
-  const textH = 0.15 * s;
-  let out = header();
-  let ox = 0;
+  const textH = 0.003;
+  let out = dxfHeader();
 
-  for (const wall of walls) {
-    // Outer boundary.
-    out += polyline(wall.outer, ox, 0, s, "WALLS");
-
-    // Openings.
-    for (const opening of wall.openings) {
-      out += polyline(opening, ox, 0, s, "OPENINGS");
+  for (const poly of facade.polygons) {
+    const verts = poly.vertices;
+    if (verts.length < 2) continue;
+    // Each polygon is a 2-vertex line segment (edge).
+    if (verts.length === 2) {
+      out += dxfLine(
+        verts[0].x * s, verts[0].y * s,
+        verts[1].x * s, verts[1].y * s,
+        "CORTE",
+      );
+    } else {
+      // Closed polyline for legacy polygons.
+      for (let i = 0; i < verts.length; i++) {
+        const j = (i + 1) % verts.length;
+        out += dxfLine(
+          verts[i].x * s, verts[i].y * s,
+          verts[j].x * s, verts[j].y * s,
+          "CORTE",
+        );
+      }
     }
-
-    // Dimension: width below.
-    out += textEntity(
-      (ox + wall.width * 0.5) * s,
-      -0.4 * s,
-      textH,
-      `${wall.width.toFixed(2)} m`,
-      "DIMENSIONS"
-    );
-
-    // Dimension: height to the right.
-    out += textEntity(
-      (ox + wall.width + 0.3) * s,
-      wall.height * 0.5 * s,
-      textH,
-      `${wall.height.toFixed(2)} m`,
-      "DIMENSIONS"
-    );
-
-    // Wall label above.
-    out += textEntity(
-      (ox + wall.width * 0.5) * s,
-      (wall.height + 0.3) * s,
-      textH,
-      wall.label,
-      "DIMENSIONS"
-    );
-
-    ox += wall.width + GAP_M;
   }
 
-  out += footer();
+  // Title.
+  out += dxfText(
+    facade.width * 0.5 * s,
+    (facade.height + 0.5) * s,
+    textH * 1.5,
+    facade.label,
+    "TITULO",
+  );
+
+  // Dimensions.
+  out += dxfText(
+    facade.width * 0.5 * s,
+    -0.4 * s,
+    textH,
+    `${facade.width.toFixed(2)} m`,
+    "COTAS",
+  );
+  out += dxfText(
+    (facade.width + 0.3) * s,
+    facade.height * 0.5 * s,
+    textH,
+    `${facade.height.toFixed(2)} m`,
+    "COTAS",
+  );
+
+  out += dxfFooter();
+  return out;
+}
+
+export function generateFloorPlanDxf(
+  plan: FloorPlan,
+  scaleDenom: number,
+): string {
+  const s = 1 / scaleDenom;
+  const textH = 0.003;
+  let out = dxfHeader();
+
+  for (const seg of plan.segments) {
+    const layer = seg.isInterior ? "INTERIOR" : "EXTERIOR";
+    out += dxfLine(
+      seg.a.x * s, seg.a.y * s,
+      seg.b.x * s, seg.b.y * s,
+      layer,
+    );
+  }
+
+  // Title.
+  out += dxfText(
+    plan.width * 0.5 * s,
+    (plan.height + 0.5) * s,
+    textH * 1.5,
+    plan.label,
+    "TITULO",
+  );
+
+  // Dimensions.
+  out += dxfText(
+    plan.width * 0.5 * s,
+    -0.4 * s,
+    textH,
+    `${plan.width.toFixed(2)} m`,
+    "COTAS",
+  );
+  out += dxfText(
+    (plan.width + 0.3) * s,
+    plan.height * 0.5 * s,
+    textH,
+    `${plan.height.toFixed(2)} m`,
+    "COTAS",
+  );
+
+  out += dxfFooter();
   return out;
 }
