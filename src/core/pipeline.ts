@@ -7,7 +7,8 @@
 // ============================================================================
 
 import { parseObj } from "./obj-parser";
-import { extractFacades } from "./facade-extractor";
+import { generateCuttingSheets } from "./cutting-sheet";
+import { detectUpAxis, extractFacades } from "./facade-extractor";
 import { extractFloorPlans } from "./floor-plan-extractor";
 import { generateFacadeDxf, generateFloorPlanDxf } from "./dxf-writer";
 import { generatePdf } from "./pdf-writer";
@@ -102,13 +103,16 @@ export function runPipeline(
     return { facades: [], floorPlans: [], files: [], warnings };
   }
 
-  // --- 2. Extract facades ---
-  let facades = extractFacades(faces);
+  // --- 2. Detect up axis once (shared by facades and floor plans) ---
+  const upAxis = detectUpAxis(faces);
 
-  // --- 3. Extract floor plans ---
-  let floorPlans = extractFloorPlans(faces);
+  // --- 3. Extract facades ---
+  let facades = extractFacades(faces, upAxis);
 
-  // --- 4. Normalize units ---
+  // --- 4. Extract floor plans (using same axis as facades) ---
+  let floorPlans = extractFloorPlans(faces, upAxis);
+
+  // --- 5. Normalize units ---
   const unitScale = guessUnitScale(faces);
   if (unitScale !== 1.0) {
     facades = scaleFacades(facades, unitScale);
@@ -123,7 +127,7 @@ export function runPipeline(
     return { facades, floorPlans, files: [], warnings };
   }
 
-  // --- 5. Generate outputs ---
+  // --- 6. Generate outputs ---
   const files: OutputFile[] = [];
   const scaleDenom = opts.scaleDenom;
 
@@ -147,12 +151,23 @@ export function runPipeline(
   }
 
   // PDF: multi-page with all views.
-  const pdfContent = generatePdf(facades, floorPlans, scaleDenom);
+  const pdfContent = generatePdf(facades, floorPlans, scaleDenom, opts.paper);
   if (pdfContent) {
     files.push({
       name: `${stem}_planos.pdf`,
       blob: new Blob([pdfContent], { type: "application/pdf" }),
     });
+  }
+
+  // Cutting sheets (plancha de corte).
+  if (opts.includeCuttingSheet) {
+    const cuttingFiles = generateCuttingSheets(facades);
+    for (const cf of cuttingFiles) {
+      files.push({
+        name: `${stem}_${cf.name}`,
+        blob: new Blob([cf.content], { type: "application/dxf" }),
+      });
+    }
   }
 
   return { facades, floorPlans, files, warnings };

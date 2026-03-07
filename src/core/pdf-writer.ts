@@ -11,7 +11,11 @@
 
 import type { Facade, FloorPlan } from "./types";
 
-const A4 = { w: 297, h: 210 }; // landscape A4 in mm
+const PAPERS: Record<string, { w: number; h: number }> = {
+  A4: { w: 297, h: 210 },  // landscape in mm
+  A3: { w: 420, h: 297 },
+  A1: { w: 841, h: 594 },
+};
 const MM_TO_PT = 72 / 25.4;
 
 function mToPts(m: number, scaleDenom: number): number {
@@ -21,9 +25,10 @@ function mToPts(m: number, scaleDenom: number): number {
 function buildFacadeContent(
   facade: Facade,
   scaleDenom: number,
+  paper: { w: number; h: number } = PAPERS.A4,
 ): string {
-  const pageW = A4.w * MM_TO_PT;
-  const pageH = A4.h * MM_TO_PT;
+  const pageW = paper.w * MM_TO_PT;
+  const pageH = paper.h * MM_TO_PT;
   const margin = 40;
   const fontSize = 10;
 
@@ -94,7 +99,7 @@ function buildFacadeContent(
   cs += `/F1 ${fontSize - 2} Tf\n`;
   cs += `${(pageW - margin).toFixed(2)} ${(margin / 2).toFixed(2)} Td\n`;
   if (fitScale < 0.999) {
-    cs += `(Escala: ajustada para caber en A4) Tj\n`;
+    cs += `(Escala: ajustada para caber en pagina) Tj\n`;
   } else {
     cs += `(Escala: 1:${scaleDenom}) Tj\n`;
   }
@@ -106,9 +111,10 @@ function buildFacadeContent(
 function buildFloorPlanContent(
   plan: FloorPlan,
   scaleDenom: number,
+  paper: { w: number; h: number } = PAPERS.A4,
 ): string {
-  const pageW = A4.w * MM_TO_PT;
-  const pageH = A4.h * MM_TO_PT;
+  const pageW = paper.w * MM_TO_PT;
+  const pageH = paper.h * MM_TO_PT;
   const margin = 40;
   const fontSize = 10;
 
@@ -177,7 +183,7 @@ function buildFloorPlanContent(
   cs += `/F1 ${fontSize - 2} Tf\n`;
   cs += `${(pageW - margin).toFixed(2)} ${(margin / 2).toFixed(2)} Td\n`;
   if (fitScale < 0.999) {
-    cs += `(Escala: ajustada para caber en A4) Tj\n`;
+    cs += `(Escala: ajustada para caber en pagina) Tj\n`;
   } else {
     cs += `(Escala: 1:${scaleDenom}) Tj\n`;
   }
@@ -190,17 +196,19 @@ export function generatePdf(
   facades: Facade[],
   floorPlans: FloorPlan[],
   scaleDenom: number,
+  paperName: string = "A4",
 ): string {
-  const pw = (A4.w * MM_TO_PT).toFixed(2);
-  const ph = (A4.h * MM_TO_PT).toFixed(2);
+  const paper = PAPERS[paperName] ?? PAPERS.A4;
+  const pw = (paper.w * MM_TO_PT).toFixed(2);
+  const ph = (paper.h * MM_TO_PT).toFixed(2);
 
   const pageContents: string[] = [];
 
   for (const facade of facades) {
-    pageContents.push(buildFacadeContent(facade, scaleDenom));
+    pageContents.push(buildFacadeContent(facade, scaleDenom, paper));
   }
   for (const plan of floorPlans) {
-    pageContents.push(buildFloorPlanContent(plan, scaleDenom));
+    pageContents.push(buildFloorPlanContent(plan, scaleDenom, paper));
   }
 
   if (pageContents.length === 0) return "";
