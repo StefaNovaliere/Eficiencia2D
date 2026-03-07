@@ -33,16 +33,16 @@ export interface CuttingSheet {
   }>;
 }
 
-/** Convert facades into cutting panels (wall outlines in mm at 1:1). */
-function facadesToPanels(facades: Facade[]): CuttingPanel[] {
+/** Convert facades into cutting panels (scaled to model mm). */
+function facadesToPanels(facades: Facade[], scaleDenom: number): CuttingPanel[] {
+  const toMm = 1000 / scaleDenom; // metres → mm at model scale
   return facades.map((f) => {
-    const wMm = f.width * 1000; // metres → mm
-    const hMm = f.height * 1000;
-    // Scale outline vertices to mm.
+    const wMm = f.width * toMm;
+    const hMm = f.height * toMm;
     const outline: Vec2[] = [];
     for (const poly of f.polygons) {
       for (const v of poly.vertices) {
-        outline.push({ x: v.x * 1000, y: v.y * 1000 });
+        outline.push({ x: v.x * toMm, y: v.y * toMm });
       }
     }
     return {
@@ -109,6 +109,11 @@ function sheetToDxf(sheet: CuttingSheet): string {
     "9", "$INSUNITS", "70", "4", // mm
     "0", "ENDSEC",
     "0", "SECTION", "2", "TABLES",
+    // LTYPE table (required by Autodesk viewers).
+    "0", "TABLE", "2", "LTYPE", "70", "1",
+    "0", "LTYPE", "2", "CONTINUOUS", "70", "0", "3", "Solid line", "72", "65", "73", "0", "40", "0.0",
+    "0", "ENDTAB",
+    // LAYER table.
     "0", "TABLE", "2", "LAYER", "70", "3",
     "0", "LAYER", "2", "SHEET",   "70", "0", "62", "8", "6", "CONTINUOUS",
     "0", "LAYER", "2", "PANELS",  "70", "0", "62", "7", "6", "CONTINUOUS",
@@ -162,11 +167,12 @@ function sheetToDxf(sheet: CuttingSheet): string {
   return lines.join("\n") + "\n";
 }
 
-/** Generate cutting sheet DXFs from facade data. */
+/** Generate cutting sheet DXFs from facade data at model scale. */
 export function generateCuttingSheets(
   facades: Facade[],
+  scaleDenom: number,
 ): Array<{ name: string; content: string }> {
-  const panels = facadesToPanels(facades);
+  const panels = facadesToPanels(facades, scaleDenom);
   if (panels.length === 0) return [];
 
   const sheets = packPanels(panels);
