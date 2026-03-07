@@ -37,9 +37,9 @@ export function parseObj(text: string): ObjParseResult {
       // Vertex position.  OBJ coordinates are in the model's native unit.
       // SketchUp OBJ export uses inches by default; we convert to metres.
       // If the model was exported in metres, the user can adjust scale.
-      const x = parseFloat(parts[1]) * 0.0254;
-      const y = parseFloat(parts[2]) * 0.0254;
-      const z = parseFloat(parts[3]) * 0.0254;
+      const x = parseFloat(parts[1]);
+      const y = parseFloat(parts[2]);
+      const z = parseFloat(parts[3]);
       if (isFinite(x) && isFinite(y) && isFinite(z)) {
         vertices.push({ x, y, z });
       }
