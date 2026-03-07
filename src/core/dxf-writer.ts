@@ -29,6 +29,9 @@ function dxfHeader(): string {
     "0", "LAYER", "2", "COTAS",     "70", "0", "62", "3",  "6", "CONTINUOUS",
     "0", "ENDTAB",
     "0", "ENDSEC",
+    // Empty BLOCKS section (required by AC1015 / DXF R2000).
+    "0", "SECTION", "2", "BLOCKS",
+    "0", "ENDSEC",
     "0", "SECTION", "2", "ENTITIES",
   ].join("\n") + "\n";
 }
