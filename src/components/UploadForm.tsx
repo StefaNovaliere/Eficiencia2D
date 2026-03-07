@@ -9,6 +9,8 @@ type Status = "idle" | "processing" | "done" | "error";
 export default function UploadForm() {
   const [file, setFile] = useState<File | null>(null);
   const [scale, setScale] = useState(100);
+  const [paper, setPaper] = useState("A4");
+  const [includeCuttingSheet, setIncludeCuttingSheet] = useState(false);
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState("");
   const [dragActive, setDragActive] = useState(false);
@@ -62,7 +64,8 @@ export default function UploadForm() {
 
       const opts: PipelineOptions = {
         scaleDenom: scale,
-        paper: "A4",
+        paper,
+        includeCuttingSheet,
       };
 
       // Run pipeline (synchronous, CPU-bound).
@@ -193,11 +196,35 @@ export default function UploadForm() {
           </div>
 
           <div className="setting-group">
+            <label className="setting-label">Papel</label>
+            <select
+              className="setting-select"
+              value={paper}
+              onChange={(e) => setPaper(e.target.value)}
+            >
+              <option value="A4">A4</option>
+              <option value="A3">A3</option>
+              <option value="A1">A1</option>
+            </select>
+          </div>
+
+          <div className="setting-group">
             <label className="setting-label">Formato de salida</label>
             <div className="chip-row">
               <span className="chip chip--active">DXF + PDF</span>
             </div>
           </div>
+        </div>
+
+        <div className="settings-row">
+          <label className="setting-check">
+            <input
+              type="checkbox"
+              checked={includeCuttingSheet}
+              onChange={(e) => setIncludeCuttingSheet(e.target.checked)}
+            />
+            Plancha de Corte
+          </label>
         </div>
       </div>
 

@@ -56,6 +56,7 @@ export interface FloorPlan {
 export interface PipelineOptions {
   scaleDenom: number;
   paper: string;
+  includeCuttingSheet?: boolean;
 }
 
 /** A generated output file ready for download. */
