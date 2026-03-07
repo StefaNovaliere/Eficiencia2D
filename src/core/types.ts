@@ -13,39 +13,49 @@ export interface Vec2 {
   y: number;
 }
 
-/** A closed loop of 2D points (outer boundary or inner opening). */
+/** A closed loop of 2D points (outer boundary or polygon outline). */
 export interface Loop2D {
   vertices: Vec2[];
+  panelId?: string;
 }
 
 /** A 3D face extracted from the source model. */
 export interface Face3D {
-  /** Vertices of the outer boundary in world space. */
   vertices: Vec3[];
-  /** Normal vector (unit length). */
   normal: Vec3;
-  /** Inner loops (window/door openings). */
   innerLoops: Vec3[][];
+  panelId?: string;
 }
 
-/** A wall projected to its local 2D plane. */
-export interface Wall {
+/** One elevation view of the building (N/S/E/W). */
+export interface Facade {
   label: string;
-  normal: Vec3;
-  vertices3d: Vec3[];
-  outer: Loop2D;
-  openings: Loop2D[];
-  /** Bounding-box width in metres. */
+  direction: Vec3;
+  polygons: Loop2D[];
   width: number;
-  /** Bounding-box height in metres. */
   height: number;
+}
+
+/** A 2D line segment in a floor plan. */
+export interface FloorPlanSegment {
+  a: Vec2;
+  b: Vec2;
+  isInterior: boolean;
+}
+
+/** One horizontal section-cut view at a specific floor level. */
+export interface FloorPlan {
+  label: string;
+  segments: FloorPlanSegment[];
+  width: number;
+  height: number;
+  elevation: number;
 }
 
 /** Options that travel through the full pipeline. */
 export interface PipelineOptions {
-  scaleDenom: number;     // 50 | 100
-  paper: "A3" | "A1";
-  formats: ("dxf" | "pdf")[];
+  scaleDenom: number;
+  paper: string;
 }
 
 /** A generated output file ready for download. */
@@ -68,7 +78,7 @@ export function add(a: Vec3, b: Vec3): Vec3 {
   return { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z };
 }
 
-export function scale(v: Vec3, s: number): Vec3 {
+export function scaleVec(v: Vec3, s: number): Vec3 {
   return { x: v.x * s, y: v.y * s, z: v.z * s };
 }
 
@@ -84,12 +94,12 @@ export function cross(a: Vec3, b: Vec3): Vec3 {
   };
 }
 
-export function length(v: Vec3): number {
+export function vlength(v: Vec3): number {
   return Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
 }
 
 export function normalize(v: Vec3): Vec3 {
-  const len = length(v);
+  const len = vlength(v);
   if (len < 1e-12) return { x: 0, y: 0, z: 0 };
   return { x: v.x / len, y: v.y / len, z: v.z / len };
 }
