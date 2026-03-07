@@ -141,21 +141,13 @@ function buildFloorPlanContent(
 
   let cs = "";
 
-  // Draw wall segments: exterior = black, interior = red.
+  // Draw wall segments (all black).
+  cs += "0 0 0 RG\n0.6 w\n";
   for (const seg of plan.segments) {
-    if (seg.isInterior) {
-      cs += "1 0 0 RG\n"; // red
-    } else {
-      cs += "0 0 0 RG\n"; // black
-    }
-    cs += "0.6 w\n";
     cs += `${tx(seg.a.x).toFixed(4)} ${ty(seg.a.y).toFixed(4)} m\n`;
     cs += `${tx(seg.b.x).toFixed(4)} ${ty(seg.b.y).toFixed(4)} l\n`;
     cs += "S\n";
   }
-
-  // Reset to black.
-  cs += "0 0 0 RG\n";
 
   // Title.
   cs += "BT\n";
