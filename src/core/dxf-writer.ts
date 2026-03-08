@@ -14,30 +14,24 @@ import type { Facade, FloorPlan } from "./types";
 function dxfHeader(): string {
   return [
     "0", "SECTION", "2", "HEADER",
-    "9", "$ACADVER", "1", "AC1015",
-    "9", "$INSUNITS", "70", "6",
+    "9", "$ACADVER", "1", "AC1009",
     "0", "ENDSEC",
     "0", "SECTION", "2", "TABLES",
-    // LTYPE table (required by Autodesk viewers).
     "0", "TABLE", "2", "LTYPE", "70", "1",
     "0", "LTYPE", "2", "CONTINUOUS", "70", "0", "3", "Solid line", "72", "65", "73", "0", "40", "0.0",
     "0", "ENDTAB",
-    // LAYER table.
     "0", "TABLE", "2", "LAYER", "70", "3",
     "0", "LAYER", "2", "CORTE",     "70", "0", "62", "7",  "6", "CONTINUOUS",
     "0", "LAYER", "2", "TITULO",    "70", "0", "62", "5",  "6", "CONTINUOUS",
     "0", "LAYER", "2", "COTAS",     "70", "0", "62", "3",  "6", "CONTINUOUS",
     "0", "ENDTAB",
     "0", "ENDSEC",
-    // Empty BLOCKS section (required by AC1015 / DXF R2000).
-    "0", "SECTION", "2", "BLOCKS",
-    "0", "ENDSEC",
     "0", "SECTION", "2", "ENTITIES",
-  ].join("\n") + "\n";
+  ].join("\r\n") + "\r\n";
 }
 
 function dxfFooter(): string {
-  return "0\nENDSEC\n0\nEOF\n";
+  return "0\r\nENDSEC\r\n0\r\nEOF\r\n";
 }
 
 function dxfLine(
@@ -50,7 +44,7 @@ function dxfLine(
     "8", layer,
     "10", String(x1), "20", String(y1),
     "11", String(x2), "21", String(y2),
-  ].join("\n") + "\n";
+  ].join("\r\n") + "\r\n";
 }
 
 function dxfText(
@@ -62,9 +56,7 @@ function dxfText(
     "10", String(x), "20", String(y),
     "40", String(h),
     "1", text,
-    "72", "1",
-    "11", String(x), "21", String(y),
-  ].join("\n") + "\n";
+  ].join("\r\n") + "\r\n";
 }
 
 export function generateFacadeDxf(facade: Facade, scaleDenom: number): string {
