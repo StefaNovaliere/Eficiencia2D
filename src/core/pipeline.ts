@@ -7,7 +7,7 @@
 // ============================================================================
 
 import { parseObj } from "./obj-parser";
-import { buildPanelIdMap, generateCuttingSheets } from "./cutting-sheet";
+import { generateCuttingSheets } from "./cutting-sheet";
 import { detectUpAxis, extractFacades } from "./facade-extractor";
 import { extractFloorPlans } from "./floor-plan-extractor";
 import { generateFacadeDxf, generateFloorPlanDxf } from "./dxf-writer";
@@ -138,13 +138,8 @@ export function runPipeline(
     });
   }
 
-  // Build panel ID map if cutting sheets are requested (used for PDF annotations too).
-  const panelIdMap = opts.includeCuttingSheet
-    ? buildPanelIdMap(faces, upAxis)
-    : undefined;
-
   // PDF: multi-page with all views.
-  const pdfContent = generatePdf(facades, floorPlans, scaleDenom, opts.paper, panelIdMap);
+  const pdfContent = generatePdf(facades, floorPlans, scaleDenom, opts.paper);
   if (pdfContent) {
     files.push({
       name: `${stem}_planos.pdf`,
