@@ -207,7 +207,7 @@ def generate_cutting_dxf(layout: CuttingLayout) -> str:
         msp.add_lwpolyline(
             [(x, y), (x + w, y), (x + w, y + h), (x, y + h)],
             close=True,
-            dxfattribs={"layer": "CORTE"},
+            dxfattribs={"layer": "CORTE", "color": 1},
         )
 
         # Reference label at centroid on GRABADO (blue).
@@ -218,7 +218,7 @@ def generate_cutting_dxf(layout: CuttingLayout) -> str:
         t = msp.add_text(
             piece.ref_id,
             height=label_h,
-            dxfattribs={"layer": "GRABADO"},
+            dxfattribs={"layer": "GRABADO", "color": 5},
         )
         t.set_placement((cx, cy), align=TextEntityAlignment.MIDDLE_CENTER)
 
@@ -228,7 +228,7 @@ def generate_cutting_dxf(layout: CuttingLayout) -> str:
     tt = msp.add_text(
         layout.label,
         height=title_h,
-        dxfattribs={"layer": "GRABADO"},
+        dxfattribs={"layer": "GRABADO", "color": 5},
     )
     tt.set_placement(
         (layout.total_width / 2.0, title_y),
@@ -240,7 +240,7 @@ def generate_cutting_dxf(layout: CuttingLayout) -> str:
     sn = msp.add_text(
         note,
         height=2.5,
-        dxfattribs={"layer": "GRABADO"},
+        dxfattribs={"layer": "GRABADO", "color": 5},
     )
     sn.set_placement(
         (layout.total_width / 2.0, -6.0),
