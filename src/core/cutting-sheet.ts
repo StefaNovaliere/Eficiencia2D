@@ -110,23 +110,17 @@ function r(n: number): string {
 function sheetToDxf(sheet: CuttingSheet, scaleDenom: number): string {
   const lines: string[] = [
     "0", "SECTION", "2", "HEADER",
-    "9", "$ACADVER", "1", "AC1015",
-    "9", "$INSUNITS", "70", "4", // mm
+    "9", "$ACADVER", "1", "AC1009",
     "0", "ENDSEC",
     "0", "SECTION", "2", "TABLES",
-    // LTYPE table (required by Autodesk viewers).
     "0", "TABLE", "2", "LTYPE", "70", "1",
     "0", "LTYPE", "2", "CONTINUOUS", "70", "0", "3", "Solid line", "72", "65", "73", "0", "40", "0.0",
     "0", "ENDTAB",
-    // LAYER table.
     "0", "TABLE", "2", "LAYER", "70", "3",
     "0", "LAYER", "2", "SHEET",   "70", "0", "62", "8", "6", "CONTINUOUS",
     "0", "LAYER", "2", "PANELS",  "70", "0", "62", "7", "6", "CONTINUOUS",
     "0", "LAYER", "2", "LABELS",  "70", "0", "62", "5", "6", "CONTINUOUS",
     "0", "ENDTAB",
-    "0", "ENDSEC",
-    // Empty BLOCKS section (required by AC1015 / DXF R2000).
-    "0", "SECTION", "2", "BLOCKS",
     "0", "ENDSEC",
     "0", "SECTION", "2", "ENTITIES",
   ];
@@ -174,7 +168,7 @@ function sheetToDxf(sheet: CuttingSheet, scaleDenom: number): string {
   }
 
   lines.push("0", "ENDSEC", "0", "EOF");
-  return lines.join("\n") + "\n";
+  return lines.join("\r\n") + "\r\n";
 }
 
 /** Generate cutting sheet DXFs from facade data at model scale. */
