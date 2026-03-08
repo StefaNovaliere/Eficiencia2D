@@ -12,7 +12,7 @@
 //   5. Normalize coordinates so (0,0) is bottom-left.
 // ============================================================================
 
-import type { Face3D, Facade, Loop2D, Vec2, Vec3 } from "./types";
+import type { Face3D, Facade, Loop2D, PanelLabel, Vec2, Vec3 } from "./types";
 import { cross, dot, normalize, vlength } from "./types";
 
 const VERTICAL_EPSILON = 0.20;
@@ -120,11 +120,28 @@ function extractWithAxis(faces: Face3D[], up: UpAxis): Facade[] {
     // triangulation lines (edges shared between two faces cancel out).
     const edgeCounts = new Map<string, { ax: number; ay: number; bx: number; by: number }>();
 
+    // Track projected vertex centroids per OBJ group (panelId).
+    const panelVertices = new Map<string, { sumX: number; sumY: number; count: number }>();
+
     for (const face of clusterFaces) {
       const pts: Vec2[] = face.vertices.map((v) => ({
         x: dot(v, uAxis),
         y: dot(v, vAxis),
       }));
+
+      // Accumulate centroid data for this face's panelId.
+      if (face.panelId) {
+        let entry = panelVertices.get(face.panelId);
+        if (!entry) {
+          entry = { sumX: 0, sumY: 0, count: 0 };
+          panelVertices.set(face.panelId, entry);
+        }
+        for (const pt of pts) {
+          entry.sumX += pt.x;
+          entry.sumY += pt.y;
+          entry.count++;
+        }
+      }
 
       // Walk edges of this polygon.
       for (let i = 0; i < pts.length; i++) {
@@ -170,6 +187,17 @@ function extractWithAxis(faces: Face3D[], up: UpAxis): Facade[] {
       ],
     }));
 
+    // Compute panel label positions (centroids shifted to facade origin).
+    const panelLabels: PanelLabel[] = [];
+    for (const [panelId, entry] of panelVertices) {
+      if (entry.count === 0) continue;
+      panelLabels.push({
+        panelId,
+        cx: entry.sumX / entry.count - minU,
+        cy: entry.sumY / entry.count - minV,
+      });
+    }
+
     let label = directionLabel(dir, up);
     const existing = new Set(facades.map((f) => f.label));
     if (existing.has(label)) {
@@ -178,7 +206,7 @@ function extractWithAxis(faces: Face3D[], up: UpAxis): Facade[] {
       label = `${label} ${n}`;
     }
 
-    facades.push({ label, direction: dir, polygons, width, height });
+    facades.push({ label, direction: dir, polygons, width, height, panelLabels });
   }
 
   const order: Record<string, number> = { Norte: 0, Este: 1, Sur: 2, Oeste: 3 };
