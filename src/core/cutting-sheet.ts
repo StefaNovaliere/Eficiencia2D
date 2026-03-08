@@ -15,9 +15,7 @@ import type { Face3D, Vec2, Vec3 } from "./types";
 import { cross, dot, normalize, vlength } from "./types";
 import { detectFloorLevels } from "./floor-plan-extractor";
 
-const SHEET_W_MM = 1000;
-const SHEET_H_MM = 600;
-const PANEL_GAP_MM = 10;
+const GAP_M = 0.5; // gap between panels in metres
 const VERTICAL_EPSILON = 0.20;
 const HORIZONTAL_EPSILON = 0.25;
 
@@ -62,22 +60,11 @@ interface WallPanel {
   edges: Array<{ a: Vec2; b: Vec2 }>;
 }
 
-interface CuttingPanel {
-  id: string;
-  widthMm: number;
-  heightMm: number;
-  edges: Array<{ a: Vec2; b: Vec2 }>;
-  realWidthM: number;
-  realHeightM: number;
-}
-
-interface CuttingSheet {
-  index: number;
-  panels: Array<{
-    panel: CuttingPanel;
-    x: number;
-    y: number;
-  }>;
+/** A panel placed at a position in the layout (coordinates in metres). */
+interface PlacedPanel {
+  panel: WallPanel;
+  x: number; // placement x in metres
+  y: number; // placement y in metres
 }
 
 // ---------------------------------------------------------------------------
@@ -272,78 +259,61 @@ function decomposeIntoPanels(
 }
 
 // ---------------------------------------------------------------------------
-// Scale panels from metres → mm at model scale
+// Vertical grid layout — no fixed sheet, grows downward.
+// Sort panels by height descending, place left-to-right in rows.
+// Largest panels end up at the bottom (DXF Y grows up, so we build
+// rows upward and then flip so biggest are at the bottom visually).
 // ---------------------------------------------------------------------------
 
-function panelsToCuttingPanels(
-  panels: WallPanel[],
-  scaleDenom: number,
-): CuttingPanel[] {
-  const toMm = 1000 / scaleDenom;
-  return panels.map((p) => ({
-    id: p.id,
-    widthMm: p.widthM * toMm,
-    heightMm: p.heightM * toMm,
-    edges: p.edges.map((e) => ({
-      a: { x: e.a.x * toMm, y: e.a.y * toMm },
-      b: { x: e.b.x * toMm, y: e.b.y * toMm },
-    })),
-    realWidthM: p.widthM,
-    realHeightM: p.heightM,
-  }));
-}
+function layoutPanels(panels: WallPanel[]): PlacedPanel[] {
+  if (panels.length === 0) return [];
 
-// ---------------------------------------------------------------------------
-// Shelf-packing
-// ---------------------------------------------------------------------------
+  // Sort by height descending (tallest first → bottom rows).
+  const sorted = [...panels].sort((a, b) => b.heightM - a.heightM);
 
-function packPanels(panels: CuttingPanel[]): CuttingSheet[] {
-  const sorted = [...panels].sort((a, b) => b.heightMm - a.heightMm);
+  // Build rows top-to-bottom (we'll flip Y later so largest = bottom).
+  const placed: PlacedPanel[] = [];
+  let rowX = 0;
+  let rowY = 0;    // current row's top edge (grows downward as negative)
+  let rowH = 0;
 
-  const sheets: CuttingSheet[] = [];
-  let currentSheet: CuttingSheet = { index: 1, panels: [] };
-  let shelfX = 0;
-  let shelfY = 0;
-  let shelfH = 0;
+  // Use the widest panel to set a soft max row width.
+  const maxRowW = Math.max(...sorted.map((p) => p.widthM)) * 4;
 
   for (const panel of sorted) {
-    const pw = panel.widthMm + PANEL_GAP_MM;
-    const ph = panel.heightMm + PANEL_GAP_MM;
+    const pw = panel.widthM + GAP_M;
+    const ph = panel.heightM + GAP_M;
 
-    if (shelfX + pw <= SHEET_W_MM && shelfY + ph <= SHEET_H_MM) {
-      currentSheet.panels.push({ panel, x: shelfX, y: shelfY });
-      shelfX += pw;
-      shelfH = Math.max(shelfH, ph);
-    } else if (shelfY + shelfH + ph <= SHEET_H_MM) {
-      shelfY += shelfH;
-      shelfX = 0;
-      shelfH = ph;
-      currentSheet.panels.push({ panel, x: shelfX, y: shelfY });
-      shelfX = pw;
-    } else {
-      if (currentSheet.panels.length > 0) {
-        sheets.push(currentSheet);
-      }
-      currentSheet = { index: sheets.length + 1, panels: [] };
-      shelfX = pw;
-      shelfY = 0;
-      shelfH = ph;
-      currentSheet.panels.push({ panel, x: 0, y: 0 });
+    if (rowX > 0 && rowX + pw > maxRowW) {
+      // Start new row below.
+      rowY -= rowH;
+      rowX = 0;
+      rowH = 0;
     }
+
+    placed.push({ panel, x: rowX, y: rowY - panel.heightM });
+    rowX += pw;
+    rowH = Math.max(rowH, ph);
   }
 
-  if (currentSheet.panels.length > 0) {
-    sheets.push(currentSheet);
+  // Shift everything so min Y = 0 (all panels above origin).
+  const minY = Math.min(...placed.map((p) => p.y));
+  for (const p of placed) {
+    p.y -= minY;
   }
 
-  return sheets;
+  return placed;
 }
 
 // ---------------------------------------------------------------------------
-// DXF generation
+// DXF generation — all panels in a single DXF, no sheet border
 // ---------------------------------------------------------------------------
 
-function sheetToDxf(sheet: CuttingSheet): string {
+function panelsToDxf(placed: PlacedPanel[], scaleDenom: number): string {
+  const s = 1 / scaleDenom; // metres → model units
+  const textH = 0.15 / scaleDenom;
+  const dimTextH = 0.12 / scaleDenom;
+
   const lines: string[] = [
     "0", "SECTION", "2", "HEADER",
     "9", "$ACADVER", "1", "AC1009",
@@ -352,8 +322,7 @@ function sheetToDxf(sheet: CuttingSheet): string {
     "0", "TABLE", "2", "LTYPE", "70", "1",
     "0", "LTYPE", "2", "CONTINUOUS", "70", "0", "3", "Solid line", "72", "65", "73", "0", "40", "0.0",
     "0", "ENDTAB",
-    "0", "TABLE", "2", "LAYER", "70", "3",
-    "0", "LAYER", "2", "SHEET",  "70", "0", "62", "8", "6", "CONTINUOUS",
+    "0", "TABLE", "2", "LAYER", "70", "2",
     "0", "LAYER", "2", "PANELS", "70", "0", "62", "7", "6", "CONTINUOUS",
     "0", "LAYER", "2", "LABELS", "70", "0", "62", "1", "6", "CONTINUOUS",
     "0", "ENDTAB",
@@ -363,28 +332,21 @@ function sheetToDxf(sheet: CuttingSheet): string {
 
   const addLine = (x1: number, y1: number, x2: number, y2: number, layer: string) => {
     lines.push("0", "LINE", "8", layer,
-      "10", r(x1), "20", r(y1),
-      "11", r(x2), "21", r(y2));
+      "10", r(x1 * s), "20", r(y1 * s),
+      "11", r(x2 * s), "21", r(y2 * s));
   };
 
   const addText = (x: number, y: number, h: number, text: string, layer: string) => {
     lines.push("0", "TEXT", "8", layer,
-      "10", r(x), "20", r(y),
-      "40", String(h), "1", text);
+      "10", r(x * s), "20", r(y * s),
+      "40", r(h), "1", text);
   };
 
-  // Sheet border.
-  addLine(0, 0, SHEET_W_MM, 0, "SHEET");
-  addLine(SHEET_W_MM, 0, SHEET_W_MM, SHEET_H_MM, "SHEET");
-  addLine(SHEET_W_MM, SHEET_H_MM, 0, SHEET_H_MM, "SHEET");
-  addLine(0, SHEET_H_MM, 0, 0, "SHEET");
+  for (const { panel, x, y } of placed) {
+    const pw = panel.widthM;
+    const ph = panel.heightM;
 
-  // Draw each panel.
-  for (const { panel, x, y } of sheet.panels) {
-    const pw = panel.widthMm;
-    const ph = panel.heightMm;
-
-    // Draw outline edges (translated to placement position).
+    // Draw panel outline edges.
     for (const edge of panel.edges) {
       addLine(
         x + edge.a.x, y + edge.a.y,
@@ -393,15 +355,15 @@ function sheetToDxf(sheet: CuttingSheet): string {
       );
     }
 
-    // Panel ID (red, above panel).
-    addText(x + pw / 2, y + ph + 2, 5, panel.id, "LABELS");
+    // Panel ID label (red, above panel).
+    addText(x + pw / 2, y + ph + GAP_M * 0.15, textH, panel.id, "LABELS");
 
     // Dimensions below panel.
     addText(
       x + pw / 2,
-      y - 5,
-      4,
-      `${panel.realWidthM.toFixed(2)} x ${panel.realHeightM.toFixed(2)}`,
+      y - GAP_M * 0.3,
+      dimTextH,
+      `${pw.toFixed(2)} x ${ph.toFixed(2)}`,
       "LABELS",
     );
   }
@@ -419,14 +381,11 @@ export function generateCuttingSheets(
   upAxis: "Y" | "Z",
   scaleDenom: number,
 ): Array<{ name: string; content: string }> {
-  const wallPanels = decomposeIntoPanels(faces, upAxis);
-  if (wallPanels.length === 0) return [];
+  const panels = decomposeIntoPanels(faces, upAxis);
+  if (panels.length === 0) return [];
 
-  const cuttingPanels = panelsToCuttingPanels(wallPanels, scaleDenom);
-  const sheets = packPanels(cuttingPanels);
+  const placed = layoutPanels(panels);
+  const content = panelsToDxf(placed, scaleDenom);
 
-  return sheets.map((sheet) => ({
-    name: `Plancha_de_Corte${sheets.length > 1 ? `_${sheet.index}` : ""}.dxf`,
-    content: sheetToDxf(sheet),
-  }));
+  return [{ name: "Plancha_de_Corte.dxf", content }];
 }
