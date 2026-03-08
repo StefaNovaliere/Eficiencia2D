@@ -8,9 +8,9 @@ Using ezdxf guarantees structurally valid DXF (proper header, tables,
 entities section, and EOF).
 
 Layers follow laser-cutter conventions:
-  - CORTE   (color 7 / black) — cut lines (panel/polygon outlines)
-  - MARCA   (color 1 / red)   — reference labels (A1, B2...), dimensions
+  - CORTE   (color 1 / red)   — cut lines (panel/polygon outlines)
   - GRABADO (color 5 / blue)  — titles, scale text, engrave marks
+  - MARCA   (color 7 / black) — reference labels (A1, B2...), dimensions
 """
 
 from __future__ import annotations
@@ -27,9 +27,9 @@ from .types import ComponentSheet, Facade
 def _new_doc() -> ezdxf.document.Drawing:
     """Create a new DXF R2010 document with laser-cutter layers."""
     doc = ezdxf.new("R2010")
-    doc.layers.add("CORTE", color=7)       # black — cut lines
-    doc.layers.add("MARCA", color=1)       # red — marks / labels
+    doc.layers.add("CORTE", color=1)       # red — cut lines
     doc.layers.add("GRABADO", color=5)     # blue — engrave / titles
+    doc.layers.add("MARCA", color=7)       # black — marks / labels / dimensions
     return doc
 
 
