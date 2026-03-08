@@ -41,7 +41,7 @@ function faceArea(face: Face3D): number {
   return 0.5 * Math.sqrt(sx * sx + sy * sy + sz * sz);
 }
 
-function detectFloorLevels(faces: Face3D[], up: UpAxis): number[] {
+export function detectFloorLevels(faces: Face3D[], up: "Y" | "Z"): number[] {
   // Collect ALL horizontal faces, even tiny triangulated mesh pieces.
   const elevations: Array<{ elev: number; area: number }> = [];
 
