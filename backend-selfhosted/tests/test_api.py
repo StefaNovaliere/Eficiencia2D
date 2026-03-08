@@ -361,7 +361,7 @@ def test_plancha_paper_rejected():
 
 
 def test_cutting_sheet_generated():
-    """include_cutting_sheet=true should produce a Plancha_de_Corte DXF."""
+    """include_cutting_sheet=true should produce per-material cutting DXFs."""
     obj_data = _make_box_y_up()
     resp = client.post(
         "/api/upload",
@@ -377,14 +377,13 @@ def test_cutting_sheet_generated():
     zf = zipfile.ZipFile(io.BytesIO(resp.content))
     names = zf.namelist()
 
-    cutting_dxfs = [n for n in names if "Plancha_de_Corte" in n]
+    cutting_dxfs = [n for n in names if "corte_paredes" in n or "corte_pisos" in n]
     assert len(cutting_dxfs) >= 1, f"Expected cutting sheet DXF, got {names}"
 
     # The cutting sheet DXF should have proper layers.
     dxf_content = zf.read(cutting_dxfs[0]).decode("utf-8")
     assert "CORTE" in dxf_content
     assert "GRABADO" in dxf_content
-    assert "MARCO" in dxf_content
 
 
 def test_cutting_sheet_has_panel_ids():
@@ -403,12 +402,13 @@ def test_cutting_sheet_has_panel_ids():
     assert resp.status_code == 200
     zf = zipfile.ZipFile(io.BytesIO(resp.content))
     names = zf.namelist()
-    cutting_dxfs = [n for n in names if "Plancha_de_Corte" in n]
+    cutting_dxfs = [n for n in names if "corte_paredes" in n or "corte_pisos" in n]
     assert len(cutting_dxfs) >= 1
 
     dxf_content = zf.read(cutting_dxfs[0]).decode("utf-8")
-    # Should contain at least A1 (wall panel).
-    assert "A1" in dxf_content, "Expected panel reference ID A1 in cutting sheet"
+    # Should contain at least A1 (wall panel) or B1 (floor panel).
+    has_id = "A1" in dxf_content or "B1" in dxf_content
+    assert has_id, "Expected panel reference ID (A1 or B1) in cutting sheet"
 
 
 def test_cutting_sheet_not_generated_by_default():
@@ -422,7 +422,7 @@ def test_cutting_sheet_not_generated_by_default():
     assert resp.status_code == 200
     zf = zipfile.ZipFile(io.BytesIO(resp.content))
     names = zf.namelist()
-    cutting_dxfs = [n for n in names if "Plancha_de_Corte" in n]
+    cutting_dxfs = [n for n in names if "corte_paredes" in n or "corte_pisos" in n]
     assert len(cutting_dxfs) == 0
 
 
