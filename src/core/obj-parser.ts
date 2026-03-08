@@ -23,6 +23,7 @@ export function parseObj(text: string): ObjParseResult {
   const warnings: string[] = [];
   const vertices: Vec3[] = [];
   const faces: Face3D[] = [];
+  let currentGroup = "";
 
   const lines = text.split(/\r?\n/);
 
@@ -33,7 +34,10 @@ export function parseObj(text: string): ObjParseResult {
     const parts = line.split(/\s+/);
     const keyword = parts[0];
 
-    if (keyword === "v") {
+    if (keyword === "g" || keyword === "o") {
+      // Group or object name — used as component ID for cutting sheets.
+      currentGroup = parts.slice(1).join(" ") || "";
+    } else if (keyword === "v") {
       // Vertex position.  OBJ coordinates are in the model's native unit.
       // SketchUp OBJ export uses inches by default; we convert to metres.
       // If the model was exported in metres, the user can adjust scale.
@@ -72,7 +76,7 @@ export function parseObj(text: string): ObjParseResult {
       const e2 = sub(faceVerts[2], faceVerts[0]);
       const normal = normalize(cross(e1, e2));
 
-      faces.push({ vertices: faceVerts, normal, innerLoops: [] });
+      faces.push({ vertices: faceVerts, normal, innerLoops: [], panelId: currentGroup || undefined });
     }
   }
 
