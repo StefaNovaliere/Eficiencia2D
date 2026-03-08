@@ -4,9 +4,9 @@
 // Generates AutoCAD-compatible DXF files.
 //
 // Layers:
-//   - CORTE    (color 7 / black) — wall and facade outlines
-//   - TITULO   (color 5 / blue)  — titles and annotations
-//   - COTAS    (color 3 / green) — dimensions
+//   - CORTE    (color 1 / red)   — wall and facade outlines (cut lines)
+//   - TITULO   (color 5 / blue)  — titles and annotations (engrave)
+//   - COTAS    (color 7 / black) — dimensions (engrave)
 // ============================================================================
 
 import type { Facade, FloorPlan } from "./types";
@@ -21,9 +21,9 @@ function dxfHeader(): string {
     "0", "LTYPE", "2", "CONTINUOUS", "70", "0", "3", "Solid line", "72", "65", "73", "0", "40", "0.0",
     "0", "ENDTAB",
     "0", "TABLE", "2", "LAYER", "70", "3",
-    "0", "LAYER", "2", "CORTE",     "70", "0", "62", "7",  "6", "CONTINUOUS",
+    "0", "LAYER", "2", "CORTE",     "70", "0", "62", "1",  "6", "CONTINUOUS",
     "0", "LAYER", "2", "TITULO",    "70", "0", "62", "5",  "6", "CONTINUOUS",
-    "0", "LAYER", "2", "COTAS",     "70", "0", "62", "3",  "6", "CONTINUOUS",
+    "0", "LAYER", "2", "COTAS",     "70", "0", "62", "7",  "6", "CONTINUOUS",
     "0", "ENDTAB",
     "0", "ENDSEC",
     "0", "SECTION", "2", "ENTITIES",
@@ -34,6 +34,13 @@ function dxfFooter(): string {
   return "0\r\nENDSEC\r\n0\r\nEOF\r\n";
 }
 
+// Layer → ACI color mapping (explicit per entity for viewer compatibility).
+const LAYER_COLOR: Record<string, string> = {
+  CORTE: "1",    // red — cut lines
+  TITULO: "5",   // blue — titles (engrave)
+  COTAS: "7",    // black — dimensions (engrave)
+};
+
 function dxfLine(
   x1: number, y1: number,
   x2: number, y2: number,
@@ -42,6 +49,7 @@ function dxfLine(
   return [
     "0", "LINE",
     "8", layer,
+    "62", LAYER_COLOR[layer] ?? "7",
     "10", String(x1), "20", String(y1),
     "11", String(x2), "21", String(y2),
   ].join("\r\n") + "\r\n";
@@ -53,6 +61,7 @@ function dxfText(
   return [
     "0", "TEXT",
     "8", layer,
+    "62", LAYER_COLOR[layer] ?? "7",
     "10", String(x), "20", String(y),
     "40", String(h),
     "1", text,
