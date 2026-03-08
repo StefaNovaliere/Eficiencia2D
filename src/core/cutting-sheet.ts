@@ -424,23 +424,32 @@ function panelsToDxf(placed: PlacedPanel[]): string {
     "0", "ENDTAB",
     // Layers
     "0", "TABLE", "2", "LAYER", "70", "3",
-    "0", "LAYER", "2", "CORTE",     "70", "0", "62", "7",  "6", "CONTINUOUS",
-    "0", "LAYER", "2", "ETIQUETAS", "70", "0", "62", "1",  "6", "CONTINUOUS",
-    "0", "LAYER", "2", "COTAS",     "70", "0", "62", "3",  "6", "CONTINUOUS",
+    "0", "LAYER", "2", "CORTE",     "70", "0", "62", "1",  "6", "CONTINUOUS",
+    "0", "LAYER", "2", "ETIQUETAS", "70", "0", "62", "5",  "6", "CONTINUOUS",
+    "0", "LAYER", "2", "COTAS",     "70", "0", "62", "7",  "6", "CONTINUOUS",
     "0", "ENDTAB",
     "0", "ENDSEC",
     // ENTITIES
     "0", "SECTION", "2", "ENTITIES",
   ];
 
+  // Layer → ACI color mapping (explicit per entity for viewer compatibility).
+  const layerColor: Record<string, string> = {
+    CORTE: "1",       // red — cut lines
+    ETIQUETAS: "5",   // blue — panel IDs (engrave)
+    COTAS: "7",       // black — dimensions (engrave)
+  };
+
   const addLine = (x1: number, y1: number, x2: number, y2: number, layer: string) => {
     lines.push("0", "LINE", "8", layer,
+      "62", layerColor[layer] ?? "7",
       "10", r(x1), "20", r(y1),
       "11", r(x2), "21", r(y2));
   };
 
   const addText = (x: number, y: number, h: number, text: string, layer: string) => {
     lines.push("0", "TEXT", "8", layer,
+      "62", layerColor[layer] ?? "7",
       "10", r(x), "20", r(y),
       "40", r(h), "1", text,
       "72", "1",  // horizontal justification = center
@@ -451,7 +460,7 @@ function panelsToDxf(placed: PlacedPanel[]): string {
     const pw = panel.widthM;
     const ph = panel.heightM;
 
-    // Draw panel outline edges (CORTE layer — black).
+    // Draw panel outline edges (CORTE layer — red).
     for (const edge of panel.edges) {
       addLine(
         x + edge.a.x, y + edge.a.y,
@@ -460,7 +469,7 @@ function panelsToDxf(placed: PlacedPanel[]): string {
       );
     }
 
-    // Panel ID label centered above panel (ETIQUETAS layer — red).
+    // Panel ID label centered above panel (ETIQUETAS layer — blue).
     addText(
       x + pw / 2,
       y + ph + GAP_M * 0.2,
@@ -469,7 +478,7 @@ function panelsToDxf(placed: PlacedPanel[]): string {
       "ETIQUETAS",
     );
 
-    // Dimensions below panel (COTAS layer — green).
+    // Dimensions below panel (COTAS layer — black).
     addText(
       x + pw / 2,
       y - GAP_M * 0.35,
