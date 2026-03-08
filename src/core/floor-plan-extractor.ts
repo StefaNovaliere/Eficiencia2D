@@ -11,11 +11,12 @@
 import type { Face3D, FloorPlan, FloorPlanSegment, Vec2, Vec3 } from "./types";
 import { cross, vlength, sub } from "./types";
 
-const MIN_GROUP_AREA = 1.0; // m² — minimum *total* area for a floor-level group
-const MIN_FLOOR_GAP = 1.8; // m — minimum vertical gap between distinct floors
 const CUT_HEIGHT = 1.0;
 const HORIZONTAL_EPSILON = 0.25;
 const VERTICAL_EPSILON = 0.20;
+const BIN_SIZE = 0.3;          // m — histogram bin width for floor detection
+const MIN_FLOOR_GAP = 2.0;    // m — merge peaks closer than this
+const PEAK_AREA_RATIO = 0.08; // peaks must have ≥ 8% of the tallest bin's area
 
 type UpAxis = "Y" | "Z";
 
@@ -56,27 +57,57 @@ function detectFloorLevels(faces: Face3D[], up: UpAxis): number[] {
 
   if (elevations.length === 0) return [];
 
-  elevations.sort((a, b) => a.elev - b.elev);
+  // Histogram-based floor detection.
+  const minElev = Math.min(...elevations.map((e) => e.elev));
+  const maxElev = Math.max(...elevations.map((e) => e.elev));
+  const numBins = Math.max(1, Math.ceil((maxElev - minElev) / BIN_SIZE) + 1);
+  const bins = new Float64Array(numBins);
 
-  // Gap-based grouping.
-  const groups: Array<Array<{ elev: number; area: number }>> = [[elevations[0]]];
-  for (let i = 1; i < elevations.length; i++) {
-    if (elevations[i].elev - elevations[i - 1].elev >= MIN_FLOOR_GAP) {
-      groups.push([]);
+  for (const { elev, area } of elevations) {
+    const idx = Math.min(Math.floor((elev - minElev) / BIN_SIZE), numBins - 1);
+    bins[idx] += area;
+  }
+
+  // Find peaks: bins that are local maxima or above the area threshold.
+  const maxBinArea = Math.max(...bins);
+  const threshold = maxBinArea * PEAK_AREA_RATIO;
+
+  const peakElevations: Array<{ elev: number; area: number }> = [];
+  for (let i = 0; i < numBins; i++) {
+    if (bins[i] < threshold) continue;
+    const isLocalMax =
+      (i === 0 || bins[i] >= bins[i - 1]) &&
+      (i === numBins - 1 || bins[i] >= bins[i + 1]);
+    if (!isLocalMax) continue;
+    // Compute area-weighted average elevation for faces in this bin.
+    const binLow = minElev + i * BIN_SIZE;
+    const binHigh = binLow + BIN_SIZE;
+    let sumArea = 0, sumWeighted = 0;
+    for (const { elev, area } of elevations) {
+      if (elev >= binLow && elev < binHigh) {
+        sumArea += area;
+        sumWeighted += elev * area;
+      }
     }
-    groups[groups.length - 1].push(elevations[i]);
+    peakElevations.push({ elev: sumWeighted / sumArea, area: sumArea });
   }
 
-  // Filter: only keep groups whose *total* slab area is significant.
+  // Merge peaks closer than MIN_FLOOR_GAP.
+  peakElevations.sort((a, b) => a.elev - b.elev);
   const levels: number[] = [];
-  for (const g of groups) {
-    const totalArea = g.reduce((s, e) => s + e.area, 0);
-    if (totalArea < MIN_GROUP_AREA) continue;
-    const avgElev = g.reduce((s, e) => s + e.elev * e.area, 0) / totalArea;
-    levels.push(avgElev);
+  for (const peak of peakElevations) {
+    if (levels.length > 0 && peak.elev - levels[levels.length - 1] < MIN_FLOOR_GAP) {
+      // Keep the one with more area — replace if this peak is bigger.
+      const prevIdx = levels.length - 1;
+      const prevPeak = peakElevations.find((p) => Math.abs(p.elev - levels[prevIdx]) < 1e-9);
+      if (prevPeak && peak.area > prevPeak.area) {
+        levels[prevIdx] = peak.elev;
+      }
+    } else {
+      levels.push(peak.elev);
+    }
   }
 
-  levels.sort((a, b) => a - b);
   return levels;
 }
 
