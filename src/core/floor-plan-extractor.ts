@@ -8,7 +8,7 @@
 // All wall segments are drawn uniformly in black (CORTE layer).
 // ============================================================================
 
-import type { Face3D, FloorPlan, FloorPlanSegment, PanelLabel, Vec2, Vec3 } from "./types";
+import type { Face3D, FloorPlan, FloorPlanSegment, Vec2, Vec3 } from "./types";
 import { cross, vlength, sub } from "./types";
 
 const CUT_HEIGHT = 1.0;
@@ -161,6 +161,17 @@ function intersectFaceWithPlane(
   return [];
 }
 
+/** Convert raw segments to FloorPlanSegments (all drawn uniformly). */
+function toFloorPlanSegments(
+  segments: Array<{ a: Vec2; b: Vec2 }>,
+): FloorPlanSegment[] {
+  return segments.map((s) => ({
+    a: s.a,
+    b: s.b,
+    isInterior: false, // all segments drawn uniformly in black
+  }));
+}
+
 function extractWithAxis(faces: Face3D[], up: UpAxis): FloorPlan[] {
   const levels = detectFloorLevels(faces, up);
   if (levels.length === 0) return [];
@@ -176,7 +187,7 @@ function extractWithAxis(faces: Face3D[], up: UpAxis): FloorPlan[] {
     const floorElev = levels[idx];
     const cutElev = floorElev + CUT_HEIGHT;
 
-    const rawSegments: Array<{ a: Vec2; b: Vec2; panelId?: string }> = [];
+    const rawSegments: Array<{ a: Vec2; b: Vec2 }> = [];
 
     for (const face of verticalFaces) {
       const ups = face.vertices.map((v) => getUp(v, up));
@@ -187,7 +198,7 @@ function extractWithAxis(faces: Face3D[], up: UpAxis): FloorPlan[] {
         const a = projectTopDown(p1, up);
         const b = projectTopDown(p2, up);
         if (Math.abs(a.x - b.x) < 1e-6 && Math.abs(a.y - b.y) < 1e-6) continue;
-        rawSegments.push({ a, b, panelId: face.panelId });
+        rawSegments.push({ a, b });
       }
     }
 
@@ -203,39 +214,9 @@ function extractWithAxis(faces: Face3D[], up: UpAxis): FloorPlan[] {
     const shifted = rawSegments.map((s) => ({
       a: { x: s.a.x - minX, y: s.a.y - minY },
       b: { x: s.b.x - minX, y: s.b.y - minY },
-      panelId: s.panelId,
     }));
 
-    const classified: FloorPlanSegment[] = shifted.map((s) => ({
-      a: s.a,
-      b: s.b,
-      isInterior: false,
-      panelId: s.panelId,
-    }));
-
-    // Compute panel label centroids per panelId.
-    const panelCentroids = new Map<string, { sumX: number; sumY: number; count: number }>();
-    for (const seg of classified) {
-      if (!seg.panelId) continue;
-      let entry = panelCentroids.get(seg.panelId);
-      if (!entry) {
-        entry = { sumX: 0, sumY: 0, count: 0 };
-        panelCentroids.set(seg.panelId, entry);
-      }
-      entry.sumX += (seg.a.x + seg.b.x) / 2;
-      entry.sumY += (seg.a.y + seg.b.y) / 2;
-      entry.count++;
-    }
-
-    const panelLabels: PanelLabel[] = [];
-    for (const [panelId, entry] of panelCentroids) {
-      if (entry.count === 0) continue;
-      panelLabels.push({
-        panelId,
-        cx: entry.sumX / entry.count,
-        cy: entry.sumY / entry.count,
-      });
-    }
+    const classified = toFloorPlanSegments(shifted);
 
     plans.push({
       label: `Piso ${idx + 1}`,
@@ -243,7 +224,6 @@ function extractWithAxis(faces: Face3D[], up: UpAxis): FloorPlan[] {
       width: maxX - minX,
       height: maxY - minY,
       elevation: floorElev,
-      panelLabels,
     });
   }
 
