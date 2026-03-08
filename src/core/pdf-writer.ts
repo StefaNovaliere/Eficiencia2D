@@ -9,7 +9,7 @@
 // No external dependencies — writes raw PDF operators.
 // ============================================================================
 
-import type { Facade, FloorPlan, PanelLabel } from "./types";
+import type { Facade, FloorPlan } from "./types";
 
 const PAPERS: Record<string, { w: number; h: number }> = {
   A4: { w: 297, h: 210 },  // landscape in mm
@@ -26,7 +26,6 @@ function buildFacadeContent(
   facade: Facade,
   scaleDenom: number,
   paper: { w: number; h: number } = PAPERS.A4,
-  panelIdMap?: Map<string, string>,
 ): string {
   const pageW = paper.w * MM_TO_PT;
   const pageH = paper.h * MM_TO_PT;
@@ -95,35 +94,6 @@ function buildFacadeContent(
   cs += `(${facade.height.toFixed(2)} m) Tj\n`;
   cs += "ET\n";
 
-  // Panel reference labels (from cutting sheet).
-  if (panelIdMap && facade.panelLabels) {
-    const labelFontSize = 7;
-    // Red text for panel references.
-    cs += "0.8 0 0 rg\n";
-    for (const pl of facade.panelLabels) {
-      const sheetId = panelIdMap.get(pl.panelId);
-      if (!sheetId) continue;
-      const lx = tx(pl.cx);
-      const ly = ty(pl.cy);
-      // Draw a small circle indicator.
-      const rad = 6;
-      cs += `${lx.toFixed(2)} ${ly.toFixed(2)} ${rad} 0 360 arc\n`;
-      // White filled circle behind text.
-      cs += "q\n1 1 1 rg\n";
-      cs += `${(lx - rad).toFixed(2)} ${(ly - rad).toFixed(2)} ${(rad * 2).toFixed(2)} ${(rad * 2).toFixed(2)} re\nf\n`;
-      cs += "Q\n";
-      // Red text.
-      cs += "BT\n";
-      cs += `0.8 0 0 rg\n`;
-      cs += `/F1 ${labelFontSize} Tf\n`;
-      cs += `${lx.toFixed(2)} ${(ly - labelFontSize * 0.35).toFixed(2)} Td\n`;
-      cs += `(${sheetId}) Tj\n`;
-      cs += "ET\n";
-    }
-    // Reset to black.
-    cs += "0 0 0 rg\n";
-  }
-
   // Scale annotation.
   cs += "BT\n";
   cs += `/F1 ${fontSize - 2} Tf\n`;
@@ -142,7 +112,6 @@ function buildFloorPlanContent(
   plan: FloorPlan,
   scaleDenom: number,
   paper: { w: number; h: number } = PAPERS.A4,
-  panelIdMap?: Map<string, string>,
 ): string {
   const pageW = paper.w * MM_TO_PT;
   const pageH = paper.h * MM_TO_PT;
@@ -201,31 +170,6 @@ function buildFloorPlanContent(
   cs += `(${plan.height.toFixed(2)} m) Tj\n`;
   cs += "ET\n";
 
-  // Panel reference labels (from cutting sheet).
-  if (panelIdMap && plan.panelLabels) {
-    const labelFontSize = 7;
-    cs += "0.8 0 0 rg\n";
-    for (const pl of plan.panelLabels) {
-      const sheetId = panelIdMap.get(pl.panelId);
-      if (!sheetId) continue;
-      const lx = tx(pl.cx);
-      const ly = ty(pl.cy);
-      // White background behind label.
-      const rad = 6;
-      cs += "q\n1 1 1 rg\n";
-      cs += `${(lx - rad).toFixed(2)} ${(ly - rad).toFixed(2)} ${(rad * 2).toFixed(2)} ${(rad * 2).toFixed(2)} re\nf\n`;
-      cs += "Q\n";
-      // Red text.
-      cs += "BT\n";
-      cs += `0.8 0 0 rg\n`;
-      cs += `/F1 ${labelFontSize} Tf\n`;
-      cs += `${lx.toFixed(2)} ${(ly - labelFontSize * 0.35).toFixed(2)} Td\n`;
-      cs += `(${sheetId}) Tj\n`;
-      cs += "ET\n";
-    }
-    cs += "0 0 0 rg\n";
-  }
-
   // Scale annotation.
   cs += "BT\n";
   cs += `/F1 ${fontSize - 2} Tf\n`;
@@ -245,7 +189,6 @@ export function generatePdf(
   floorPlans: FloorPlan[],
   scaleDenom: number,
   paperName: string = "A4",
-  panelIdMap?: Map<string, string>,
 ): string {
   const paper = PAPERS[paperName] ?? PAPERS.A4;
   const pw = (paper.w * MM_TO_PT).toFixed(2);
@@ -254,10 +197,10 @@ export function generatePdf(
   const pageContents: string[] = [];
 
   for (const facade of facades) {
-    pageContents.push(buildFacadeContent(facade, scaleDenom, paper, panelIdMap));
+    pageContents.push(buildFacadeContent(facade, scaleDenom, paper));
   }
   for (const plan of floorPlans) {
-    pageContents.push(buildFloorPlanContent(plan, scaleDenom, paper, panelIdMap));
+    pageContents.push(buildFloorPlanContent(plan, scaleDenom, paper));
   }
 
   if (pageContents.length === 0) return "";
