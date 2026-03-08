@@ -487,6 +487,22 @@ function panelsToDxf(placed: PlacedPanel[]): string {
 // Public API
 // ---------------------------------------------------------------------------
 
+/**
+ * Build a map from OBJ group name → cutting-sheet panel ID (e.g. "A1", "B2").
+ * Used to annotate facades and floor plans with panel references.
+ */
+export function buildPanelIdMap(
+  faces: Face3D[],
+  upAxis: "Y" | "Z",
+): Map<string, string> {
+  const panels = decomposeIntoPanels(faces, upAxis);
+  const map = new Map<string, string>();
+  for (const p of panels) {
+    map.set(p.groupName, p.id);
+  }
+  return map;
+}
+
 export function generateCuttingSheets(
   faces: Face3D[],
   upAxis: "Y" | "Z",

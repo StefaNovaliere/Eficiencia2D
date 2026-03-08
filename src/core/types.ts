@@ -27,6 +27,13 @@ export interface Face3D {
   panelId?: string;
 }
 
+/** Label anchor for a panel reference on a 2D view. */
+export interface PanelLabel {
+  panelId: string;  // OBJ group name
+  cx: number;       // centroid X in view-local coords
+  cy: number;       // centroid Y in view-local coords
+}
+
 /** One elevation view of the building (N/S/E/W). */
 export interface Facade {
   label: string;
@@ -34,6 +41,7 @@ export interface Facade {
   polygons: Loop2D[];
   width: number;
   height: number;
+  panelLabels?: PanelLabel[];
 }
 
 /** A 2D line segment in a floor plan. */
@@ -41,6 +49,7 @@ export interface FloorPlanSegment {
   a: Vec2;
   b: Vec2;
   isInterior: boolean;
+  panelId?: string;  // OBJ group name for panel reference
 }
 
 /** One horizontal section-cut view at a specific floor level. */
@@ -50,6 +59,7 @@ export interface FloorPlan {
   width: number;
   height: number;
   elevation: number;
+  panelLabels?: PanelLabel[];
 }
 
 /** Options that travel through the full pipeline. */
