@@ -21,7 +21,7 @@ import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .cutting_sheet import generate_cutting_sheet_dxf, pack_panels
+from .cutting_sheet import build_cutting_layout, generate_cutting_dxf
 from .dxf_writer import generate_dxf, generate_component_dxf, generate_floor_plan_dxf
 from .floor_plan_extractor import FloorPlan, extract_floor_plans
 from .obj_parser import parse_obj
@@ -273,18 +273,26 @@ def run_pipeline(
         )
         files.append(OutputFile(name=f"{stem}_planos.pdf", content=pdf_content))
 
-    # --- 6. Cutting sheets (plancha de corte) ---
+    # --- 6. Cutting sheets — one DXF per material group ---
     if include_cutting_sheet and component_sheets:
-        all_panels: list[PanelInfo] = []
-        for sh in component_sheets:
-            all_panels.extend(sh.panels)
+        # Map ComponentSheet labels to cutting-sheet file names / labels.
+        _CUTTING_LABELS = {
+            "Descomposicion Paredes": ("Corte Paredes", "corte_paredes"),
+            "Descomposicion Pisos": ("Corte Pisos", "corte_pisos"),
+        }
 
-        cutting_sheets = pack_panels(all_panels, scale_denom)
-        for i, cs in enumerate(cutting_sheets, start=1):
-            dxf_text = generate_cutting_sheet_dxf(cs, sheet_index=i)
-            suffix = f"_{i}" if len(cutting_sheets) > 1 else ""
+        for sheet in component_sheets:
+            cut_label, file_slug = _CUTTING_LABELS.get(
+                sheet.label, (sheet.label, _sanitize_label(sheet.label)),
+            )
+            layout = build_cutting_layout(
+                sheet.panels, label=cut_label, scale_denom=scale_denom,
+            )
+            if layout is None:
+                continue
+            dxf_text = generate_cutting_dxf(layout)
             files.append(OutputFile(
-                name=f"{stem}_Plancha_de_Corte{suffix}.dxf",
+                name=f"{stem}_{file_slug}.dxf",
                 content=dxf_text,
             ))
 
