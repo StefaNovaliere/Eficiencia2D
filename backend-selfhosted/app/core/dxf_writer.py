@@ -1,16 +1,17 @@
 """
 DXF Writer
 
-Generates AutoCAD-compatible DXF files using ``ezdxf`` for facades
-and component decomposition sheets.
+Generates AutoCAD-compatible DXF files using ``ezdxf`` for facades,
+component decomposition sheets, and floor plans.
 
 Using ezdxf guarantees structurally valid DXF (proper header, tables,
 entities section, and EOF).
 
 Layers follow laser-cutter conventions:
-  - CORTE   (color 1 / red)   — cut lines (panel/polygon outlines)
-  - GRABADO (color 5 / blue)  — titles, scale text, engrave marks
-  - MARCA   (color 7 / black) — reference labels (A1, B2...), dimensions
+  - CORTE      (color 1 / red)       — cut lines (panel/polygon outlines)
+  - GRABADO    (color 5 / blue)      — titles, scale text, engrave marks
+  - MARCA      (color 7 / black)     — reference labels (A1, B2...), dimensions
+  - ABERTURAS  (color 8 / dark gray) — door arcs + leaves (thin, dashed arc)
 """
 
 from __future__ import annotations
@@ -27,9 +28,17 @@ from .types import ComponentSheet, Facade
 def _new_doc() -> ezdxf.document.Drawing:
     """Create a new DXF R2010 document with laser-cutter layers."""
     doc = ezdxf.new("R2010")
+
+    # Add DASHED linetype (if not already present).
+    if "DASHED" not in doc.linetypes:
+        doc.linetypes.add("DASHED", pattern=[0.005, 0.003, -0.002],
+                          description="Dashed __ __ __")
+
     doc.layers.add("CORTE", color=1)       # red — cut lines
     doc.layers.add("GRABADO", color=5)     # blue — engrave / titles
     doc.layers.add("MARCA", color=7)       # black — marks / labels / dimensions
+    doc.layers.add("ABERTURAS", color=8,   # dark gray — door symbols
+                   linetype="DASHED")
     return doc
 
 
@@ -205,6 +214,24 @@ def generate_floor_plan_dxf(plan: FloorPlan, scale_denom: int) -> str:
             (seg_a.x * s, seg_a.y * s),
             (seg_b.x * s, seg_b.y * s),
             dxfattribs={"layer": "CORTE", "color": 1},
+        )
+
+    # --- Door symbols on ABERTURAS layer ---
+    for door in plan.doors:
+        # Door leaf line (solid — from hinge to open position).
+        msp.add_line(
+            (door.hinge.x * s, door.hinge.y * s),
+            (door.leaf_end.x * s, door.leaf_end.y * s),
+            dxfattribs={"layer": "ABERTURAS", "color": 8, "linetype": "CONTINUOUS"},
+        )
+
+        # Swing arc (dashed quarter-circle).
+        msp.add_arc(
+            center=(door.hinge.x * s, door.hinge.y * s),
+            radius=door.width * s,
+            start_angle=door.start_angle,
+            end_angle=door.end_angle,
+            dxfattribs={"layer": "ABERTURAS", "color": 8, "linetype": "DASHED"},
         )
 
     # Title above the drawing on GRABADO.
