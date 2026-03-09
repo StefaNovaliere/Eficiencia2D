@@ -133,11 +133,22 @@ def _scale_floor_plans(plans: list[FloorPlan], s: float) -> list[FloorPlan]:
     """Scale all floor plan dimensions by factor s."""
     if s == 1.0:
         return plans
+    from .door_extractor import Door2D
     result: list[FloorPlan] = []
     for p in plans:
         scaled_segs = [
             (Vec2(a.x * s, a.y * s), Vec2(b.x * s, b.y * s))
             for a, b in p.segments
+        ]
+        scaled_doors = [
+            Door2D(
+                hinge=Vec2(d.hinge.x * s, d.hinge.y * s),
+                width=d.width * s,
+                start_angle=d.start_angle,
+                end_angle=d.end_angle,
+                leaf_end=Vec2(d.leaf_end.x * s, d.leaf_end.y * s),
+            )
+            for d in p.doors
         ]
         result.append(FloorPlan(
             label=p.label,
@@ -145,6 +156,7 @@ def _scale_floor_plans(plans: list[FloorPlan], s: float) -> list[FloorPlan]:
             width=p.width * s,
             height=p.height * s,
             elevation=p.elevation * s,
+            doors=scaled_doors,
         ))
     return result
 

@@ -5,11 +5,17 @@ For each detected floor level, cuts the building with a horizontal plane
 at ~1 m above the slab, producing a 2D plan view that shows interior and
 exterior wall layout.
 
+Door components (OBJ groups whose name contains "puerta", "door", or "porta")
+are detected automatically:
+  - Their faces are excluded from the wall-segment section cut.
+  - Instead they produce Door2D entries (hinge, arc, leaf).
+
 Algorithm:
   1. Find horizontal slab faces with area > MIN_SLAB_AREA → floor levels
   2. Cluster slab elevations → distinct floors
   3. For each floor, intersect all vertical faces with the cut plane
   4. Project intersection segments onto the ground (top-down view)
+  5. Detect door groups → exclude from walls, generate Door2D entries
 """
 
 from __future__ import annotations
@@ -18,6 +24,7 @@ import math
 from typing import Literal
 
 from .types import Face3D, Vec2, Vec3, cross, length, normalize, sub
+from .door_extractor import Door2D, is_door_group, extract_doors_for_level
 
 
 # --- Detection thresholds ---
@@ -44,6 +51,7 @@ class FloorPlan:
     width: float                            # Bounding box width (model units)
     height: float                           # Bounding box height (model units)
     elevation: float                        # Floor slab elevation
+    doors: list[Door2D] = field(default_factory=list)  # Detected doors
 
 
 # ---------------------------------------------------------------------------
@@ -137,30 +145,22 @@ def _intersect_face_with_plane(
     cut_elev: float,
     up_axis: Literal["Y", "Z"],
 ) -> list[tuple[Vec3, Vec3]]:
-    """Intersect a face polygon with a horizontal plane at cut_elev.
-
-    Returns line segments (pairs of 3D intersection points) where the
-    face edges cross the cut plane.
-    """
+    """Intersect a face polygon with a horizontal plane at cut_elev."""
     verts = face.vertices
     n = len(verts)
     if n < 3:
         return []
 
-    # Compute signed distances from the cut plane.
     dists = [_get_up(v, up_axis) - cut_elev for v in verts]
 
-    # Find intersection points along edges that cross the plane.
     intersections: list[Vec3] = []
     for i in range(n):
         j = (i + 1) % n
         di, dj = dists[i], dists[j]
 
         if abs(di) < 1e-9:
-            # Vertex i is exactly on the plane.
             intersections.append(verts[i])
         elif (di > 0) != (dj > 0):
-            # Edge crosses the plane.
             t = di / (di - dj)
             vi, vj = verts[i], verts[j]
             px = vi.x + t * (vj.x - vi.x)
@@ -179,7 +179,6 @@ def _intersect_face_with_plane(
         if not is_dup:
             unique.append(pt)
 
-    # For a convex polygon cut by a plane, we expect 0 or 2 intersection points.
     if len(unique) >= 2:
         return [(unique[0], unique[1])]
     return []
@@ -197,14 +196,27 @@ def _extract_with_axis(
     if not levels:
         return []
 
-    # Collect all vertical faces.
+    # --- Identify door groups ---
+    door_group_names: set[str] = set()
+    for face in faces:
+        if face.panel_id and is_door_group(face.panel_id):
+            door_group_names.add(face.panel_id)
+
+    # Group ALL door-group faces by name.
+    door_faces_by_group: dict[str, list[Face3D]] = {}
+    for face in faces:
+        if face.panel_id and face.panel_id in door_group_names:
+            door_faces_by_group.setdefault(face.panel_id, []).append(face)
+
+    # Vertical faces EXCLUDING doors.
     vertical_faces: list[Face3D] = []
     for face in faces:
         up_comp = abs(_get_up(face.normal, up_axis))
         if up_comp <= VERTICAL_EPSILON:
-            vertical_faces.append(face)
+            if not face.panel_id or face.panel_id not in door_group_names:
+                vertical_faces.append(face)
 
-    if not vertical_faces:
+    if not vertical_faces and not door_faces_by_group:
         return []
 
     plans: list[FloorPlan] = []
@@ -212,34 +224,38 @@ def _extract_with_axis(
     for floor_idx, floor_elev in enumerate(levels, start=1):
         cut_elev = floor_elev + CUT_HEIGHT
 
-        # Intersect all vertical faces with the cut plane.
+        # --- Wall section-cut (doors excluded) ---
         segments_3d: list[tuple[Vec3, Vec3]] = []
         for face in vertical_faces:
-            # Quick check: does the face span the cut elevation?
             ups = [_get_up(v, up_axis) for v in face.vertices]
             if min(ups) > cut_elev or max(ups) < cut_elev:
                 continue
             segs = _intersect_face_with_plane(face, cut_elev, up_axis)
             segments_3d.extend(segs)
 
-        if not segments_3d:
-            continue
-
         # Project to 2D top-down view.
         segments_2d: list[tuple[Vec2, Vec2]] = []
         for p1, p2 in segments_3d:
             a = _project_top_down(p1, up_axis)
             b = _project_top_down(p2, up_axis)
-            # Skip degenerate segments.
             if abs(a.x - b.x) < 1e-6 and abs(a.y - b.y) < 1e-6:
                 continue
             segments_2d.append((a, b))
 
-        if not segments_2d:
+        # --- Doors for this level ---
+        raw_doors = extract_doors_for_level(door_faces_by_group, cut_elev, up_axis)
+
+        if not segments_2d and not raw_doors:
             continue
 
-        # Compute bounding box and normalize to (0, 0) origin.
+        # Bounding box (include door points for safety).
         all_pts = [p for seg in segments_2d for p in seg]
+        for d in raw_doors:
+            all_pts.extend([d.hinge, d.leaf_end])
+
+        if not all_pts:
+            continue
+
         min_x = min(p.x for p in all_pts)
         min_y = min(p.y for p in all_pts)
         max_x = max(p.x for p in all_pts)
@@ -253,12 +269,23 @@ def _extract_with_axis(
                 Vec2(b.x - min_x, b.y - min_y),
             ))
 
+        shifted_doors: list[Door2D] = []
+        for d in raw_doors:
+            shifted_doors.append(Door2D(
+                hinge=Vec2(d.hinge.x - min_x, d.hinge.y - min_y),
+                width=d.width,
+                start_angle=d.start_angle,
+                end_angle=d.end_angle,
+                leaf_end=Vec2(d.leaf_end.x - min_x, d.leaf_end.y - min_y),
+            ))
+
         plans.append(FloorPlan(
             label=f"Planta Piso {floor_idx}",
             segments=shifted,
             width=max_x - min_x,
             height=max_y - min_y,
             elevation=floor_elev,
+            doors=shifted_doors,
         ))
 
     return plans

@@ -43,6 +43,20 @@ export interface FloorPlanSegment {
   isInterior: boolean;
 }
 
+/** A door detected in a floor plan, with its 2D swing-arc representation. */
+export interface Door2D {
+  /** Pivot / hinge point (in floor-plan 2D coordinates, metres). */
+  hinge: Vec2;
+  /** Door leaf width = arc radius (metres). */
+  width: number;
+  /** DXF arc start angle in degrees (CCW from +X axis). */
+  startAngle: number;
+  /** DXF arc end angle in degrees (CCW from +X axis). */
+  endAngle: number;
+  /** Endpoint of the door leaf in the fully-open position. */
+  leafEnd: Vec2;
+}
+
 /** One horizontal section-cut view at a specific floor level. */
 export interface FloorPlan {
   label: string;
@@ -50,6 +64,8 @@ export interface FloorPlan {
   width: number;
   height: number;
   elevation: number;
+  /** Doors detected at this floor level. */
+  doors?: Door2D[];
 }
 
 /** Options that travel through the full pipeline. */
