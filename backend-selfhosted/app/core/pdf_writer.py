@@ -4,6 +4,8 @@ PDF Writer
 Generates a multi-page PDF where each page is one facade elevation
 with panel reference IDs (A1, A2..., B1, B2...).
 
+Floor plan pages include door symbols (arc + leaf line) in gray.
+
 Decomposition sheets are NOT included in the PDF — they live
 in the DXF files and the cutting-sheet output.
 
@@ -13,6 +15,8 @@ Paper sizes: A3 (420x297 mm), A1 (841x594 mm).
 """
 
 from __future__ import annotations
+
+import math
 
 from .floor_plan_extractor import FloorPlan
 from .types import Facade
@@ -74,9 +78,7 @@ def _build_page_content(facade: Facade, scale_denom: int, paper: str) -> str:
             cs += f"{tx(verts[i].x):.4f} {ty(verts[i].y):.4f} l\n"
         cs += "s\n"
 
-    # Panel reference IDs: one label per unique panel_id.
-    # Group all polygons by panel_id, compute the combined bounding box,
-    # and place a single label at its center.
+    # Panel reference IDs.
     panel_groups: dict[str, tuple[float, float, float, float]] = {}
     for poly in facade.polygons:
         if not poly.panel_id:
@@ -189,6 +191,42 @@ def _build_floor_plan_content(plan: FloorPlan, scale_denom: int, paper: str) -> 
         cs += f"{tx(seg_b.x):.4f} {ty(seg_b.y):.4f} l\n"
         cs += "S\n"
 
+    # --- Door symbols (gray, thin) ---
+    if plan.doors:
+        cs += "0.45 0.45 0.45 RG\n"  # dark gray
+        cs += "0.3 w\n"               # thin line
+
+        for door in plan.doors:
+            # Swing arc (dashed, approximated with line segments).
+            cs += "[3 2] 0 d\n"
+            steps = 24
+            start_rad = math.radians(door.start_angle)
+            end_rad = math.radians(door.end_angle)
+            sweep_rad = end_rad - start_rad
+            if sweep_rad < 0:
+                sweep_rad += 2 * math.pi
+
+            for i in range(steps + 1):
+                angle = start_rad + sweep_rad * (i / steps)
+                px = door.hinge.x + door.width * math.cos(angle)
+                py = door.hinge.y + door.width * math.sin(angle)
+                if i == 0:
+                    cs += f"{tx(px):.4f} {ty(py):.4f} m\n"
+                else:
+                    cs += f"{tx(px):.4f} {ty(py):.4f} l\n"
+            cs += "S\n"
+
+            # Door leaf line (solid).
+            cs += "[] 0 d\n"
+            cs += f"{tx(door.hinge.x):.4f} {ty(door.hinge.y):.4f} m\n"
+            cs += f"{tx(door.leaf_end.x):.4f} {ty(door.leaf_end.y):.4f} l\n"
+            cs += "S\n"
+
+        # Reset graphics state.
+        cs += "0 0 0 RG\n"
+        cs += "0.6 w\n"
+        cs += "[] 0 d\n"
+
     # Title above the drawing.
     cs += "BT\n"
     cs += f"/F1 {font_size + 2} Tf\n"
@@ -229,11 +267,7 @@ def generate_pdf(
     paper: str,
     floor_plans: list[FloorPlan] | None = None,
 ) -> str:
-    """Generate a multi-page PDF with facade elevations and optional floor plans.
-
-    Each facade gets one page with panel reference IDs shown in red.
-    Floor plans (if provided) are appended as additional pages.
-    """
+    """Generate a multi-page PDF with facade elevations and optional floor plans."""
     w_mm, h_mm = PAPERS.get(paper, PAPERS["A3"])
     pw = f"{w_mm * MM_TO_PT:.2f}"
     ph = f"{h_mm * MM_TO_PT:.2f}"

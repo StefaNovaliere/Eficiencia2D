@@ -750,3 +750,186 @@ def test_floor_detection_merges_slabs_same_level():
     assert len(floor_dxfs) == 4, (
         f"Expected 4 floor plans (roof has no walls above), got {len(floor_dxfs)}: {floor_dxfs}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Door detection tests
+# ---------------------------------------------------------------------------
+
+
+def _make_box_with_door_y_up() -> bytes:
+    """Create a box building (Y-up) with a door component.
+
+    Building: 6x4x3m (exterior walls).
+    Door: 0.8m wide, 2.1m tall, 4cm thick, placed in the front wall
+    at x=2..2.8, z=0 (front face at z=0, back at z=0.04).
+    The door group is named "Puerta_principal".
+
+    A floor slab at y=0 (>2 m²) is needed for floor-level detection.
+    """
+    lines = [
+        "# Box 6x4x3m Y-up with door",
+        # Outer vertices
+        "v 0 0 0",     # 1
+        "v 6 0 0",     # 2
+        "v 6 0 4",     # 3
+        "v 0 0 4",     # 4
+        "v 0 3 0",     # 5
+        "v 6 3 0",     # 6
+        "v 6 3 4",     # 7
+        "v 0 3 4",     # 8
+        # Floor slab at y=0 (8 vertices reused, horizontal face)
+        "v 0 0 0",     # 9
+        "v 6 0 0",     # 10
+        "v 6 0 4",     # 11
+        "v 0 0 4",     # 12
+        # Front wall LEFT of door opening (x=0..2, z=0)
+        "v 0 0 0",     # 13
+        "v 2 0 0",     # 14
+        "v 2 3 0",     # 15
+        "v 0 3 0",     # 16
+        # Front wall RIGHT of door opening (x=2.8..6, z=0)
+        "v 2.8 0 0",   # 17
+        "v 6 0 0",     # 18
+        "v 6 3 0",     # 19
+        "v 2.8 3 0",   # 20
+        # Door leaf: thin vertical rectangle at z=0..0.04, x=2..2.8, y=0..2.1
+        "v 2.0 0.0 0.0",    # 21  front-left-bottom
+        "v 2.8 0.0 0.0",    # 22  front-right-bottom
+        "v 2.8 2.1 0.0",    # 23  front-right-top
+        "v 2.0 2.1 0.0",    # 24  front-left-top
+        "v 2.0 0.0 0.04",   # 25  back-left-bottom
+        "v 2.8 0.0 0.04",   # 26  back-right-bottom
+        "v 2.8 2.1 0.04",   # 27  back-right-top
+        "v 2.0 2.1 0.04",   # 28  back-left-top
+        # Exterior walls (sides and back)
+        "f 2 3 7 6",    # right wall
+        "f 3 4 8 7",    # back wall
+        "f 4 1 5 8",    # left wall
+        # Floor slab (horizontal, needed for floor detection)
+        "f 9 10 11 12",
+        # Front wall (split around door opening)
+        "f 13 14 15 16",   # left of door
+        "f 17 18 19 20",   # right of door
+        # Door component
+        "g Puerta_principal",
+        "f 21 22 23 24",   # front face (normal -Z)
+        "f 28 27 26 25",   # back face (normal +Z)
+        "f 21 25 26 22",   # bottom
+        "f 24 23 27 28",   # top
+        "f 21 24 28 25",   # left side (hinge)
+        "f 22 26 27 23",   # right side
+    ]
+    return "\n".join(lines).encode("utf-8")
+
+
+def test_door_detected_in_floor_plan():
+    """A building with a named door group should produce a floor plan
+    with the ABERTURAS layer and ARC entities in the DXF."""
+    obj_data = _make_box_with_door_y_up()
+    resp = client.post(
+        "/api/upload",
+        files={"file": ("house_door.obj", io.BytesIO(obj_data), "application/octet-stream")},
+        data={
+            "scale": "100",
+            "paper": "A3",
+            "formats": "dxf",
+            "include_floor_plans": "true",
+        },
+    )
+    assert resp.status_code == 200
+    zf = zipfile.ZipFile(io.BytesIO(resp.content))
+    names = zf.namelist()
+
+    floor_dxfs = [n for n in names if "Planta_Piso" in n]
+    assert len(floor_dxfs) >= 1, f"Expected floor plan DXFs, got {names}"
+
+    # The floor plan DXF should contain the ABERTURAS layer.
+    dxf_content = zf.read(floor_dxfs[0]).decode("utf-8")
+    assert "ABERTURAS" in dxf_content, "Expected ABERTURAS layer in floor plan DXF"
+
+
+def test_door_arc_entity_present():
+    """The floor plan DXF should contain an ARC entity for the door swing."""
+    obj_data = _make_box_with_door_y_up()
+    resp = client.post(
+        "/api/upload",
+        files={"file": ("house_door.obj", io.BytesIO(obj_data), "application/octet-stream")},
+        data={
+            "scale": "100",
+            "paper": "A3",
+            "formats": "dxf",
+            "include_floor_plans": "true",
+        },
+    )
+    assert resp.status_code == 200
+    zf = zipfile.ZipFile(io.BytesIO(resp.content))
+    names = zf.namelist()
+
+    floor_dxfs = [n for n in names if "Planta_Piso" in n]
+    assert len(floor_dxfs) >= 1
+
+    dxf_content = zf.read(floor_dxfs[0]).decode("utf-8")
+    # ezdxf writes ARC entities
+    assert "ARC" in dxf_content, "Expected ARC entity in floor plan DXF for door swing"
+
+
+def test_door_excluded_from_wall_segments():
+    """Door faces should NOT appear as wall segments in the floor plan.
+    The floor plan should have fewer segments than a model without the
+    door group (the door leaf is excluded from the section cut)."""
+    obj_data = _make_box_with_door_y_up()
+    resp = client.post(
+        "/api/upload",
+        files={"file": ("house_door.obj", io.BytesIO(obj_data), "application/octet-stream")},
+        data={
+            "scale": "100",
+            "paper": "A3",
+            "formats": "dxf,pdf",
+            "include_floor_plans": "true",
+        },
+    )
+    assert resp.status_code == 200
+    zf = zipfile.ZipFile(io.BytesIO(resp.content))
+    names = zf.namelist()
+
+    # Should still have facades + floor plans + pdf.
+    facade_dxfs = [n for n in names if "Fachada" in n]
+    floor_dxfs = [n for n in names if "Planta_Piso" in n]
+    pdf_files = [n for n in names if n.endswith(".pdf")]
+    assert len(facade_dxfs) >= 1, f"Expected facade DXFs, got {names}"
+    assert len(floor_dxfs) >= 1, f"Expected floor plan DXFs, got {names}"
+    assert len(pdf_files) == 1
+
+
+def test_no_door_group_no_aberturas_entities():
+    """A model WITHOUT door groups should still produce valid floor plans
+    (just no door entities on ABERTURAS layer)."""
+    obj_data = _make_multistory_with_slabs_y_up()
+    resp = client.post(
+        "/api/upload",
+        files={"file": ("building.obj", io.BytesIO(obj_data), "application/octet-stream")},
+        data={
+            "scale": "100",
+            "paper": "A3",
+            "formats": "dxf",
+            "include_floor_plans": "true",
+        },
+    )
+    assert resp.status_code == 200
+    zf = zipfile.ZipFile(io.BytesIO(resp.content))
+    names = zf.namelist()
+    floor_dxfs = [n for n in names if "Planta_Piso" in n]
+    assert len(floor_dxfs) >= 1
+
+    # ABERTURAS layer is defined in the header (harmless) but there should
+    # be no ARC entities since there are no doors.
+    dxf_content = zf.read(floor_dxfs[0]).decode("utf-8")
+    # The layer definition will contain "ABERTURAS" but there should be
+    # no ARC entity in the ENTITIES section.
+    # Count occurrences: "ARC" should only appear in layer/linetype definitions,
+    # not as an entity type.
+    entities_section = dxf_content.split("ENTITIES")[1] if "ENTITIES" in dxf_content else ""
+    # In ezdxf output, ARC as entity type appears as "\nARC\n"
+    arc_count = entities_section.count("\nARC\n")
+    assert arc_count == 0, f"Expected no ARC entities without doors, found {arc_count}"

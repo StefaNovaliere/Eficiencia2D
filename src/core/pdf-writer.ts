@@ -3,7 +3,7 @@
 //
 // Generates a multi-page PDF:
 //   - One page per facade elevation
-//   - One page per floor plan (with interior walls in red, exterior in black)
+//   - One page per floor plan (with door symbols in gray dashed arcs)
 //
 // Paper: always A4 for facades and floor plans.
 // No external dependencies — writes raw PDF operators.
@@ -147,6 +147,45 @@ function buildFloorPlanContent(
     cs += `${tx(seg.a.x).toFixed(4)} ${ty(seg.a.y).toFixed(4)} m\n`;
     cs += `${tx(seg.b.x).toFixed(4)} ${ty(seg.b.y).toFixed(4)} l\n`;
     cs += "S\n";
+  }
+
+  // --- Door symbols (gray, thin) ---
+  if (plan.doors && plan.doors.length > 0) {
+    cs += "0.45 0.45 0.45 RG\n"; // dark gray stroke
+    cs += "0.3 w\n";              // thin line
+
+    for (const door of plan.doors) {
+      // Swing arc (dashed quarter-circle, approximated with line segments).
+      cs += "[3 2] 0 d\n"; // dash pattern
+      const steps = 24;
+      const startRad = door.startAngle * Math.PI / 180;
+      const endRad = door.endAngle * Math.PI / 180;
+      let sweepRad = endRad - startRad;
+      if (sweepRad < 0) sweepRad += 2 * Math.PI;
+
+      for (let i = 0; i <= steps; i++) {
+        const angle = startRad + sweepRad * (i / steps);
+        const px = door.hinge.x + door.width * Math.cos(angle);
+        const py = door.hinge.y + door.width * Math.sin(angle);
+        if (i === 0) {
+          cs += `${tx(px).toFixed(4)} ${ty(py).toFixed(4)} m\n`;
+        } else {
+          cs += `${tx(px).toFixed(4)} ${ty(py).toFixed(4)} l\n`;
+        }
+      }
+      cs += "S\n";
+
+      // Door leaf line (solid — from hinge to open position).
+      cs += "[] 0 d\n"; // reset to solid
+      cs += `${tx(door.hinge.x).toFixed(4)} ${ty(door.hinge.y).toFixed(4)} m\n`;
+      cs += `${tx(door.leafEnd.x).toFixed(4)} ${ty(door.leafEnd.y).toFixed(4)} l\n`;
+      cs += "S\n";
+    }
+
+    // Reset graphics state for subsequent content.
+    cs += "0 0 0 RG\n";
+    cs += "0.6 w\n";
+    cs += "[] 0 d\n";
   }
 
   // Title.
