@@ -141,6 +141,53 @@ def _direction_label(direction: Vec3, up_axis: Literal["Y", "Z"]) -> str:
         return "Fachada Oeste"
 
 
+def _face_center(face: Face3D) -> Vec3:
+    """Compute the centroid of a face."""
+    n = len(face.vertices)
+    if n == 0:
+        return Vec3(0.0, 0.0, 0.0)
+    sx = sum(v.x for v in face.vertices)
+    sy = sum(v.y for v in face.vertices)
+    sz = sum(v.z for v in face.vertices)
+    return Vec3(sx / n, sy / n, sz / n)
+
+
+def _filter_exterior_faces(
+    cluster_faces: list[Face3D], direction: Vec3, model_diag: float,
+) -> list[Face3D]:
+    """Keep only the outermost faces in a cluster (exterior wall faces).
+
+    For each direction cluster, interior wall faces sit at a different depth
+    (distance along the facade direction) than the exterior walls.  We keep
+    faces whose depth is within a tolerance of the maximum depth (the
+    outermost/exterior position).
+
+    Tolerance is 15% of the total depth span of the cluster, or 0.6 m,
+    whichever is larger.  This accommodates wall thickness, window recesses,
+    and minor offsets while filtering out interior partitions that are
+    well behind the exterior wall.
+    """
+    if not cluster_faces:
+        return cluster_faces
+
+    depths = [dot(_face_center(f), direction) for f in cluster_faces]
+    max_depth = max(depths)
+    min_depth = min(depths)
+    span = max_depth - min_depth
+
+    if span < 0.01:
+        # All faces at roughly the same depth — keep all.
+        return cluster_faces
+
+    # Tolerance: 15% of the cluster's depth span, min 0.6 m.
+    tol = max(span * 0.15, 0.6)
+
+    return [
+        f for f, d in zip(cluster_faces, depths)
+        if d >= max_depth - tol
+    ]
+
+
 def _extract_facades_with_axis(
     faces: list[Face3D], up_axis: Literal["Y", "Z"]
 ) -> list[Facade]:
@@ -156,6 +203,8 @@ def _extract_facades_with_axis(
     if not vertical_faces:
         return []
 
+    model_diag = _compute_model_diagonal(faces)
+
     # 2. Cluster by horizontal direction.
     clusters = _cluster_by_direction(vertical_faces, up_axis)
 
@@ -163,6 +212,8 @@ def _extract_facades_with_axis(
     facades: list[Facade] = []
 
     for direction, cluster_faces in clusters:
+        # 3a. Filter to keep only exterior (outermost) faces per cluster.
+        cluster_faces = _filter_exterior_faces(cluster_faces, direction, model_diag)
         u_axis, v_axis = _compute_facade_axes(direction, up_axis)
 
         # Project all face vertices to the facade's 2D space.
@@ -233,19 +284,42 @@ def _extract_facades_with_axis(
     return facades
 
 
-def extract_facades(faces: list[Face3D]) -> list[Facade]:
-    """Extract facades from faces, auto-detecting up axis."""
-    if not faces:
-        return []
+def extract_facades(
+    faces: list[Face3D], up_axis: Literal["Y", "Z"] | None = None
+) -> list[Facade]:
+    """Extract facades from faces.
 
-    # Try both up-axis conventions and pick the one with more facades.
+    If *up_axis* is provided it is used directly; otherwise both Y and Z are
+    tried and the one producing more geometry wins.
+    """
+    result, _ = extract_facades_with_detected_axis(faces, up_axis)
+    return result
+
+
+def extract_facades_with_detected_axis(
+    faces: list[Face3D], up_axis: Literal["Y", "Z"] | None = None
+) -> tuple[list[Facade], Literal["Y", "Z"]]:
+    """Like extract_facades but also returns the up axis that was used.
+
+    The pipeline calls this so it can re-use the same axis for floor plans
+    and decomposition, ensuring all views are consistent.
+    """
+    if not faces:
+        return [], "Z"
+
+    if up_axis is not None:
+        return _extract_facades_with_axis(faces, up_axis), up_axis
+
+    # Try both up-axis conventions and pick the best.
     facades_z = _extract_facades_with_axis(faces, "Z")
     facades_y = _extract_facades_with_axis(faces, "Y")
 
-    # Prefer the result that has more total projected polygons (more geometry).
-    count_z = sum(len(f.polygons) for f in facades_z)
-    count_y = sum(len(f.polygons) for f in facades_y)
+    # Compare by total facade area (width × height).  Using area instead of
+    # polygon count avoids false positives when slab faces get misclassified
+    # as vertical under the wrong axis — their projected "facades" are small.
+    area_z = sum(f.width * f.height for f in facades_z)
+    area_y = sum(f.width * f.height for f in facades_y)
 
-    if count_y > count_z:
-        return facades_y
-    return facades_z
+    if area_y > area_z:
+        return facades_y, "Y"
+    return facades_z, "Z"
