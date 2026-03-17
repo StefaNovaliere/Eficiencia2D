@@ -33,6 +33,7 @@ class Face3D:
     normal: Vec3
     inner_loops: list[list[Vec3]] = field(default_factory=list)
     panel_id: str | None = None  # Set by decomposition (e.g. "A1", "B2")
+    group_name: str | None = None  # OBJ group/object name (g/o line)
 
 
 @dataclass
