@@ -22,16 +22,28 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
-from .cutting_sheet import build_cutting_layout, generate_cutting_dxf
+from .cutting_sheet import (
+    build_cutting_layout_legacy,
+    generate_cutting_dxf,
+    generate_cutting_dxf_legacy,
+)
 from .dxf_writer import generate_dxf, generate_component_dxf, generate_floor_plan_dxf
 from .floor_plan_extractor import FloorPlan, extract_floor_plans
+from .nesting import (
+    build_cutting_layout,
+    SHEET_WIDTH_MM,
+    SHEET_HEIGHT_MM,
+    PIECE_GAP_MM,
+    DEFAULT_KERF_MM,
+)
 from .obj_parser import parse_obj
 from .pdf_writer import generate_pdf
-from .plan_extractor import extract_components
+from .plan_extractor import extract_components, extract_cutting_pieces
 from .skp_parser import parse_skp
 from .facade_extractor import extract_facades, extract_facades_with_detected_axis
 from .types import (
     ComponentSheet,
+    CuttingPiece,
     Face3D,
     Facade,
     Loop2D,
@@ -235,6 +247,10 @@ def run_pipeline(
     include_plan: bool = False,
     include_cutting_sheet: bool = False,
     include_floor_plans: bool = False,
+    kerf_mm: float = DEFAULT_KERF_MM,
+    sheet_width_mm: float = SHEET_WIDTH_MM,
+    sheet_height_mm: float = SHEET_HEIGHT_MM,
+    piece_gap_mm: float = PIECE_GAP_MM,
 ) -> PipelineResult:
     """Run the full processing pipeline on a file.
 
@@ -245,10 +261,19 @@ def run_pipeline(
         in addition to facade elevations.
     include_cutting_sheet : bool
         If True, generate cutting-sheet DXF files (plancha de corte) with
-        panels packed onto 1000x600mm sheets for laser cutting.
+        panels packed onto sheets for laser cutting.
     include_floor_plans : bool
         If True, generate horizontal section-cut floor plans showing interior
         wall layout for each detected floor level.
+    kerf_mm : float
+        Kerf compensation in mm (default 0.5mm). Applied as inward offset on
+        exterior contours and outward on interior holes.
+    sheet_width_mm : float
+        Sheet width in mm (default 2440mm — standard MDF/MDP).
+    sheet_height_mm : float
+        Sheet height in mm (default 1220mm — standard MDF/MDP).
+    piece_gap_mm : float
+        Minimum gap between pieces in mm (default 8mm).
     """
     if formats is None:
         formats = {"dxf", "pdf"}
@@ -351,22 +376,45 @@ def run_pipeline(
 
     # --- 6. Cutting sheets — one DXF per material group ---
     if include_cutting_sheet and component_sheets:
-        # Map ComponentSheet labels to cutting-sheet file names / labels.
-        _CUTTING_LABELS = {
-            "Descomposicion Paredes": ("Corte Paredes", "corte_paredes"),
-            "Descomposicion Pisos": ("Corte Pisos", "corte_pisos"),
-        }
+        # Determine unit scale for model→mm conversion.
+        unit_scale_mm = 1000.0  # Default: model in meters → mm
+        if ext == "obj":
+            us = _guess_unit_scale(faces)
+            # _guess_unit_scale returns factor to meters, so multiply by 1000 for mm.
+            unit_scale_mm = us * 1000.0
 
-        for sheet in component_sheets:
-            cut_label, file_slug = _CUTTING_LABELS.get(
-                sheet.label, (sheet.label, _sanitize_label(sheet.label)),
-            )
+        # Extract real contours using the new pipeline.
+        wall_pieces, slab_pieces, piece_warnings = extract_cutting_pieces(
+            faces,
+            up_axis=up_axis,
+            kerf_mm=kerf_mm,
+            unit_scale=unit_scale_mm,
+        )
+        warnings.extend(piece_warnings)
+
+        # Build and render cutting sheets.
+        _PIECE_GROUPS = [
+            (wall_pieces, "Corte Paredes", "corte_paredes"),
+            (slab_pieces, "Corte Pisos", "corte_pisos"),
+        ]
+
+        for pieces, cut_label, file_slug in _PIECE_GROUPS:
+            if not pieces:
+                continue
+
             layout = build_cutting_layout(
-                sheet.panels, label=cut_label, scale_denom=scale_denom,
+                pieces,
+                label=cut_label,
+                sheet_w=sheet_width_mm,
+                sheet_h=sheet_height_mm,
+                gap=piece_gap_mm,
             )
             if layout is None:
                 continue
-            dxf_text = generate_cutting_dxf(layout)
+
+            # Build lookup for real contour data.
+            pieces_by_id = {p.ref_id: p for p in pieces}
+            dxf_text = generate_cutting_dxf(layout, pieces_by_id=pieces_by_id)
             files.append(OutputFile(
                 name=f"{stem}_{file_slug}.dxf",
                 content=dxf_text,

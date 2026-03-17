@@ -24,9 +24,11 @@ from typing import Literal
 
 from .types import (
     ComponentSheet,
+    CuttingPiece,
     Face3D,
     Loop2D,
     PanelInfo,
+    PieceType,
     Vec2,
     Vec3,
     cross,
@@ -401,3 +403,185 @@ def extract_components(
         for face in faces:
             face.panel_id = z_tags.get(id(face))
         return sheets_z
+
+
+# ---------------------------------------------------------------------------
+# CuttingPiece extraction — real contours for laser cutting
+# ---------------------------------------------------------------------------
+
+def _make_cutting_pieces_from_groups(
+    groups: list[list[Face3D]],
+    group_to_id: dict[int, str],
+    kerf_mm: float = 0.5,
+    unit_scale: float = 1.0,
+) -> list[CuttingPiece]:
+    """Convert face groups into CuttingPieces with real contours.
+
+    Uses Rodrigues rotation to align each piece's local plane with XY,
+    then extracts actual boundary contours (not bounding boxes).
+
+    Parameters
+    ----------
+    groups : list of list of Face3D
+        Coplanar face groups.
+    group_to_id : dict
+        Maps group index to ref_id (e.g. "A1"). Only groups in this dict
+        are processed.
+    kerf_mm : float
+        Kerf compensation in mm.
+    unit_scale : float
+        Factor to convert model units to mm (e.g. 1000.0 for meters→mm).
+    """
+    from .geometry_classifier import (
+        classify_piece,
+        compute_weighted_normal,
+        rotate_vertices_to_xy,
+    )
+    from .contour_extractor import extract_piece_contours
+
+    pieces: list[CuttingPiece] = []
+
+    for gi, group in enumerate(groups):
+        ref_id = group_to_id.get(gi)
+        if ref_id is None:
+            continue
+
+        # 1. Classify piece geometry.
+        piece_type = classify_piece(group)
+
+        warning = ""
+        if piece_type == PieceType.DOUBLE_CURVATURE:
+            warning = (
+                f"Pieza {ref_id}: doble curvatura detectada. "
+                "El contorno es una aproximacion — verificar manualmente."
+            )
+
+        # 2. Compute area-weighted normal.
+        weighted_normal = compute_weighted_normal(group)
+
+        # 3. Rotate all face vertices to XY plane.
+        face_verts_2d: list[list[tuple[float, float]]] = []
+        for face in group:
+            rotated = rotate_vertices_to_xy(face.vertices, weighted_normal)
+            face_verts_2d.append([(x, y) for x, y, z in rotated])
+
+        # 4. Extract contours (boundary edges → loops → classify → kerf).
+        outer, inners, outer_kerf, inners_kerf = extract_piece_contours(
+            face_verts_2d,
+            kerf_mm=kerf_mm,
+            scale_to_mm=unit_scale,
+        )
+
+        if not outer:
+            continue
+
+        # 5. Compute bounding box in mm.
+        all_x = [v.x for v in outer]
+        all_y = [v.y for v in outer]
+        min_x, max_x = min(all_x), max(all_x)
+        min_y, max_y = min(all_y), max(all_y)
+        w_mm = max_x - min_x
+        h_mm = max_y - min_y
+
+        if w_mm < 0.1 or h_mm < 0.1:
+            continue
+
+        # 6. Normalize contours so (0,0) = bottom-left.
+        def _shift(verts: list[Vec2]) -> list[Vec2]:
+            return [Vec2(v.x - min_x, v.y - min_y) for v in verts]
+
+        pieces.append(CuttingPiece(
+            ref_id=ref_id,
+            piece_type=piece_type,
+            outer_contour=_shift(outer),
+            inner_loops=[_shift(loop) for loop in inners],
+            outer_kerf=_shift(outer_kerf),
+            inner_kerf=[_shift(loop) for loop in inners_kerf],
+            width_mm=w_mm,
+            height_mm=h_mm,
+            warning=warning,
+        ))
+
+    return pieces
+
+
+def extract_cutting_pieces(
+    faces: list[Face3D],
+    up_axis: Literal["Y", "Z"],
+    kerf_mm: float = 0.5,
+    unit_scale: float = 1000.0,
+) -> tuple[list[CuttingPiece], list[CuttingPiece], list[str]]:
+    """Extract CuttingPieces with real contours for laser cutting.
+
+    Must be called AFTER extract_components() so that face groups and
+    panel IDs are already established.
+
+    Parameters
+    ----------
+    faces : list of Face3D
+        All model faces (with panel_id already set by extract_components).
+    up_axis : "Y" or "Z"
+        Detected up axis.
+    kerf_mm : float
+        Kerf compensation in mm.
+    unit_scale : float
+        Conversion factor from model units to mm.
+
+    Returns
+    -------
+    (wall_pieces, slab_pieces, warnings)
+    """
+    warnings: list[str] = []
+
+    vertical_faces: list[Face3D] = []
+    horizontal_faces: list[Face3D] = []
+
+    for face in faces:
+        if face.group_name and _OPENING_NAME_RE.search(face.group_name):
+            continue
+        if face.panel_id is None:
+            continue
+
+        up_comp = abs(_get_up_component(face.normal, up_axis))
+        if up_comp > (1.0 - HORIZONTAL_EPSILON):
+            horizontal_faces.append(face)
+        elif up_comp <= VERTICAL_EPSILON:
+            vertical_faces.append(face)
+
+    model_diag = _compute_model_diagonal(faces)
+
+    # --- Walls ---
+    wall_pieces: list[CuttingPiece] = []
+    if vertical_faces:
+        wall_groups = _group_coplanar(vertical_faces, model_diag)
+        # Build group_to_id from existing panel_id tags.
+        group_to_id: dict[int, str] = {}
+        for gi, group in enumerate(wall_groups):
+            for face in group:
+                if face.panel_id:
+                    group_to_id[gi] = face.panel_id
+                    break
+        wall_pieces = _make_cutting_pieces_from_groups(
+            wall_groups, group_to_id, kerf_mm, unit_scale,
+        )
+
+    # --- Slabs ---
+    slab_pieces: list[CuttingPiece] = []
+    if horizontal_faces:
+        slab_groups = _group_coplanar(horizontal_faces, model_diag)
+        group_to_id = {}
+        for gi, group in enumerate(slab_groups):
+            for face in group:
+                if face.panel_id:
+                    group_to_id[gi] = face.panel_id
+                    break
+        slab_pieces = _make_cutting_pieces_from_groups(
+            slab_groups, group_to_id, kerf_mm, unit_scale,
+        )
+
+    # Collect warnings from pieces.
+    for p in wall_pieces + slab_pieces:
+        if p.warning:
+            warnings.append(p.warning)
+
+    return wall_pieces, slab_pieces, warnings
