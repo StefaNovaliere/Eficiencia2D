@@ -380,10 +380,10 @@ def test_cutting_sheet_generated():
     cutting_dxfs = [n for n in names if "corte_paredes" in n or "corte_pisos" in n]
     assert len(cutting_dxfs) >= 1, f"Expected cutting sheet DXF, got {names}"
 
-    # The cutting sheet DXF should have proper layers.
+    # The cutting sheet DXF should have laser-cutter layers.
     dxf_content = zf.read(cutting_dxfs[0]).decode("utf-8")
-    assert "CORTE" in dxf_content
-    assert "GRABADO" in dxf_content
+    assert "CUT_EXTERIOR" in dxf_content
+    assert "ENGRAVE_RASTER" in dxf_content
 
 
 def test_cutting_sheet_has_panel_ids():
@@ -933,3 +933,336 @@ def test_no_door_group_no_aberturas_entities():
     # In ezdxf output, ARC as entity type appears as "\nARC\n"
     arc_count = entities_section.count("\nARC\n")
     assert arc_count == 0, f"Expected no ARC entities without doors, found {arc_count}"
+
+
+# ---------------------------------------------------------------------------
+# New laser-cutting pipeline tests
+# ---------------------------------------------------------------------------
+
+
+def _make_box_with_hole_z_up() -> bytes:
+    """Create a box with a hole in the front wall (Z-up).
+
+    The front wall has a rectangular hole (window) modeled as two quads
+    on either side of the hole, plus top and bottom strips.
+    """
+    lines = [
+        "# Box 6x4x3m Z-up with hole in front wall",
+        # Outer vertices of front wall
+        "v 0 0 0",     # 1: bottom-left
+        "v 6 0 0",     # 2: bottom-right
+        "v 6 0 3",     # 3: top-right
+        "v 0 0 3",     # 4: top-left
+        # Hole vertices (1m x 1m hole centered at x=3, z=1.5)
+        "v 2 0 1",     # 5: hole bottom-left
+        "v 4 0 1",     # 6: hole bottom-right
+        "v 4 0 2",     # 7: hole top-right
+        "v 2 0 2",     # 8: hole top-left
+        # Front wall faces around the hole:
+        "f 1 2 6 5",   # Bottom strip
+        "f 5 8 4 1",   # Left strip
+        "f 6 2 3 7",   # Right strip
+        "f 8 7 3 4",   # Top strip
+        # Right wall (solid)
+        "v 6 4 0",     # 9
+        "v 6 4 3",     # 10
+        "f 2 9 10 3",
+        # Back wall (solid)
+        "v 0 4 0",     # 11
+        "v 0 4 3",     # 12
+        "f 9 11 12 10",
+        # Left wall (solid)
+        "f 11 1 4 12",
+    ]
+    return "\n".join(lines).encode("utf-8")
+
+
+def _make_inclined_wall() -> bytes:
+    """Create a wall inclined 30 degrees from vertical (Z-up).
+
+    A flat quad tilted 30° — its real dimensions are 4m wide x 3m tall,
+    but a naive XY projection would show it shorter.
+    """
+    import math
+    # Wall normal is tilted 30° from Z-axis toward Y
+    # Wall plane: 4m wide (along X), 3m tall (along tilted direction)
+    # Bottom edge at y=0, z=0; top edge at y=3*sin(30°), z=3*cos(30°)
+    tilt = math.radians(30)
+    dy = 3.0 * math.sin(tilt)  # 1.5
+    dz = 3.0 * math.cos(tilt)  # 2.598
+
+    lines = [
+        "# Inclined wall 4x3m, tilted 30° from vertical, Z-up",
+        f"v 0 0 0",
+        f"v 4 0 0",
+        f"v 4 {dy} {dz}",
+        f"v 0 {dy} {dz}",
+        "f 1 2 3 4",
+    ]
+    return "\n".join(lines).encode("utf-8")
+
+
+def test_cutting_dxf_has_4_layers():
+    """Cutting sheet DXF should have all 4 laser-cutter layers."""
+    obj_data = _make_box_z_up()
+    resp = client.post(
+        "/api/upload",
+        files={"file": ("house.obj", io.BytesIO(obj_data), "application/octet-stream")},
+        data={
+            "scale": "100", "paper": "A3", "formats": "dxf",
+            "include_cutting_sheet": "true",
+        },
+    )
+    assert resp.status_code == 200
+    zf = zipfile.ZipFile(io.BytesIO(resp.content))
+    names = zf.namelist()
+    cutting_dxfs = [n for n in names if "corte_paredes" in n]
+    assert len(cutting_dxfs) >= 1, f"Expected cutting DXF, got {names}"
+
+    dxf_content = zf.read(cutting_dxfs[0]).decode("utf-8")
+    assert "CUT_INTERIOR" in dxf_content, "Missing CUT_INTERIOR layer"
+    assert "ENGRAVE_VECTOR" in dxf_content, "Missing ENGRAVE_VECTOR layer"
+    assert "ENGRAVE_RASTER" in dxf_content, "Missing ENGRAVE_RASTER layer"
+    assert "CUT_EXTERIOR" in dxf_content, "Missing CUT_EXTERIOR layer"
+
+
+def test_cutting_dxf_layer_colors():
+    """Cutting sheet layers should have exact RGB true colors."""
+    obj_data = _make_box_z_up()
+    resp = client.post(
+        "/api/upload",
+        files={"file": ("house.obj", io.BytesIO(obj_data), "application/octet-stream")},
+        data={
+            "scale": "100", "paper": "A3", "formats": "dxf",
+            "include_cutting_sheet": "true",
+        },
+    )
+    assert resp.status_code == 200
+    zf = zipfile.ZipFile(io.BytesIO(resp.content))
+    names = zf.namelist()
+    cutting_dxfs = [n for n in names if "corte_paredes" in n]
+    assert len(cutting_dxfs) >= 1
+
+    import ezdxf
+    dxf_text = zf.read(cutting_dxfs[0]).decode("utf-8")
+    doc = ezdxf.read(io.StringIO(dxf_text))
+
+    # Verify true colors on each layer (group code 420 = RGB integer).
+    layer_ci = doc.layers.get("CUT_INTERIOR")
+    assert layer_ci is not None
+    ci_rgb = ezdxf.colors.int2rgb(layer_ci.dxf.true_color)
+    assert ci_rgb == ezdxf.colors.RGB(0, 255, 0), \
+        f"CUT_INTERIOR color should be green, got {ci_rgb}"
+
+    layer_ce = doc.layers.get("CUT_EXTERIOR")
+    assert layer_ce is not None
+    ce_rgb = ezdxf.colors.int2rgb(layer_ce.dxf.true_color)
+    assert ce_rgb == ezdxf.colors.RGB(255, 0, 0), \
+        f"CUT_EXTERIOR color should be red, got {ce_rgb}"
+
+    layer_ev = doc.layers.get("ENGRAVE_VECTOR")
+    assert layer_ev is not None
+    ev_rgb = ezdxf.colors.int2rgb(layer_ev.dxf.true_color)
+    assert ev_rgb == ezdxf.colors.RGB(0, 0, 255), \
+        f"ENGRAVE_VECTOR color should be blue, got {ev_rgb}"
+
+    layer_er = doc.layers.get("ENGRAVE_RASTER")
+    assert layer_er is not None
+    er_rgb = ezdxf.colors.int2rgb(layer_er.dxf.true_color)
+    assert er_rgb == ezdxf.colors.RGB(0, 0, 0), \
+        f"ENGRAVE_RASTER color should be black, got {er_rgb}"
+
+
+def test_cutting_dxf_lineweight():
+    """Cut layers should have 0.01mm lineweight."""
+    obj_data = _make_box_z_up()
+    resp = client.post(
+        "/api/upload",
+        files={"file": ("house.obj", io.BytesIO(obj_data), "application/octet-stream")},
+        data={
+            "scale": "100", "paper": "A3", "formats": "dxf",
+            "include_cutting_sheet": "true",
+        },
+    )
+    assert resp.status_code == 200
+    zf = zipfile.ZipFile(io.BytesIO(resp.content))
+    cutting_dxfs = [n for n in zf.namelist() if "corte_paredes" in n]
+    assert len(cutting_dxfs) >= 1
+
+    import ezdxf
+    doc = ezdxf.read(io.StringIO(zf.read(cutting_dxfs[0]).decode("utf-8")))
+
+    # ezdxf lineweight is in 1/100 mm units; 5 = 0.05mm (thinnest standard)
+    for layer_name in ["CUT_INTERIOR", "CUT_EXTERIOR", "ENGRAVE_VECTOR"]:
+        layer = doc.layers.get(layer_name)
+        assert layer is not None, f"Layer {layer_name} missing"
+        assert layer.dxf.lineweight == 5, \
+            f"{layer_name} lineweight should be 5 (0.05mm), got {layer.dxf.lineweight}"
+
+
+def test_inclined_wall_real_dimensions():
+    """An inclined wall should produce a cutting piece with real dimensions.
+
+    A 4m x 3m wall tilted 30° from vertical should produce a cutting piece
+    with dimensions close to 4000mm x 3000mm, NOT the projected dimensions.
+    """
+    from app.core.obj_parser import parse_obj
+    from app.core.plan_extractor import extract_components, extract_cutting_pieces
+    from app.core.pipeline import detect_up_axis
+
+    obj_text = _make_inclined_wall().decode("utf-8")
+    result = parse_obj(obj_text)
+    faces = result.faces
+    assert len(faces) >= 1
+
+    up_axis = detect_up_axis(faces)
+
+    # Run decomposition to tag faces.
+    sheets = extract_components(faces, gap=0.5, up_axis=up_axis)
+
+    # Extract cutting pieces.
+    wall_pieces, slab_pieces, warnings = extract_cutting_pieces(
+        faces, up_axis=up_axis, kerf_mm=0.0, unit_scale=1000.0,
+    )
+
+    # The inclined wall should produce at least one cutting piece.
+    all_pieces = wall_pieces + slab_pieces
+    assert len(all_pieces) >= 1, f"Expected cutting pieces, got {len(all_pieces)}"
+
+    piece = all_pieces[0]
+    # Real dimensions: 4m wide, 3m tall → 4000mm x 3000mm
+    # Allow 5% tolerance for floating point.
+    assert abs(piece.width_mm - 4000.0) < 200.0, \
+        f"Width should be ~4000mm, got {piece.width_mm}"
+    assert abs(piece.height_mm - 3000.0) < 200.0, \
+        f"Height should be ~3000mm, got {piece.height_mm}"
+
+
+def test_contour_extraction_nonrectangular():
+    """An L-shaped piece made of two triangles should produce a non-rectangular contour.
+
+    Uses two triangles sharing an edge to form a quadrilateral that isn't
+    a rectangle — proving the system extracts real contours, not bounding boxes.
+    """
+    from app.core.geometry_classifier import compute_weighted_normal, rotate_vertices_to_xy
+    from app.core.contour_extractor import extract_piece_contours
+    from app.core.types import Face3D, Vec3
+
+    # Two triangles sharing edge (0,0,0)-(4,0,0), forming a non-rectangular
+    # quadrilateral in the Y=0 plane.
+    faces = [
+        Face3D(
+            vertices=[Vec3(0, 0, 0), Vec3(4, 0, 0), Vec3(2, 0, 3)],
+            normal=Vec3(0, -1, 0),
+        ),
+        Face3D(
+            vertices=[Vec3(0, 0, 0), Vec3(4, 0, 0), Vec3(3, 0, -1)],
+            normal=Vec3(0, -1, 0),
+        ),
+    ]
+
+    normal = compute_weighted_normal(faces)
+    face_verts_2d = []
+    for face in faces:
+        rotated = rotate_vertices_to_xy(face.vertices, normal)
+        face_verts_2d.append([(x, y) for x, y, z in rotated])
+
+    outer, inners, outer_kerf, inners_kerf = extract_piece_contours(
+        face_verts_2d, kerf_mm=0.0, scale_to_mm=1.0,
+    )
+
+    # The two-triangle shape should have 4 boundary vertices (not 3, since
+    # the shared edge is internal and gets eliminated).
+    assert len(outer) >= 4, \
+        f"Two-triangle shape should have >= 4 boundary vertices, got {len(outer)}"
+    # The contour should NOT be a rectangle — verify it's not axis-aligned.
+    # A bounding box approach would give a rectangle; real contour gives the diamond.
+    xs = [v.x for v in outer]
+    ys = [v.y for v in outer]
+    bbox_area = (max(xs) - min(xs)) * (max(ys) - min(ys))
+    # Compute actual polygon area via shoelace.
+    n = len(outer)
+    poly_area = abs(sum(
+        outer[i].x * outer[(i + 1) % n].y - outer[(i + 1) % n].x * outer[i].y
+        for i in range(n)
+    )) / 2.0
+    # Real contour area should be less than bounding box area.
+    assert poly_area < bbox_area * 0.99, \
+        f"Real contour area ({poly_area:.2f}) should be < bbox area ({bbox_area:.2f})"
+
+
+def test_wall_with_hole_has_inner_loop():
+    """A wall with a window hole should produce inner loops in CUT_INTERIOR."""
+    from app.core.geometry_classifier import compute_weighted_normal, rotate_vertices_to_xy
+    from app.core.contour_extractor import extract_piece_contours
+    from app.core.types import Face3D, Vec3
+
+    # Front wall with hole (from _make_box_with_hole_z_up, front wall faces only)
+    faces = [
+        Face3D(
+            vertices=[Vec3(0, 0, 0), Vec3(6, 0, 0), Vec3(4, 0, 1), Vec3(2, 0, 1)],
+            normal=Vec3(0, -1, 0),
+        ),
+        Face3D(
+            vertices=[Vec3(2, 0, 1), Vec3(2, 0, 2), Vec3(0, 0, 3), Vec3(0, 0, 0)],
+            normal=Vec3(0, -1, 0),
+        ),
+        Face3D(
+            vertices=[Vec3(4, 0, 1), Vec3(6, 0, 0), Vec3(6, 0, 3), Vec3(4, 0, 2)],
+            normal=Vec3(0, -1, 0),
+        ),
+        Face3D(
+            vertices=[Vec3(2, 0, 2), Vec3(4, 0, 2), Vec3(6, 0, 3), Vec3(0, 0, 3)],
+            normal=Vec3(0, -1, 0),
+        ),
+    ]
+
+    normal = compute_weighted_normal(faces)
+    face_verts_2d = []
+    for face in faces:
+        rotated = rotate_vertices_to_xy(face.vertices, normal)
+        face_verts_2d.append([(x, y) for x, y, z in rotated])
+
+    outer, inners, _, _ = extract_piece_contours(
+        face_verts_2d, kerf_mm=0.0, scale_to_mm=1.0,
+    )
+
+    assert len(outer) >= 4, f"Should have outer contour, got {len(outer)} vertices"
+    assert len(inners) >= 1, f"Should have at least 1 inner loop (hole), got {len(inners)}"
+
+
+def test_geometry_classifier_flat_panel():
+    """A single flat quad should be classified as FLAT_PANEL."""
+    from app.core.geometry_classifier import classify_piece
+    from app.core.types import Face3D, PieceType, Vec3
+
+    face = Face3D(
+        vertices=[Vec3(0, 0, 0), Vec3(4, 0, 0), Vec3(4, 0, 3), Vec3(0, 0, 3)],
+        normal=Vec3(0, -1, 0),
+    )
+    result = classify_piece([face])
+    assert result == PieceType.FLAT_PANEL
+
+
+def test_rodrigues_rotation_identity():
+    """A normal already pointing up should produce identity rotation."""
+    from app.core.geometry_classifier import rotation_matrix_to_z
+    from app.core.types import Vec3
+    import numpy as np
+
+    R = rotation_matrix_to_z(Vec3(0, 0, 1))
+    assert np.allclose(R, np.eye(3)), f"Should be identity, got {R}"
+
+
+def test_rodrigues_rotation_horizontal():
+    """A horizontal normal should rotate to Z correctly."""
+    from app.core.geometry_classifier import rotation_matrix_to_z
+    from app.core.types import Vec3
+    import numpy as np
+
+    # Normal pointing in Y direction
+    R = rotation_matrix_to_z(Vec3(0, 1, 0))
+    n = np.array([0, 1, 0], dtype=np.float64)
+    rotated = R @ n
+    assert np.allclose(rotated, [0, 0, 1], atol=1e-10), \
+        f"Y normal should rotate to Z, got {rotated}"
