@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
+from enum import Enum
 
 
 @dataclass
@@ -71,6 +72,30 @@ class ComponentSheet:
     panels: list[PanelInfo]     # Each panel with ref_id, outline, dimensions
     width: float                # Overall bounding box width
     height: float               # Overall bounding box height
+
+
+class PieceType(Enum):
+    """Geometric classification of a building piece."""
+    FLAT_PANEL = "flat"
+    SINGLE_CURVATURE = "single_curve"
+    DOUBLE_CURVATURE = "double_curve"
+    SOLID_3D = "solid"
+
+
+@dataclass
+class CuttingPiece:
+    """A piece ready for laser cutting with real contours (not bounding box)."""
+    ref_id: str
+    piece_type: PieceType
+    outer_contour: list[Vec2]       # Real exterior contour
+    inner_loops: list[list[Vec2]]   # Holes / perforations
+    outer_kerf: list[Vec2]          # Exterior contour with kerf offset applied
+    inner_kerf: list[list[Vec2]]    # Holes with kerf offset applied
+    width_mm: float
+    height_mm: float
+    material: str = ""
+    thickness_mm: float = 0.0
+    warning: str = ""               # Warning for double-curvature pieces
 
 
 # --- Vector math helpers ---
