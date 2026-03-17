@@ -196,24 +196,24 @@ def _extract_with_axis(
     if not levels:
         return []
 
-    # --- Identify door groups ---
+    # --- Identify door groups (via OBJ group_name, not panel_id) ---
     door_group_names: set[str] = set()
     for face in faces:
-        if face.panel_id and is_door_group(face.panel_id):
-            door_group_names.add(face.panel_id)
+        if face.group_name and is_door_group(face.group_name):
+            door_group_names.add(face.group_name)
 
     # Group ALL door-group faces by name.
     door_faces_by_group: dict[str, list[Face3D]] = {}
     for face in faces:
-        if face.panel_id and face.panel_id in door_group_names:
-            door_faces_by_group.setdefault(face.panel_id, []).append(face)
+        if face.group_name and face.group_name in door_group_names:
+            door_faces_by_group.setdefault(face.group_name, []).append(face)
 
     # Vertical faces EXCLUDING doors.
     vertical_faces: list[Face3D] = []
     for face in faces:
         up_comp = abs(_get_up(face.normal, up_axis))
         if up_comp <= VERTICAL_EPSILON:
-            if not face.panel_id or face.panel_id not in door_group_names:
+            if not face.group_name or face.group_name not in door_group_names:
                 vertical_faces.append(face)
 
     if not vertical_faces and not door_faces_by_group:
@@ -291,13 +291,18 @@ def _extract_with_axis(
     return plans
 
 
-def extract_floor_plans(faces: list[Face3D]) -> list[FloorPlan]:
-    """Extract floor plans, auto-detecting up axis (Y or Z).
+def extract_floor_plans(
+    faces: list[Face3D], up_axis: Literal["Y", "Z"] | None = None
+) -> list[FloorPlan]:
+    """Extract floor plans, optionally using a pre-detected up axis.
 
     Returns one FloorPlan per detected floor level.
     """
     if not faces:
         return []
+
+    if up_axis is not None:
+        return _extract_with_axis(faces, up_axis)
 
     plans_z = _extract_with_axis(faces, "Z")
     plans_y = _extract_with_axis(faces, "Y")
