@@ -33,6 +33,7 @@ def parse_obj(text: str) -> ObjParseResult:
     warnings: list[str] = []
     vertices: list[Vec3] = []
     faces: list[Face3D] = []
+    current_group: str | None = None
 
     for raw_line in text.splitlines():
         line = raw_line.strip()
@@ -51,6 +52,10 @@ def parse_obj(text: str) -> ObjParseResult:
                 continue
             if math.isfinite(x) and math.isfinite(y) and math.isfinite(z):
                 vertices.append(Vec3(x, y, z))
+
+        elif keyword in ("g", "o"):
+            # Track group/object name for door/window detection.
+            current_group = " ".join(parts[1:]) if len(parts) > 1 else None
 
         elif keyword == "f":
             idx_list: list[int] = []
@@ -82,7 +87,10 @@ def parse_obj(text: str) -> ObjParseResult:
             e2 = sub(face_verts[2], face_verts[0])
             normal = normalize(cross(e1, e2))
 
-            faces.append(Face3D(vertices=face_verts, normal=normal))
+            faces.append(Face3D(
+                vertices=face_verts, normal=normal,
+                group_name=current_group,
+            ))
 
     if not faces:
         warnings.append("No faces found in the .obj file.")

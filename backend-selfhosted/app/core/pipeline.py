@@ -11,7 +11,7 @@ Output:
 
 Handles auto-detection of:
   - File format (.skp vs .obj)
-  - Coordinate system (Y-up vs Z-up) -- done in facade_extractor
+  - Coordinate system (Y-up vs Z-up) -- detected ONCE and shared
   - Unit scale -- OBJ files may be in inches, cm, mm, or meters
 """
 
@@ -20,6 +20,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 from .cutting_sheet import build_cutting_layout, generate_cutting_dxf
 from .dxf_writer import generate_dxf, generate_component_dxf, generate_floor_plan_dxf
@@ -28,7 +29,7 @@ from .obj_parser import parse_obj
 from .pdf_writer import generate_pdf
 from .plan_extractor import extract_components
 from .skp_parser import parse_skp
-from .facade_extractor import extract_facades
+from .facade_extractor import extract_facades, extract_facades_with_detected_axis
 from .types import (
     ComponentSheet,
     Face3D,
@@ -161,6 +162,65 @@ def _scale_floor_plans(plans: list[FloorPlan], s: float) -> list[FloorPlan]:
     return result
 
 
+def detect_up_axis(faces: list[Face3D]) -> Literal["Y", "Z"]:
+    """Detect whether the model uses Y-up or Z-up convention.
+
+    Primary signal: the correct axis classifies the MOST faces as vertical
+    (walls).  With the wrong axis, some walls get misclassified as
+    horizontal, reducing the vertical count.
+
+    Secondary signal (tie-break): when horizontal faces exist, prefer the
+    axis whose horizontal faces cluster into fewer distinct floor levels
+    (the hallmark of real floor slabs vs. misclassified walls).
+
+    This is called ONCE in the pipeline and the result is passed to all
+    extractors so they all agree on the same coordinate system.
+    """
+    if not faces:
+        return "Z"
+
+    def _score(up: Literal["Y", "Z"]) -> tuple[int, float]:
+        """Return (n_vertical, floor_quality_bonus) — compared lexicographically."""
+        n_vert = 0
+        n_horiz = 0
+        horiz_elevs: list[float] = []
+        for f in faces:
+            comp = abs(f.normal.y if up == "Y" else f.normal.z)
+            if comp <= 0.20:
+                n_vert += 1
+            elif comp >= 0.85:
+                n_horiz += 1
+                avg_up = sum(
+                    (v.y if up == "Y" else v.z) for v in f.vertices
+                ) / max(len(f.vertices), 1)
+                horiz_elevs.append(round(avg_up, 1))
+
+        # Floor-quality bonus: fewer distinct floor levels is better.
+        bonus = 0.0
+        if n_horiz > 0 and horiz_elevs:
+            sorted_e = sorted(set(horiz_elevs))
+            n_levels = 1
+            for i in range(1, len(sorted_e)):
+                if sorted_e[i] - sorted_e[i - 1] >= 2.0:
+                    n_levels += 1
+            bonus = n_horiz / max(n_levels, 1)
+
+        return n_vert, bonus
+
+    vert_y, bonus_y = _score("Y")
+    vert_z, bonus_z = _score("Z")
+
+    # Primary: pick the axis with more vertical faces.
+    if vert_y != vert_z:
+        return "Y" if vert_y > vert_z else "Z"
+
+    # Secondary: prefer better floor-level clustering.
+    if bonus_y != bonus_z:
+        return "Y" if bonus_y > bonus_z else "Z"
+
+    return "Z"
+
+
 def _sanitize_label(label: str) -> str:
     """Make a label safe for filenames."""
     return label.replace(" ", "_")
@@ -216,14 +276,10 @@ def run_pipeline(
     if not faces:
         return PipelineResult(facades=[], files=[], warnings=warnings)
 
-    # --- 2. Decomposition FIRST (tags Face3D.panel_id for facade labeling) ---
-    component_sheets: list[ComponentSheet] = []
-
-    if include_plan or include_cutting_sheet:
-        component_sheets = extract_components(faces, gap=0.5)
-
-    # --- 3. Extract facades (picks up panel_id from tagged faces) ---
-    facades = extract_facades(faces)
+    # --- 1b. Detect up axis via facade extraction (tries both Y and Z,
+    #     picks the one with more geometry).  The winning axis is then
+    #     shared with ALL other extractors to guarantee consistency. ---
+    facades, up_axis = extract_facades_with_detected_axis(faces)
 
     if not facades:
         warnings.append(
@@ -232,10 +288,18 @@ def run_pipeline(
         )
         return PipelineResult(facades=facades, files=[], warnings=warnings)
 
-    # --- 3b. Floor plans (horizontal section cuts) ---
+    # --- 2. Decomposition (tags Face3D.panel_id for facade labeling) ---
+    component_sheets: list[ComponentSheet] = []
+
+    if include_plan or include_cutting_sheet:
+        component_sheets = extract_components(faces, gap=0.5, up_axis=up_axis)
+        # Re-extract facades so they pick up the new panel_id tags.
+        facades = extract_facades(faces, up_axis=up_axis)
+
+    # --- 3. Floor plans (horizontal section cuts) ---
     floor_plans: list[FloorPlan] = []
     if include_floor_plans:
-        floor_plans = extract_floor_plans(faces)
+        floor_plans = extract_floor_plans(faces, up_axis=up_axis)
         if not floor_plans:
             warnings.append(
                 "No se detectaron niveles de piso. El modelo necesita losas "

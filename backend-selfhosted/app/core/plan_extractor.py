@@ -43,6 +43,12 @@ HORIZONTAL_EPSILON = 0.15  # |up_component_of_normal| > (1 - this) means horizon
 MIN_PANEL_AREA = 0.4  # m² — panels smaller than this are excluded
 MIN_PANEL_DIM = 0.25  # m  — minimum width or height of a panel
 
+# --- Door/window group name patterns ---
+import re
+_OPENING_NAME_RE = re.compile(
+    r"puerta|door|porta|ventana|window|janela", re.IGNORECASE
+)
+
 
 def _get_up_component(normal: Vec3, up_axis: Literal["Y", "Z"]) -> float:
     return normal.y if up_axis == "Y" else normal.z
@@ -309,6 +315,10 @@ def _extract_components_with_axis(
     horizontal_faces: list[Face3D] = []
 
     for face in faces:
+        # Skip faces belonging to door/window components.
+        if face.group_name and _OPENING_NAME_RE.search(face.group_name):
+            continue
+
         up_comp = abs(_get_up_component(face.normal, up_axis))
         if up_comp > (1.0 - HORIZONTAL_EPSILON):
             horizontal_faces.append(face)
@@ -353,14 +363,24 @@ def _extract_components_with_axis(
     return sheets
 
 
-def extract_components(faces: list[Face3D], gap: float = 0.5) -> list[ComponentSheet]:
-    """Extract component decomposition, auto-detecting up axis.
+def extract_components(
+    faces: list[Face3D], gap: float = 0.5,
+    up_axis: Literal["Y", "Z"] | None = None,
+) -> list[ComponentSheet]:
+    """Extract component decomposition.
+
+    If *up_axis* is provided it is used directly; otherwise both Y and Z are
+    tried and the one producing more panels wins.
 
     Side effect: sets Face3D.panel_id on each face that belongs to a panel.
     This allows the facade extractor to carry reference IDs through.
     """
     if not faces:
         return []
+
+    if up_axis is not None:
+        _clear_panel_ids(faces)
+        return _extract_components_with_axis(faces, up_axis, gap)
 
     # Try both axes — but only tag faces for the winner.
     _clear_panel_ids(faces)
