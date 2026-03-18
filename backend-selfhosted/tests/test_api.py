@@ -1266,3 +1266,131 @@ def test_rodrigues_rotation_horizontal():
     rotated = R @ n
     assert np.allclose(rotated, [0, 0, 1], atol=1e-10), \
         f"Y normal should rotate to Z, got {rotated}"
+
+
+# ---------------------------------------------------------------------------
+# Bug-fix tests
+# ---------------------------------------------------------------------------
+
+
+def test_cutting_dxf_entity_true_colors():
+    """Every entity in the cutting DXF should have true_color set directly."""
+    obj_data = _make_box_z_up()
+    resp = client.post(
+        "/api/upload",
+        files={"file": ("house.obj", io.BytesIO(obj_data), "application/octet-stream")},
+        data={
+            "scale": "100", "paper": "A3", "formats": "dxf",
+            "include_cutting_sheet": "true",
+        },
+    )
+    assert resp.status_code == 200
+    zf = zipfile.ZipFile(io.BytesIO(resp.content))
+    cutting_dxfs = [n for n in zf.namelist() if "corte_" in n]
+    assert len(cutting_dxfs) >= 1
+
+    import ezdxf
+    dxf_text = zf.read(cutting_dxfs[0]).decode("utf-8")
+    doc = ezdxf.read(io.StringIO(dxf_text))
+    msp = doc.modelspace()
+
+    # Expected true_color integers by layer.
+    expected_colors = {
+        "CUT_INTERIOR": ezdxf.colors.rgb2int((0, 255, 0)),
+        "ENGRAVE_VECTOR": ezdxf.colors.rgb2int((0, 0, 255)),
+        "ENGRAVE_RASTER": ezdxf.colors.rgb2int((0, 0, 0)),
+        "CUT_EXTERIOR": ezdxf.colors.rgb2int((255, 0, 0)),
+    }
+
+    entities_without_color = 0
+    entities_wrong_color = 0
+    for entity in msp:
+        layer = entity.dxf.layer
+        if layer not in expected_colors:
+            continue
+        if not entity.dxf.hasattr("true_color"):
+            entities_without_color += 1
+            continue
+        if entity.dxf.true_color != expected_colors[layer]:
+            entities_wrong_color += 1
+
+    assert entities_without_color == 0, \
+        f"{entities_without_color} entities missing true_color"
+    assert entities_wrong_color == 0, \
+        f"{entities_wrong_color} entities have wrong true_color"
+
+
+def test_boundary_edges_no_internal_triangulation():
+    """Boundary edge extraction should not include internal triangulation edges."""
+    from app.core.contour_extractor import extract_boundary_edges_2d, chain_edges_into_loops
+
+    # A 4x3 rectangle made of 2 triangles sharing the diagonal edge (0,0)-(4,3).
+    # The diagonal is internal (shared by both faces) and should NOT appear.
+    tri1 = [(0.0, 0.0), (4.0, 0.0), (4.0, 3.0)]
+    tri2 = [(0.0, 0.0), (4.0, 3.0), (0.0, 3.0)]
+
+    boundary = extract_boundary_edges_2d([tri1, tri2])
+    loops = chain_edges_into_loops(boundary)
+
+    # Should produce exactly 1 loop with 4 vertices (the rectangle outline).
+    assert len(loops) == 1, f"Expected 1 loop, got {len(loops)}"
+    assert len(loops[0]) == 4, \
+        f"Rectangle should have 4 boundary vertices, got {len(loops[0])}"
+
+    # No edge should be the internal diagonal (0,0)-(4,3).
+    for (a, b) in boundary:
+        is_diagonal = (
+            (abs(a[0]) < 0.01 and abs(a[1]) < 0.01 and abs(b[0] - 4) < 0.01 and abs(b[1] - 3) < 0.01)
+            or (abs(b[0]) < 0.01 and abs(b[1]) < 0.01 and abs(a[0] - 4) < 0.01 and abs(a[1] - 3) < 0.01)
+        )
+        assert not is_diagonal, "Internal diagonal edge should have been removed"
+
+
+def test_boundary_edges_with_floating_point_drift():
+    """Boundary edges should handle small floating-point differences from rotation."""
+    from app.core.contour_extractor import extract_boundary_edges_2d, chain_edges_into_loops
+
+    # Same rectangle as above, but the shared edge has tiny floating-point drift
+    # simulating what happens after Rodrigues rotation.
+    tri1 = [(0.0, 0.0), (4.0, 0.0), (4.0 + 1e-7, 3.0 - 2e-7)]
+    tri2 = [(0.0 + 5e-8, 0.0 - 1e-8), (4.0, 3.0), (0.0, 3.0)]
+
+    boundary = extract_boundary_edges_2d([tri1, tri2])
+    loops = chain_edges_into_loops(boundary)
+
+    # Should still produce 1 loop with 4 vertices despite the drift.
+    assert len(loops) == 1, \
+        f"Expected 1 loop despite float drift, got {len(loops)}"
+    assert len(loops[0]) == 4, \
+        f"Rectangle should have 4 vertices despite drift, got {len(loops[0])}"
+
+
+def test_deduplicate_wall_pieces():
+    """Pieces with identical dimensions should be deduplicated."""
+    from app.core.plan_extractor import _deduplicate_pieces
+    from app.core.types import CuttingPiece, PieceType, Vec2
+
+    # Create 3 pieces: two with identical dims, one different.
+    p1 = CuttingPiece(
+        ref_id="A1", piece_type=PieceType.FLAT_PANEL,
+        outer_contour=[Vec2(0, 0), Vec2(100, 0), Vec2(100, 200), Vec2(0, 200)],
+        inner_loops=[], outer_kerf=[], inner_kerf=[],
+        width_mm=100.0, height_mm=200.0,
+    )
+    p2 = CuttingPiece(
+        ref_id="A2", piece_type=PieceType.FLAT_PANEL,
+        outer_contour=[Vec2(0, 0), Vec2(100, 0), Vec2(100, 200), Vec2(0, 200)],
+        inner_loops=[], outer_kerf=[], inner_kerf=[],
+        width_mm=100.5, height_mm=199.8,  # Within 5mm tolerance
+    )
+    p3 = CuttingPiece(
+        ref_id="A3", piece_type=PieceType.FLAT_PANEL,
+        outer_contour=[Vec2(0, 0), Vec2(300, 0), Vec2(300, 400), Vec2(0, 400)],
+        inner_loops=[], outer_kerf=[], inner_kerf=[],
+        width_mm=300.0, height_mm=400.0,
+    )
+
+    result = _deduplicate_pieces([p1, p2, p3])
+    assert len(result) == 2, f"Expected 2 unique pieces, got {len(result)}"
+    assert result[0].ref_id == "A1"
+    assert result[1].ref_id == "A3"
