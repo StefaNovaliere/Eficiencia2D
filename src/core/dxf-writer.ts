@@ -199,6 +199,12 @@ const LAYER_STYLE: Record<string, { aci: string; tc: string }> = {
   CUT_INTERIOR:   { aci: "3", tc: "65280" },    // green 0,255,0
 };
 
+/** Incremental entity handle counter (starts at 0x100 to avoid table handles). */
+let _handleCounter = 0x100;
+function nextHandle(): string {
+  return (_handleCounter++).toString(16).toUpperCase();
+}
+
 function dxfLine(
   x1: number, y1: number,
   x2: number, y2: number,
@@ -208,6 +214,9 @@ function dxfLine(
   const style = LAYER_STYLE[layer] ?? { aci: "7", tc: "0" };
   const parts = [
     "0", "LINE",
+    "5", nextHandle(),
+    "330", "17",
+    "100", "AcDbEntity",
     "8", layer,
     "62", style.aci,
     "420", style.tc,
@@ -216,8 +225,9 @@ function dxfLine(
     parts.push("6", linetype);
   }
   parts.push(
-    "10", String(x1), "20", String(y1),
-    "11", String(x2), "21", String(y2),
+    "100", "AcDbLine",
+    "10", String(x1), "20", String(y1), "30", "0.0",
+    "11", String(x2), "21", String(y2), "31", "0.0",
   );
   return joinDxf(parts);
 }
@@ -228,10 +238,14 @@ function dxfText(
   const style = LAYER_STYLE[layer] ?? { aci: "7", tc: "0" };
   return joinDxf([
     "0", "TEXT",
+    "5", nextHandle(),
+    "330", "17",
+    "100", "AcDbEntity",
     "8", layer,
     "62", style.aci,
     "420", style.tc,
-    "10", String(x), "20", String(y),
+    "100", "AcDbText",
+    "10", String(x), "20", String(y), "30", "0.0",
     "40", String(h),
     "1", text,
   ]);
@@ -249,6 +263,9 @@ function dxfArc(
   const style = LAYER_STYLE[layer] ?? { aci: "7", tc: "0" };
   const parts = [
     "0", "ARC",
+    "5", nextHandle(),
+    "330", "17",
+    "100", "AcDbEntity",
     "8", layer,
     "62", style.aci,
     "420", style.tc,
@@ -257,8 +274,10 @@ function dxfArc(
     parts.push("6", linetype);
   }
   parts.push(
-    "10", String(cx), "20", String(cy),
+    "100", "AcDbCircle",
+    "10", String(cx), "20", String(cy), "30", "0.0",
     "40", String(radius),
+    "100", "AcDbArc",
     "50", String(startAngle),
     "51", String(endAngle),
   );
@@ -266,6 +285,7 @@ function dxfArc(
 }
 
 export function generateFacadeDxf(facade: Facade, scaleDenom: number): string {
+  _handleCounter = 0x100;
   const s = 1 / scaleDenom;
   const textH = 0.003;
   let out = dxfHeader();
@@ -324,6 +344,7 @@ export function generateFloorPlanDxf(
   plan: FloorPlan,
   scaleDenom: number,
 ): string {
+  _handleCounter = 0x100;
   const s = 1 / scaleDenom;
   const textH = 0.003;
   let out = dxfHeader();
