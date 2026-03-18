@@ -505,6 +505,41 @@ def _make_cutting_pieces_from_groups(
     return pieces
 
 
+def _deduplicate_pieces(
+    pieces: list[CuttingPiece],
+    dim_tolerance_mm: float = 5.0,
+) -> list[CuttingPiece]:
+    """Remove duplicate pieces that have the same dimensions.
+
+    Walls modeled with thickness produce parallel coplanar groups (exterior,
+    interior, edges) that generate near-identical cutting pieces. This keeps
+    only the first occurrence of each unique (width, height) pair.
+    """
+    if not pieces:
+        return pieces
+
+    unique: list[CuttingPiece] = []
+    seen_dims: list[tuple[float, float]] = []
+
+    for piece in pieces:
+        w, h = piece.width_mm, piece.height_mm
+        # Normalize: always store (smaller, larger) to handle rotation.
+        dims = (min(w, h), max(w, h))
+
+        is_dup = False
+        for sw, sh in seen_dims:
+            if (abs(dims[0] - sw) < dim_tolerance_mm
+                    and abs(dims[1] - sh) < dim_tolerance_mm):
+                is_dup = True
+                break
+
+        if not is_dup:
+            unique.append(piece)
+            seen_dims.append(dims)
+
+    return unique
+
+
 def extract_cutting_pieces(
     faces: list[Face3D],
     up_axis: Literal["Y", "Z"],
@@ -578,6 +613,10 @@ def extract_cutting_pieces(
         slab_pieces = _make_cutting_pieces_from_groups(
             slab_groups, group_to_id, kerf_mm, unit_scale,
         )
+
+    # Deduplicate pieces with near-identical dimensions (thick wall faces).
+    wall_pieces = _deduplicate_pieces(wall_pieces)
+    slab_pieces = _deduplicate_pieces(slab_pieces)
 
     # Collect warnings from pieces.
     for p in wall_pieces + slab_pieces:

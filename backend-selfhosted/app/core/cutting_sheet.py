@@ -168,28 +168,34 @@ def generate_cutting_dxf(
     doc = ezdxf.new("R2010")
     msp = doc.modelspace()
 
+    # --- True Color constants (24-bit RGB integers) ---
+    COLOR_CUT_INT = ezdxf.colors.rgb2int((0, 255, 0))       # Green
+    COLOR_ENGRAVE_VEC = ezdxf.colors.rgb2int((0, 0, 255))    # Blue
+    COLOR_ENGRAVE_RAS = ezdxf.colors.rgb2int((0, 0, 0))      # Black
+    COLOR_CUT_EXT = ezdxf.colors.rgb2int((255, 0, 0))        # Red
+
     # --- Create layers in correct order (green → blue → black → red) ---
     # Layer 1: CUT_INTERIOR (green) — interior cuts first
     layer_ci = doc.layers.add("CUT_INTERIOR")
     layer_ci.color = 3  # ACI green as fallback
-    layer_ci.dxf.true_color = ezdxf.colors.rgb2int((0, 255, 0))
+    layer_ci.dxf.true_color = COLOR_CUT_INT
     layer_ci.dxf.lineweight = 5  # 0.05mm — thinnest DXF standard lineweight
 
     # Layer 2: ENGRAVE_VECTOR (blue) — vector engraving
     layer_ev = doc.layers.add("ENGRAVE_VECTOR")
     layer_ev.color = 5  # ACI blue as fallback
-    layer_ev.dxf.true_color = ezdxf.colors.rgb2int((0, 0, 255))
+    layer_ev.dxf.true_color = COLOR_ENGRAVE_VEC
     layer_ev.dxf.lineweight = 5  # 0.05mm
 
     # Layer 3: ENGRAVE_RASTER (black) — raster engraving (text)
     layer_er = doc.layers.add("ENGRAVE_RASTER")
     layer_er.color = 7  # ACI white/black as fallback
-    layer_er.dxf.true_color = ezdxf.colors.rgb2int((0, 0, 0))
+    layer_er.dxf.true_color = COLOR_ENGRAVE_RAS
 
     # Layer 4: CUT_EXTERIOR (red) — exterior cut last
     layer_ce = doc.layers.add("CUT_EXTERIOR")
     layer_ce.color = 1  # ACI red as fallback
-    layer_ce.dxf.true_color = ezdxf.colors.rgb2int((255, 0, 0))
+    layer_ce.dxf.true_color = COLOR_CUT_EXT
     layer_ce.dxf.lineweight = 5  # 0.05mm
 
     # --- Draw pieces ---
@@ -213,6 +219,7 @@ def generate_cutting_dxf(
                     dxfattribs={"layer": "CUT_INTERIOR"},
                 )
                 poly.dxf.lineweight = 5
+                poly.dxf.true_color = COLOR_CUT_INT
 
             # Orientation mark — blue, ENGRAVE_VECTOR
             # Draw a small upward arrow at the top center of the piece.
@@ -220,23 +227,26 @@ def generate_cutting_dxf(
             top_y = y_off + piece.height_mm
             arrow_len = min(piece.height_mm * 0.08, 5.0)
             # Arrow shaft
-            msp.add_line(
+            ln = msp.add_line(
                 (cx, top_y - arrow_len * 1.5),
                 (cx, top_y - arrow_len * 0.3),
                 dxfattribs={"layer": "ENGRAVE_VECTOR"},
             )
+            ln.dxf.true_color = COLOR_ENGRAVE_VEC
             # Arrow head (two short lines)
             head_w = arrow_len * 0.3
-            msp.add_line(
+            ln = msp.add_line(
                 (cx, top_y - arrow_len * 0.3),
                 (cx - head_w, top_y - arrow_len * 0.8),
                 dxfattribs={"layer": "ENGRAVE_VECTOR"},
             )
-            msp.add_line(
+            ln.dxf.true_color = COLOR_ENGRAVE_VEC
+            ln = msp.add_line(
                 (cx, top_y - arrow_len * 0.3),
                 (cx + head_w, top_y - arrow_len * 0.8),
                 dxfattribs={"layer": "ENGRAVE_VECTOR"},
             )
+            ln.dxf.true_color = COLOR_ENGRAVE_VEC
 
             # Piece number — black, ENGRAVE_RASTER (centered, 5mm height)
             cx = x_off + piece.width_mm / 2.0
@@ -248,6 +258,7 @@ def generate_cutting_dxf(
                 dxfattribs={"layer": "ENGRAVE_RASTER"},
             )
             t.set_placement((cx, cy), align=TextEntityAlignment.MIDDLE_CENTER)
+            t.dxf.true_color = COLOR_ENGRAVE_RAS
 
             # Exterior contour — red, CUT_EXTERIOR (drawn LAST)
             pts = [(v.x + x_off, v.y + y_off) for v in piece.outer_kerf]
@@ -256,6 +267,7 @@ def generate_cutting_dxf(
                 dxfattribs={"layer": "CUT_EXTERIOR"},
             )
             poly.dxf.lineweight = 1
+            poly.dxf.true_color = COLOR_CUT_EXT
 
         else:
             # --- Legacy rectangle mode (fallback) ---
@@ -269,6 +281,7 @@ def generate_cutting_dxf(
                 dxfattribs={"layer": "CUT_EXTERIOR"},
             )
             poly.dxf.lineweight = 1
+            poly.dxf.true_color = COLOR_CUT_EXT
 
             # Piece number on ENGRAVE_RASTER (black).
             cx = x_off + w / 2.0
@@ -280,6 +293,7 @@ def generate_cutting_dxf(
                 dxfattribs={"layer": "ENGRAVE_RASTER"},
             )
             t.set_placement((cx, cy), align=TextEntityAlignment.MIDDLE_CENTER)
+            t.dxf.true_color = COLOR_ENGRAVE_RAS
 
     # --- Title above layout on ENGRAVE_VECTOR ---
     title_h = 5.0
@@ -293,6 +307,7 @@ def generate_cutting_dxf(
         (layout.total_width / 2.0, title_y),
         align=TextEntityAlignment.BOTTOM_CENTER,
     )
+    tt.dxf.true_color = COLOR_ENGRAVE_VEC
 
     # --- Scale / units note below layout on ENGRAVE_VECTOR ---
     note = "Unidades: mm  |  Escala 1:1"
@@ -305,6 +320,7 @@ def generate_cutting_dxf(
         (layout.total_width / 2.0, -6.0),
         align=TextEntityAlignment.TOP_CENTER,
     )
+    sn.dxf.true_color = COLOR_ENGRAVE_VEC
 
     # --- Write to string ---
     stream = io.StringIO()
