@@ -78,6 +78,30 @@ function r(n: number): string {
   return Number(n.toFixed(4)).toString();
 }
 
+/**
+ * Pad a DXF group code to the required width (right-aligned in a 3-char field).
+ *   codes 0–9   → "  0" (2 leading spaces)
+ *   codes 10–99  → " 10" (1 leading space)
+ *   codes 100+   → "420" (no padding)
+ */
+function padGroupCode(code: string): string {
+  if (code.length === 1) return "  " + code;
+  if (code.length === 2) return " " + code;
+  return code;
+}
+
+/**
+ * Join an alternating [groupCode, value, groupCode, value, …] array into
+ * a DXF-conformant string with padded group codes and \r\n line endings.
+ */
+function joinDxf(pairs: string[]): string {
+  const out: string[] = [];
+  for (let i = 0; i < pairs.length; i++) {
+    out.push(i % 2 === 0 ? padGroupCode(pairs[i]) : pairs[i]);
+  }
+  return out.join("\r\n") + "\r\n";
+}
+
 // ---------------------------------------------------------------------------
 // Panel types
 // ---------------------------------------------------------------------------
@@ -570,7 +594,7 @@ function panelsToDxf(placed: PlacedPanel[]): string {
   }
 
   lines.push("0", "ENDSEC", "0", "EOF");
-  return lines.join("\r\n") + "\r\n";
+  return joinDxf(lines);
 }
 
 // ---------------------------------------------------------------------------
