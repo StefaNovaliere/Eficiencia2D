@@ -1,13 +1,13 @@
 // ============================================================================
 // DXF Writer
 //
-// Generates AutoCAD-compatible DXF files.
+// Generates AutoCAD-compatible DXF files (AC1024 / R2010 with True Color).
 //
-// Layers:
-//   - CORTE      (color 1 / red)       — wall and facade outlines (cut lines)
-//   - TITULO     (color 5 / blue)      — titles and annotations (engrave)
-//   - COTAS      (color 7 / black)     — dimensions (engrave)
-//   - ABERTURAS  (color 8 / dark gray) — door arcs + leaves (thin, dashed arc)
+// Layers (4-layer laser cutting protocol):
+//   - CUT_INTERIOR    (green  RGB 0,255,0  / 420=65280)    — interior cuts
+//   - ENGRAVE_VECTOR  (blue   RGB 0,0,255  / 420=255)      — titles, annotations
+//   - ENGRAVE_RASTER  (black  RGB 0,0,0    / 420=0)        — dimensions
+//   - CUT_EXTERIOR    (red    RGB 255,0,0  / 420=16711680) — exterior outlines
 // ============================================================================
 
 import type { Facade, FloorPlan } from "./types";
@@ -15,7 +15,7 @@ import type { Facade, FloorPlan } from "./types";
 function dxfHeader(): string {
   return [
     "0", "SECTION", "2", "HEADER",
-    "9", "$ACADVER", "1", "AC1009",
+    "9", "$ACADVER", "1", "AC1024",
     "0", "ENDSEC",
     "0", "SECTION", "2", "TABLES",
     // --- Line types ---
@@ -23,12 +23,12 @@ function dxfHeader(): string {
     "0", "LTYPE", "2", "CONTINUOUS", "70", "0", "3", "Solid line", "72", "65", "73", "0", "40", "0.0",
     "0", "LTYPE", "2", "DASHED", "70", "0", "3", "Dashed __ __ __", "72", "65", "73", "2", "40", "0.005", "49", "0.003", "49", "-0.002",
     "0", "ENDTAB",
-    // --- Layers ---
+    // --- Layers (4-layer laser protocol with True Color) ---
     "0", "TABLE", "2", "LAYER", "70", "4",
-    "0", "LAYER", "2", "CORTE",      "70", "0", "62", "1",  "6", "CONTINUOUS",
-    "0", "LAYER", "2", "TITULO",     "70", "0", "62", "5",  "6", "CONTINUOUS",
-    "0", "LAYER", "2", "COTAS",      "70", "0", "62", "7",  "6", "CONTINUOUS",
-    "0", "LAYER", "2", "ABERTURAS",  "70", "0", "62", "8",  "6", "DASHED",
+    "0", "LAYER", "2", "CUT_EXTERIOR",    "70", "0", "62", "1",  "420", "16711680", "6", "CONTINUOUS",
+    "0", "LAYER", "2", "ENGRAVE_VECTOR",  "70", "0", "62", "5",  "420", "255",      "6", "CONTINUOUS",
+    "0", "LAYER", "2", "ENGRAVE_RASTER",  "70", "0", "62", "7",  "420", "0",        "6", "CONTINUOUS",
+    "0", "LAYER", "2", "CUT_INTERIOR",    "70", "0", "62", "3",  "420", "65280",    "6", "CONTINUOUS",
     "0", "ENDTAB",
     "0", "ENDSEC",
     "0", "SECTION", "2", "ENTITIES",
@@ -39,12 +39,12 @@ function dxfFooter(): string {
   return "0\r\nENDSEC\r\n0\r\nEOF\r\n";
 }
 
-// Layer → ACI color mapping (explicit per entity for viewer compatibility).
-const LAYER_COLOR: Record<string, string> = {
-  CORTE: "1",       // red — cut lines
-  TITULO: "5",      // blue — titles (engrave)
-  COTAS: "7",       // black — dimensions (engrave)
-  ABERTURAS: "8",   // dark gray — door symbols
+// Layer → [ACI color, True Color 24-bit RGB int] per entity for viewer compat.
+const LAYER_STYLE: Record<string, { aci: string; tc: string }> = {
+  CUT_EXTERIOR:   { aci: "1", tc: "16711680" }, // red   255,0,0
+  ENGRAVE_VECTOR: { aci: "5", tc: "255" },      // blue  0,0,255
+  ENGRAVE_RASTER: { aci: "7", tc: "0" },        // black 0,0,0
+  CUT_INTERIOR:   { aci: "3", tc: "65280" },    // green 0,255,0
 };
 
 function dxfLine(
@@ -53,10 +53,12 @@ function dxfLine(
   layer: string,
   linetype?: string,
 ): string {
+  const style = LAYER_STYLE[layer] ?? { aci: "7", tc: "0" };
   const parts = [
     "0", "LINE",
     "8", layer,
-    "62", LAYER_COLOR[layer] ?? "7",
+    "62", style.aci,
+    "420", style.tc,
   ];
   if (linetype) {
     parts.push("6", linetype);
@@ -71,10 +73,12 @@ function dxfLine(
 function dxfText(
   x: number, y: number, h: number, text: string, layer: string,
 ): string {
+  const style = LAYER_STYLE[layer] ?? { aci: "7", tc: "0" };
   return [
     "0", "TEXT",
     "8", layer,
-    "62", LAYER_COLOR[layer] ?? "7",
+    "62", style.aci,
+    "420", style.tc,
     "10", String(x), "20", String(y),
     "40", String(h),
     "1", text,
@@ -90,10 +94,12 @@ function dxfArc(
   layer: string,
   linetype?: string,
 ): string {
+  const style = LAYER_STYLE[layer] ?? { aci: "7", tc: "0" };
   const parts = [
     "0", "ARC",
     "8", layer,
-    "62", LAYER_COLOR[layer] ?? "8",
+    "62", style.aci,
+    "420", style.tc,
   ];
   if (linetype) {
     parts.push("6", linetype);
@@ -119,7 +125,7 @@ export function generateFacadeDxf(facade: Facade, scaleDenom: number): string {
       out += dxfLine(
         verts[0].x * s, verts[0].y * s,
         verts[1].x * s, verts[1].y * s,
-        "CORTE",
+        "CUT_EXTERIOR",
       );
     } else {
       for (let i = 0; i < verts.length; i++) {
@@ -127,7 +133,7 @@ export function generateFacadeDxf(facade: Facade, scaleDenom: number): string {
         out += dxfLine(
           verts[i].x * s, verts[i].y * s,
           verts[j].x * s, verts[j].y * s,
-          "CORTE",
+          "CUT_EXTERIOR",
         );
       }
     }
@@ -139,7 +145,7 @@ export function generateFacadeDxf(facade: Facade, scaleDenom: number): string {
     (facade.height + 0.5) * s,
     textH * 1.5,
     facade.label,
-    "TITULO",
+    "ENGRAVE_VECTOR",
   );
 
   // Dimensions.
@@ -148,14 +154,14 @@ export function generateFacadeDxf(facade: Facade, scaleDenom: number): string {
     -0.4 * s,
     textH,
     `${facade.width.toFixed(2)} m`,
-    "COTAS",
+    "ENGRAVE_RASTER",
   );
   out += dxfText(
     (facade.width + 0.3) * s,
     facade.height * 0.5 * s,
     textH,
     `${facade.height.toFixed(2)} m`,
-    "COTAS",
+    "ENGRAVE_RASTER",
   );
 
   out += dxfFooter();
@@ -170,23 +176,23 @@ export function generateFloorPlanDxf(
   const textH = 0.003;
   let out = dxfHeader();
 
-  // --- Wall segments (CORTE layer) ---
+  // --- Wall segments (CUT_EXTERIOR layer) ---
   for (const seg of plan.segments) {
     out += dxfLine(
       seg.a.x * s, seg.a.y * s,
       seg.b.x * s, seg.b.y * s,
-      "CORTE",
+      "CUT_EXTERIOR",
     );
   }
 
-  // --- Door symbols (ABERTURAS layer) ---
+  // --- Door symbols (CUT_INTERIOR layer) ---
   if (plan.doors) {
     for (const door of plan.doors) {
       // Door leaf line (solid — from hinge to open position).
       out += dxfLine(
         door.hinge.x * s, door.hinge.y * s,
         door.leafEnd.x * s, door.leafEnd.y * s,
-        "ABERTURAS",
+        "CUT_INTERIOR",
         "CONTINUOUS",
       );
 
@@ -196,7 +202,7 @@ export function generateFloorPlanDxf(
         door.width * s,
         door.startAngle,
         door.endAngle,
-        "ABERTURAS",
+        "CUT_INTERIOR",
         "DASHED",
       );
     }
@@ -208,7 +214,7 @@ export function generateFloorPlanDxf(
     (plan.height + 0.5) * s,
     textH * 1.5,
     plan.label,
-    "TITULO",
+    "ENGRAVE_VECTOR",
   );
 
   // Dimensions.
@@ -217,14 +223,14 @@ export function generateFloorPlanDxf(
     -0.4 * s,
     textH,
     `${plan.width.toFixed(2)} m`,
-    "COTAS",
+    "ENGRAVE_RASTER",
   );
   out += dxfText(
     (plan.width + 0.3) * s,
     plan.height * 0.5 * s,
     textH,
     `${plan.height.toFixed(2)} m`,
-    "COTAS",
+    "ENGRAVE_RASTER",
   );
 
   out += dxfFooter();
