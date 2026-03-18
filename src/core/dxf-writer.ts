@@ -37,17 +37,45 @@ function joinDxf(pairs: string[]): string {
 }
 
 function dxfHeader(): string {
-  return joinDxf([
-    "0", "SECTION", "2", "HEADER",
-    "9", "$ACADVER", "1", "AC1024",
-    "0", "ENDSEC",
+  // Complete HEADER section (Autodesk Viewer requires these variables)
+  const header = [
+    "  0", "SECTION",
+    "  2", "HEADER",
+    "  9", "$ACADVER",      "  1", "AC1024",
+    "  9", "$ACADMAINTVER", " 70", "6",
+    "  9", "$DWGCODEPAGE",  "  3", "ANSI_1252",
+    "  9", "$INSBASE",  " 10", "0.0",  " 20", "0.0",  " 30", "0.0",
+    "  9", "$EXTMIN",   " 10", "1e+20"," 20", "1e+20"," 30", "1e+20",
+    "  9", "$EXTMAX",   " 10", "-1e+20"," 20", "-1e+20"," 30", "-1e+20",
+    "  9", "$LIMMIN",   " 10", "0.0",  " 20", "0.0",
+    "  9", "$LIMMAX",   " 10", "420.0"," 20", "297.0",
+    "  9", "$ORTHOMODE"," 70", "0",
+    "  9", "$REGENMODE"," 70", "1",
+    "  9", "$FILLMODE", " 70", "1",
+    "  9", "$QTEXTMODE"," 70", "0",
+    "  9", "$MIRRTEXT", " 70", "1",
+    "  9", "$LTSCALE",  " 40", "1.0",
+    "  9", "$ATTMODE",  " 70", "1",
+    "  9", "$TEXTSIZE", " 40", "2.5",
+    "  9", "$TEXTSTYLE","  7", "Standard",
+    "  9", "$CLAYER",   "  8", "0",
+    "  9", "$CELTYPE",  "  6", "ByLayer",
+    "  9", "$CECOLOR",  " 62", "256",
+    "  9", "$CELTSCALE"," 40", "1.0",
+    "  9", "$INSUNITS", " 70", "6",
+    "  9", "$MEASUREMENT"," 70", "1",
+    "  0", "ENDSEC",
+  ].join("\r\n") + "\r\n";
+
+  // TABLES section (line types + layers)
+  const tables = joinDxf([
     "0", "SECTION", "2", "TABLES",
     // --- Line types ---
     "0", "TABLE", "2", "LTYPE", "70", "2",
     "0", "LTYPE", "2", "CONTINUOUS", "70", "0", "3", "Solid line", "72", "65", "73", "0", "40", "0.0",
     "0", "LTYPE", "2", "DASHED", "70", "0", "3", "Dashed __ __ __", "72", "65", "73", "2", "40", "0.005", "49", "0.003", "49", "-0.002",
     "0", "ENDTAB",
-    // --- Layers (4-layer laser protocol — ACI only in table, True Color on entities) ---
+    // --- Layers (4-layer laser protocol) ---
     "0", "TABLE", "2", "LAYER", "70", "4",
     "0", "LAYER", "2", "CUT_EXTERIOR",    "70", "0", "62", "1",  "6", "CONTINUOUS",
     "0", "LAYER", "2", "ENGRAVE_VECTOR",  "70", "0", "62", "5",  "6", "CONTINUOUS",
@@ -57,6 +85,8 @@ function dxfHeader(): string {
     "0", "ENDSEC",
     "0", "SECTION", "2", "ENTITIES",
   ]);
+
+  return header + tables;
 }
 
 function dxfFooter(): string {
