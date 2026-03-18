@@ -60,9 +60,25 @@ function dxfObjects(): string {
  * UCS, APPID, DIMSTYLE, BLOCK_RECORD — with proper handles and subclass markers.
  */
 function dxfTables(layers: Array<{name: string, aci: string, tc: string}>): string {
+  // Layer "0" is mandatory — referenced by $CLAYER and BLOCK entities.
+  const layer0 = [
+    "  0", "LAYER",
+    "  5", "2F",
+    "330", "1",
+    "100", "AcDbSymbolTableRecord",
+    "100", "AcDbLayerTableRecord",
+    "  2", "0",
+    " 70", "0",
+    " 62", "7",
+    "  6", "Continuous",
+    "370", "-3",
+  ].join("\r\n");
+
+  // Custom layers start at handle 0x30 to avoid collisions with STYLE (0x29)
+  // and APPID (0x2A) records.
   const layerRecords = layers.map((l, idx) => [
     "  0", "LAYER",
-    "  5", (0x27 + idx).toString(16).toUpperCase(),
+    "  5", (0x30 + idx).toString(16).toUpperCase(),
     "330", "1",
     "100", "AcDbSymbolTableRecord",
     "100", "AcDbLayerTableRecord",
@@ -79,17 +95,21 @@ function dxfTables(layers: Array<{name: string, aci: string, tc: string}>): stri
     // VPORT
     "  0", "TABLE", "  2", "VPORT", "  5", "8", "330", "0", "100", "AcDbSymbolTable", " 70", "0",
     "  0", "ENDTAB",
-    // LTYPE
-    "  0", "TABLE", "  2", "LTYPE", "  5", "2", "330", "0", "100", "AcDbSymbolTable", " 70", "3",
+    // LTYPE (4 entries: ByBlock, ByLayer, Continuous, DASHED)
+    "  0", "TABLE", "  2", "LTYPE", "  5", "2", "330", "0", "100", "AcDbSymbolTable", " 70", "4",
     "  0", "LTYPE", "  5", "24", "330", "2", "100", "AcDbSymbolTableRecord", "100", "AcDbLinetypeTableRecord",
     "  2", "ByBlock", " 70", "0", "  3", "", " 72", "65", " 73", "0", " 40", "0.0",
     "  0", "LTYPE", "  5", "25", "330", "2", "100", "AcDbSymbolTableRecord", "100", "AcDbLinetypeTableRecord",
     "  2", "ByLayer", " 70", "0", "  3", "", " 72", "65", " 73", "0", " 40", "0.0",
     "  0", "LTYPE", "  5", "26", "330", "2", "100", "AcDbSymbolTableRecord", "100", "AcDbLinetypeTableRecord",
     "  2", "Continuous", " 70", "0", "  3", "", " 72", "65", " 73", "0", " 40", "0.0",
+    "  0", "LTYPE", "  5", "2E", "330", "2", "100", "AcDbSymbolTableRecord", "100", "AcDbLinetypeTableRecord",
+    "  2", "DASHED", " 70", "0", "  3", "_ _ _ _ _", " 72", "65", " 73", "2", " 40", "0.75",
+    " 49", "0.5", " 74", "0", " 49", "-0.25", " 74", "0",
     "  0", "ENDTAB",
-    // LAYER
-    "  0", "TABLE", "  2", "LAYER", "  5", "1", "330", "0", "100", "AcDbSymbolTable", " 70", String(layers.length),
+    // LAYER (count = custom layers + layer "0")
+    "  0", "TABLE", "  2", "LAYER", "  5", "1", "330", "0", "100", "AcDbSymbolTable", " 70", String(layers.length + 1),
+    layer0,
     layerRecords,
     "  0", "ENDTAB",
     // STYLE
