@@ -511,12 +511,38 @@ function panelsToDxf(placed: PlacedPanel[]): string {
   const textH = 0.15;     // panel ID text height (metres)
   const dimTextH = 0.10;  // dimension text height (metres)
 
+  // Complete HEADER section (Autodesk Viewer requires these variables)
+  const headerStr = [
+    "  0", "SECTION",
+    "  2", "HEADER",
+    "  9", "$ACADVER",      "  1", "AC1024",
+    "  9", "$ACADMAINTVER", " 70", "6",
+    "  9", "$DWGCODEPAGE",  "  3", "ANSI_1252",
+    "  9", "$INSBASE",  " 10", "0.0",  " 20", "0.0",  " 30", "0.0",
+    "  9", "$EXTMIN",   " 10", "1e+20"," 20", "1e+20"," 30", "1e+20",
+    "  9", "$EXTMAX",   " 10", "-1e+20"," 20", "-1e+20"," 30", "-1e+20",
+    "  9", "$LIMMIN",   " 10", "0.0",  " 20", "0.0",
+    "  9", "$LIMMAX",   " 10", "420.0"," 20", "297.0",
+    "  9", "$ORTHOMODE"," 70", "0",
+    "  9", "$REGENMODE"," 70", "1",
+    "  9", "$FILLMODE", " 70", "1",
+    "  9", "$QTEXTMODE"," 70", "0",
+    "  9", "$MIRRTEXT", " 70", "1",
+    "  9", "$LTSCALE",  " 40", "1.0",
+    "  9", "$ATTMODE",  " 70", "1",
+    "  9", "$TEXTSIZE", " 40", "2.5",
+    "  9", "$TEXTSTYLE","  7", "Standard",
+    "  9", "$CLAYER",   "  8", "0",
+    "  9", "$CELTYPE",  "  6", "ByLayer",
+    "  9", "$CECOLOR",  " 62", "256",
+    "  9", "$CELTSCALE"," 40", "1.0",
+    "  9", "$INSUNITS", " 70", "6",
+    "  9", "$MEASUREMENT"," 70", "1",
+    "  0", "ENDSEC",
+  ].join("\r\n") + "\r\n";
+
+  // TABLES section + open ENTITIES (these go through joinDxf for padding)
   const lines: string[] = [
-    // HEADER
-    "0", "SECTION", "2", "HEADER",
-    "9", "$ACADVER", "1", "AC1024",
-    "9", "$INSUNITS", "70", "6",  // 6 = metres
-    "0", "ENDSEC",
     // TABLES
     "0", "SECTION", "2", "TABLES",
     // Line types
@@ -594,7 +620,7 @@ function panelsToDxf(placed: PlacedPanel[]): string {
   }
 
   lines.push("0", "ENDSEC", "0", "EOF");
-  return joinDxf(lines);
+  return headerStr + joinDxf(lines);
 }
 
 // ---------------------------------------------------------------------------
