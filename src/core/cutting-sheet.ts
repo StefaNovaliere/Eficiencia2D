@@ -515,79 +515,79 @@ const CS_LAYERS = [
   { name: "CUT_INTERIOR",   aci: "3", tc: "65280" },    // green
 ];
 
+/** Empty CLASSES section — required by Autodesk between HEADER and TABLES. */
+function dxfClasses(): string {
+  return "  0\r\nSECTION\r\n  2\r\nCLASSES\r\n  0\r\nENDSEC\r\n";
+}
+
+/** Empty OBJECTS section — required by Autodesk after ENTITIES. */
+function dxfObjects(): string {
+  return "  0\r\nSECTION\r\n  2\r\nOBJECTS\r\n  0\r\nENDSEC\r\n";
+}
+
 /**
  * Complete TABLES section required by Autodesk Viewer (AC1024 / R2010).
- * Includes: VPORT, LTYPE, LAYER, STYLE, VIEW, UCS, APPID, DIMSTYLE, BLOCK_RECORD.
+ * Includes: VPORT, LTYPE (ByBlock+ByLayer+Continuous), LAYER, STYLE, VIEW,
+ * UCS, APPID, DIMSTYLE, BLOCK_RECORD — with proper handles and subclass markers.
  */
 function dxfTables(layers: Array<{name: string, aci: string, tc: string}>): string {
-  const layerDefs = layers.map(l => [
+  const layerRecords = layers.map((l, idx) => [
     "  0", "LAYER",
-    "  5", Math.floor(Math.random()*0xFFFF).toString(16).toUpperCase(),
+    "  5", (0x27 + idx).toString(16).toUpperCase(),
     "330", "1",
     "100", "AcDbSymbolTableRecord",
     "100", "AcDbLayerTableRecord",
     "  2", l.name,
     " 70", "0",
-    " 62", l.aci,
+    " 62", "7",
     "420", l.tc,
     "  6", "Continuous",
     "370", "-3",
   ].join("\r\n")).join("\r\n");
+
   return [
-    "  0", "SECTION",
-    "  2", "TABLES",
+    "  0", "SECTION", "  2", "TABLES",
     // VPORT
-    "  0", "TABLE", "  2", "VPORT", "  5", "8", "330", "0",
-    "100", "AcDbSymbolTable", " 70", "0",
+    "  0", "TABLE", "  2", "VPORT", "  5", "8", "330", "0", "100", "AcDbSymbolTable", " 70", "0",
     "  0", "ENDTAB",
     // LTYPE
-    "  0", "TABLE", "  2", "LTYPE", "  5", "2", "330", "0",
-    "100", "AcDbSymbolTable", " 70", "1",
-    "  0", "LTYPE", "  5", "14", "330", "2",
-    "100", "AcDbSymbolTableRecord", "100", "AcDbLinetypeTableRecord",
+    "  0", "TABLE", "  2", "LTYPE", "  5", "2", "330", "0", "100", "AcDbSymbolTable", " 70", "3",
+    "  0", "LTYPE", "  5", "24", "330", "2", "100", "AcDbSymbolTableRecord", "100", "AcDbLinetypeTableRecord",
+    "  2", "ByBlock", " 70", "0", "  3", "", " 72", "65", " 73", "0", " 40", "0.0",
+    "  0", "LTYPE", "  5", "25", "330", "2", "100", "AcDbSymbolTableRecord", "100", "AcDbLinetypeTableRecord",
+    "  2", "ByLayer", " 70", "0", "  3", "", " 72", "65", " 73", "0", " 40", "0.0",
+    "  0", "LTYPE", "  5", "26", "330", "2", "100", "AcDbSymbolTableRecord", "100", "AcDbLinetypeTableRecord",
     "  2", "Continuous", " 70", "0", "  3", "", " 72", "65", " 73", "0", " 40", "0.0",
     "  0", "ENDTAB",
     // LAYER
-    "  0", "TABLE", "  2", "LAYER", "  5", "1", "330", "0",
-    "100", "AcDbSymbolTable", " 70", String(layers.length),
-    layerDefs,
+    "  0", "TABLE", "  2", "LAYER", "  5", "1", "330", "0", "100", "AcDbSymbolTable", " 70", String(layers.length),
+    layerRecords,
     "  0", "ENDTAB",
     // STYLE
-    "  0", "TABLE", "  2", "STYLE", "  5", "5", "330", "0",
-    "100", "AcDbSymbolTable", " 70", "1",
-    "  0", "STYLE", "  5", "11", "330", "5",
-    "100", "AcDbSymbolTableRecord", "100", "AcDbTextStyleTableRecord",
-    "  2", "Standard", " 70", "0", " 40", "0.0", " 41", "1.0",
-    " 50", "0.0", " 71", "0", " 42", "2.5", "  3", "txt", "  4", "",
+    "  0", "TABLE", "  2", "STYLE", "  5", "5", "330", "0", "100", "AcDbSymbolTable", " 70", "1",
+    "  0", "STYLE", "  5", "29", "330", "5", "100", "AcDbSymbolTableRecord", "100", "AcDbTextStyleTableRecord",
+    "  2", "Standard", " 70", "0", " 40", "0.0", " 41", "1.0", " 50", "0.0", " 71", "0", " 42", "2.5", "  3", "txt", "  4", "",
     "  0", "ENDTAB",
     // VIEW
-    "  0", "TABLE", "  2", "VIEW",  "  5", "7", "330", "0",
-    "100", "AcDbSymbolTable", " 70", "0",
+    "  0", "TABLE", "  2", "VIEW", "  5", "7", "330", "0", "100", "AcDbSymbolTable", " 70", "0",
     "  0", "ENDTAB",
     // UCS
-    "  0", "TABLE", "  2", "UCS",   "  5", "6", "330", "0",
-    "100", "AcDbSymbolTable", " 70", "0",
+    "  0", "TABLE", "  2", "UCS", "  5", "6", "330", "0", "100", "AcDbSymbolTable", " 70", "0",
     "  0", "ENDTAB",
     // APPID
-    "  0", "TABLE", "  2", "APPID", "  5", "3", "330", "0",
-    "100", "AcDbSymbolTable", " 70", "1",
-    "  0", "APPID", "  5", "12", "330", "3",
-    "100", "AcDbSymbolTableRecord", "100", "AcDbRegAppTableRecord",
+    "  0", "TABLE", "  2", "APPID", "  5", "3", "330", "0", "100", "AcDbSymbolTable", " 70", "1",
+    "  0", "APPID", "  5", "2A", "330", "3", "100", "AcDbSymbolTableRecord", "100", "AcDbRegAppTableRecord",
     "  2", "ACAD", " 70", "0",
     "  0", "ENDTAB",
     // DIMSTYLE
-    "  0", "TABLE", "  2", "DIMSTYLE", "  5", "4", "330", "0",
-    "100", "AcDbSymbolTable", " 70", "0",
+    "  0", "TABLE", "  2", "DIMSTYLE", "  5", "4", "330", "0", "100", "AcDbSymbolTable", " 70", "0",
     "100", "AcDbDimStyleTable",
     "  0", "ENDTAB",
     // BLOCK_RECORD
-    "  0", "TABLE", "  2", "BLOCK_RECORD", "  5", "9", "330", "0",
-    "100", "AcDbSymbolTable", " 70", "2",
-    "  0", "BLOCK_RECORD", "  5", "17", "330", "9",
-    "100", "AcDbSymbolTableRecord", "100", "AcDbBlockTableRecord",
+    "  0", "TABLE", "  2", "BLOCK_RECORD", "  5", "9", "330", "0", "100", "AcDbSymbolTable", " 70", "2",
+    "  0", "BLOCK_RECORD", "  5", "17", "330", "9", "100", "AcDbSymbolTableRecord", "100", "AcDbBlockTableRecord",
     "  2", "*Model_Space", "340", "1A", " 70", "0", "280", "1", "281", "0",
-    "  0", "BLOCK_RECORD", "  5", "1B", "330", "9",
-    "100", "AcDbSymbolTableRecord", "100", "AcDbBlockTableRecord",
+    "  0", "BLOCK_RECORD", "  5", "1B", "330", "9", "100", "AcDbSymbolTableRecord", "100", "AcDbBlockTableRecord",
     "  2", "*Paper_Space", "340", "1E", " 70", "0", "280", "1", "281", "0",
     "  0", "ENDTAB",
     "  0", "ENDSEC",
@@ -730,9 +730,9 @@ function panelsToDxf(placed: PlacedPanel[]): string {
     );
   }
 
-  lines.push("0", "ENDSEC", "0", "EOF");
-  // Order: HEADER → TABLES → BLOCKS → ENTITIES + EOF
-  return headerStr + dxfTables(CS_LAYERS) + dxfBlocks() + joinDxf(lines);
+  lines.push("0", "ENDSEC");
+  // Order: HEADER → CLASSES → TABLES → BLOCKS → ENTITIES → OBJECTS → EOF
+  return headerStr + dxfClasses() + dxfTables(CS_LAYERS) + dxfBlocks() + joinDxf(lines) + dxfObjects() + joinDxf(["0", "EOF"]);
 }
 
 // ---------------------------------------------------------------------------
