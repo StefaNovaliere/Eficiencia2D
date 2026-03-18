@@ -7,11 +7,18 @@ component decomposition sheets, and floor plans.
 Using ezdxf guarantees structurally valid DXF (proper header, tables,
 entities section, and EOF).
 
-Layers follow laser-cutter conventions:
-  - CORTE      (color 1 / red)       — cut lines (panel/polygon outlines)
-  - GRABADO    (color 5 / blue)      — titles, scale text, engrave marks
-  - MARCA      (color 7 / black)     — reference labels (A1, B2...), dimensions
-  - ABERTURAS  (color 8 / dark gray) — door arcs + leaves (thin, dashed arc)
+Layers follow professional laser-cutter conventions with exact RGB True
+Color (requires DXF R2004 / AC1018 or later):
+
+  Layer order    Layer name       RGB exact      Operation
+  1 (first)      CUT_INTERIOR     #00FF00        Interior cuts (holes, mortises)
+  2              ENGRAVE_VECTOR   #0000FF        Vector engraving (marks, dims)
+  3              ENGRAVE_RASTER   #000000        Raster engraving (piece numbers)
+  4 (last)       CUT_EXTERIOR     #FF0000        Exterior contour cut
+  (extra)        ABERTURAS        ACI 8          Door arcs & leaves (dashed)
+
+True Color is set both on the layer AND on each entity to guarantee
+correct color in Autodesk Viewer, LightBurn, and RDWorks.
 """
 
 from __future__ import annotations
@@ -19,14 +26,23 @@ from __future__ import annotations
 import io
 
 import ezdxf
+import ezdxf.colors
 from ezdxf.enums import TextEntityAlignment
 
 from .floor_plan_extractor import FloorPlan
 from .types import ComponentSheet, Facade
 
+# ---------------------------------------------------------------------------
+# True Color constants (24-bit RGB as ezdxf integer)
+# ---------------------------------------------------------------------------
+_COLOR_CUT_INT = ezdxf.colors.rgb2int((0, 255, 0))       # Green
+_COLOR_ENGRAVE_VEC = ezdxf.colors.rgb2int((0, 0, 255))    # Blue
+_COLOR_ENGRAVE_RAS = ezdxf.colors.rgb2int((0, 0, 0))      # Black
+_COLOR_CUT_EXT = ezdxf.colors.rgb2int((255, 0, 0))        # Red
+
 
 def _new_doc() -> ezdxf.document.Drawing:
-    """Create a new DXF R2010 document with laser-cutter layers."""
+    """Create a new DXF R2010 document with 4-layer laser-cutter protocol."""
     doc = ezdxf.new("R2010")
 
     # Add DASHED linetype (if not already present).
@@ -34,11 +50,32 @@ def _new_doc() -> ezdxf.document.Drawing:
         doc.linetypes.add("DASHED", pattern=[0.005, 0.003, -0.002],
                           description="Dashed __ __ __")
 
-    doc.layers.add("CORTE", color=1)       # red — cut lines
-    doc.layers.add("GRABADO", color=5)     # blue — engrave / titles
-    doc.layers.add("MARCA", color=7)       # black — marks / labels / dimensions
-    doc.layers.add("ABERTURAS", color=8,   # dark gray — door symbols
-                   linetype="DASHED")
+    # Layer 1: CUT_INTERIOR (green) — interior cuts first
+    layer_ci = doc.layers.add("CUT_INTERIOR")
+    layer_ci.color = 3
+    layer_ci.dxf.true_color = _COLOR_CUT_INT
+    layer_ci.dxf.lineweight = 5
+
+    # Layer 2: ENGRAVE_VECTOR (blue) — vector engraving
+    layer_ev = doc.layers.add("ENGRAVE_VECTOR")
+    layer_ev.color = 5
+    layer_ev.dxf.true_color = _COLOR_ENGRAVE_VEC
+    layer_ev.dxf.lineweight = 5
+
+    # Layer 3: ENGRAVE_RASTER (black) — raster engraving (text)
+    layer_er = doc.layers.add("ENGRAVE_RASTER")
+    layer_er.color = 7
+    layer_er.dxf.true_color = _COLOR_ENGRAVE_RAS
+
+    # Layer 4: CUT_EXTERIOR (red) — exterior cut last
+    layer_ce = doc.layers.add("CUT_EXTERIOR")
+    layer_ce.color = 1
+    layer_ce.dxf.true_color = _COLOR_CUT_EXT
+    layer_ce.dxf.lineweight = 5
+
+    # Extra: ABERTURAS — door symbols (kept for floor plans)
+    doc.layers.add("ABERTURAS", color=8, linetype="DASHED")
+
     return doc
 
 
@@ -61,12 +98,14 @@ def generate_dxf(facade: Facade, scale_denom: int) -> str:
     doc = _new_doc()
     msp = doc.modelspace()
 
-    # Draw all polygon outlines on CORTE layer.
+    # Draw all polygon outlines on CUT_EXTERIOR (red).
     for poly in facade.polygons:
         if not poly.vertices or len(poly.vertices) < 3:
             continue
         pts = [(v.x * s, v.y * s) for v in poly.vertices]
-        msp.add_lwpolyline(pts, close=True, dxfattribs={"layer": "CORTE", "color": 1})
+        e = msp.add_lwpolyline(pts, close=True,
+                               dxfattribs={"layer": "CUT_EXTERIOR"})
+        e.dxf.true_color = _COLOR_CUT_EXT
 
     # Panel reference IDs: one label per unique panel_id.
     # Group polygons by panel_id and compute combined bounding box.
@@ -97,39 +136,43 @@ def generate_dxf(facade: Facade, scale_denom: int) -> str:
             lh = min(text_h, min(pw, ph) * 0.3)
             t = msp.add_text(
                 pid, height=lh,
-                dxfattribs={"layer": "MARCA", "color": 7},
+                dxfattribs={"layer": "ENGRAVE_RASTER"},
             )
             t.set_placement((cx, cy), align=TextEntityAlignment.MIDDLE_CENTER)
+            t.dxf.true_color = _COLOR_ENGRAVE_RAS
 
-    # Title above drawing on GRABADO.
+    # Title above drawing on ENGRAVE_VECTOR (blue).
     t = msp.add_text(
         facade.label, height=text_h * 1.5,
-        dxfattribs={"layer": "GRABADO", "color": 5},
+        dxfattribs={"layer": "ENGRAVE_VECTOR"},
     )
     t.set_placement(
         (facade.width * 0.5 * s, (facade.height + 0.5) * s),
         align=TextEntityAlignment.BOTTOM_CENTER,
     )
+    t.dxf.true_color = _COLOR_ENGRAVE_VEC
 
-    # Width dimension below on MARCA.
+    # Width dimension below on ENGRAVE_VECTOR (blue).
     t = msp.add_text(
         f"{facade.width:.2f} m", height=text_h,
-        dxfattribs={"layer": "MARCA", "color": 7},
+        dxfattribs={"layer": "ENGRAVE_VECTOR"},
     )
     t.set_placement(
         (facade.width * 0.5 * s, -0.4 * s),
         align=TextEntityAlignment.TOP_CENTER,
     )
+    t.dxf.true_color = _COLOR_ENGRAVE_VEC
 
-    # Height dimension to the right on MARCA.
+    # Height dimension to the right on ENGRAVE_VECTOR (blue).
     t = msp.add_text(
         f"{facade.height:.2f} m", height=text_h,
-        dxfattribs={"layer": "MARCA", "color": 7},
+        dxfattribs={"layer": "ENGRAVE_VECTOR"},
     )
     t.set_placement(
         ((facade.width + 0.3) * s, facade.height * 0.5 * s),
         align=TextEntityAlignment.MIDDLE_LEFT,
     )
+    t.dxf.true_color = _COLOR_ENGRAVE_VEC
 
     return _doc_to_string(doc)
 
@@ -150,9 +193,11 @@ def generate_component_dxf(sheet: ComponentSheet, scale_denom: int) -> str:
         if not panel.outline.vertices:
             continue
 
-        # Panel outline on CORTE.
+        # Panel outline on CUT_EXTERIOR (red).
         pts = [(v.x * s, v.y * s) for v in panel.outline.vertices]
-        msp.add_lwpolyline(pts, close=True, dxfattribs={"layer": "CORTE", "color": 1})
+        e = msp.add_lwpolyline(pts, close=True,
+                               dxfattribs={"layer": "CUT_EXTERIOR"})
+        e.dxf.true_color = _COLOR_CUT_EXT
 
         verts = panel.outline.vertices
         cx = sum(v.x for v in verts) / len(verts) * s
@@ -162,36 +207,39 @@ def generate_component_dxf(sheet: ComponentSheet, scale_denom: int) -> str:
 
         lh = min(text_h, max(text_h * 0.5, panel_h_dxf * 0.12))
 
-        # Reference ID above panel on MARCA.
+        # Reference ID above panel on ENGRAVE_RASTER (black).
         t = msp.add_text(
             panel.ref_id, height=lh,
-            dxfattribs={"layer": "MARCA", "color": 7},
+            dxfattribs={"layer": "ENGRAVE_RASTER"},
         )
         t.set_placement(
             (cx, max_y + 0.15 * s),
             align=TextEntityAlignment.BOTTOM_CENTER,
         )
+        t.dxf.true_color = _COLOR_ENGRAVE_RAS
 
-        # Dimensions below panel on MARCA.
+        # Dimensions below panel on ENGRAVE_VECTOR (blue).
         dim_text = f"{panel.width:.2f} x {panel.height:.2f}"
         t = msp.add_text(
             dim_text, height=lh * 0.8,
-            dxfattribs={"layer": "MARCA", "color": 7},
+            dxfattribs={"layer": "ENGRAVE_VECTOR"},
         )
         t.set_placement(
             (cx, min_y - 0.25 * s),
             align=TextEntityAlignment.TOP_CENTER,
         )
+        t.dxf.true_color = _COLOR_ENGRAVE_VEC
 
-    # Title above on GRABADO.
+    # Title above on ENGRAVE_VECTOR (blue).
     t = msp.add_text(
         sheet.label, height=text_h * 1.5,
-        dxfattribs={"layer": "GRABADO", "color": 5},
+        dxfattribs={"layer": "ENGRAVE_VECTOR"},
     )
     t.set_placement(
         (sheet.width * 0.5 * s, (sheet.height + 0.5) * s),
         align=TextEntityAlignment.BOTTOM_CENTER,
     )
+    t.dxf.true_color = _COLOR_ENGRAVE_VEC
 
     return _doc_to_string(doc)
 
@@ -208,13 +256,14 @@ def generate_floor_plan_dxf(plan: FloorPlan, scale_denom: int) -> str:
     doc = _new_doc()
     msp = doc.modelspace()
 
-    # Draw wall-cut line segments on CORTE layer.
+    # Draw wall-cut line segments on CUT_EXTERIOR (red).
     for seg_a, seg_b in plan.segments:
-        msp.add_line(
+        ln = msp.add_line(
             (seg_a.x * s, seg_a.y * s),
             (seg_b.x * s, seg_b.y * s),
-            dxfattribs={"layer": "CORTE", "color": 1},
+            dxfattribs={"layer": "CUT_EXTERIOR"},
         )
+        ln.dxf.true_color = _COLOR_CUT_EXT
 
     # --- Door symbols on ABERTURAS layer ---
     for door in plan.doors:
@@ -234,34 +283,37 @@ def generate_floor_plan_dxf(plan: FloorPlan, scale_denom: int) -> str:
             dxfattribs={"layer": "ABERTURAS", "color": 8, "linetype": "DASHED"},
         )
 
-    # Title above the drawing on GRABADO.
+    # Title above the drawing on ENGRAVE_VECTOR (blue).
     t = msp.add_text(
         plan.label, height=text_h * 1.5,
-        dxfattribs={"layer": "GRABADO", "color": 5},
+        dxfattribs={"layer": "ENGRAVE_VECTOR"},
     )
     t.set_placement(
         (plan.width * 0.5 * s, (plan.height + 0.5) * s),
         align=TextEntityAlignment.BOTTOM_CENTER,
     )
+    t.dxf.true_color = _COLOR_ENGRAVE_VEC
 
-    # Width dimension below on MARCA.
+    # Width dimension below on ENGRAVE_VECTOR (blue).
     t = msp.add_text(
         f"{plan.width:.2f} m", height=text_h,
-        dxfattribs={"layer": "MARCA", "color": 7},
+        dxfattribs={"layer": "ENGRAVE_VECTOR"},
     )
     t.set_placement(
         (plan.width * 0.5 * s, -0.4 * s),
         align=TextEntityAlignment.TOP_CENTER,
     )
+    t.dxf.true_color = _COLOR_ENGRAVE_VEC
 
-    # Height dimension to the right on MARCA.
+    # Height dimension to the right on ENGRAVE_VECTOR (blue).
     t = msp.add_text(
         f"{plan.height:.2f} m", height=text_h,
-        dxfattribs={"layer": "MARCA", "color": 7},
+        dxfattribs={"layer": "ENGRAVE_VECTOR"},
     )
     t.set_placement(
         ((plan.width + 0.3) * s, plan.height * 0.5 * s),
         align=TextEntityAlignment.MIDDLE_LEFT,
     )
+    t.dxf.true_color = _COLOR_ENGRAVE_VEC
 
     return _doc_to_string(doc)

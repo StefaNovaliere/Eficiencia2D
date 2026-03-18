@@ -427,7 +427,7 @@ def test_cutting_sheet_not_generated_by_default():
 
 
 def test_dxf_has_laser_layers():
-    """DXF output should use CORTE/MARCA/GRABADO layers."""
+    """DXF output should use 4-layer laser-cutter protocol."""
     obj_data = _make_box_y_up()
     resp = client.post(
         "/api/upload",
@@ -441,9 +441,9 @@ def test_dxf_has_laser_layers():
     assert len(dxf_files) > 0
 
     dxf_content = zf.read(dxf_files[0]).decode("utf-8")
-    assert "CORTE" in dxf_content
-    assert "MARCA" in dxf_content
-    assert "GRABADO" in dxf_content
+    assert "CUT_EXTERIOR" in dxf_content
+    assert "ENGRAVE_RASTER" in dxf_content
+    assert "ENGRAVE_VECTOR" in dxf_content
     # Old layers should NOT be present.
     assert "FACADE" not in dxf_content
     assert "DIMENSIONS" not in dxf_content
@@ -597,8 +597,8 @@ def test_floor_plan_dxf_has_laser_layers():
     assert len(floor_dxfs) >= 1
 
     dxf_content = zf.read(floor_dxfs[0]).decode("utf-8")
-    assert "CORTE" in dxf_content
-    assert "GRABADO" in dxf_content
+    assert "CUT_EXTERIOR" in dxf_content
+    assert "ENGRAVE_VECTOR" in dxf_content
 
 
 def test_floor_plans_with_simple_box():
@@ -1394,3 +1394,108 @@ def test_deduplicate_wall_pieces():
     assert len(result) == 2, f"Expected 2 unique pieces, got {len(result)}"
     assert result[0].ref_id == "A1"
     assert result[1].ref_id == "A3"
+
+
+def test_facade_dxf_entity_true_colors():
+    """Facade DXF entities should have entity-level true_color set."""
+    obj_data = _make_box_y_up()
+    resp = client.post(
+        "/api/upload",
+        files={"file": ("house.obj", io.BytesIO(obj_data), "application/octet-stream")},
+        data={"scale": "100", "paper": "A3", "formats": "dxf"},
+    )
+    assert resp.status_code == 200
+    zf = zipfile.ZipFile(io.BytesIO(resp.content))
+    # Get a facade DXF (not decomposition, not cutting sheet).
+    facade_dxfs = [n for n in zf.namelist()
+                   if n.endswith(".dxf") and "Fachada" in n]
+    assert len(facade_dxfs) >= 1
+
+    import ezdxf
+    dxf_text = zf.read(facade_dxfs[0]).decode("utf-8")
+    doc = ezdxf.read(io.StringIO(dxf_text))
+    msp = doc.modelspace()
+
+    expected_colors = {
+        "CUT_EXTERIOR": ezdxf.colors.rgb2int((255, 0, 0)),
+        "ENGRAVE_VECTOR": ezdxf.colors.rgb2int((0, 0, 255)),
+        "ENGRAVE_RASTER": ezdxf.colors.rgb2int((0, 0, 0)),
+    }
+
+    entities_without_color = 0
+    for entity in msp:
+        layer = entity.dxf.layer
+        if layer not in expected_colors:
+            continue
+        if not entity.dxf.hasattr("true_color"):
+            entities_without_color += 1
+
+    assert entities_without_color == 0, \
+        f"{entities_without_color} facade entities missing true_color"
+
+
+def test_component_dxf_entity_true_colors():
+    """Component decomposition DXF entities should have entity-level true_color."""
+    obj_data = _make_box_y_up()
+    resp = client.post(
+        "/api/upload",
+        files={"file": ("house.obj", io.BytesIO(obj_data), "application/octet-stream")},
+        data={
+            "scale": "100", "paper": "A3", "formats": "dxf",
+            "include_plan": "true",
+        },
+    )
+    assert resp.status_code == 200
+    zf = zipfile.ZipFile(io.BytesIO(resp.content))
+    comp_dxfs = [n for n in zf.namelist()
+                 if n.endswith(".dxf") and "Descomposicion" in n]
+    assert len(comp_dxfs) >= 1
+
+    import ezdxf
+    dxf_text = zf.read(comp_dxfs[0]).decode("utf-8")
+    doc = ezdxf.read(io.StringIO(dxf_text))
+    msp = doc.modelspace()
+
+    expected_colors = {
+        "CUT_EXTERIOR": ezdxf.colors.rgb2int((255, 0, 0)),
+        "ENGRAVE_VECTOR": ezdxf.colors.rgb2int((0, 0, 255)),
+        "ENGRAVE_RASTER": ezdxf.colors.rgb2int((0, 0, 0)),
+    }
+
+    entities_without_color = 0
+    for entity in msp:
+        layer = entity.dxf.layer
+        if layer not in expected_colors:
+            continue
+        if not entity.dxf.hasattr("true_color"):
+            entities_without_color += 1
+
+    assert entities_without_color == 0, \
+        f"{entities_without_color} component entities missing true_color"
+
+
+def test_no_old_layer_names_in_dxf():
+    """No DXF output should contain old layer names CORTE, GRABADO, MARCA."""
+    obj_data = _make_box_z_up()
+    resp = client.post(
+        "/api/upload",
+        files={"file": ("house.obj", io.BytesIO(obj_data), "application/octet-stream")},
+        data={
+            "scale": "100", "paper": "A3", "formats": "dxf",
+            "include_plan": "true",
+            "include_cutting_sheet": "true",
+        },
+    )
+    assert resp.status_code == 200
+    zf = zipfile.ZipFile(io.BytesIO(resp.content))
+
+    import ezdxf
+    for name in zf.namelist():
+        if not name.endswith(".dxf"):
+            continue
+        dxf_text = zf.read(name).decode("utf-8")
+        doc = ezdxf.read(io.StringIO(dxf_text))
+        layer_names = [l.dxf.name for l in doc.layers]
+        for old_name in ["CORTE", "GRABADO", "MARCA"]:
+            assert old_name not in layer_names, \
+                f"Old layer '{old_name}' found in {name}"
