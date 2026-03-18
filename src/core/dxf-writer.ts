@@ -36,8 +36,122 @@ function joinDxf(pairs: string[]): string {
   return out.join("\r\n") + "\r\n";
 }
 
+/** Layer definitions for the 4-layer laser cutting protocol. */
+const LAYERS = [
+  { name: "CUT_EXTERIOR",   aci: "1", tc: "16711680" }, // red
+  { name: "ENGRAVE_VECTOR", aci: "5", tc: "255" },      // blue
+  { name: "ENGRAVE_RASTER", aci: "7", tc: "0" },        // black
+  { name: "CUT_INTERIOR",   aci: "3", tc: "65280" },    // green
+];
+
+/**
+ * Complete TABLES section required by Autodesk Viewer (AC1024 / R2010).
+ * Includes: VPORT, LTYPE, LAYER, STYLE, VIEW, UCS, APPID, DIMSTYLE, BLOCK_RECORD.
+ */
+function dxfTables(layers: Array<{name: string, aci: string, tc: string}>): string {
+  const layerDefs = layers.map(l => [
+    "  0", "LAYER",
+    "  5", Math.floor(Math.random()*0xFFFF).toString(16).toUpperCase(),
+    "330", "1",
+    "100", "AcDbSymbolTableRecord",
+    "100", "AcDbLayerTableRecord",
+    "  2", l.name,
+    " 70", "0",
+    " 62", l.aci,
+    "420", l.tc,
+    "  6", "Continuous",
+    "370", "-3",
+  ].join("\r\n")).join("\r\n");
+  return [
+    "  0", "SECTION",
+    "  2", "TABLES",
+    // VPORT
+    "  0", "TABLE", "  2", "VPORT", "  5", "8", "330", "0",
+    "100", "AcDbSymbolTable", " 70", "0",
+    "  0", "ENDTAB",
+    // LTYPE
+    "  0", "TABLE", "  2", "LTYPE", "  5", "2", "330", "0",
+    "100", "AcDbSymbolTable", " 70", "1",
+    "  0", "LTYPE", "  5", "14", "330", "2",
+    "100", "AcDbSymbolTableRecord", "100", "AcDbLinetypeTableRecord",
+    "  2", "Continuous", " 70", "0", "  3", "", " 72", "65", " 73", "0", " 40", "0.0",
+    "  0", "ENDTAB",
+    // LAYER
+    "  0", "TABLE", "  2", "LAYER", "  5", "1", "330", "0",
+    "100", "AcDbSymbolTable", " 70", String(layers.length),
+    layerDefs,
+    "  0", "ENDTAB",
+    // STYLE
+    "  0", "TABLE", "  2", "STYLE", "  5", "5", "330", "0",
+    "100", "AcDbSymbolTable", " 70", "1",
+    "  0", "STYLE", "  5", "11", "330", "5",
+    "100", "AcDbSymbolTableRecord", "100", "AcDbTextStyleTableRecord",
+    "  2", "Standard", " 70", "0", " 40", "0.0", " 41", "1.0",
+    " 50", "0.0", " 71", "0", " 42", "2.5", "  3", "txt", "  4", "",
+    "  0", "ENDTAB",
+    // VIEW
+    "  0", "TABLE", "  2", "VIEW",  "  5", "7", "330", "0",
+    "100", "AcDbSymbolTable", " 70", "0",
+    "  0", "ENDTAB",
+    // UCS
+    "  0", "TABLE", "  2", "UCS",   "  5", "6", "330", "0",
+    "100", "AcDbSymbolTable", " 70", "0",
+    "  0", "ENDTAB",
+    // APPID
+    "  0", "TABLE", "  2", "APPID", "  5", "3", "330", "0",
+    "100", "AcDbSymbolTable", " 70", "1",
+    "  0", "APPID", "  5", "12", "330", "3",
+    "100", "AcDbSymbolTableRecord", "100", "AcDbRegAppTableRecord",
+    "  2", "ACAD", " 70", "0",
+    "  0", "ENDTAB",
+    // DIMSTYLE
+    "  0", "TABLE", "  2", "DIMSTYLE", "  5", "4", "330", "0",
+    "100", "AcDbSymbolTable", " 70", "0",
+    "100", "AcDbDimStyleTable",
+    "  0", "ENDTAB",
+    // BLOCK_RECORD
+    "  0", "TABLE", "  2", "BLOCK_RECORD", "  5", "9", "330", "0",
+    "100", "AcDbSymbolTable", " 70", "2",
+    "  0", "BLOCK_RECORD", "  5", "17", "330", "9",
+    "100", "AcDbSymbolTableRecord", "100", "AcDbBlockTableRecord",
+    "  2", "*Model_Space", "340", "1A", " 70", "0", "280", "1", "281", "0",
+    "  0", "BLOCK_RECORD", "  5", "1B", "330", "9",
+    "100", "AcDbSymbolTableRecord", "100", "AcDbBlockTableRecord",
+    "  2", "*Paper_Space", "340", "1E", " 70", "0", "280", "1", "281", "0",
+    "  0", "ENDTAB",
+    "  0", "ENDSEC",
+  ].join("\r\n") + "\r\n";
+}
+
+/**
+ * BLOCKS section required by DXF R2010 — Model_Space + Paper_Space.
+ */
+function dxfBlocks(): string {
+  return [
+    "  0", "SECTION",
+    "  2", "BLOCKS",
+    "  0", "BLOCK", "  5", "1A", "330", "17",
+    "100", "AcDbEntity", "  8", "0",
+    "100", "AcDbBlockBegin", "  2", "*Model_Space", " 70", "0",
+    " 10", "0.0", " 20", "0.0", " 30", "0.0",
+    "  3", "*Model_Space", "  1", "",
+    "  0", "ENDBLK", "  5", "1C", "330", "17",
+    "100", "AcDbEntity", "  8", "0",
+    "100", "AcDbBlockEnd",
+    "  0", "BLOCK", "  5", "1E", "330", "1B",
+    "100", "AcDbEntity", "  8", "0",
+    "100", "AcDbBlockBegin", "  2", "*Paper_Space", " 70", "0",
+    " 10", "0.0", " 20", "0.0", " 30", "0.0",
+    "  3", "*Paper_Space", "  1", "",
+    "  0", "ENDBLK", "  5", "1F", "330", "1B",
+    "100", "AcDbEntity", "  8", "0",
+    "100", "AcDbBlockEnd",
+    "  0", "ENDSEC",
+  ].join("\r\n") + "\r\n";
+}
+
 function dxfHeader(): string {
-  // Complete HEADER section (Autodesk Viewer requires these variables)
+  // HEADER section
   const header = [
     "  0", "SECTION",
     "  2", "HEADER",
@@ -67,26 +181,10 @@ function dxfHeader(): string {
     "  0", "ENDSEC",
   ].join("\r\n") + "\r\n";
 
-  // TABLES section (line types + layers)
-  const tables = joinDxf([
-    "0", "SECTION", "2", "TABLES",
-    // --- Line types ---
-    "0", "TABLE", "2", "LTYPE", "70", "2",
-    "0", "LTYPE", "2", "CONTINUOUS", "70", "0", "3", "Solid line", "72", "65", "73", "0", "40", "0.0",
-    "0", "LTYPE", "2", "DASHED", "70", "0", "3", "Dashed __ __ __", "72", "65", "73", "2", "40", "0.005", "49", "0.003", "49", "-0.002",
-    "0", "ENDTAB",
-    // --- Layers (4-layer laser protocol) ---
-    "0", "TABLE", "2", "LAYER", "70", "4",
-    "0", "LAYER", "2", "CUT_EXTERIOR",    "70", "0", "62", "1",  "6", "CONTINUOUS",
-    "0", "LAYER", "2", "ENGRAVE_VECTOR",  "70", "0", "62", "5",  "6", "CONTINUOUS",
-    "0", "LAYER", "2", "ENGRAVE_RASTER",  "70", "0", "62", "7",  "6", "CONTINUOUS",
-    "0", "LAYER", "2", "CUT_INTERIOR",    "70", "0", "62", "3",  "6", "CONTINUOUS",
-    "0", "ENDTAB",
-    "0", "ENDSEC",
-    "0", "SECTION", "2", "ENTITIES",
-  ]);
+  // Order: HEADER → TABLES → BLOCKS → open ENTITIES
+  const entities = joinDxf(["0", "SECTION", "2", "ENTITIES"]);
 
-  return header + tables;
+  return header + dxfTables(LAYERS) + dxfBlocks() + entities;
 }
 
 function dxfFooter(): string {
