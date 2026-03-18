@@ -12,8 +12,32 @@
 
 import type { Facade, FloorPlan } from "./types";
 
+/**
+ * Pad a DXF group code to the required width (right-aligned in a 3-char field).
+ *   codes 0–9   → "  0" (2 leading spaces)
+ *   codes 10–99  → " 10" (1 leading space)
+ *   codes 100+   → "420" (no padding)
+ */
+function padGroupCode(code: string): string {
+  if (code.length === 1) return "  " + code;
+  if (code.length === 2) return " " + code;
+  return code;
+}
+
+/**
+ * Join an alternating [groupCode, value, groupCode, value, …] array into
+ * a DXF-conformant string with padded group codes and \r\n line endings.
+ */
+function joinDxf(pairs: string[]): string {
+  const out: string[] = [];
+  for (let i = 0; i < pairs.length; i++) {
+    out.push(i % 2 === 0 ? padGroupCode(pairs[i]) : pairs[i]);
+  }
+  return out.join("\r\n") + "\r\n";
+}
+
 function dxfHeader(): string {
-  return [
+  return joinDxf([
     "0", "SECTION", "2", "HEADER",
     "9", "$ACADVER", "1", "AC1024",
     "0", "ENDSEC",
@@ -32,11 +56,11 @@ function dxfHeader(): string {
     "0", "ENDTAB",
     "0", "ENDSEC",
     "0", "SECTION", "2", "ENTITIES",
-  ].join("\r\n") + "\r\n";
+  ]);
 }
 
 function dxfFooter(): string {
-  return "0\r\nENDSEC\r\n0\r\nEOF\r\n";
+  return joinDxf(["0", "ENDSEC", "0", "EOF"]);
 }
 
 // Layer → [ACI color, True Color 24-bit RGB int] per entity for viewer compat.
@@ -67,14 +91,14 @@ function dxfLine(
     "10", String(x1), "20", String(y1),
     "11", String(x2), "21", String(y2),
   );
-  return parts.join("\r\n") + "\r\n";
+  return joinDxf(parts);
 }
 
 function dxfText(
   x: number, y: number, h: number, text: string, layer: string,
 ): string {
   const style = LAYER_STYLE[layer] ?? { aci: "7", tc: "0" };
-  return [
+  return joinDxf([
     "0", "TEXT",
     "8", layer,
     "62", style.aci,
@@ -82,7 +106,7 @@ function dxfText(
     "10", String(x), "20", String(y),
     "40", String(h),
     "1", text,
-  ].join("\r\n") + "\r\n";
+  ]);
 }
 
 /** Generate an ARC entity (DXF angles are CCW from +X, in degrees). */
@@ -110,7 +134,7 @@ function dxfArc(
     "50", String(startAngle),
     "51", String(endAngle),
   );
-  return parts.join("\r\n") + "\r\n";
+  return joinDxf(parts);
 }
 
 export function generateFacadeDxf(facade: Facade, scaleDenom: number): string {
