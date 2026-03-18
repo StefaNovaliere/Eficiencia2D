@@ -26,7 +26,7 @@ from .types import Vec2
 # ---------------------------------------------------------------------------
 
 # Tolerance for snapping vertices to the same position.
-_SNAP_TOL = 1e-6
+_SNAP_TOL = 1e-4
 
 
 def _snap_key(x: float, y: float) -> tuple[int, int]:
@@ -73,7 +73,40 @@ def extract_boundary_edges_2d(
         if len(edges) == 1:
             boundary.append(edges[0])
 
+    # Post-filter: remove near-duplicate boundary edges that are actually
+    # internal edges whose vertices didn't snap to the same key.
+    boundary = _remove_near_duplicate_edges(boundary)
+
     return boundary
+
+
+def _remove_near_duplicate_edges(
+    edges: list[tuple[tuple[float, float], tuple[float, float]]],
+) -> list[tuple[tuple[float, float], tuple[float, float]]]:
+    """Remove pairs of edges that are near-duplicates.
+
+    Two boundary edges with matching snapped endpoints (in either direction)
+    are actually an internal edge that slipped through the counting step
+    due to floating-point drift. Remove both from the result.
+    """
+    if len(edges) < 2:
+        return edges
+
+    # Build a dict from snapped-edge-key → list of indices.
+    edge_groups: dict[tuple, list[int]] = defaultdict(list)
+    for i, (a, b) in enumerate(edges):
+        ka = _snap_key(a[0], a[1])
+        kb = _snap_key(b[0], b[1])
+        canonical = (min(ka, kb), max(ka, kb))
+        edge_groups[canonical].append(i)
+
+    # Keep only edges whose canonical key appears exactly once.
+    keep = set()
+    for key, indices in edge_groups.items():
+        if len(indices) == 1:
+            keep.add(indices[0])
+
+    return [edges[i] for i in sorted(keep)]
 
 
 # ---------------------------------------------------------------------------
