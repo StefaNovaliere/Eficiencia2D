@@ -42,7 +42,6 @@ __all__ = [
     "CuttingLayout",
     "build_cutting_layout_legacy",
     "generate_cutting_dxf",
-    "generate_cutting_dxf_legacy",
 ]
 
 # ---------------------------------------------------------------------------
@@ -323,73 +322,6 @@ def generate_cutting_dxf(
     sn.dxf.true_color = COLOR_ENGRAVE_VEC
 
     # --- Write to string ---
-    stream = io.StringIO()
-    doc.write(stream)
-    return stream.getvalue()
-
-
-# ---------------------------------------------------------------------------
-# Legacy DXF generation (old 2-layer format, kept for reference)
-# ---------------------------------------------------------------------------
-
-def generate_cutting_dxf_legacy(layout: CuttingLayout) -> str:
-    """Generate a legacy 2-layer cutting DXF (CORTE + GRABADO).
-
-    Kept for backward compatibility. New code should use
-    generate_cutting_dxf() which produces 4 laser-cutter layers.
-    """
-    import ezdxf
-    from ezdxf.enums import TextEntityAlignment
-
-    doc = ezdxf.new("R2010")
-    msp = doc.modelspace()
-
-    doc.layers.add("CORTE", color=1)
-    doc.layers.add("GRABADO", color=5)
-
-    for piece in layout.pieces:
-        x, y = piece.x, piece.y
-        w, h = piece.width_mm, piece.height_mm
-
-        msp.add_lwpolyline(
-            [(x, y), (x + w, y), (x + w, y + h), (x, y + h)],
-            close=True,
-            dxfattribs={"layer": "CORTE", "color": 1},
-        )
-
-        cx = x + w / 2.0
-        cy = y + h / 2.0
-        label_h = min(4.0, max(1.5, min(w, h) * 0.15))
-        t = msp.add_text(
-            piece.ref_id,
-            height=label_h,
-            dxfattribs={"layer": "GRABADO", "color": 5},
-        )
-        t.set_placement((cx, cy), align=TextEntityAlignment.MIDDLE_CENTER)
-
-    title_h = 5.0
-    title_y = layout.total_height + title_h + 2.0
-    tt = msp.add_text(
-        layout.label,
-        height=title_h,
-        dxfattribs={"layer": "GRABADO", "color": 5},
-    )
-    tt.set_placement(
-        (layout.total_width / 2.0, title_y),
-        align=TextEntityAlignment.BOTTOM_CENTER,
-    )
-
-    note = "Unidades: mm  |  Escala aplicada al layout"
-    sn = msp.add_text(
-        note,
-        height=2.5,
-        dxfattribs={"layer": "GRABADO", "color": 5},
-    )
-    sn.set_placement(
-        (layout.total_width / 2.0, -6.0),
-        align=TextEntityAlignment.TOP_CENTER,
-    )
-
     stream = io.StringIO()
     doc.write(stream)
     return stream.getvalue()

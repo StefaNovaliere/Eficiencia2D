@@ -25,7 +25,6 @@ from typing import Literal
 from .cutting_sheet import (
     build_cutting_layout_legacy,
     generate_cutting_dxf,
-    generate_cutting_dxf_legacy,
 )
 from .dxf_writer import generate_dxf, generate_component_dxf, generate_floor_plan_dxf
 from .floor_plan_extractor import FloorPlan, extract_floor_plans
