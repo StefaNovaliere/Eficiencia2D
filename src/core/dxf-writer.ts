@@ -23,12 +23,12 @@ function dxfHeader(): string {
     "0", "LTYPE", "2", "CONTINUOUS", "70", "0", "3", "Solid line", "72", "65", "73", "0", "40", "0.0",
     "0", "LTYPE", "2", "DASHED", "70", "0", "3", "Dashed __ __ __", "72", "65", "73", "2", "40", "0.005", "49", "0.003", "49", "-0.002",
     "0", "ENDTAB",
-    // --- Layers (4-layer laser protocol with True Color) ---
+    // --- Layers (4-layer laser protocol — ACI only in table, True Color on entities) ---
     "0", "TABLE", "2", "LAYER", "70", "4",
-    "0", "LAYER", "2", "CUT_EXTERIOR",    "70", "0", "62", "1",  "420", "16711680", "6", "CONTINUOUS",
-    "0", "LAYER", "2", "ENGRAVE_VECTOR",  "70", "0", "62", "5",  "420", "255",      "6", "CONTINUOUS",
-    "0", "LAYER", "2", "ENGRAVE_RASTER",  "70", "0", "62", "7",  "420", "0",        "6", "CONTINUOUS",
-    "0", "LAYER", "2", "CUT_INTERIOR",    "70", "0", "62", "3",  "420", "65280",    "6", "CONTINUOUS",
+    "0", "LAYER", "2", "CUT_EXTERIOR",    "70", "0", "62", "1",  "6", "CONTINUOUS",
+    "0", "LAYER", "2", "ENGRAVE_VECTOR",  "70", "0", "62", "5",  "6", "CONTINUOUS",
+    "0", "LAYER", "2", "ENGRAVE_RASTER",  "70", "0", "62", "7",  "6", "CONTINUOUS",
+    "0", "LAYER", "2", "CUT_INTERIOR",    "70", "0", "62", "3",  "6", "CONTINUOUS",
     "0", "ENDTAB",
     "0", "ENDSEC",
     "0", "SECTION", "2", "ENTITIES",
