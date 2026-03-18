@@ -668,22 +668,34 @@ function panelsToDxf(placed: PlacedPanel[]): string {
     CUT_INTERIOR:   { aci: "3", tc: "65280" },    // green 0,255,0
   };
 
+  /** Incremental entity handle counter (starts at 0x100 to avoid table handles). */
+  let handleCounter = 0x100;
+  const nextHandle = () => (handleCounter++).toString(16).toUpperCase();
+
   const addLine = (x1: number, y1: number, x2: number, y2: number, layer: string) => {
     const s = layerStyle[layer] ?? { aci: "7", tc: "0" };
-    lines.push("0", "LINE", "8", layer,
+    lines.push("0", "LINE",
+      "5", nextHandle(), "330", "17",
+      "100", "AcDbEntity",
+      "8", layer,
       "62", s.aci, "420", s.tc,
-      "10", r(x1), "20", r(y1),
-      "11", r(x2), "21", r(y2));
+      "100", "AcDbLine",
+      "10", r(x1), "20", r(y1), "30", "0.0",
+      "11", r(x2), "21", r(y2), "31", "0.0");
   };
 
   const addText = (x: number, y: number, h: number, text: string, layer: string) => {
     const s = layerStyle[layer] ?? { aci: "7", tc: "0" };
-    lines.push("0", "TEXT", "8", layer,
+    lines.push("0", "TEXT",
+      "5", nextHandle(), "330", "17",
+      "100", "AcDbEntity",
+      "8", layer,
       "62", s.aci, "420", s.tc,
-      "10", r(x), "20", r(y),
+      "100", "AcDbText",
+      "10", r(x), "20", r(y), "30", "0.0",
       "40", r(h), "1", text,
       "72", "1",  // horizontal justification = center
-      "11", r(x), "21", r(y));  // alignment point for centered text
+      "11", r(x), "21", r(y), "31", "0.0");  // alignment point for centered text
   };
 
   for (const { panel, x, y } of placed) {
