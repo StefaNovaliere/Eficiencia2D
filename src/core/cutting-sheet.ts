@@ -78,29 +78,6 @@ function r(n: number): string {
   return Number(n.toFixed(4)).toString();
 }
 
-/**
- * Pad a DXF group code to the required width (right-aligned in a 3-char field).
- *   codes 0–9   → "  0" (2 leading spaces)
- *   codes 10–99  → " 10" (1 leading space)
- *   codes 100+   → "420" (no padding)
- */
-function padGroupCode(code: string): string {
-  if (code.length === 1) return "  " + code;
-  if (code.length === 2) return " " + code;
-  return code;
-}
-
-/**
- * Join an alternating [groupCode, value, groupCode, value, …] array into
- * a DXF-conformant string with padded group codes and \r\n line endings.
- */
-function joinDxf(pairs: string[]): string {
-  const out: string[] = [];
-  for (let i = 0; i < pairs.length; i++) {
-    out.push(i % 2 === 0 ? padGroupCode(pairs[i]) : pairs[i]);
-  }
-  return out.join("\r\n") + "\r\n";
-}
 
 // ---------------------------------------------------------------------------
 // Panel types
@@ -503,316 +480,71 @@ function layoutPanels(panels: Panel[]): PlacedPanel[] {
 }
 
 // ---------------------------------------------------------------------------
-// DXF generation — Autodesk-compatible AC1024 (R2010) with True Color
+// DXF generation — AC1009 (R12) for maximum compatibility with Autodesk
+// Viewer, QCAD, LibreCAD, and laser-cutting software.
 // Cutting sheets are always at 1:1 scale (real dimensions in metres).
 // ---------------------------------------------------------------------------
 
 /** Layer definitions for the 4-layer laser cutting protocol. */
 const CS_LAYERS = [
-  { name: "CUT_EXTERIOR",   aci: "1", tc: "16711680" }, // red
-  { name: "ENGRAVE_VECTOR", aci: "5", tc: "255" },      // blue
-  { name: "ENGRAVE_RASTER", aci: "7", tc: "0" },        // black
-  { name: "CUT_INTERIOR",   aci: "3", tc: "65280" },    // green
+  { name: "CUT_EXTERIOR",   aci: "1" }, // red
+  { name: "ENGRAVE_VECTOR", aci: "5" }, // blue
+  { name: "ENGRAVE_RASTER", aci: "7" }, // white
+  { name: "CUT_INTERIOR",   aci: "3" }, // green
 ];
 
-/** Empty CLASSES section — required by Autodesk between HEADER and TABLES. */
-function dxfClasses(): string {
-  return "  0\r\nSECTION\r\n  2\r\nCLASSES\r\n  0\r\nENDSEC\r\n";
-}
-
-/**
- * OBJECTS section with root dictionary, ACAD_GROUP, ACAD_LAYOUT and LAYOUT
- * objects — required by Autodesk Viewer for successful translation.
- */
-function dxfObjects(): string {
-  return [
-    "  0", "SECTION",
-    "  2", "OBJECTS",
-    // Root dictionary
-    "  0", "DICTIONARY",
-    "  5", "C",
-    "330", "0",
-    "100", "AcDbDictionary",
-    "281", "1",
-    "  3", "ACAD_GROUP",
-    "350", "D",
-    "  3", "ACAD_LAYOUT",
-    "350", "40",
-    // ACAD_GROUP dictionary (empty)
-    "  0", "DICTIONARY",
-    "  5", "D",
-    "330", "C",
-    "100", "AcDbDictionary",
-    "281", "1",
-    // ACAD_LAYOUT dictionary
-    "  0", "DICTIONARY",
-    "  5", "40",
-    "330", "C",
-    "100", "AcDbDictionary",
-    "281", "1",
-    "  3", "Model",
-    "350", "41",
-    "  3", "Layout1",
-    "350", "42",
-    // Model layout
-    "  0", "LAYOUT",
-    "  5", "41",
-    "330", "40",
-    "100", "AcDbPlotSettings",
-    "  1", "",
-    "  2", "none_device",
-    "  4", "",
-    "  6", "",
-    " 40", "0.0", " 41", "0.0", " 42", "0.0", " 43", "0.0",
-    " 44", "0.0", " 45", "0.0", " 46", "0.0", " 47", "0.0",
-    " 48", "0.0", " 49", "0.0",
-    "140", "0.0", "141", "0.0", "142", "1.0", "143", "1.0",
-    " 70", "688",
-    " 72", "0", " 73", "0", " 74", "5",
-    "  7", "",
-    " 75", "16",
-    "147", "1.0", "148", "0.0", "149", "0.0",
-    "100", "AcDbLayout",
-    "  1", "Model",
-    " 70", "1",
-    " 71", "0",
-    " 10", "0.0", " 20", "0.0",
-    " 11", "420.0", " 21", "297.0",
-    " 12", "0.0", " 22", "0.0", " 32", "0.0",
-    " 14", "0.0", " 24", "0.0", " 34", "0.0",
-    " 15", "0.0", " 25", "0.0", " 35", "0.0",
-    "146", "0.0",
-    " 13", "0.0", " 23", "0.0", " 33", "0.0",
-    " 16", "1.0", " 26", "0.0", " 36", "0.0",
-    " 17", "0.0", " 27", "1.0", " 37", "0.0",
-    " 76", "0",
-    "330", "17",
-    // Paper_Space layout
-    "  0", "LAYOUT",
-    "  5", "42",
-    "330", "40",
-    "100", "AcDbPlotSettings",
-    "  1", "",
-    "  2", "none_device",
-    "  4", "",
-    "  6", "",
-    " 40", "0.0", " 41", "0.0", " 42", "0.0", " 43", "0.0",
-    " 44", "0.0", " 45", "0.0", " 46", "0.0", " 47", "0.0",
-    " 48", "0.0", " 49", "0.0",
-    "140", "0.0", "141", "0.0", "142", "1.0", "143", "1.0",
-    " 70", "0",
-    " 72", "0", " 73", "0", " 74", "5",
-    "  7", "",
-    " 75", "16",
-    "147", "1.0", "148", "0.0", "149", "0.0",
-    "100", "AcDbLayout",
-    "  1", "Layout1",
-    " 70", "0",
-    " 71", "1",
-    " 10", "0.0", " 20", "0.0",
-    " 11", "420.0", " 21", "297.0",
-    " 12", "0.0", " 22", "0.0", " 32", "0.0",
-    " 14", "0.0", " 24", "0.0", " 34", "0.0",
-    " 15", "0.0", " 25", "0.0", " 35", "0.0",
-    "146", "0.0",
-    " 13", "0.0", " 23", "0.0", " 33", "0.0",
-    " 16", "1.0", " 26", "0.0", " 36", "0.0",
-    " 17", "0.0", " 27", "1.0", " 37", "0.0",
-    " 76", "0",
-    "330", "1B",
-    "  0", "ENDSEC",
-  ].join("\r\n") + "\r\n";
-}
-
-/**
- * Complete TABLES section required by Autodesk Viewer (AC1024 / R2010).
- * Includes: VPORT, LTYPE (ByBlock+ByLayer+Continuous), LAYER, STYLE, VIEW,
- * UCS, APPID, DIMSTYLE, BLOCK_RECORD — with proper handles and subclass markers.
- */
-function dxfTables(layers: Array<{name: string, aci: string, tc: string}>): string {
-  // Layer "0" is mandatory — referenced by $CLAYER and BLOCK entities.
-  const layer0 = [
-    "  0", "LAYER",
-    "  5", "2F",
-    "330", "1",
-    "100", "AcDbSymbolTableRecord",
-    "100", "AcDbLayerTableRecord",
-    "  2", "0",
-    " 70", "0",
-    " 62", "7",
-    "  6", "Continuous",
-    "370", "-3",
-  ].join("\r\n");
-
-  // Custom layers start at handle 0x30 to avoid collisions with STYLE (0x29)
-  // and APPID (0x2A) records.
-  const layerRecords = layers.map((l, idx) => [
-    "  0", "LAYER",
-    "  5", (0x30 + idx).toString(16).toUpperCase(),
-    "330", "1",
-    "100", "AcDbSymbolTableRecord",
-    "100", "AcDbLayerTableRecord",
-    "  2", l.name,
-    " 70", "0",
-    " 62", "7",
-    "420", l.tc,
-    "  6", "Continuous",
-    "370", "-3",
-  ].join("\r\n")).join("\r\n");
-
-  return [
-    "  0", "SECTION", "  2", "TABLES",
-    // VPORT
-    "  0", "TABLE", "  2", "VPORT", "  5", "8", "330", "0", "100", "AcDbSymbolTable", " 70", "0",
-    "  0", "ENDTAB",
-    // LTYPE
-    "  0", "TABLE", "  2", "LTYPE", "  5", "2", "330", "0", "100", "AcDbSymbolTable", " 70", "3",
-    "  0", "LTYPE", "  5", "24", "330", "2", "100", "AcDbSymbolTableRecord", "100", "AcDbLinetypeTableRecord",
-    "  2", "ByBlock", " 70", "0", "  3", "", " 72", "65", " 73", "0", " 40", "0.0",
-    "  0", "LTYPE", "  5", "25", "330", "2", "100", "AcDbSymbolTableRecord", "100", "AcDbLinetypeTableRecord",
-    "  2", "ByLayer", " 70", "0", "  3", "", " 72", "65", " 73", "0", " 40", "0.0",
-    "  0", "LTYPE", "  5", "26", "330", "2", "100", "AcDbSymbolTableRecord", "100", "AcDbLinetypeTableRecord",
-    "  2", "Continuous", " 70", "0", "  3", "", " 72", "65", " 73", "0", " 40", "0.0",
-    "  0", "ENDTAB",
-    // LAYER (count = custom layers + layer "0")
-    "  0", "TABLE", "  2", "LAYER", "  5", "1", "330", "0", "100", "AcDbSymbolTable", " 70", String(layers.length + 1),
-    layer0,
-    layerRecords,
-    "  0", "ENDTAB",
-    // STYLE
-    "  0", "TABLE", "  2", "STYLE", "  5", "5", "330", "0", "100", "AcDbSymbolTable", " 70", "1",
-    "  0", "STYLE", "  5", "29", "330", "5", "100", "AcDbSymbolTableRecord", "100", "AcDbTextStyleTableRecord",
-    "  2", "Standard", " 70", "0", " 40", "0.0", " 41", "1.0", " 50", "0.0", " 71", "0", " 42", "2.5", "  3", "txt", "  4", "",
-    "  0", "ENDTAB",
-    // VIEW
-    "  0", "TABLE", "  2", "VIEW", "  5", "7", "330", "0", "100", "AcDbSymbolTable", " 70", "0",
-    "  0", "ENDTAB",
-    // UCS
-    "  0", "TABLE", "  2", "UCS", "  5", "6", "330", "0", "100", "AcDbSymbolTable", " 70", "0",
-    "  0", "ENDTAB",
-    // APPID
-    "  0", "TABLE", "  2", "APPID", "  5", "3", "330", "0", "100", "AcDbSymbolTable", " 70", "1",
-    "  0", "APPID", "  5", "2A", "330", "3", "100", "AcDbSymbolTableRecord", "100", "AcDbRegAppTableRecord",
-    "  2", "ACAD", " 70", "0",
-    "  0", "ENDTAB",
-    // DIMSTYLE
-    "  0", "TABLE", "  2", "DIMSTYLE", "  5", "4", "330", "0", "100", "AcDbSymbolTable", " 70", "0",
-    "100", "AcDbDimStyleTable",
-    "  0", "ENDTAB",
-    // BLOCK_RECORD
-    "  0", "TABLE", "  2", "BLOCK_RECORD", "  5", "9", "330", "0", "100", "AcDbSymbolTable", " 70", "2",
-    "  0", "BLOCK_RECORD", "  5", "17", "330", "9", "100", "AcDbSymbolTableRecord", "100", "AcDbBlockTableRecord",
-    "  2", "*Model_Space", "340", "41", " 70", "0", "280", "1", "281", "0",
-    "  0", "BLOCK_RECORD", "  5", "1B", "330", "9", "100", "AcDbSymbolTableRecord", "100", "AcDbBlockTableRecord",
-    "  2", "*Paper_Space", "340", "42", " 70", "0", "280", "1", "281", "0",
-    "  0", "ENDTAB",
-    "  0", "ENDSEC",
-  ].join("\r\n") + "\r\n";
-}
-
-/**
- * BLOCKS section required by DXF R2010 — Model_Space + Paper_Space.
- */
-function dxfBlocks(): string {
-  return [
-    "  0", "SECTION",
-    "  2", "BLOCKS",
-    "  0", "BLOCK", "  5", "1A", "330", "17",
-    "100", "AcDbEntity", "  8", "0",
-    "100", "AcDbBlockBegin", "  2", "*Model_Space", " 70", "0",
-    " 10", "0.0", " 20", "0.0", " 30", "0.0",
-    "  3", "*Model_Space", "  1", "",
-    "  0", "ENDBLK", "  5", "1C", "330", "17",
-    "100", "AcDbEntity", "  8", "0",
-    "100", "AcDbBlockEnd",
-    "  0", "BLOCK", "  5", "1E", "330", "1B",
-    "100", "AcDbEntity", "  8", "0",
-    "100", "AcDbBlockBegin", "  2", "*Paper_Space", " 70", "0",
-    " 10", "0.0", " 20", "0.0", " 30", "0.0",
-    "  3", "*Paper_Space", "  1", "",
-    "  0", "ENDBLK", "  5", "1F", "330", "1B",
-    "100", "AcDbEntity", "  8", "0",
-    "100", "AcDbBlockEnd",
-    "  0", "ENDSEC",
-  ].join("\r\n") + "\r\n";
-}
 
 function panelsToDxf(placed: PlacedPanel[]): string {
   const textH = 0.15;     // panel ID text height (metres)
   const dimTextH = 0.10;  // dimension text height (metres)
 
+  const lines: string[] = [];
+
   // HEADER section
-  const headerStr = [
-    "  0", "SECTION",
-    "  2", "HEADER",
-    "  9", "$ACADVER",      "  1", "AC1024",
-    "  9", "$ACADMAINTVER", " 70", "6",
-    "  9", "$DWGCODEPAGE",  "  3", "ANSI_1252",
-    "  9", "$INSBASE",  " 10", "0.0",  " 20", "0.0",  " 30", "0.0",
-    "  9", "$EXTMIN",   " 10", "1e+20"," 20", "1e+20"," 30", "1e+20",
-    "  9", "$EXTMAX",   " 10", "-1e+20"," 20", "-1e+20"," 30", "-1e+20",
-    "  9", "$LIMMIN",   " 10", "0.0",  " 20", "0.0",
-    "  9", "$LIMMAX",   " 10", "420.0"," 20", "297.0",
-    "  9", "$ORTHOMODE"," 70", "0",
-    "  9", "$REGENMODE"," 70", "1",
-    "  9", "$FILLMODE", " 70", "1",
-    "  9", "$QTEXTMODE"," 70", "0",
-    "  9", "$MIRRTEXT", " 70", "1",
-    "  9", "$LTSCALE",  " 40", "1.0",
-    "  9", "$ATTMODE",  " 70", "1",
-    "  9", "$TEXTSIZE", " 40", "2.5",
-    "  9", "$TEXTSTYLE","  7", "Standard",
-    "  9", "$CLAYER",   "  8", "0",
-    "  9", "$CELTYPE",  "  6", "ByLayer",
-    "  9", "$CECOLOR",  " 62", "256",
-    "  9", "$CELTSCALE"," 40", "1.0",
-    "  9", "$INSUNITS", " 70", "6",
-    "  9", "$MEASUREMENT"," 70", "1",
-    "  0", "ENDSEC",
-  ].join("\r\n") + "\r\n";
+  lines.push(
+    "0", "SECTION",
+    "2", "HEADER",
+    "9", "$ACADVER",
+    "1", "AC1009",
+    "9", "$INSUNITS",
+    "70", "6",
+    "0", "ENDSEC",
+  );
 
-  // ENTITIES section content (goes through joinDxf for padding)
-  const lines: string[] = [
-    "0", "SECTION", "2", "ENTITIES",
-  ];
+  // TABLES section
+  lines.push(
+    "0", "SECTION",
+    "2", "TABLES",
+    "0", "TABLE",
+    "2", "LTYPE",
+    "70", "1",
+    "0", "LTYPE",
+    "2", "CONTINUOUS",
+    "70", "0",
+    "3", "Solid line",
+    "72", "65",
+    "73", "0",
+    "40", "0.0",
+    "0", "ENDTAB",
+    "0", "TABLE",
+    "2", "LAYER",
+    "70", String(CS_LAYERS.length),
+  );
 
-  // Layer → [ACI color, True Color 24-bit RGB int] per entity.
-  const layerStyle: Record<string, { aci: string; tc: string }> = {
-    CUT_EXTERIOR:   { aci: "1", tc: "16711680" }, // red   255,0,0
-    ENGRAVE_VECTOR: { aci: "5", tc: "255" },      // blue  0,0,255
-    ENGRAVE_RASTER: { aci: "7", tc: "0" },        // black 0,0,0
-    CUT_INTERIOR:   { aci: "3", tc: "65280" },    // green 0,255,0
-  };
+  for (const l of CS_LAYERS) {
+    lines.push(
+      "0", "LAYER",
+      "2", l.name,
+      "70", "0",
+      "62", l.aci,
+      "6", "CONTINUOUS",
+    );
+  }
 
-  /** Incremental entity handle counter (starts at 0x100 to avoid table handles). */
-  let handleCounter = 0x100;
-  const nextHandle = () => (handleCounter++).toString(16).toUpperCase();
+  lines.push("0", "ENDTAB", "0", "ENDSEC");
 
-  const addLine = (x1: number, y1: number, x2: number, y2: number, layer: string) => {
-    const s = layerStyle[layer] ?? { aci: "7", tc: "0" };
-    lines.push("0", "LINE",
-      "5", nextHandle(), "330", "17",
-      "100", "AcDbEntity",
-      "8", layer,
-      "62", s.aci, "420", s.tc,
-      "100", "AcDbLine",
-      "10", r(x1), "20", r(y1), "30", "0.0",
-      "11", r(x2), "21", r(y2), "31", "0.0");
-  };
-
-  const addText = (x: number, y: number, h: number, text: string, layer: string) => {
-    const s = layerStyle[layer] ?? { aci: "7", tc: "0" };
-    lines.push("0", "TEXT",
-      "5", nextHandle(), "330", "17",
-      "100", "AcDbEntity",
-      "8", layer,
-      "62", s.aci, "420", s.tc,
-      "100", "AcDbText",
-      "10", r(x), "20", r(y), "30", "0.0",
-      "40", r(h), "1", text,
-      "72", "1",  // horizontal justification = center
-      "11", r(x), "21", r(y), "31", "0.0");  // alignment point for centered text
-  };
+  // ENTITIES section
+  lines.push("0", "SECTION", "2", "ENTITIES");
 
   for (const { panel, x, y } of placed) {
     const pw = panel.widthM;
@@ -820,35 +552,52 @@ function panelsToDxf(placed: PlacedPanel[]): string {
 
     // Draw panel outline edges (CUT_EXTERIOR layer — red).
     for (const edge of panel.edges) {
-      addLine(
-        x + edge.a.x, y + edge.a.y,
-        x + edge.b.x, y + edge.b.y,
-        "CUT_EXTERIOR",
+      lines.push(
+        "0", "LINE",
+        "8", "CUT_EXTERIOR",
+        "62", "1",
+        "10", r(x + edge.a.x),
+        "20", r(y + edge.a.y),
+        "11", r(x + edge.b.x),
+        "21", r(y + edge.b.y),
       );
     }
 
     // Panel ID label centered above panel (ENGRAVE_VECTOR layer — blue).
-    addText(
-      x + pw / 2,
-      y + ph + GAP_M * 0.2,
-      textH,
-      panel.id,
-      "ENGRAVE_VECTOR",
+    const labelX = r(x + pw / 2);
+    const labelY = r(y + ph + GAP_M * 0.2);
+    lines.push(
+      "0", "TEXT",
+      "8", "ENGRAVE_VECTOR",
+      "62", "5",
+      "10", labelX,
+      "20", labelY,
+      "40", r(textH),
+      "1", panel.id,
+      "72", "1",
+      "11", labelX,
+      "21", labelY,
     );
 
-    // Dimensions below panel (ENGRAVE_RASTER layer — black).
-    addText(
-      x + pw / 2,
-      y - GAP_M * 0.35,
-      dimTextH,
-      `${pw.toFixed(2)} x ${ph.toFixed(2)} m`,
-      "ENGRAVE_RASTER",
+    // Dimensions below panel (ENGRAVE_RASTER layer — white/7).
+    const dimX = r(x + pw / 2);
+    const dimY = r(y - GAP_M * 0.35);
+    lines.push(
+      "0", "TEXT",
+      "8", "ENGRAVE_RASTER",
+      "62", "7",
+      "10", dimX,
+      "20", dimY,
+      "40", r(dimTextH),
+      "1", `${pw.toFixed(2)} x ${ph.toFixed(2)} m`,
+      "72", "1",
+      "11", dimX,
+      "21", dimY,
     );
   }
 
-  lines.push("0", "ENDSEC");
-  // Order: HEADER → CLASSES → TABLES → BLOCKS → ENTITIES → OBJECTS → EOF
-  return headerStr + dxfClasses() + dxfTables(CS_LAYERS) + dxfBlocks() + joinDxf(lines) + dxfObjects() + joinDxf(["0", "EOF"]);
+  lines.push("0", "ENDSEC", "0", "EOF");
+  return lines.join("\n") + "\n";
 }
 
 // ---------------------------------------------------------------------------
