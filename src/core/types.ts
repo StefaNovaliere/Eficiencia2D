@@ -71,12 +71,20 @@ export interface FloorPlan {
 /** Decomposition mode for cutting sheets. */
 export type DecompositionMode = "detailed" | "simple";
 
+/** Which architectural element categories to include in cutting sheets. */
+export interface ElementFilter {
+  floors: boolean;
+  wallsExterior: boolean;
+  wallsInterior: boolean;
+}
+
 /** Options that travel through the full pipeline. */
 export interface PipelineOptions {
   scaleDenom: number;
   paper: string;
   includeCuttingSheet?: boolean;
   decompositionMode?: DecompositionMode;
+  elementFilter?: ElementFilter;
 }
 
 /** A generated output file ready for download. */
