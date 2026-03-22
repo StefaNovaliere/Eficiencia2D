@@ -68,11 +68,15 @@ export interface FloorPlan {
   doors?: Door2D[];
 }
 
+/** Decomposition mode for cutting sheets. */
+export type DecompositionMode = "detailed" | "simple";
+
 /** Options that travel through the full pipeline. */
 export interface PipelineOptions {
   scaleDenom: number;
   paper: string;
   includeCuttingSheet?: boolean;
+  decompositionMode?: DecompositionMode;
 }
 
 /** A generated output file ready for download. */

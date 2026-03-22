@@ -18,7 +18,7 @@
 // DXF output: 1:1 scale (real dimensions for laser/CNC cutting).
 // ============================================================================
 
-import type { Face3D, Vec2, Vec3 } from "./types";
+import type { DecompositionMode, Face3D, Vec2, Vec3 } from "./types";
 import { cross, dot, normalize, sub, vlength } from "./types";
 import { detectFloorLevels } from "./floor-plan-extractor";
 
@@ -331,15 +331,74 @@ function projectFacesTo2D(
 }
 
 // ---------------------------------------------------------------------------
+// Simple-mode filter: keep only the largest face per wall orientation
+// ---------------------------------------------------------------------------
+
+/**
+ * For "simple" mode, reduce coplanar groups to one per wall orientation:
+ *   1. Pair up groups with opposite normals (interior + exterior of same wall)
+ *      that are close together (within wall thickness ≈ 0.5m).
+ *   2. From each pair, keep only the group with the larger total area (exterior).
+ *   3. Discard any remaining group whose area is < 10% of the largest (cantos).
+ *
+ * Floor groups pass through unchanged.
+ */
+function filterGroupsForSimpleMode(groups: CoplanarGroup[]): CoplanarGroup[] {
+  const walls = groups.filter((g) => g.category === "wall");
+  const floors = groups.filter((g) => g.category === "floor");
+
+  // Pair interior/exterior faces of the same wall.
+  const used = new Set<number>();
+  const kept: CoplanarGroup[] = [];
+
+  for (let i = 0; i < walls.length; i++) {
+    if (used.has(i)) continue;
+    used.add(i);
+
+    let best = walls[i];
+
+    for (let j = i + 1; j < walls.length; j++) {
+      if (used.has(j)) continue;
+
+      // Opposite normals → same wall, interior vs exterior.
+      const d = dot(walls[i].normal, walls[j].normal);
+      if (d > -0.85) continue;
+
+      // Close in space → wall thickness (|d_i + d_j| ≈ thickness).
+      if (Math.abs(walls[i].d + walls[j].d) > 0.5) continue;
+
+      used.add(j);
+      if (walls[j].totalArea > best.totalArea) {
+        best = walls[j];
+      }
+    }
+
+    kept.push(best);
+  }
+
+  // Discard cantos: groups with area < 10% of the largest.
+  const maxArea = Math.max(...kept.map((g) => g.totalArea), 0);
+  const filtered = kept.filter((g) => g.totalArea >= maxArea * 0.10);
+
+  return [...filtered, ...floors];
+}
+
+// ---------------------------------------------------------------------------
 // Decompose model into classified panels using geometric coplanarity
 // ---------------------------------------------------------------------------
 
 function decomposeIntoPanels(
   faces: Face3D[],
   up: UpAxis,
+  simpleMode: boolean,
 ): Panel[] {
   // 1. Cluster ALL faces by coplanarity (normal + plane offset).
-  const coplanarGroups = clusterByCoplanarity(faces, up);
+  let coplanarGroups = clusterByCoplanarity(faces, up);
+
+  // 1b. In simple mode, keep only the largest face per wall orientation.
+  if (simpleMode) {
+    coplanarGroups = filterGroupsForSimpleMode(coplanarGroups);
+  }
 
   // 2. Detect floor levels for assigning floor indices.
   const levels = detectFloorLevels(faces, up);
@@ -608,8 +667,10 @@ export function generateCuttingSheets(
   faces: Face3D[],
   upAxis: "Y" | "Z",
   _scaleDenom: number,
+  mode?: DecompositionMode,
 ): Array<{ name: string; content: string }> {
-  const panels = decomposeIntoPanels(faces, upAxis);
+  const simpleMode = (mode ?? "simple") === "simple";
+  const panels = decomposeIntoPanels(faces, upAxis, simpleMode);
   if (panels.length === 0) return [];
 
   const results: Array<{ name: string; content: string }> = [];
