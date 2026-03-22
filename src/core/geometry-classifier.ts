@@ -144,7 +144,8 @@ export function classifyAndFilter(
     levelGroups.get(key)!.push(fi);
   }
 
-  const MIN_FLOOR_DIMENSION = 0.3; // 30cm — wall bases are ~5cm wide
+  const MIN_FLOOR_DIMENSION = 0.15; // 15cm absolute safety minimum
+  const MAX_ASPECT_RATIO = 6.0;     // strips longer than 6:1 are wall bases
 
   const floorFaces = new Set<Face3D>();
   const discardFaces = new Set<Face3D>();
@@ -161,9 +162,14 @@ export function classifyAndFilter(
         if (v.z < zMin) zMin = v.z;
         if (v.z > zMax) zMax = v.z;
       }
-      const minDim = Math.min(xMax - xMin, zMax - zMin);
-      if (minDim < MIN_FLOOR_DIMENSION) {
-        discardFaces.add(fi.face); // wall base → discard
+      const w2d = xMax - xMin;
+      const h2d = zMax - zMin;
+      const minDim = Math.min(w2d, h2d);
+      const maxDim = Math.max(w2d, h2d);
+      const aspectRatio = maxDim / (minDim + 1e-10);
+
+      if (minDim < MIN_FLOOR_DIMENSION || aspectRatio > MAX_ASPECT_RATIO) {
+        discardFaces.add(fi.face); // narrow strip → wall base
       } else {
         floorFaces.add(fi.face);
       }
