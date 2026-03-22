@@ -124,7 +124,7 @@ export function classifyAndFilter(
     return faces;
   }
 
-  // --- Classify horizontal faces: real floors vs skirting boards ---
+  // --- Paso 1: Histograma de área acumulada por banda de altura Y ---
 
   const horizontals = infos.filter((fi) => fi.orientation === "horizontal");
 
@@ -144,34 +144,46 @@ export function classifyAndFilter(
     levelGroups.get(key)!.push(fi);
   }
 
-  const MIN_FLOOR_DIMENSION = 0.3; // 30cm — wall bases are ~5cm wide
+  // Accumulate total area per height band.
+  const bandArea = new Map<number, number>();
+  for (const [key, group] of levelGroups.entries()) {
+    let total = 0;
+    for (const fi of group) total += fi.area;
+    bandArea.set(key, total);
+  }
+
+  // --- Paso 2: Detectar niveles reales como picos del histograma ---
+
+  let maxBandArea = 0;
+  for (const area of bandArea.values()) {
+    if (area > maxBandArea) maxBandArea = area;
+  }
+
+  // A band is a real level if its accumulated area exceeds this threshold.
+  const LEVEL_THRESHOLD = Math.max(1.0, 0.03 * maxBandArea);
+
+  const realLevelKeys = new Set<number>();
+  for (const [key, area] of bandArea.entries()) {
+    if (area >= LEVEL_THRESHOLD) {
+      realLevelKeys.add(key);
+    }
+  }
+
+  // --- Paso 3: Clasificar cada cara horizontal ---
 
   const floorFaces = new Set<Face3D>();
   const discardFaces = new Set<Face3D>();
 
-  for (const group of levelGroups.values()) {
-    for (const fi of group) {
-      // Project to XZ plane (horizontal face) and check bounding box.
-      const verts = fi.face.vertices;
-      let xMin = Infinity, xMax = -Infinity;
-      let zMin = Infinity, zMax = -Infinity;
-      for (const v of verts) {
-        if (v.x < xMin) xMin = v.x;
-        if (v.x > xMax) xMax = v.x;
-        if (v.z < zMin) zMin = v.z;
-        if (v.z > zMax) zMax = v.z;
-      }
-      const minDim = Math.min(xMax - xMin, zMax - zMin);
-      if (minDim < MIN_FLOOR_DIMENSION) {
-        discardFaces.add(fi.face); // wall base → discard
-      } else {
-        floorFaces.add(fi.face);
-      }
+  for (const [key, group] of levelGroups.entries()) {
+    if (realLevelKeys.has(key)) {
+      for (const fi of group) floorFaces.add(fi.face);
+    } else {
+      for (const fi of group) discardFaces.add(fi.face);
     }
   }
 
-  // If no floors were found, don't discard any horizontals.
-  if (floorFaces.size === 0) {
+  // If no real levels were detected, don't discard any horizontals.
+  if (realLevelKeys.size === 0) {
     for (const fi of horizontals) {
       floorFaces.add(fi.face);
       discardFaces.delete(fi.face);
