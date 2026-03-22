@@ -144,7 +144,7 @@ export function classifyAndFilter(
     levelGroups.get(key)!.push(fi);
   }
 
-  const MIN_FLOOR_DIMENSION = 0.3; // 30cm — wall bases are ~5cm wide
+  const MIN_FLOOR_DIMENSION = 0.5; // 50cm — wall bases max 0.39m, smallest floor 0.97m
 
   const floorFaces = new Set<Face3D>();
   const discardFaces = new Set<Face3D>();
