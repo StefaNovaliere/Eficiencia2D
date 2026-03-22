@@ -13,7 +13,7 @@
 // ============================================================================
 
 import type { Face3D, Facade, Loop2D, Vec2, Vec3 } from "./types";
-import { cross, dot, normalize, vlength } from "./types";
+import { cross, dot, normalize, sub, vlength } from "./types";
 
 const VERTICAL_EPSILON = 0.20;
 const DIRECTION_CLUSTER_THRESHOLD = 0.70;
@@ -191,17 +191,76 @@ function extractWithAxis(faces: Face3D[], up: UpAxis): Facade[] {
   return facades;
 }
 
-/** Detect the model's up axis by comparing facade extraction results for Y vs Z. */
+/**
+ * Detect the model's up axis using face-normal analysis.
+ *
+ * Heuristic 1 (most reliable): Floors/ceilings have normals aligned with the
+ * up axis.  Count the total area of faces whose normal has |component| > 0.9
+ * for Y vs Z.  The axis with more "horizontal-face area" is up.
+ *
+ * Heuristic 2 (fallback): Bounding-box ratio — if one axis has a much smaller
+ * range than the other, it is likely NOT the up axis (buildings are wider than
+ * tall, so up has a moderate-to-small range, but the footprint axes are larger).
+ *
+ * Heuristic 3: Default to Z (common in architectural exports).
+ */
 export function detectUpAxis(faces: Face3D[]): "Y" | "Z" {
   if (faces.length === 0) return "Z";
 
-  const facadesZ = extractWithAxis(faces, "Z");
-  const facadesY = extractWithAxis(faces, "Y");
+  // --- Heuristic 1: face-normal analysis ---
+  let yArea = 0;
+  let zArea = 0;
 
-  const countZ = facadesZ.reduce((s, f) => s + f.polygons.length, 0);
-  const countY = facadesY.reduce((s, f) => s + f.polygons.length, 0);
+  for (const face of faces) {
+    const n = face.normal;
+    const verts = face.vertices;
+    if (verts.length < 3) continue;
 
-  return countY > countZ ? "Y" : "Z";
+    // Approximate face area from first triangle.
+    const e1 = sub(verts[1], verts[0]);
+    const e2 = sub(verts[2], verts[0]);
+    const cx = cross(e1, e2);
+    const area = vlength(cx) * 0.5;
+    if (area < 1e-10) continue;
+
+    const absY = Math.abs(n.y);
+    const absZ = Math.abs(n.z);
+
+    if (absY > 0.9) yArea += area;
+    if (absZ > 0.9) zArea += area;
+  }
+
+  const totalArea = yArea + zArea;
+  if (totalArea > 0) {
+    const diff = Math.abs(yArea - zArea) / totalArea;
+    if (diff > 0.3) {
+      return yArea > zArea ? "Y" : "Z";
+    }
+  }
+
+  // --- Heuristic 2: bounding-box ratio ---
+  let minY = Infinity, maxY = -Infinity;
+  let minZ = Infinity, maxZ = -Infinity;
+
+  const limit = Math.min(faces.length, 500);
+  for (let i = 0; i < limit; i++) {
+    for (const v of faces[i].vertices) {
+      if (v.y < minY) minY = v.y;
+      if (v.y > maxY) maxY = v.y;
+      if (v.z < minZ) minZ = v.z;
+      if (v.z > maxZ) maxZ = v.z;
+    }
+  }
+
+  const rangeY = maxY - minY;
+  const rangeZ = maxZ - minZ;
+
+  // If one range is much smaller, the other is likely "up" (building height).
+  if (rangeZ > 0 && rangeY / rangeZ > 2.0) return "Z";
+  if (rangeY > 0 && rangeZ / rangeY > 2.0) return "Y";
+
+  // --- Heuristic 3: default ---
+  return "Z";
 }
 
 export function extractFacades(faces: Face3D[], upAxis?: "Y" | "Z"): Facade[] {
