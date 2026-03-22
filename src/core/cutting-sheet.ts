@@ -54,7 +54,7 @@ function faceArea(face: Face3D): number {
   return 0.5 * Math.sqrt(sx * sx + sy * sy + sz * sz);
 }
 
-/** Snap to 1cm grid for robust edge-key matching (output uses original coords). */
+/** Snap to 2 decimal places (~1cm tolerance) for robust edge matching. */
 function snap(v: number): number {
   return Math.round(v * 100) / 100;
 }
@@ -69,7 +69,7 @@ function edgeKey(ax: number, ay: number, bx: number, by: number): string {
   return a < b ? `${a}|${b}` : `${b}|${a}`;
 }
 
-/** Snap a 3D coordinate for connectivity grouping (1cm grid). */
+/** Snap a 3D coordinate for coplanarity grouping. */
 function snap3(v: number): number {
   return Math.round(v * 100) / 100;
 }
@@ -226,6 +226,52 @@ function splitConnectedComponents(faces: Face3D[]): Face3D[][] {
 }
 
 // ---------------------------------------------------------------------------
+// Height-based splitting: separate floor faces at different building levels
+// ---------------------------------------------------------------------------
+
+const HEIGHT_SPLIT_TOLERANCE = 0.20; // 20cm — faces further apart are different floors
+
+/**
+ * Split a set of coplanar floor faces into sub-groups by their vertical
+ * elevation. Faces whose up-axis coordinate differs by more than the
+ * tolerance belong to different building levels and must be treated as
+ * independent pieces — otherwise the boundary edge extractor would
+ * connect faces from different storeys, producing diagonal lines.
+ */
+function splitByHeight(faces: Face3D[], up: UpAxis): Face3D[][] {
+  if (faces.length <= 1) return [faces];
+
+  // Compute the average elevation (up-axis) of each face.
+  const elevations = faces.map((f) => {
+    const sum = f.vertices.reduce((s, v) => s + getUp(v, up), 0);
+    return sum / f.vertices.length;
+  });
+
+  // Sort faces by elevation for efficient grouping.
+  const indices = faces.map((_, i) => i);
+  indices.sort((a, b) => elevations[a] - elevations[b]);
+
+  const groups: Face3D[][] = [];
+  let currentGroup: Face3D[] = [faces[indices[0]]];
+  let currentElev = elevations[indices[0]];
+
+  for (let i = 1; i < indices.length; i++) {
+    const fi = indices[i];
+    if (Math.abs(elevations[fi] - currentElev) > HEIGHT_SPLIT_TOLERANCE) {
+      // New height level — start a new group.
+      groups.push(currentGroup);
+      currentGroup = [faces[fi]];
+      currentElev = elevations[fi];
+    } else {
+      currentGroup.push(faces[fi]);
+    }
+  }
+  groups.push(currentGroup);
+
+  return groups;
+}
+
+// ---------------------------------------------------------------------------
 // Project coplanar faces to 2D and extract boundary edges
 // ---------------------------------------------------------------------------
 
@@ -233,7 +279,7 @@ function projectFacesTo2D(
   faces: Face3D[],
   groupNormal: Vec3,
   up: UpAxis,
-): { edges: Array<{ a: Vec2; b: Vec2 }> } | null {
+): { widthM: number; heightM: number; edges: Array<{ a: Vec2; b: Vec2 }> } | null {
   if (faces.length === 0) return null;
 
   const upComp = Math.abs(getUp(groupNormal, up));
@@ -304,167 +350,30 @@ function projectFacesTo2D(
 
   if (boundaryEdges.length === 0) return null;
 
-  // Return edges in raw projected coordinates (no normalization).
-  // The caller will normalize per-polygon after cycle extraction.
+  // Bounding box and normalize to (0,0).
+  let minU = Infinity, maxU = -Infinity;
+  let minV = Infinity, maxV = -Infinity;
+
+  for (const e of boundaryEdges) {
+    minU = Math.min(minU, e.ax, e.bx);
+    maxU = Math.max(maxU, e.ax, e.bx);
+    minV = Math.min(minV, e.ay, e.by);
+    maxV = Math.max(maxV, e.ay, e.by);
+  }
+
+  const w = maxU - minU;
+  const h = maxV - minV;
+  if (w < 0.01 || h < 0.01) return null;
+
   const edges: Array<{ a: Vec2; b: Vec2 }> = [];
   for (const e of boundaryEdges) {
     edges.push({
-      a: { x: e.ax, y: e.ay },
-      b: { x: e.bx, y: e.by },
+      a: { x: e.ax - minU, y: e.ay - minV },
+      b: { x: e.bx - minU, y: e.by - minV },
     });
   }
 
-  return { edges };
-}
-
-// ---------------------------------------------------------------------------
-// Planar graph cycle extraction: split branching edge graphs into simple polygons
-// ---------------------------------------------------------------------------
-
-/**
- * Given a set of 2D boundary edges, check if the graph has branching vertices
- * (degree > 2). If so, use planar face extraction (always-turn-left) to
- * decompose into simple polygon cycles. Returns an array of edge arrays,
- * each forming a closed simple polygon.
- */
-function extractSimplePolygons(
-  edges: Array<{ a: Vec2; b: Vec2 }>,
-): Array<Array<{ a: Vec2; b: Vec2 }>> {
-  // Build adjacency: vertex key → list of neighbor vertex keys
-  const adj = new Map<string, Array<{ key: string; x: number; y: number }>>();
-
-  function vk(p: Vec2): string {
-    return `${snap(p.x)},${snap(p.y)}`;
-  }
-  function vCoord(p: Vec2): { key: string; x: number; y: number } {
-    return { key: vk(p), x: snap(p.x), y: snap(p.y) };
-  }
-
-  // Collect all vertex positions
-  const vertPos = new Map<string, { x: number; y: number }>();
-
-  for (const e of edges) {
-    const ak = vk(e.a);
-    const bk = vk(e.b);
-    const ac = vCoord(e.a);
-    const bc = vCoord(e.b);
-
-    vertPos.set(ak, { x: ac.x, y: ac.y });
-    vertPos.set(bk, { x: bc.x, y: bc.y });
-
-    if (!adj.has(ak)) adj.set(ak, []);
-    if (!adj.has(bk)) adj.set(bk, []);
-    adj.get(ak)!.push(bc);
-    adj.get(bk)!.push(ac);
-  }
-
-  // Check if any vertex has degree > 2
-  let hasBranching = false;
-  for (const [, neighbors] of adj) {
-    if (neighbors.length > 2) { hasBranching = true; break; }
-  }
-
-  // If no branching, return original edges as single polygon
-  if (!hasBranching) return [edges];
-
-  // Sort neighbors of each vertex by angle for planar face extraction
-  for (const [key, neighbors] of adj) {
-    const pos = vertPos.get(key)!;
-    neighbors.sort((a, b) => {
-      const angA = Math.atan2(a.y - pos.y, a.x - pos.x);
-      const angB = Math.atan2(b.y - pos.y, b.x - pos.x);
-      return angA - angB;
-    });
-  }
-
-  // Build half-edge structure for cycle extraction
-  // A half-edge goes from src → dst. The "twin" goes from dst → src.
-  // For each half-edge (src→dst), find "next": at dst, find twin (dst→src) in
-  // dst's sorted neighbor list, then take the NEXT neighbor clockwise.
-  // This gives the next half-edge (dst→nextNeighbor) in the face.
-
-  const usedHalfEdges = new Set<string>();
-  const cycles: Array<Array<{ a: Vec2; b: Vec2 }>> = [];
-
-  function halfEdgeKey(from: string, to: string): string {
-    return `${from}->${to}`;
-  }
-
-  function getNextHalfEdge(fromKey: string, toKey: string): string {
-    // At vertex toKey, find the reverse direction (toKey→fromKey) in the sorted
-    // neighbor list, then return the NEXT neighbor (wrapping around).
-    const neighbors = adj.get(toKey)!;
-    let reverseIdx = -1;
-    for (let i = 0; i < neighbors.length; i++) {
-      if (neighbors[i].key === fromKey) {
-        reverseIdx = i;
-        break;
-      }
-    }
-    if (reverseIdx === -1) return fromKey; // shouldn't happen
-
-    // Next clockwise = previous in the CCW-sorted list (wrap around)
-    const nextIdx = (reverseIdx - 1 + neighbors.length) % neighbors.length;
-    return neighbors[nextIdx].key;
-  }
-
-  // Extract all cycles
-  for (const [srcKey, neighbors] of adj) {
-    for (const dst of neighbors) {
-      const heKey = halfEdgeKey(srcKey, dst.key);
-      if (usedHalfEdges.has(heKey)) continue;
-
-      // Trace cycle
-      const cycle: Array<{ fromKey: string; toKey: string }> = [];
-      let curFrom = srcKey;
-      let curTo = dst.key;
-      let safe = 0;
-
-      while (safe < 10000) {
-        const ck = halfEdgeKey(curFrom, curTo);
-        if (usedHalfEdges.has(ck)) break;
-        usedHalfEdges.add(ck);
-        cycle.push({ fromKey: curFrom, toKey: curTo });
-
-        const nextTo = getNextHalfEdge(curFrom, curTo);
-        curFrom = curTo;
-        curTo = nextTo;
-        safe++;
-
-        if (curFrom === srcKey && curTo === dst.key) break;
-      }
-
-      if (cycle.length >= 3) {
-        // Convert cycle to edges with original coordinates
-        const polyEdges: Array<{ a: Vec2; b: Vec2 }> = [];
-        for (const he of cycle) {
-          const aPos = vertPos.get(he.fromKey)!;
-          const bPos = vertPos.get(he.toKey)!;
-          polyEdges.push({
-            a: { x: aPos.x, y: aPos.y },
-            b: { x: bPos.x, y: bPos.y },
-          });
-        }
-        cycles.push(polyEdges);
-      }
-    }
-  }
-
-  if (cycles.length === 0) return [edges];
-
-  // Discard the outer (unbounded) face: it has clockwise winding (negative signed area).
-  // Interior faces have counter-clockwise winding (positive signed area).
-  return cycles.filter(c => {
-    if (c.length < 3) return false;
-    // Compute signed area using the shoelace formula on the cycle vertices.
-    let signedArea = 0;
-    for (const e of c) {
-      signedArea += (e.b.x - e.a.x) * (e.b.y + e.a.y);
-    }
-    // Negative signedArea in this formulation = CCW = interior face (keep)
-    // Positive signedArea = CW = outer face (discard)
-    return signedArea < 0;
-  });
+  return { widthM: w, heightM: h, edges };
 }
 
 // ---------------------------------------------------------------------------
@@ -554,56 +463,42 @@ function decomposeIntoPanels(
     const components = splitConnectedComponents(group.faces);
 
     for (const compFaces of components) {
-      // Project and extract boundary edges.
-      const result = projectFacesTo2D(compFaces, group.normal, up);
-      if (!result) continue;
+      // For floor groups, further split by height so faces from different
+      // building levels don't get merged into the same panel.
+      const heightGroups =
+        group.category === "floor"
+          ? splitByHeight(compFaces, up)
+          : [compFaces];
 
-      // Determine floor index from vertical midpoint.
-      const allElevs = compFaces.flatMap((f) =>
-        f.vertices.map((v) => getUp(v, up)),
-      );
-      const mid = (Math.min(...allElevs) + Math.max(...allElevs)) / 2;
-
-      let floorIdx = 0;
-      for (let i = levels.length - 1; i >= 0; i--) {
-        if (mid >= levels[i] - 0.5) {
-          floorIdx = i;
-          break;
-        }
-      }
-
-      // Split branching edge graphs into simple polygon cycles.
-      const polygons = extractSimplePolygons(result.edges);
-
-      for (const polyEdges of polygons) {
-        // Compute bounding box for this polygon.
-        let minU = Infinity, maxU = -Infinity;
-        let minV = Infinity, maxV = -Infinity;
-        for (const e of polyEdges) {
-          minU = Math.min(minU, e.a.x, e.b.x);
-          maxU = Math.max(maxU, e.a.x, e.b.x);
-          minV = Math.min(minV, e.a.y, e.b.y);
-          maxV = Math.max(maxV, e.a.y, e.b.y);
-        }
-        const w = maxU - minU;
-        const h = maxV - minV;
+      for (const hgFaces of heightGroups) {
+        // Project and extract boundary edges.
+        const result = projectFacesTo2D(hgFaces, group.normal, up);
+        if (!result) continue;
 
         // Skip very small panels (artifacts, edges, trim pieces).
-        if (w < 0.05 || h < 0.05) continue;
-        if (w * h < 0.01) continue;
+        if (result.widthM < 0.05 || result.heightM < 0.05) continue;
+        if (result.widthM * result.heightM < 0.01) continue;
 
-        // Normalize edges to (0,0) origin.
-        const normalizedEdges = polyEdges.map(e => ({
-          a: { x: e.a.x - minU, y: e.a.y - minV },
-          b: { x: e.b.x - minU, y: e.b.y - minV },
-        }));
+        // Determine floor index from vertical midpoint.
+        const allElevs = hgFaces.flatMap((f) =>
+          f.vertices.map((v) => getUp(v, up)),
+        );
+        const mid = (Math.min(...allElevs) + Math.max(...allElevs)) / 2;
+
+        let floorIdx = 0;
+        for (let i = levels.length - 1; i >= 0; i--) {
+          if (mid >= levels[i] - 0.5) {
+            floorIdx = i;
+            break;
+          }
+        }
 
         rawPanels.push({
           category: group.category,
           floorIndex: floorIdx,
-          widthM: w,
-          heightM: h,
-          edges: normalizedEdges,
+          widthM: result.widthM,
+          heightM: result.heightM,
+          edges: result.edges,
         });
       }
     }
