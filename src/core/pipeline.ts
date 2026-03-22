@@ -11,6 +11,7 @@ import { generateCuttingSheets } from "./cutting-sheet";
 import { detectUpAxis, extractFacades } from "./facade-extractor";
 import { extractFloorPlans } from "./floor-plan-extractor";
 import { generateFacadeDxf, generateFloorPlanDxf } from "./dxf-writer";
+import { classifyAndFilter, DEFAULT_ELEMENT_FILTER } from "./geometry-classifier";
 import { generatePdf } from "./pdf-writer";
 import type { Face3D, Facade, FloorPlan, OutputFile, PipelineOptions } from "./types";
 
@@ -165,7 +166,8 @@ export function runPipeline(
 
   // Cutting sheets (plancha de corte).
   if (opts.includeCuttingSheet) {
-    const cuttingFiles = generateCuttingSheets(faces, upAxis, scaleDenom, opts.decompositionMode);
+    const filteredFaces = classifyAndFilter(faces, opts.elementFilter ?? DEFAULT_ELEMENT_FILTER);
+    const cuttingFiles = generateCuttingSheets(filteredFaces, upAxis, scaleDenom, opts.decompositionMode);
     for (const cf of cuttingFiles) {
       files.push({
         name: `${stem}_${cf.name}`,
