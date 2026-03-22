@@ -54,9 +54,9 @@ function faceArea(face: Face3D): number {
   return 0.5 * Math.sqrt(sx * sx + sy * sy + sz * sz);
 }
 
-/** Snap to 2 decimal places (~1cm tolerance) for robust edge matching. */
+/** Snap to 5cm grid for robust edge-key matching (output uses original coords). */
 function snap(v: number): number {
-  return Math.round(v * 100) / 100;
+  return Math.round(v * 20) / 20;
 }
 
 function vertKey(x: number, y: number): string {
@@ -69,9 +69,9 @@ function edgeKey(ax: number, ay: number, bx: number, by: number): string {
   return a < b ? `${a}|${b}` : `${b}|${a}`;
 }
 
-/** Snap a 3D coordinate for coplanarity grouping. */
+/** Snap a 3D coordinate for connectivity grouping (5cm grid). */
 function snap3(v: number): number {
-  return Math.round(v * 100) / 100;
+  return Math.round(v * 20) / 20;
 }
 
 function r(n: number): string {
