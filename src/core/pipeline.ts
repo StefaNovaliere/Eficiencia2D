@@ -98,8 +98,24 @@ export function runPipeline(
     }));
   }
 
-  // --- 3. Detect up axis once (shared by facades and floor plans) ---
-  const upAxis = detectUpAxis(faces);
+  // --- 3. Detect up axis and normalize to Y-up ---
+  const detectedUp = detectUpAxis(faces);
+
+  if (detectedUp === "Z") {
+    // Z-up → Y-up: rotate -90° around X axis.
+    // (x, y, z) → (x, z, -y) for both vertices and normals.
+    faces = faces.map((f) => ({
+      ...f,
+      vertices: f.vertices.map((v) => ({ x: v.x, y: v.z, z: -v.y })),
+      normal: { x: f.normal.x, y: f.normal.z, z: -f.normal.y },
+      innerLoops: f.innerLoops.map((loop) =>
+        loop.map((v) => ({ x: v.x, y: v.z, z: -v.y })),
+      ),
+    }));
+  }
+
+  // After transformation, always work in Y-up space.
+  const upAxis: "Y" | "Z" = "Y";
 
   // --- 4. Extract facades ---
   const facades = extractFacades(faces, upAxis);
