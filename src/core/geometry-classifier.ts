@@ -75,7 +75,7 @@ export function classifyAndFilter(
 
   // --- Compute area, centroid, and classify orientation for each face ---
 
-  const HORIZONTAL_THRESHOLD = 0.85; // |normal.y| > this → horizontal
+  const HORIZONTAL_THRESHOLD = 0.98; // |normal.y| > this → horizontal (rejects ~12° roofs)
   const VERTICAL_THRESHOLD = 0.5;    // |normal.y| < this → vertical
   const HEIGHT_BAND = 0.05;          // 5cm tolerance for grouping by level
   const MIN_AREA = 1e-6;             // skip degenerate faces
@@ -144,17 +144,28 @@ export function classifyAndFilter(
     levelGroups.get(key)!.push(fi);
   }
 
+  const MIN_FLOOR_DIMENSION = 0.3; // 30cm — wall bases are ~5cm wide
+
   const floorFaces = new Set<Face3D>();
   const discardFaces = new Set<Face3D>();
 
   for (const group of levelGroups.values()) {
-    const maxArea = Math.max(...group.map((fi) => fi.area));
-    const threshold = maxArea * 0.15;
     for (const fi of group) {
-      if (fi.area >= threshold) {
-        floorFaces.add(fi.face);
+      // Project to XZ plane (horizontal face) and check bounding box.
+      const verts = fi.face.vertices;
+      let xMin = Infinity, xMax = -Infinity;
+      let zMin = Infinity, zMax = -Infinity;
+      for (const v of verts) {
+        if (v.x < xMin) xMin = v.x;
+        if (v.x > xMax) xMax = v.x;
+        if (v.z < zMin) zMin = v.z;
+        if (v.z > zMax) zMax = v.z;
+      }
+      const minDim = Math.min(xMax - xMin, zMax - zMin);
+      if (minDim < MIN_FLOOR_DIMENSION) {
+        discardFaces.add(fi.face); // wall base → discard
       } else {
-        discardFaces.add(fi.face);
+        floorFaces.add(fi.face);
       }
     }
   }
