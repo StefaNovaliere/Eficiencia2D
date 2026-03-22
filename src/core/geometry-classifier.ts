@@ -144,14 +144,14 @@ export function classifyAndFilter(
     levelGroups.get(key)!.push(fi);
   }
 
-  const MIN_FILL_RATIO = 0.12; // 12% — wall bases 0-8%, real floors 16-94%
+  const MIN_FLOOR_DIMENSION = 0.3; // 30cm — wall bases are ~5cm wide
 
   const floorFaces = new Set<Face3D>();
   const discardFaces = new Set<Face3D>();
 
   for (const group of levelGroups.values()) {
     for (const fi of group) {
-      // Project to XZ plane (horizontal face) and check fill ratio.
+      // Project to XZ plane (horizontal face) and check bounding box.
       const verts = fi.face.vertices;
       let xMin = Infinity, xMax = -Infinity;
       let zMin = Infinity, zMax = -Infinity;
@@ -161,18 +161,9 @@ export function classifyAndFilter(
         if (v.z < zMin) zMin = v.z;
         if (v.z > zMax) zMax = v.z;
       }
-      const bboxArea = (xMax - xMin) * (zMax - zMin);
-      // Shoelace formula for projected 2D area (XZ plane).
-      let projArea = 0;
-      for (let i = 0; i < verts.length; i++) {
-        const cur = verts[i];
-        const nxt = verts[(i + 1) % verts.length];
-        projArea += cur.x * nxt.z - nxt.x * cur.z;
-      }
-      projArea = Math.abs(projArea) * 0.5;
-      const fillRatio = bboxArea > 1e-10 ? projArea / bboxArea : 0;
-      if (fillRatio < MIN_FILL_RATIO) {
-        discardFaces.add(fi.face); // wall base (U/T/L shape, low fill) → discard
+      const minDim = Math.min(xMax - xMin, zMax - zMin);
+      if (minDim < MIN_FLOOR_DIMENSION) {
+        discardFaces.add(fi.face); // wall base → discard
       } else {
         floorFaces.add(fi.face);
       }
