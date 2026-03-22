@@ -149,7 +149,7 @@ export function runPipeline(
 
   // Cutting sheets (plancha de corte).
   if (opts.includeCuttingSheet) {
-    const cuttingFiles = generateCuttingSheets(faces, upAxis, scaleDenom);
+    const cuttingFiles = generateCuttingSheets(faces, upAxis, scaleDenom, opts.decompositionMode);
     for (const cf of cuttingFiles) {
       files.push({
         name: `${stem}_${cf.name}`,
