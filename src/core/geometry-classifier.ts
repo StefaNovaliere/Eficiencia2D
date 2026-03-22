@@ -146,6 +146,7 @@ export function classifyAndFilter(
 
   const MIN_FLOOR_DIMENSION = 0.15; // 15cm absolute safety minimum
   const MAX_ASPECT_RATIO = 6.0;     // strips longer than 6:1 are wall bases
+  const MIN_FLOOR_AREA = 1.5;       // 1.5m² — real floors are at least this big
 
   const floorFaces = new Set<Face3D>();
   const discardFaces = new Set<Face3D>();
@@ -168,8 +169,8 @@ export function classifyAndFilter(
       const maxDim = Math.max(w2d, h2d);
       const aspectRatio = maxDim / (minDim + 1e-10);
 
-      if (minDim < MIN_FLOOR_DIMENSION || aspectRatio > MAX_ASPECT_RATIO) {
-        discardFaces.add(fi.face); // narrow strip → wall base
+      if (minDim < MIN_FLOOR_DIMENSION || aspectRatio > MAX_ASPECT_RATIO || fi.area < MIN_FLOOR_AREA) {
+        discardFaces.add(fi.face); // narrow strip, high ratio, or too small → discard
       } else {
         floorFaces.add(fi.face);
       }
