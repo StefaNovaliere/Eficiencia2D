@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import { runPipeline } from "@/core/pipeline";
-import type { DecompositionMode, PipelineOptions } from "@/core/types";
+import type { DecompositionMode, ElementFilter, PipelineOptions } from "@/core/types";
 
 type Status = "idle" | "processing" | "done" | "error";
 
@@ -12,6 +12,11 @@ export default function UploadForm() {
   const [paper, setPaper] = useState("A4");
   const [includeCuttingSheet, setIncludeCuttingSheet] = useState(false);
   const [decompositionMode, setDecompositionMode] = useState<DecompositionMode>("simple");
+  const [elementFilter, setElementFilter] = useState<ElementFilter>({
+    floors: true,
+    wallsExterior: true,
+    wallsInterior: true,
+  });
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState("");
   const [dragActive, setDragActive] = useState(false);
@@ -68,6 +73,7 @@ export default function UploadForm() {
         paper,
         includeCuttingSheet,
         decompositionMode,
+        elementFilter,
       };
 
       // Run pipeline (synchronous, CPU-bound).
@@ -230,19 +236,48 @@ export default function UploadForm() {
         </div>
 
         {includeCuttingSheet && (
-          <div className="settings-row">
-            <div className="setting-group" style={{ flex: 1 }}>
-              <label className="setting-label">Modo de descomposicion</label>
-              <select
-                className="setting-select"
-                value={decompositionMode}
-                onChange={(e) => setDecompositionMode(e.target.value as DecompositionMode)}
-              >
-                <option value="simple">Simple — solo cara exterior de cada pared</option>
-                <option value="detailed">Detallado — todas las caras y cantos</option>
-              </select>
+          <>
+            <div className="settings-row">
+              <div className="setting-group" style={{ flex: 1 }}>
+                <label className="setting-label">Modo de descomposicion</label>
+                <select
+                  className="setting-select"
+                  value={decompositionMode}
+                  onChange={(e) => setDecompositionMode(e.target.value as DecompositionMode)}
+                >
+                  <option value="simple">Simple — solo cara exterior de cada pared</option>
+                  <option value="detailed">Detallado — todas las caras y cantos</option>
+                </select>
+              </div>
             </div>
-          </div>
+            <div className="settings-row">
+              <label className="setting-label" style={{ marginRight: "1rem" }}>Elementos a incluir</label>
+              <label className="setting-check">
+                <input
+                  type="checkbox"
+                  checked={elementFilter.floors}
+                  onChange={(e) => setElementFilter({ ...elementFilter, floors: e.target.checked })}
+                />
+                Pisos
+              </label>
+              <label className="setting-check">
+                <input
+                  type="checkbox"
+                  checked={elementFilter.wallsExterior}
+                  onChange={(e) => setElementFilter({ ...elementFilter, wallsExterior: e.target.checked })}
+                />
+                Muros exteriores
+              </label>
+              <label className="setting-check">
+                <input
+                  type="checkbox"
+                  checked={elementFilter.wallsInterior}
+                  onChange={(e) => setElementFilter({ ...elementFilter, wallsInterior: e.target.checked })}
+                />
+                Muros interiores
+              </label>
+            </div>
+          </>
         )}
       </div>
 
