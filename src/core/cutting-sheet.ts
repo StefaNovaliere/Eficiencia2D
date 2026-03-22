@@ -226,52 +226,6 @@ function splitConnectedComponents(faces: Face3D[]): Face3D[][] {
 }
 
 // ---------------------------------------------------------------------------
-// Height-based splitting: separate floor faces at different building levels
-// ---------------------------------------------------------------------------
-
-const HEIGHT_SPLIT_TOLERANCE = 0.20; // 20cm — faces further apart are different floors
-
-/**
- * Split a set of coplanar floor faces into sub-groups by their vertical
- * elevation. Faces whose up-axis coordinate differs by more than the
- * tolerance belong to different building levels and must be treated as
- * independent pieces — otherwise the boundary edge extractor would
- * connect faces from different storeys, producing diagonal lines.
- */
-function splitByHeight(faces: Face3D[], up: UpAxis): Face3D[][] {
-  if (faces.length <= 1) return [faces];
-
-  // Compute the average elevation (up-axis) of each face.
-  const elevations = faces.map((f) => {
-    const sum = f.vertices.reduce((s, v) => s + getUp(v, up), 0);
-    return sum / f.vertices.length;
-  });
-
-  // Sort faces by elevation for efficient grouping.
-  const indices = faces.map((_, i) => i);
-  indices.sort((a, b) => elevations[a] - elevations[b]);
-
-  const groups: Face3D[][] = [];
-  let currentGroup: Face3D[] = [faces[indices[0]]];
-  let currentElev = elevations[indices[0]];
-
-  for (let i = 1; i < indices.length; i++) {
-    const fi = indices[i];
-    if (Math.abs(elevations[fi] - currentElev) > HEIGHT_SPLIT_TOLERANCE) {
-      // New height level — start a new group.
-      groups.push(currentGroup);
-      currentGroup = [faces[fi]];
-      currentElev = elevations[fi];
-    } else {
-      currentGroup.push(faces[fi]);
-    }
-  }
-  groups.push(currentGroup);
-
-  return groups;
-}
-
-// ---------------------------------------------------------------------------
 // Project coplanar faces to 2D and extract boundary edges
 // ---------------------------------------------------------------------------
 
@@ -463,44 +417,35 @@ function decomposeIntoPanels(
     const components = splitConnectedComponents(group.faces);
 
     for (const compFaces of components) {
-      // For floor groups, further split by height so faces from different
-      // building levels don't get merged into the same panel.
-      const heightGroups =
-        group.category === "floor"
-          ? splitByHeight(compFaces, up)
-          : [compFaces];
+      // Project and extract boundary edges.
+      const result = projectFacesTo2D(compFaces, group.normal, up);
+      if (!result) continue;
 
-      for (const hgFaces of heightGroups) {
-        // Project and extract boundary edges.
-        const result = projectFacesTo2D(hgFaces, group.normal, up);
-        if (!result) continue;
+      // Skip very small panels (artifacts, edges, trim pieces).
+      if (result.widthM < 0.05 || result.heightM < 0.05) continue;
+      if (result.widthM * result.heightM < 0.01) continue;
 
-        // Skip very small panels (artifacts, edges, trim pieces).
-        if (result.widthM < 0.05 || result.heightM < 0.05) continue;
-        if (result.widthM * result.heightM < 0.01) continue;
+      // Determine floor index from vertical midpoint.
+      const allElevs = compFaces.flatMap((f) =>
+        f.vertices.map((v) => getUp(v, up)),
+      );
+      const mid = (Math.min(...allElevs) + Math.max(...allElevs)) / 2;
 
-        // Determine floor index from vertical midpoint.
-        const allElevs = hgFaces.flatMap((f) =>
-          f.vertices.map((v) => getUp(v, up)),
-        );
-        const mid = (Math.min(...allElevs) + Math.max(...allElevs)) / 2;
-
-        let floorIdx = 0;
-        for (let i = levels.length - 1; i >= 0; i--) {
-          if (mid >= levels[i] - 0.5) {
-            floorIdx = i;
-            break;
-          }
+      let floorIdx = 0;
+      for (let i = levels.length - 1; i >= 0; i--) {
+        if (mid >= levels[i] - 0.5) {
+          floorIdx = i;
+          break;
         }
-
-        rawPanels.push({
-          category: group.category,
-          floorIndex: floorIdx,
-          widthM: result.widthM,
-          heightM: result.heightM,
-          edges: result.edges,
-        });
       }
+
+      rawPanels.push({
+        category: group.category,
+        floorIndex: floorIdx,
+        widthM: result.widthM,
+        heightM: result.heightM,
+        edges: result.edges,
+      });
     }
   }
 
