@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import { runPipeline } from "@/core/pipeline";
-import type { PipelineOptions } from "@/core/types";
+import type { DecompositionMode, PipelineOptions } from "@/core/types";
 
 type Status = "idle" | "processing" | "done" | "error";
 
@@ -11,6 +11,7 @@ export default function UploadForm() {
   const [scale, setScale] = useState(100);
   const [paper, setPaper] = useState("A4");
   const [includeCuttingSheet, setIncludeCuttingSheet] = useState(false);
+  const [decompositionMode, setDecompositionMode] = useState<DecompositionMode>("simple");
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState("");
   const [dragActive, setDragActive] = useState(false);
@@ -66,6 +67,7 @@ export default function UploadForm() {
         scaleDenom: scale,
         paper,
         includeCuttingSheet,
+        decompositionMode,
       };
 
       // Run pipeline (synchronous, CPU-bound).
@@ -226,6 +228,22 @@ export default function UploadForm() {
             Plancha de Corte
           </label>
         </div>
+
+        {includeCuttingSheet && (
+          <div className="settings-row">
+            <div className="setting-group" style={{ flex: 1 }}>
+              <label className="setting-label">Modo de descomposicion</label>
+              <select
+                className="setting-select"
+                value={decompositionMode}
+                onChange={(e) => setDecompositionMode(e.target.value as DecompositionMode)}
+              >
+                <option value="simple">Simple — solo cara exterior de cada pared</option>
+                <option value="detailed">Detallado — todas las caras y cantos</option>
+              </select>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Action button */}
