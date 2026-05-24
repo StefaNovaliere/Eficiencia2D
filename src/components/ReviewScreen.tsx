@@ -3,10 +3,18 @@
 import { useCallback, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import GroupList from "./GroupList";
+import VisibilityFilters from "./VisibilityFilters";
 import type { FaceCategory, GeometryGroup } from "@/core/group-classifier";
 import type { Phase1Result, ClassificationOverride } from "@/core/pipeline";
 
 const ModelViewer = dynamic(() => import("./ModelViewer"), { ssr: false });
+
+const ALL_CATEGORIES: FaceCategory[] = [
+  "floor",
+  "wall_exterior",
+  "wall_interior",
+  "discard",
+];
 
 // ---------------------------------------------------------------------------
 // Props
@@ -31,6 +39,9 @@ export default function ReviewScreen({
   const [overrides, setOverrides] = useState<Map<number, FaceCategory>>(
     () => new Map(),
   );
+  const [visibleCategories, setVisibleCategories] = useState<Set<FaceCategory>>(
+    () => new Set(ALL_CATEGORIES),
+  );
 
   const handleSelectGroup = useCallback((id: number) => {
     setSelectedGroupId((prev) => (prev === id || id === -1 ? null : id));
@@ -52,6 +63,15 @@ export default function ReviewScreen({
     [phase1.groups],
   );
 
+  const handleToggleVisibility = useCallback((cat: FaceCategory) => {
+    setVisibleCategories((prev) => {
+      const next = new Set(prev);
+      if (next.has(cat)) next.delete(cat);
+      else next.add(cat);
+      return next;
+    });
+  }, []);
+
   const handleConfirm = useCallback(() => {
     const result: ClassificationOverride[] = [];
     for (const [groupId, newCategory] of overrides.entries()) {
@@ -60,7 +80,7 @@ export default function ReviewScreen({
     onConfirm(result);
   }, [overrides, onConfirm]);
 
-  // Stats.
+  // Stats (per effective category).
   const stats = useMemo(() => {
     let floors = 0, wallsExt = 0, wallsInt = 0, discarded = 0;
     for (const group of phase1.groups) {
@@ -81,8 +101,16 @@ export default function ReviewScreen({
           groups={phase1.groups}
           selectedGroupId={selectedGroupId}
           categoryOverrides={overrides}
+          visibleCategories={visibleCategories}
           onSelectGroup={handleSelectGroup}
         />
+        <div className="review-viewer-overlay">
+          <VisibilityFilters
+            stats={stats}
+            visibleCategories={visibleCategories}
+            onToggle={handleToggleVisibility}
+          />
+        </div>
       </div>
 
       <div className="review-sidebar">
@@ -90,6 +118,7 @@ export default function ReviewScreen({
           groups={phase1.groups}
           selectedGroupId={selectedGroupId}
           categoryOverrides={overrides}
+          visibleCategories={visibleCategories}
           onSelectGroup={handleSelectGroup}
           onChangeCategory={handleChangeCategory}
         />
