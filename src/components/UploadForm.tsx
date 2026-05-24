@@ -1,10 +1,12 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import { runPipeline } from "@/core/pipeline";
+import { parsePipeline, generatePipeline } from "@/core/pipeline";
+import type { Phase1Result, ClassificationOverride } from "@/core/pipeline";
+import ReviewScreen from "./ReviewScreen";
 import type { DecompositionMode, PipelineOptions } from "@/core/types";
 
-type Status = "idle" | "processing" | "done" | "error";
+type Status = "idle" | "parsing" | "reviewing" | "generating" | "done" | "error";
 
 export default function UploadForm() {
   const [file, setFile] = useState<File | null>(null);
@@ -15,6 +17,7 @@ export default function UploadForm() {
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState("");
   const [dragActive, setDragActive] = useState(false);
+  const [phase1Result, setPhase1Result] = useState<Phase1Result | null>(null);
   const dropRef = useRef<HTMLDivElement>(null);
 
   const accept = ".obj";
@@ -57,12 +60,43 @@ export default function UploadForm() {
       return;
     }
 
-    setStatus("processing");
+    setStatus("parsing");
     setError("");
 
     try {
       const buffer = await file.arrayBuffer();
 
+      // Phase 1: Parse + classify (CPU-bound).
+      const p1 = await new Promise<Phase1Result>((resolve) => {
+        setTimeout(() => {
+          resolve(parsePipeline(file.name, buffer));
+        }, 50);
+      });
+
+      if (p1.faces.length === 0) {
+        const msg =
+          p1.warnings.length > 0
+            ? p1.warnings.join(" ")
+            : "No se encontraron caras en el archivo.";
+        throw new Error(msg);
+      }
+
+      setPhase1Result(p1);
+      setStatus("reviewing");
+    } catch (err: unknown) {
+      setError(
+        err instanceof Error ? err.message : "Error desconocido al procesar.",
+      );
+      setStatus("error");
+    }
+  };
+
+  const handleReviewConfirm = async (overrides: ClassificationOverride[]) => {
+    if (!phase1Result || !file) return;
+
+    setStatus("generating");
+
+    try {
       const opts: PipelineOptions = {
         scaleDenom: scale,
         paper,
@@ -70,12 +104,10 @@ export default function UploadForm() {
         decompositionMode,
       };
 
-      // Run pipeline (synchronous, CPU-bound).
-      // Use setTimeout to let the UI update before heavy computation.
-      const result = await new Promise<ReturnType<typeof runPipeline>>(
+      const result = await new Promise<ReturnType<typeof generatePipeline>>(
         (resolve) => {
           setTimeout(() => {
-            resolve(runPipeline(file.name, buffer, opts));
+            resolve(generatePipeline(phase1Result, opts, overrides));
           }, 50);
         },
       );
@@ -88,7 +120,6 @@ export default function UploadForm() {
         throw new Error(msg);
       }
 
-      // Create ZIP and download.
       const { default: JSZip } = await import("jszip");
       const zip = new JSZip();
 
@@ -114,11 +145,40 @@ export default function UploadForm() {
     }
   };
 
+  const handleReviewCancel = () => {
+    setPhase1Result(null);
+    setStatus("idle");
+  };
+
   const reset = () => {
     setFile(null);
+    setPhase1Result(null);
     setStatus("idle");
     setError("");
   };
+
+  // Show review screen when in review mode.
+  if (status === "reviewing" && phase1Result) {
+    return (
+      <ReviewScreen
+        phase1={phase1Result}
+        onConfirm={handleReviewConfirm}
+        onCancel={handleReviewCancel}
+      />
+    );
+  }
+
+  // Show generating overlay.
+  if (status === "generating") {
+    return (
+      <div className="upload-card">
+        <div className="generating-overlay">
+          <span className="spinner" />
+          <p>Generando planos...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="upload-card">
@@ -250,16 +310,16 @@ export default function UploadForm() {
       {status !== "done" ? (
         <button
           className="submit-btn"
-          disabled={!file || status === "processing"}
+          disabled={!file || status === "parsing"}
           onClick={handleSubmit}
         >
-          {status === "processing" ? (
+          {status === "parsing" ? (
             <>
               <span className="spinner" />
-              Procesando...
+              Analizando modelo...
             </>
           ) : (
-            "Generar Planos"
+            "Analizar Modelo"
           )}
         </button>
       ) : (
@@ -269,7 +329,7 @@ export default function UploadForm() {
       )}
 
       {/* Processing indicator */}
-      {status === "processing" && (
+      {status === "parsing" && (
         <div className="progress-bar">
           <div className="progress-fill progress-indeterminate" />
         </div>
