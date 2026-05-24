@@ -8,136 +8,171 @@ import type { Face3D, Vec3 } from "@/core/types";
 import type { FaceCategory, GeometryGroup } from "@/core/group-classifier";
 
 // ---------------------------------------------------------------------------
-// Color scheme by category
+// Shared materials (created once at module load, reused across all renders)
 // ---------------------------------------------------------------------------
 
-const CATEGORY_COLORS: Record<FaceCategory, THREE.Color> = {
-  floor: new THREE.Color(0x22c55e),
-  wall_exterior: new THREE.Color(0x3b82f6),
-  wall_interior: new THREE.Color(0x06b6d4),
-  discard: new THREE.Color(0x71717a),
+const CATEGORY_HEX: Record<FaceCategory, number> = {
+  floor: 0x22c55e,
+  wall_exterior: 0x3b82f6,
+  wall_interior: 0x06b6d4,
+  discard: 0x71717a,
 };
 
-const DIM_OPACITY = 0.15;
+function makeMaterial(hex: number, opacity: number): THREE.MeshBasicMaterial {
+  return new THREE.MeshBasicMaterial({
+    color: hex,
+    side: THREE.DoubleSide,
+    transparent: true,
+    opacity,
+    depthWrite: opacity > 0.9,
+  });
+}
+
+const NORMAL_MATERIALS: Record<FaceCategory, THREE.MeshBasicMaterial> = {
+  floor: makeMaterial(CATEGORY_HEX.floor, 0.85),
+  wall_exterior: makeMaterial(CATEGORY_HEX.wall_exterior, 0.85),
+  wall_interior: makeMaterial(CATEGORY_HEX.wall_interior, 0.85),
+  discard: makeMaterial(CATEGORY_HEX.discard, 0.6),
+};
+
+const DIMMED_MATERIALS: Record<FaceCategory, THREE.MeshBasicMaterial> = {
+  floor: makeMaterial(CATEGORY_HEX.floor, 0.08),
+  wall_exterior: makeMaterial(CATEGORY_HEX.wall_exterior, 0.08),
+  wall_interior: makeMaterial(CATEGORY_HEX.wall_interior, 0.08),
+  discard: makeMaterial(CATEGORY_HEX.discard, 0.05),
+};
+
+const HIGHLIGHT_MATERIAL = new THREE.MeshBasicMaterial({
+  color: 0xffffff,
+  side: THREE.DoubleSide,
+  transparent: true,
+  opacity: 0.55,
+});
+
+const HIGHLIGHT_WIREFRAME = new THREE.LineBasicMaterial({
+  color: 0xffffff,
+});
 
 // ---------------------------------------------------------------------------
-// Build geometry for a group of faces
+// Merged geometry per (effective category)
 // ---------------------------------------------------------------------------
 
-function buildGroupGeometry(
+interface MergedMeshData {
+  category: FaceCategory;
+  geometry: THREE.BufferGeometry;
+  groupIds: number[]; // groupId per triangle, for raycasting
+}
+
+function buildMergedGeometries(
+  faces: Face3D[],
+  groups: GeometryGroup[],
+  overrides: Map<number, FaceCategory>,
+): MergedMeshData[] {
+  const byCategory = new Map<
+    FaceCategory,
+    { positions: number[]; groupIds: number[] }
+  >();
+  for (const cat of ["floor", "wall_exterior", "wall_interior", "discard"] as FaceCategory[]) {
+    byCategory.set(cat, { positions: [], groupIds: [] });
+  }
+
+  for (const group of groups) {
+    const cat = overrides.get(group.id) ?? group.category;
+    const bucket = byCategory.get(cat)!;
+
+    for (const fi of group.faceIndices) {
+      const face = faces[fi];
+      if (!face || face.vertices.length < 3) continue;
+      const v0 = face.vertices[0];
+      for (let i = 1; i < face.vertices.length - 1; i++) {
+        const v1 = face.vertices[i];
+        const v2 = face.vertices[i + 1];
+        bucket.positions.push(
+          v0.x, v0.y, v0.z,
+          v1.x, v1.y, v1.z,
+          v2.x, v2.y, v2.z,
+        );
+        bucket.groupIds.push(group.id);
+      }
+    }
+  }
+
+  const result: MergedMeshData[] = [];
+  for (const [cat, bucket] of byCategory.entries()) {
+    if (bucket.positions.length === 0) continue;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(bucket.positions, 3));
+    geo.computeVertexNormals();
+    result.push({ category: cat, geometry: geo, groupIds: bucket.groupIds });
+  }
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// Selected-group overlay geometry (just the faces of one group)
+// ---------------------------------------------------------------------------
+
+function buildSelectedGeometry(
   faces: Face3D[],
   faceIndices: number[],
 ): THREE.BufferGeometry {
   const positions: number[] = [];
-  const normals: number[] = [];
-
   for (const idx of faceIndices) {
     const face = faces[idx];
     if (!face || face.vertices.length < 3) continue;
-
     const v0 = face.vertices[0];
-    const n = face.normal;
-
     for (let i = 1; i < face.vertices.length - 1; i++) {
       const v1 = face.vertices[i];
       const v2 = face.vertices[i + 1];
-      positions.push(v0.x, v0.y, v0.z);
-      positions.push(v1.x, v1.y, v1.z);
-      positions.push(v2.x, v2.y, v2.z);
-      normals.push(n.x, n.y, n.z);
-      normals.push(n.x, n.y, n.z);
-      normals.push(n.x, n.y, n.z);
+      positions.push(v0.x, v0.y, v0.z, v1.x, v1.y, v1.z, v2.x, v2.y, v2.z);
     }
   }
-
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-  geo.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
   return geo;
 }
 
 // ---------------------------------------------------------------------------
-// Group mesh component
+// Category mesh — one big merged mesh per category
 // ---------------------------------------------------------------------------
 
-interface GroupMeshProps {
-  faces: Face3D[];
-  group: GeometryGroup;
-  effectiveCategory: FaceCategory;
-  isSelected: boolean;
+interface CategoryMeshProps {
+  mesh: MergedMeshData;
   isDimmed: boolean;
-  onSelect: (id: number) => void;
+  onPick: (groupId: number) => void;
 }
 
-function GroupMesh({
-  faces,
-  group,
-  effectiveCategory,
-  isSelected,
-  isDimmed,
-  onSelect,
-}: GroupMeshProps) {
-  const geometry = useMemo(
-    () => buildGroupGeometry(faces, group.faceIndices),
-    [faces, group.faceIndices],
-  );
-
-  const color = CATEGORY_COLORS[effectiveCategory];
-
-  const material = useMemo(() => {
-    return new THREE.MeshStandardMaterial({
-      color,
-      side: THREE.DoubleSide,
-      transparent: true,
-      opacity: isDimmed ? DIM_OPACITY : 0.85,
-      emissive: isSelected ? color : new THREE.Color(0x000000),
-      emissiveIntensity: isSelected ? 0.4 : 0,
-    });
-  }, [color, isSelected, isDimmed]);
-
-  useEffect(() => {
-    material.opacity = isDimmed ? DIM_OPACITY : 0.85;
-    material.emissive = isSelected ? color : new THREE.Color(0x000000);
-    material.emissiveIntensity = isSelected ? 0.4 : 0;
-    material.needsUpdate = true;
-  }, [material, color, isSelected, isDimmed]);
+function CategoryMesh({ mesh, isDimmed, onPick }: CategoryMeshProps) {
+  const material = isDimmed
+    ? DIMMED_MATERIALS[mesh.category]
+    : NORMAL_MATERIALS[mesh.category];
 
   return (
-    <>
-      <mesh
-        geometry={geometry}
-        material={material}
-        userData={{ groupId: group.id }}
-        onPointerDown={(e) => {
-          e.stopPropagation();
-          onSelect(group.id);
-        }}
-      />
-      {isSelected && (
-        <mesh geometry={geometry}>
-          <meshBasicMaterial
-            color={0xffffff}
-            wireframe
-            transparent
-            opacity={0.3}
-            side={THREE.DoubleSide}
-          />
-        </mesh>
-      )}
-    </>
+    <mesh
+      geometry={mesh.geometry}
+      material={material}
+      onPointerDown={(e) => {
+        e.stopPropagation();
+        const triIdx = e.faceIndex;
+        if (typeof triIdx === "number" && triIdx >= 0 && triIdx < mesh.groupIds.length) {
+          onPick(mesh.groupIds[triIdx]);
+        }
+      }}
+    />
   );
 }
 
 // ---------------------------------------------------------------------------
-// Camera controller — smoothly focus on selected group
+// Camera + controls — constrained orbit
 // ---------------------------------------------------------------------------
 
-interface CameraFocusProps {
+interface CameraControlsProps {
   target: Vec3 | null;
+  maxDistance: number;
+  minDistance: number;
 }
 
-function CameraFocus({ target }: CameraFocusProps) {
-  const { camera } = useThree();
+function CameraControls({ target, maxDistance, minDistance }: CameraControlsProps) {
   const controlsRef = useRef<any>(null);
   const targetVec = useMemo(
     () => (target ? new THREE.Vector3(target.x, target.y, target.z) : null),
@@ -150,11 +185,23 @@ function CameraFocus({ target }: CameraFocusProps) {
     controlsRef.current.update();
   });
 
-  return <OrbitControls ref={controlsRef} makeDefault />;
+  return (
+    <OrbitControls
+      ref={controlsRef}
+      makeDefault
+      enableDamping
+      dampingFactor={0.1}
+      minPolarAngle={0.05}
+      maxPolarAngle={Math.PI / 2 + 0.2}
+      maxDistance={maxDistance}
+      minDistance={minDistance}
+      screenSpacePanning={false}
+    />
+  );
 }
 
 // ---------------------------------------------------------------------------
-// Scene contents
+// Scene
 // ---------------------------------------------------------------------------
 
 interface SceneProps {
@@ -162,6 +209,7 @@ interface SceneProps {
   groups: GeometryGroup[];
   selectedGroupId: number | null;
   categoryOverrides: Map<number, FaceCategory>;
+  visibleCategories: Set<FaceCategory>;
   onSelectGroup: (id: number) => void;
 }
 
@@ -170,12 +218,12 @@ function Scene({
   groups,
   selectedGroupId,
   categoryOverrides,
+  visibleCategories,
   onSelectGroup,
 }: SceneProps) {
   const selectedGroup = groups.find((g) => g.id === selectedGroupId);
-  const focusTarget = selectedGroup?.centroid ?? null;
 
-  // Compute bounding box for initial camera position.
+  // Bounding-box centre for camera target offset.
   const bounds = useMemo(() => {
     let minX = Infinity, minY = Infinity, minZ = Infinity;
     let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
@@ -198,29 +246,73 @@ function Scene({
     return { center: { x: cx, y: cy, z: cz }, diag };
   }, [faces]);
 
+  // Merged geometries — rebuilt when categories or overrides change.
+  const mergedMeshes = useMemo(
+    () => buildMergedGeometries(faces, groups, categoryOverrides),
+    [faces, groups, categoryOverrides],
+  );
+
+  // Cleanup old geometries when mergedMeshes changes.
+  useEffect(() => {
+    return () => {
+      for (const m of mergedMeshes) m.geometry.dispose();
+    };
+  }, [mergedMeshes]);
+
+  // Highlight geometry for the selected group.
+  const selectedGeometry = useMemo(() => {
+    if (!selectedGroup) return null;
+    return buildSelectedGeometry(faces, selectedGroup.faceIndices);
+  }, [faces, selectedGroup]);
+
+  useEffect(() => {
+    return () => {
+      if (selectedGeometry) selectedGeometry.dispose();
+    };
+  }, [selectedGeometry]);
+
+  // Centred target: selected group, or model centre.
+  const focusTarget: Vec3 = selectedGroup
+    ? {
+        x: selectedGroup.centroid.x - bounds.center.x,
+        y: selectedGroup.centroid.y - bounds.center.y,
+        z: selectedGroup.centroid.z - bounds.center.z,
+      }
+    : { x: 0, y: 0, z: 0 };
+
+  const maxDist = bounds.diag * 3;
+  const minDist = bounds.diag * 0.05;
+
   return (
     <>
-      <ambientLight intensity={0.5} />
-      <directionalLight position={[5, 10, 7]} intensity={0.8} />
-      <directionalLight position={[-5, -3, -7]} intensity={0.3} />
-      <CameraFocus target={focusTarget} />
-      <group
-        position={[-bounds.center.x, -bounds.center.y, -bounds.center.z]}
-      >
-        {groups.map((group) => {
-          const effectiveCat = categoryOverrides.get(group.id) ?? group.category;
+      <CameraControls
+        target={focusTarget}
+        maxDistance={maxDist}
+        minDistance={minDist}
+      />
+      <group position={[-bounds.center.x, -bounds.center.y, -bounds.center.z]}>
+        {mergedMeshes.map((mm) => {
+          if (!visibleCategories.has(mm.category)) return null;
+          const isDimmed = selectedGroupId !== null;
           return (
-            <GroupMesh
-              key={group.id}
-              faces={faces}
-              group={group}
-              effectiveCategory={effectiveCat}
-              isSelected={group.id === selectedGroupId}
-              isDimmed={selectedGroupId !== null && group.id !== selectedGroupId}
-              onSelect={onSelectGroup}
+            <CategoryMesh
+              key={mm.category}
+              mesh={mm}
+              isDimmed={isDimmed}
+              onPick={onSelectGroup}
             />
           );
         })}
+
+        {selectedGeometry && selectedGroup && (
+          <>
+            <mesh geometry={selectedGeometry} material={HIGHLIGHT_MATERIAL} />
+            <lineSegments>
+              <wireframeGeometry args={[selectedGeometry]} />
+              <primitive object={HIGHLIGHT_WIREFRAME} attach="material" />
+            </lineSegments>
+          </>
+        )}
       </group>
     </>
   );
@@ -235,6 +327,7 @@ export interface ModelViewerProps {
   groups: GeometryGroup[];
   selectedGroupId: number | null;
   categoryOverrides: Map<number, FaceCategory>;
+  visibleCategories: Set<FaceCategory>;
   onSelectGroup: (id: number) => void;
 }
 
@@ -243,35 +336,46 @@ export default function ModelViewer({
   groups,
   selectedGroupId,
   categoryOverrides,
+  visibleCategories,
   onSelectGroup,
 }: ModelViewerProps) {
-  const bounds = useMemo(() => {
-    let maxDist = 1;
+  const camDist = useMemo(() => {
+    let minX = Infinity, minY = Infinity, minZ = Infinity;
+    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
     for (const face of faces) {
       for (const v of face.vertices) {
-        const d = Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
-        if (d > maxDist) maxDist = d;
+        if (v.x < minX) minX = v.x;
+        if (v.y < minY) minY = v.y;
+        if (v.z < minZ) minZ = v.z;
+        if (v.x > maxX) maxX = v.x;
+        if (v.y > maxY) maxY = v.y;
+        if (v.z > maxZ) maxZ = v.z;
       }
     }
-    return maxDist;
+    const diag = Math.sqrt(
+      (maxX - minX) ** 2 + (maxY - minY) ** 2 + (maxZ - minZ) ** 2,
+    );
+    return Math.max(diag, 1);
   }, [faces]);
 
   return (
     <Canvas
       camera={{
-        position: [bounds * 1.5, bounds * 1.0, bounds * 1.5],
+        position: [camDist * 0.9, camDist * 0.6, camDist * 0.9],
         fov: 50,
         near: 0.01,
-        far: bounds * 10,
+        far: camDist * 10,
       }}
       style={{ background: "#09090b" }}
       onPointerMissed={() => onSelectGroup(-1)}
+      dpr={[1, 1.5]}
     >
       <Scene
         faces={faces}
         groups={groups}
         selectedGroupId={selectedGroupId}
         categoryOverrides={categoryOverrides}
+        visibleCategories={visibleCategories}
         onSelectGroup={onSelectGroup}
       />
     </Canvas>
