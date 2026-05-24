@@ -10,7 +10,6 @@ import { parseObj } from "./obj-parser";
 import { generateCuttingSheets } from "./cutting-sheet";
 import { detectUpAxis, extractFacades } from "./facade-extractor";
 import { extractFloorPlans } from "./floor-plan-extractor";
-import { generateFacadeDxf, generateFloorPlanDxf } from "./dxf-writer";
 import { classifyAndFilter, DEFAULT_ELEMENT_FILTER } from "./geometry-classifier";
 import { classifyIntoGroups } from "./group-classifier";
 import type { GeometryGroup } from "./group-classifier";
@@ -134,6 +133,11 @@ export function parsePipeline(
 
 /**
  * Phase 2: Generate outputs from (potentially user-corrected) classification.
+ *
+ * The ZIP contains only:
+ *   - Descomposicion_Paredes.dxf  (uses user overrides)
+ *   - Descomposicion_Pisos.dxf    (uses user overrides)
+ *   - {stem}_planos.pdf           (uses the original auto-classification)
  */
 export function generatePipeline(
   phase1: Phase1Result,
@@ -142,10 +146,10 @@ export function generatePipeline(
 ): PipelineResult {
   const warnings = [...phase1.warnings];
   const stem = phase1.stem;
-  let faces = phase1.faces;
   const upAxis: "Y" | "Z" = "Y";
 
-  // Apply overrides: remove faces in groups reclassified as "discard".
+  // Faces filtered by user overrides — only used for cutting sheets.
+  let facesForCutting = phase1.faces;
   if (overrides && overrides.length > 0) {
     const overrideMap = new Map(overrides.map((o) => [o.groupId, o.newCategory]));
     const discardIndices = new Set<number>();
@@ -158,43 +162,36 @@ export function generatePipeline(
     }
 
     if (discardIndices.size > 0) {
-      faces = faces.filter((_, i) => !discardIndices.has(i));
+      facesForCutting = phase1.faces.filter((_, i) => !discardIndices.has(i));
     }
   }
 
-  // Extract facades & floor plans.
-  const facades = extractFacades(faces, upAxis);
-  const floorPlans = extractFloorPlans(faces, upAxis);
-
-  if (facades.length === 0 && floorPlans.length === 0) {
-    warnings.push(
-      `Se encontraron ${faces.length} caras pero no se pudieron generar vistas. ` +
-      "Verificá que el modelo contenga superficies verticales.",
-    );
-    return { facades, floorPlans, files: [], warnings };
-  }
+  // PDF is built from the ORIGINAL faces (overrides do not affect it).
+  const facades = extractFacades(phase1.faces, upAxis);
+  const floorPlans = extractFloorPlans(phase1.faces, upAxis);
 
   const files: OutputFile[] = [];
   const scaleDenom = opts.scaleDenom;
 
-  for (const facade of facades) {
-    const dxfText = generateFacadeDxf(facade, scaleDenom);
-    const safeLabel = facade.label.replace(/\s+/g, "_");
+  // Cutting sheets — use overridden faces.
+  const filteredFaces = classifyAndFilter(
+    facesForCutting,
+    opts.elementFilter ?? DEFAULT_ELEMENT_FILTER,
+  );
+  const cuttingFiles = generateCuttingSheets(
+    filteredFaces,
+    upAxis,
+    scaleDenom,
+    opts.decompositionMode,
+  );
+  for (const cf of cuttingFiles) {
     files.push({
-      name: `${stem}_${safeLabel}.dxf`,
-      blob: new Blob([dxfText], { type: "application/dxf" }),
+      name: `${stem}_${cf.name}`,
+      blob: new Blob([cf.content], { type: "application/dxf" }),
     });
   }
 
-  for (const plan of floorPlans) {
-    const dxfText = generateFloorPlanDxf(plan, scaleDenom);
-    const safeLabel = plan.label.replace(/\s+/g, "_");
-    files.push({
-      name: `${stem}_${safeLabel}.dxf`,
-      blob: new Blob([dxfText], { type: "application/dxf" }),
-    });
-  }
-
+  // Combined PDF with all auto-detected views.
   const pdfContent = generatePdf(facades, floorPlans, scaleDenom, opts.paper);
   if (pdfContent) {
     files.push({
@@ -203,15 +200,11 @@ export function generatePipeline(
     });
   }
 
-  if (opts.includeCuttingSheet) {
-    const filteredFaces = classifyAndFilter(faces, opts.elementFilter ?? DEFAULT_ELEMENT_FILTER);
-    const cuttingFiles = generateCuttingSheets(filteredFaces, upAxis, scaleDenom, opts.decompositionMode);
-    for (const cf of cuttingFiles) {
-      files.push({
-        name: `${stem}_${cf.name}`,
-        blob: new Blob([cf.content], { type: "application/dxf" }),
-      });
-    }
+  if (files.length === 0) {
+    warnings.push(
+      `Se encontraron ${phase1.faces.length} caras pero no se pudieron generar archivos. ` +
+      "Verificá que el modelo contenga superficies válidas.",
+    );
   }
 
   return { facades, floorPlans, files, warnings };

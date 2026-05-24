@@ -12,7 +12,6 @@ export default function UploadForm() {
   const [file, setFile] = useState<File | null>(null);
   const [scale, setScale] = useState(100);
   const [paper, setPaper] = useState("A4");
-  const [includeCuttingSheet, setIncludeCuttingSheet] = useState(false);
   const [decompositionMode, setDecompositionMode] = useState<DecompositionMode>("simple");
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState("");
@@ -100,7 +99,7 @@ export default function UploadForm() {
       const opts: PipelineOptions = {
         scaleDenom: scale,
         paper,
-        includeCuttingSheet,
+        includeCuttingSheet: true,
         decompositionMode,
       };
 
@@ -279,31 +278,18 @@ export default function UploadForm() {
         </div>
 
         <div className="settings-row">
-          <label className="setting-check">
-            <input
-              type="checkbox"
-              checked={includeCuttingSheet}
-              onChange={(e) => setIncludeCuttingSheet(e.target.checked)}
-            />
-            Plancha de Corte
-          </label>
-        </div>
-
-        {includeCuttingSheet && (
-          <div className="settings-row">
-            <div className="setting-group" style={{ flex: 1 }}>
-              <label className="setting-label">Modo de descomposicion</label>
-              <select
-                className="setting-select"
-                value={decompositionMode}
-                onChange={(e) => setDecompositionMode(e.target.value as DecompositionMode)}
-              >
-                <option value="simple">Simple — solo cara exterior de cada pared</option>
-                <option value="detailed">Detallado — todas las caras y cantos</option>
-              </select>
-            </div>
+          <div className="setting-group" style={{ flex: 1 }}>
+            <label className="setting-label">Modo de descomposicion</label>
+            <select
+              className="setting-select"
+              value={decompositionMode}
+              onChange={(e) => setDecompositionMode(e.target.value as DecompositionMode)}
+            >
+              <option value="simple">Simple — solo cara exterior de cada pared</option>
+              <option value="detailed">Detallado — todas las caras y cantos</option>
+            </select>
           </div>
-        )}
+        </div>
       </div>
 
       {/* Action button */}
