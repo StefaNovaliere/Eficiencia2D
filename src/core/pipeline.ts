@@ -12,6 +12,8 @@ import { detectUpAxis, extractFacades } from "./facade-extractor";
 import { extractFloorPlans } from "./floor-plan-extractor";
 import { generateFacadeDxf, generateFloorPlanDxf } from "./dxf-writer";
 import { classifyAndFilter, DEFAULT_ELEMENT_FILTER } from "./geometry-classifier";
+import { classifyIntoGroups } from "./group-classifier";
+import type { GeometryGroup } from "./group-classifier";
 import { generatePdf } from "./pdf-writer";
 import type { Face3D, Facade, FloorPlan, OutputFile, PipelineOptions } from "./types";
 
@@ -20,6 +22,18 @@ export interface PipelineResult {
   floorPlans: FloorPlan[];
   files: OutputFile[];
   warnings: string[];
+}
+
+export interface Phase1Result {
+  faces: Face3D[];
+  groups: GeometryGroup[];
+  stem: string;
+  warnings: string[];
+}
+
+export interface ClassificationOverride {
+  groupId: number;
+  newCategory: GeometryGroup["category"];
 }
 
 /** Guess a conversion factor to bring coordinates into meters. */
@@ -49,16 +63,18 @@ function guessUnitScale(faces: Face3D[]): number {
   return (1.0 / span) * 20.0;       // unknown large → normalize
 }
 
-export function runPipeline(
+/**
+ * Phase 1: Parse, normalise units/axis, and classify into groups.
+ * Returns geometry + groups ready for the review screen.
+ */
+export function parsePipeline(
   fileName: string,
   buffer: ArrayBuffer,
-  opts: PipelineOptions,
-): PipelineResult {
+): Phase1Result {
   const warnings: string[] = [];
   const ext = fileName.toLowerCase().split(".").pop() ?? "";
   const stem = fileName.replace(/\.[^.]+$/, "");
 
-  // --- 1. Parse ---
   let faces: Face3D[] = [];
 
   if (ext === "obj") {
@@ -68,17 +84,15 @@ export function runPipeline(
     warnings.push(...result.warnings);
   } else {
     warnings.push(`Formato no soportado: .${ext}. Usa .obj.`);
-    return { facades: [], floorPlans: [], files: [], warnings };
+    return { faces: [], groups: [], stem, warnings };
   }
 
   if (faces.length === 0) {
     warnings.push("No se encontraron caras en el archivo.");
-    return { facades: [], floorPlans: [], files: [], warnings };
+    return { faces: [], groups: [], stem, warnings };
   }
 
-  // --- 2. Normalize units to metres BEFORE extraction ---
-  // This ensures all distance-based thresholds (floor gap, slab area, etc.)
-  // work correctly regardless of the source model's native unit.
+  // Normalise units.
   const unitScale = guessUnitScale(faces);
   if (unitScale !== 1.0) {
     faces = faces.map((f) => ({
@@ -95,16 +109,13 @@ export function runPipeline(
           z: v.z * unitScale,
         })),
       ),
-      // Normals stay unchanged (they're unit directions).
     }));
   }
 
-  // --- 3. Detect up axis and normalize to Y-up ---
+  // Detect up axis and normalise to Y-up.
   const detectedUp = detectUpAxis(faces);
 
   if (detectedUp === "Z") {
-    // Z-up → Y-up: rotate -90° around X axis.
-    // (x, y, z) → (x, z, -y) for both vertices and normals.
     faces = faces.map((f) => ({
       ...f,
       vertices: f.vertices.map((v) => ({ x: v.x, y: v.z, z: -v.y })),
@@ -115,13 +126,44 @@ export function runPipeline(
     }));
   }
 
-  // After transformation, always work in Y-up space.
+  // Classify into reviewable groups.
+  const groups = classifyIntoGroups(faces);
+
+  return { faces, groups, stem, warnings };
+}
+
+/**
+ * Phase 2: Generate outputs from (potentially user-corrected) classification.
+ */
+export function generatePipeline(
+  phase1: Phase1Result,
+  opts: PipelineOptions,
+  overrides?: ClassificationOverride[],
+): PipelineResult {
+  const warnings = [...phase1.warnings];
+  const stem = phase1.stem;
+  let faces = phase1.faces;
   const upAxis: "Y" | "Z" = "Y";
 
-  // --- 4. Extract facades ---
-  const facades = extractFacades(faces, upAxis);
+  // Apply overrides: remove faces in groups reclassified as "discard".
+  if (overrides && overrides.length > 0) {
+    const overrideMap = new Map(overrides.map((o) => [o.groupId, o.newCategory]));
+    const discardIndices = new Set<number>();
 
-  // --- 5. Extract floor plans (using same axis as facades) ---
+    for (const group of phase1.groups) {
+      const newCat = overrideMap.get(group.id) ?? group.category;
+      if (newCat === "discard") {
+        for (const idx of group.faceIndices) discardIndices.add(idx);
+      }
+    }
+
+    if (discardIndices.size > 0) {
+      faces = faces.filter((_, i) => !discardIndices.has(i));
+    }
+  }
+
+  // Extract facades & floor plans.
+  const facades = extractFacades(faces, upAxis);
   const floorPlans = extractFloorPlans(faces, upAxis);
 
   if (facades.length === 0 && floorPlans.length === 0) {
@@ -132,11 +174,9 @@ export function runPipeline(
     return { facades, floorPlans, files: [], warnings };
   }
 
-  // --- 6. Generate outputs ---
   const files: OutputFile[] = [];
   const scaleDenom = opts.scaleDenom;
 
-  // DXF: one per facade, one per floor plan.
   for (const facade of facades) {
     const dxfText = generateFacadeDxf(facade, scaleDenom);
     const safeLabel = facade.label.replace(/\s+/g, "_");
@@ -155,7 +195,6 @@ export function runPipeline(
     });
   }
 
-  // PDF: multi-page with all views.
   const pdfContent = generatePdf(facades, floorPlans, scaleDenom, opts.paper);
   if (pdfContent) {
     files.push({
@@ -164,7 +203,6 @@ export function runPipeline(
     });
   }
 
-  // Cutting sheets (plancha de corte).
   if (opts.includeCuttingSheet) {
     const filteredFaces = classifyAndFilter(faces, opts.elementFilter ?? DEFAULT_ELEMENT_FILTER);
     const cuttingFiles = generateCuttingSheets(filteredFaces, upAxis, scaleDenom, opts.decompositionMode);
@@ -177,4 +215,14 @@ export function runPipeline(
   }
 
   return { facades, floorPlans, files, warnings };
+}
+
+/** Full pipeline in one shot (backward compatible). */
+export function runPipeline(
+  fileName: string,
+  buffer: ArrayBuffer,
+  opts: PipelineOptions,
+): PipelineResult {
+  const phase1 = parsePipeline(fileName, buffer);
+  return generatePipeline(phase1, opts);
 }
