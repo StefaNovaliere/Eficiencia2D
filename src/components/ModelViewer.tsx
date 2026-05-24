@@ -53,6 +53,13 @@ const HIGHLIGHT_WIREFRAME = new THREE.LineBasicMaterial({
   color: 0xffffff,
 });
 
+const EDGE_LINE_MATERIAL = new THREE.LineBasicMaterial({
+  color: 0x000000,
+  transparent: true,
+  opacity: 0.35,
+  depthTest: true,
+});
+
 // ---------------------------------------------------------------------------
 // Merged geometry per (effective category)
 // ---------------------------------------------------------------------------
@@ -60,7 +67,15 @@ const HIGHLIGHT_WIREFRAME = new THREE.LineBasicMaterial({
 interface MergedMeshData {
   category: FaceCategory;
   geometry: THREE.BufferGeometry;
+  edgeGeometry: THREE.BufferGeometry | null;
   groupIds: number[]; // groupId per triangle, for raycasting
+}
+
+function edgeKey(ax: number, ay: number, az: number, bx: number, by: number, bz: number): string {
+  const p = 5;
+  const a = `${ax.toFixed(p)},${ay.toFixed(p)},${az.toFixed(p)}`;
+  const b = `${bx.toFixed(p)},${by.toFixed(p)},${bz.toFixed(p)}`;
+  return a < b ? `${a}|${b}` : `${b}|${a}`;
 }
 
 function buildMergedGeometries(
@@ -103,7 +118,47 @@ function buildMergedGeometries(
     const geo = new THREE.BufferGeometry();
     geo.setAttribute("position", new THREE.Float32BufferAttribute(bucket.positions, 3));
     geo.computeVertexNormals();
-    result.push({ category: cat, geometry: geo, groupIds: bucket.groupIds });
+
+    // Build boundary edges between different groups within this category.
+    const edgeMap = new Map<string, { gid: number; ax: number; ay: number; az: number; bx: number; by: number; bz: number }>();
+    const boundaryEdgePositions: number[] = [];
+    const triCount = bucket.groupIds.length;
+
+    for (let t = 0; t < triCount; t++) {
+      const gid = bucket.groupIds[t];
+      const base = t * 9;
+      const p = bucket.positions;
+      const triVerts = [
+        [p[base], p[base + 1], p[base + 2]],
+        [p[base + 3], p[base + 4], p[base + 5]],
+        [p[base + 6], p[base + 7], p[base + 8]],
+      ];
+      for (let e = 0; e < 3; e++) {
+        const a = triVerts[e];
+        const b = triVerts[(e + 1) % 3];
+        const ek = edgeKey(a[0], a[1], a[2], b[0], b[1], b[2]);
+        const existing = edgeMap.get(ek);
+        if (existing) {
+          if (existing.gid !== gid) {
+            boundaryEdgePositions.push(
+              existing.ax, existing.ay, existing.az,
+              existing.bx, existing.by, existing.bz,
+            );
+          }
+          edgeMap.delete(ek);
+        } else {
+          edgeMap.set(ek, { gid, ax: a[0], ay: a[1], az: a[2], bx: b[0], by: b[1], bz: b[2] });
+        }
+      }
+    }
+
+    let edgeGeometry: THREE.BufferGeometry | null = null;
+    if (boundaryEdgePositions.length > 0) {
+      edgeGeometry = new THREE.BufferGeometry();
+      edgeGeometry.setAttribute("position", new THREE.Float32BufferAttribute(boundaryEdgePositions, 3));
+    }
+
+    result.push({ category: cat, geometry: geo, edgeGeometry, groupIds: bucket.groupIds });
   }
   return result;
 }
@@ -148,17 +203,22 @@ function CategoryMesh({ mesh, isDimmed, onPick }: CategoryMeshProps) {
     : NORMAL_MATERIALS[mesh.category];
 
   return (
-    <mesh
-      geometry={mesh.geometry}
-      material={material}
-      onPointerDown={(e) => {
-        e.stopPropagation();
-        const triIdx = e.faceIndex;
-        if (typeof triIdx === "number" && triIdx >= 0 && triIdx < mesh.groupIds.length) {
-          onPick(mesh.groupIds[triIdx]);
-        }
-      }}
-    />
+    <>
+      <mesh
+        geometry={mesh.geometry}
+        material={material}
+        onPointerDown={(e) => {
+          e.stopPropagation();
+          const triIdx = e.faceIndex;
+          if (typeof triIdx === "number" && triIdx >= 0 && triIdx < mesh.groupIds.length) {
+            onPick(mesh.groupIds[triIdx]);
+          }
+        }}
+      />
+      {mesh.edgeGeometry && !isDimmed && (
+        <lineSegments geometry={mesh.edgeGeometry} material={EDGE_LINE_MATERIAL} />
+      )}
+    </>
   );
 }
 
@@ -255,7 +315,10 @@ function Scene({
   // Cleanup old geometries when mergedMeshes changes.
   useEffect(() => {
     return () => {
-      for (const m of mergedMeshes) m.geometry.dispose();
+      for (const m of mergedMeshes) {
+        m.geometry.dispose();
+        m.edgeGeometry?.dispose();
+      }
     };
   }, [mergedMeshes]);
 
