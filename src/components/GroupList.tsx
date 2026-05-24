@@ -36,6 +36,7 @@ export interface GroupListProps {
   groups: GeometryGroup[];
   selectedGroupId: number | null;
   categoryOverrides: Map<number, FaceCategory>;
+  visibleCategories: Set<FaceCategory>;
   onSelectGroup: (id: number) => void;
   onChangeCategory: (id: number, category: FaceCategory) => void;
 }
@@ -44,11 +45,18 @@ export default function GroupList({
   groups,
   selectedGroupId,
   categoryOverrides,
+  visibleCategories,
   onSelectGroup,
   onChangeCategory,
 }: GroupListProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const selectedRef = useRef<HTMLDivElement>(null);
+
+  // Filter by visibility (based on effective category).
+  const visibleGroups = groups.filter((g) => {
+    const eff = categoryOverrides.get(g.id) ?? g.category;
+    return visibleCategories.has(eff);
+  });
 
   // Scroll selected item into view.
   useEffect(() => {
@@ -62,12 +70,12 @@ export default function GroupList({
       <div className="group-list-header">
         <h3 className="group-list-title">Clasificacion de Grupos</h3>
         <p className="group-list-subtitle">
-          {groups.length} grupo{groups.length !== 1 ? "s" : ""} detectado{groups.length !== 1 ? "s" : ""}
+          {visibleGroups.length} de {groups.length} grupo{groups.length !== 1 ? "s" : ""}
         </p>
       </div>
 
       <div className="group-list-items">
-        {groups.map((group) => {
+        {visibleGroups.map((group) => {
           const effectiveCat = categoryOverrides.get(group.id) ?? group.category;
           const isSelected = group.id === selectedGroupId;
           const color = CATEGORY_COLORS[effectiveCat];
