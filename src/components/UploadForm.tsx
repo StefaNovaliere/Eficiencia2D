@@ -163,6 +163,7 @@ export default function UploadForm() {
         phase1={phase1Result}
         onConfirm={handleReviewConfirm}
         onCancel={handleReviewCancel}
+        onAxisChange={setPhase1Result}
       />
     );
   }
