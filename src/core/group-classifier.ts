@@ -48,6 +48,7 @@ const MIN_AREA = 1e-6;
 const HEIGHT_BAND = 0.05;
 const PERIMETER_MARGIN = 0.15;
 const THIN_WALL_THRESHOLD = 0.40; // walls thinner than 40cm => single "wall" category
+const MIN_REAL_AREA = 1.0;        // subgroups smaller than 1 m² default to "discard"
 
 function faceArea(f: Face3D): number {
   const verts = f.vertices;
@@ -378,9 +379,20 @@ export function classifyIntoGroups(faces: Face3D[]): GeometryGroup[] {
     }
   }
 
+  // Demote small components to "discard". This runs before thin-twin merging
+  // so that, e.g., adjacent stair treads don't get linked together by the
+  // < 40 cm pairing rule — each tread stays as its own discard component
+  // that the user can promote back to "floor" in the review screen.
+  for (const sg of subgroups) {
+    if (sg.totalArea < MIN_REAL_AREA && sg.category !== "discard") {
+      sg.category = "discard";
+    }
+  }
+
   // Merge thin-twin subgroups (two parallel-opposite skins of the same physical
   // element, e.g. the inner+outer face of a thin wall or the top+bottom of a
-  // thin floor slab) into a single component.
+  // thin floor slab) into a single component. Discard subgroups are excluded
+  // so that each stair tread / trim piece remains a unique component.
   const parent = subgroups.map((_, i) => i);
   function find(x: number): number {
     while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; }
@@ -392,7 +404,9 @@ export function classifyIntoGroups(faces: Face3D[]): GeometryGroup[] {
   }
 
   for (let i = 0; i < subgroups.length; i++) {
+    if (subgroups[i].category === "discard") continue;
     for (let j = i + 1; j < subgroups.length; j++) {
+      if (subgroups[j].category === "discard") continue;
       if (areThinTwins(subgroups[i], subgroups[j], THIN_WALL_THRESHOLD)) {
         union(i, j);
       }
