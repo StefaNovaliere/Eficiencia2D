@@ -21,11 +21,13 @@
 import type { DecompositionMode, Face3D, Vec2, Vec3 } from "./types";
 import { cross, dot, normalize, sub, vlength } from "./types";
 import { detectFloorLevels } from "./floor-plan-extractor";
+import { areThinTwins } from "./wall-thickness";
 
 const GAP_M = 0.5;              // gap between panels in metres
 const NORMAL_CLUSTER_DOT = 0.85; // faces with dot > this are "same direction"
 const HORIZONTAL_THRESHOLD = 0.75; // |upComponent| > this → horizontal face
 const VERTICAL_THRESHOLD = 0.25;   // |upComponent| < this → vertical face
+const THIN_TWIN_THRESHOLD = 0.40;  // merge twin coplanar groups closer than this
 
 type UpAxis = "Y" | "Z";
 
@@ -331,6 +333,59 @@ function projectFacesTo2D(
 }
 
 // ---------------------------------------------------------------------------
+// Thin-twin merge: collapse parallel-opposite coplanar groups that represent
+// the two skins of the same physical element (thin walls and thin slabs).
+// Keeps the larger of each pair, drops the other — the 2D outline is the same.
+// ---------------------------------------------------------------------------
+
+function computeGroupGeom(group: CoplanarGroup): { centroid: Vec3; extent: number } {
+  let sx = 0, sy = 0, sz = 0, count = 0;
+  let minX = Infinity, minY = Infinity, minZ = Infinity;
+  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  for (const face of group.faces) {
+    for (const v of face.vertices) {
+      sx += v.x; sy += v.y; sz += v.z; count++;
+      if (v.x < minX) minX = v.x;
+      if (v.y < minY) minY = v.y;
+      if (v.z < minZ) minZ = v.z;
+      if (v.x > maxX) maxX = v.x;
+      if (v.y > maxY) maxY = v.y;
+      if (v.z > maxZ) maxZ = v.z;
+    }
+  }
+  return {
+    centroid: { x: sx / count, y: sy / count, z: sz / count },
+    extent: Math.max(maxX - minX, maxY - minY, maxZ - minZ),
+  };
+}
+
+function mergeThinTwinGroups(groups: CoplanarGroup[]): CoplanarGroup[] {
+  const geom = groups.map(computeGroupGeom);
+  const drop = new Set<number>();
+
+  for (let i = 0; i < groups.length; i++) {
+    if (drop.has(i)) continue;
+    for (let j = i + 1; j < groups.length; j++) {
+      if (drop.has(j)) continue;
+      if (groups[i].category !== groups[j].category) continue;
+
+      const a = { normal: groups[i].normal, d: groups[i].d, ...geom[i] };
+      const b = { normal: groups[j].normal, d: groups[j].d, ...geom[j] };
+      if (!areThinTwins(a, b, THIN_TWIN_THRESHOLD)) continue;
+
+      if (groups[i].totalArea >= groups[j].totalArea) {
+        drop.add(j);
+      } else {
+        drop.add(i);
+        break;
+      }
+    }
+  }
+
+  return groups.filter((_, i) => !drop.has(i));
+}
+
+// ---------------------------------------------------------------------------
 // Simple-mode filter: keep only the largest face per wall orientation
 // ---------------------------------------------------------------------------
 
@@ -394,6 +449,10 @@ function decomposeIntoPanels(
 ): Panel[] {
   // 1. Cluster ALL faces by coplanarity (normal + plane offset).
   let coplanarGroups = clusterByCoplanarity(faces, up);
+
+  // 1a. Collapse thin twins (parallel-opposite skins of the same physical
+  //     element — thin walls and thin floor slabs) into a single panel.
+  coplanarGroups = mergeThinTwinGroups(coplanarGroups);
 
   // 1b. In simple mode, keep only the largest face per wall orientation.
   if (simpleMode) {
