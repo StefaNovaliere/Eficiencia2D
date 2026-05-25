@@ -14,7 +14,7 @@
 
 import type { Face3D, Vec3 } from "./types";
 import { cross, dot, normalize, sub, vlength } from "./types";
-import { findThinWallFaces } from "./wall-thickness";
+import { areThinTwins, findThinWallFaces } from "./wall-thickness";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -299,6 +299,59 @@ const CATEGORY_LABELS: Record<FaceCategory, string> = {
 // Public API
 // ---------------------------------------------------------------------------
 
+interface Subgroup {
+  category: FaceCategory;
+  faceInfos: FaceInfo[];
+  normal: Vec3;
+  d: number;
+  centroid: Vec3;
+  extent: number;
+  totalArea: number;
+}
+
+function buildSubgroup(
+  category: FaceCategory,
+  cluster: CoplanarCluster,
+  comp: FaceInfo[],
+  faces: Face3D[],
+): Subgroup | null {
+  let totalArea = 0;
+  for (const fi of comp) totalArea += fi.area;
+  if (totalArea < 0.01) return null;
+
+  let cx = 0, cy = 0, cz = 0;
+  for (const fi of comp) {
+    cx += fi.centroid.x * fi.area;
+    cy += fi.centroid.y * fi.area;
+    cz += fi.centroid.z * fi.area;
+  }
+  cx /= totalArea; cy /= totalArea; cz /= totalArea;
+
+  let minX = Infinity, minY = Infinity, minZ = Infinity;
+  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  for (const fi of comp) {
+    for (const v of faces[fi.index].vertices) {
+      if (v.x < minX) minX = v.x;
+      if (v.y < minY) minY = v.y;
+      if (v.z < minZ) minZ = v.z;
+      if (v.x > maxX) maxX = v.x;
+      if (v.y > maxY) maxY = v.y;
+      if (v.z > maxZ) maxZ = v.z;
+    }
+  }
+  const extent = Math.max(maxX - minX, maxY - minY, maxZ - minZ);
+
+  return {
+    category,
+    faceInfos: comp,
+    normal: cluster.normal,
+    d: cluster.d,
+    centroid: { x: cx, y: cy, z: cz },
+    extent,
+    totalArea,
+  };
+}
+
 export function classifyIntoGroups(faces: Face3D[]): GeometryGroup[] {
   if (faces.length === 0) return [];
 
@@ -312,45 +365,112 @@ export function classifyIntoGroups(faces: Face3D[]): GeometryGroup[] {
     else byCategory.set(fi.category, [fi]);
   }
 
+  // Build subgroups: one per (category, coplanar cluster, connected component).
+  const subgroups: Subgroup[] = [];
+  for (const [category, infos] of byCategory.entries()) {
+    const clusters = clusterCoplanar(infos, faces);
+    for (const cluster of clusters) {
+      const components = splitConnected(cluster.faceInfos, faces);
+      for (const comp of components) {
+        const sg = buildSubgroup(category, cluster, comp, faces);
+        if (sg) subgroups.push(sg);
+      }
+    }
+  }
+
+  // Merge thin-twin subgroups (two parallel-opposite skins of the same physical
+  // element, e.g. the inner+outer face of a thin wall or the top+bottom of a
+  // thin floor slab) into a single component.
+  const parent = subgroups.map((_, i) => i);
+  function find(x: number): number {
+    while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; }
+    return x;
+  }
+  function union(a: number, b: number) {
+    const ra = find(a), rb = find(b);
+    if (ra !== rb) parent[ra] = rb;
+  }
+
+  for (let i = 0; i < subgroups.length; i++) {
+    for (let j = i + 1; j < subgroups.length; j++) {
+      if (areThinTwins(subgroups[i], subgroups[j], THIN_WALL_THRESHOLD)) {
+        union(i, j);
+      }
+    }
+  }
+
+  const unionMap = new Map<number, Subgroup[]>();
+  for (let i = 0; i < subgroups.length; i++) {
+    const root = find(i);
+    const arr = unionMap.get(root);
+    if (arr) arr.push(subgroups[i]);
+    else unionMap.set(root, [subgroups[i]]);
+  }
+
+  const CATEGORY_PRIORITY: FaceCategory[] = [
+    "floor",
+    "wall",
+    "wall_exterior",
+    "wall_interior",
+    "discard",
+  ];
+
   const groups: GeometryGroup[] = [];
   let nextId = 1;
   const counters: Record<string, number> = {};
 
-  for (const [category, infos] of byCategory.entries()) {
-    // Cluster coplanar faces within this category.
-    const clusters = clusterCoplanar(infos, faces);
-
-    for (const cluster of clusters) {
-      // Split into connected components.
-      const components = splitConnected(cluster.faceInfos, faces);
-
-      for (const comp of components) {
-        const totalArea = comp.reduce((s, fi) => s + fi.area, 0);
-
-        // Skip tiny groups.
-        if (totalArea < 0.01) continue;
-
-        const cx = comp.reduce((s, fi) => s + fi.centroid.x * fi.area, 0) / totalArea;
-        const cy = comp.reduce((s, fi) => s + fi.centroid.y * fi.area, 0) / totalArea;
-        const cz = comp.reduce((s, fi) => s + fi.centroid.z * fi.area, 0) / totalArea;
-
-        const orient = orientationLabel(cluster.normal, comp[0].orientation);
-        const catLabel = CATEGORY_LABELS[category];
-        const key = `${catLabel}_${orient}`;
-        counters[key] = (counters[key] ?? 0) + 1;
-
-        groups.push({
-          id: nextId++,
-          label: `${catLabel} ${orient} #${counters[key]}`,
-          category,
-          faceIndices: comp.map((fi) => fi.index),
-          totalArea,
-          centroid: { x: cx, y: cy, z: cz },
-          orientation: orient,
-          representativeNormal: cluster.normal,
-        });
+  for (const merged of unionMap.values()) {
+    // Dominant category: largest area, with non-discard winning ties over discard.
+    const areaByCat = new Map<FaceCategory, number>();
+    for (const sg of merged) {
+      areaByCat.set(sg.category, (areaByCat.get(sg.category) ?? 0) + sg.totalArea);
+    }
+    let dominant: FaceCategory = "discard";
+    let bestArea = -1;
+    for (const cat of CATEGORY_PRIORITY) {
+      const a = areaByCat.get(cat);
+      if (a === undefined) continue;
+      if (cat !== "discard" && a > bestArea) {
+        dominant = cat;
+        bestArea = a;
       }
     }
+    if (bestArea < 0) dominant = "discard";
+
+    // Combine faces, recompute centroid, total area.
+    const allFaceIndices: number[] = [];
+    let totalArea = 0;
+    let cx = 0, cy = 0, cz = 0;
+    let biggest = merged[0];
+    let biggestOrient = merged[0].faceInfos[0].orientation;
+    for (const sg of merged) {
+      for (const fi of sg.faceInfos) allFaceIndices.push(fi.index);
+      totalArea += sg.totalArea;
+      cx += sg.centroid.x * sg.totalArea;
+      cy += sg.centroid.y * sg.totalArea;
+      cz += sg.centroid.z * sg.totalArea;
+      if (sg.totalArea > biggest.totalArea) {
+        biggest = sg;
+        biggestOrient = sg.faceInfos[0].orientation;
+      }
+    }
+    cx /= totalArea; cy /= totalArea; cz /= totalArea;
+
+    const orient = orientationLabel(biggest.normal, biggestOrient);
+    const catLabel = CATEGORY_LABELS[dominant];
+    const key = `${catLabel}_${orient}`;
+    counters[key] = (counters[key] ?? 0) + 1;
+
+    groups.push({
+      id: nextId++,
+      label: `${catLabel} ${orient} #${counters[key]}`,
+      category: dominant,
+      faceIndices: allFaceIndices,
+      totalArea,
+      centroid: { x: cx, y: cy, z: cz },
+      orientation: orient,
+      representativeNormal: biggest.normal,
+    });
   }
 
   // Sort: floors, thin walls, exterior walls, interior walls, discarded. Within each, by area desc.

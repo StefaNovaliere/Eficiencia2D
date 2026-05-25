@@ -18,6 +18,52 @@ const OPPOSITE_NORMAL_DOT = -0.985;    // dot product < this => opposite normals
 const MAX_WALL_THICKNESS = 1.0;        // search range for twin (1m)
 const LATERAL_OVERLAP_FACTOR = 0.5;    // how much lateral offset is tolerated
 
+/** A parametrised, planar region (used to check thin-twin pairing). */
+export interface TwinCandidate {
+  normal: Vec3;   // unit normal
+  d: number;      // plane offset = dot(normal, point_on_plane)
+  centroid: Vec3;
+  extent: number; // max dimension of bounding box (lateral overlap budget)
+}
+
+/**
+ * True if two planar regions are "thin twins": parallel with opposite normals,
+ * perpendicular distance below `thicknessThreshold`, and laterally overlapping.
+ * A pair of thin twins represents the two skins of the same physical wall or
+ * the top/bottom faces of the same physical floor slab.
+ */
+export function areThinTwins(
+  a: TwinCandidate,
+  b: TwinCandidate,
+  thicknessThreshold: number,
+): boolean {
+  const ndot =
+    a.normal.x * b.normal.x +
+    a.normal.y * b.normal.y +
+    a.normal.z * b.normal.z;
+  if (ndot > OPPOSITE_NORMAL_DOT) return false;
+
+  const distance = Math.abs(
+    a.normal.x * b.centroid.x +
+      a.normal.y * b.centroid.y +
+      a.normal.z * b.centroid.z -
+      a.d,
+  );
+  if (distance < 1e-4 || distance > thicknessThreshold) return false;
+
+  const dx = b.centroid.x - a.centroid.x;
+  const dy = b.centroid.y - a.centroid.y;
+  const dz = b.centroid.z - a.centroid.z;
+  const nc = dx * a.normal.x + dy * a.normal.y + dz * a.normal.z;
+  const lx = dx - nc * a.normal.x;
+  const ly = dy - nc * a.normal.y;
+  const lz = dz - nc * a.normal.z;
+  const lateralDist = Math.sqrt(lx * lx + ly * ly + lz * lz);
+
+  const budget = (a.extent + b.extent) * 0.5 * LATERAL_OVERLAP_FACTOR;
+  return lateralDist <= budget;
+}
+
 interface VerticalCluster {
   normal: Vec3;
   d: number;
