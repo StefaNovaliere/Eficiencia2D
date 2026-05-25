@@ -25,6 +25,8 @@ export interface PipelineResult {
 
 export interface Phase1Result {
   faces: Face3D[];
+  rawFaces: Face3D[];
+  appliedAxis: "Y" | "Z";
   groups: GeometryGroup[];
   stem: string;
   warnings: string[];
@@ -62,6 +64,33 @@ function guessUnitScale(faces: Face3D[]): number {
   return (1.0 / span) * 20.0;       // unknown large → normalize
 }
 
+function rotateZtoY(faces: Face3D[]): Face3D[] {
+  return faces.map((f) => ({
+    ...f,
+    vertices: f.vertices.map((v) => ({ x: v.x, y: v.z, z: -v.y })),
+    normal: { x: f.normal.x, y: f.normal.z, z: -f.normal.y },
+    innerLoops: f.innerLoops.map((loop) =>
+      loop.map((v) => ({ x: v.x, y: v.z, z: -v.y })),
+    ),
+  }));
+}
+
+/**
+ * Re-classify with a different up-axis assumption.
+ * Reuses the stored rawFaces (post-unit-scale, pre-rotation).
+ */
+export function reclassifyWithAxis(
+  phase1: Phase1Result,
+  newAxis: "Y" | "Z",
+): Phase1Result {
+  let faces = phase1.rawFaces;
+  if (newAxis === "Z") {
+    faces = rotateZtoY(faces);
+  }
+  const groups = classifyIntoGroups(faces);
+  return { ...phase1, faces, appliedAxis: newAxis, groups };
+}
+
 /**
  * Phase 1: Parse, normalise units/axis, and classify into groups.
  * Returns geometry + groups ready for the review screen.
@@ -83,12 +112,12 @@ export function parsePipeline(
     warnings.push(...result.warnings);
   } else {
     warnings.push(`Formato no soportado: .${ext}. Usa .obj.`);
-    return { faces: [], groups: [], stem, warnings };
+    return { faces: [], rawFaces: [], appliedAxis: "Y", groups: [], stem, warnings };
   }
 
   if (faces.length === 0) {
     warnings.push("No se encontraron caras en el archivo.");
-    return { faces: [], groups: [], stem, warnings };
+    return { faces: [], rawFaces: [], appliedAxis: "Y", groups: [], stem, warnings };
   }
 
   // Normalise units.
@@ -113,22 +142,16 @@ export function parsePipeline(
 
   // Detect up axis and normalise to Y-up.
   const detectedUp = detectUpAxis(faces);
+  const rawFaces = faces;
 
   if (detectedUp === "Z") {
-    faces = faces.map((f) => ({
-      ...f,
-      vertices: f.vertices.map((v) => ({ x: v.x, y: v.z, z: -v.y })),
-      normal: { x: f.normal.x, y: f.normal.z, z: -f.normal.y },
-      innerLoops: f.innerLoops.map((loop) =>
-        loop.map((v) => ({ x: v.x, y: v.z, z: -v.y })),
-      ),
-    }));
+    faces = rotateZtoY(faces);
   }
 
   // Classify into reviewable groups.
   const groups = classifyIntoGroups(faces);
 
-  return { faces, groups, stem, warnings };
+  return { faces, rawFaces, appliedAxis: detectedUp, groups, stem, warnings };
 }
 
 /**
