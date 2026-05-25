@@ -10,7 +10,7 @@ import { parseObj } from "./obj-parser";
 import { generateCuttingSheets } from "./cutting-sheet";
 import { detectUpAxis, extractFacades } from "./facade-extractor";
 import { extractFloorPlans } from "./floor-plan-extractor";
-import { classifyAndFilter, DEFAULT_ELEMENT_FILTER } from "./geometry-classifier";
+import { DEFAULT_ELEMENT_FILTER } from "./geometry-classifier";
 import { classifyIntoGroups } from "./group-classifier";
 import type { GeometryGroup } from "./group-classifier";
 import { generatePdf } from "./pdf-writer";
@@ -171,22 +171,31 @@ export function generatePipeline(
   const stem = phase1.stem;
   const upAxis: "Y" | "Z" = "Y";
 
-  // Faces filtered by user overrides — only used for cutting sheets.
-  let facesForCutting = phase1.faces;
-  if (overrides && overrides.length > 0) {
-    const overrideMap = new Map(overrides.map((o) => [o.groupId, o.newCategory]));
-    const discardIndices = new Set<number>();
+  // Build the effective face → category map from groups + user overrides.
+  // The review-screen classification is the source of truth for the cutting
+  // sheet, so promoting a default-discard component back to "floor" / "wall"
+  // actually adds it to the output (and demoting works symmetrically).
+  const overrideMap = new Map<number, GeometryGroup["category"]>();
+  if (overrides) {
+    for (const o of overrides) overrideMap.set(o.groupId, o.newCategory);
+  }
+  const faceCategoryMap = new Map<number, GeometryGroup["category"]>();
+  for (const group of phase1.groups) {
+    const effective = overrideMap.get(group.id) ?? group.category;
+    for (const fi of group.faceIndices) faceCategoryMap.set(fi, effective);
+  }
 
-    for (const group of phase1.groups) {
-      const newCat = overrideMap.get(group.id) ?? group.category;
-      if (newCat === "discard") {
-        for (const idx of group.faceIndices) discardIndices.add(idx);
-      }
-    }
-
-    if (discardIndices.size > 0) {
-      facesForCutting = phase1.faces.filter((_, i) => !discardIndices.has(i));
-    }
+  const filter = opts.elementFilter ?? DEFAULT_ELEMENT_FILTER;
+  const wallEnabled = filter.wallsExterior || filter.wallsInterior;
+  const filteredFaces: typeof phase1.faces = [];
+  for (let i = 0; i < phase1.faces.length; i++) {
+    const cat = faceCategoryMap.get(i);
+    if (!cat || cat === "discard") continue;
+    if (cat === "floor" && !filter.floors) continue;
+    if (cat === "wall_exterior" && !filter.wallsExterior) continue;
+    if (cat === "wall_interior" && !filter.wallsInterior) continue;
+    if (cat === "wall" && !wallEnabled) continue;
+    filteredFaces.push(phase1.faces[i]);
   }
 
   // PDF is built from the ORIGINAL faces (overrides do not affect it).
@@ -196,11 +205,6 @@ export function generatePipeline(
   const files: OutputFile[] = [];
   const scaleDenom = opts.scaleDenom;
 
-  // Cutting sheets — use overridden faces.
-  const filteredFaces = classifyAndFilter(
-    facesForCutting,
-    opts.elementFilter ?? DEFAULT_ELEMENT_FILTER,
-  );
   const cuttingFiles = generateCuttingSheets(
     filteredFaces,
     upAxis,
