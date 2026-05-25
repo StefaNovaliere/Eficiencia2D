@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import GroupList from "./GroupList";
 import VisibilityFilters from "./VisibilityFilters";
 import type { FaceCategory, GeometryGroup } from "@/core/group-classifier";
+import { reclassifyWithAxis } from "@/core/pipeline";
 import type { Phase1Result, ClassificationOverride } from "@/core/pipeline";
 
 const ModelViewer = dynamic(() => import("./ModelViewer"), { ssr: false });
@@ -24,6 +25,7 @@ export interface ReviewScreenProps {
   phase1: Phase1Result;
   onConfirm: (overrides: ClassificationOverride[]) => void;
   onCancel: () => void;
+  onAxisChange: (newPhase1: Phase1Result) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -34,6 +36,7 @@ export default function ReviewScreen({
   phase1,
   onConfirm,
   onCancel,
+  onAxisChange,
 }: ReviewScreenProps) {
   const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null);
   const [overrides, setOverrides] = useState<Map<number, FaceCategory>>(
@@ -62,6 +65,14 @@ export default function ReviewScreen({
     },
     [phase1.groups],
   );
+
+  const handleRotateAxis = useCallback(() => {
+    const newAxis = phase1.appliedAxis === "Y" ? "Z" : "Y";
+    const updated = reclassifyWithAxis(phase1, newAxis);
+    setOverrides(new Map());
+    setSelectedGroupId(null);
+    onAxisChange(updated);
+  }, [phase1, onAxisChange]);
 
   const handleToggleVisibility = useCallback((cat: FaceCategory) => {
     setVisibleCategories((prev) => {
@@ -110,6 +121,13 @@ export default function ReviewScreen({
             visibleCategories={visibleCategories}
             onToggle={handleToggleVisibility}
           />
+          <button
+            className="axis-toggle-btn"
+            onClick={handleRotateAxis}
+            title="Intercambiar eje vertical (Y/Z) si pisos y paredes están invertidos"
+          >
+            Rotar eje ({phase1.appliedAxis === "Y" ? "Y↑" : "Z↑"})
+          </button>
         </div>
       </div>
 
