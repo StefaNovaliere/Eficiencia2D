@@ -13,9 +13,11 @@
 
 import type { ElementFilter, Face3D, Vec3 } from "./types";
 import { cross, sub, vlength } from "./types";
+import { findThinWallFaces } from "./wall-thickness";
 
 export type FaceCategory =
   | "floor"
+  | "wall"
   | "wall_exterior"
   | "wall_interior"
   | "discard";
@@ -190,20 +192,36 @@ export function classifyAndFilter(
     }
   }
 
-  // --- Classify vertical faces: exterior vs interior ---
+  // --- Classify vertical faces ---
+  //   - thin walls (paired thickness < 40cm) → "wall" (no ext/int split)
+  //   - thick walls → wall_exterior / wall_interior by perimeter distance
 
   const PERIMETER_MARGIN = 0.15;
+  const THIN_WALL_THRESHOLD = 0.40;
 
+  const wallThin = new Set<Face3D>();
   const wallExterior = new Set<Face3D>();
   const wallInterior = new Set<Face3D>();
 
   const verticals = infos.filter((fi) => fi.orientation === "vertical");
+  const verticalIndices: number[] = [];
+  for (let i = 0; i < infos.length; i++) {
+    if (infos[i].orientation === "vertical") verticalIndices.push(i);
+  }
+  const facesArr = infos.map((fi) => fi.face);
+  const thinWallSet = findThinWallFaces(facesArr, verticalIndices, THIN_WALL_THRESHOLD);
 
-  for (const fi of verticals) {
+  for (let i = 0; i < infos.length; i++) {
+    const fi = infos[i];
+    if (fi.orientation !== "vertical") continue;
+
+    if (thinWallSet.has(i)) {
+      wallThin.add(fi.face);
+      continue;
+    }
+
     const cx = fi.centroid.x;
     const cz = fi.centroid.z;
-
-    // Normalized distance to nearest bounding box edge.
     const distX = Math.min(
       Math.abs(cx - minX) / rangeX,
       Math.abs(cx - maxX) / rangeX,
@@ -237,6 +255,8 @@ export function classifyAndFilter(
     if (floorFaces.has(fi.face) && !filter.floors) continue;
     if (wallExterior.has(fi.face) && !filter.wallsExterior) continue;
     if (wallInterior.has(fi.face) && !filter.wallsInterior) continue;
+    // Thin walls pass through if either wall filter is enabled.
+    if (wallThin.has(fi.face) && !filter.wallsExterior && !filter.wallsInterior) continue;
     result.push(fi.face);
   }
 

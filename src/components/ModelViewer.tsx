@@ -13,6 +13,7 @@ import type { FaceCategory, GeometryGroup } from "@/core/group-classifier";
 
 const CATEGORY_HEX: Record<FaceCategory, number> = {
   floor: 0x22c55e,
+  wall: 0xa855f7,
   wall_exterior: 0x3b82f6,
   wall_interior: 0x06b6d4,
   discard: 0x71717a,
@@ -30,6 +31,7 @@ function makeMaterial(hex: number, opacity: number): THREE.MeshBasicMaterial {
 
 const NORMAL_MATERIALS: Record<FaceCategory, THREE.MeshBasicMaterial> = {
   floor: makeMaterial(CATEGORY_HEX.floor, 0.85),
+  wall: makeMaterial(CATEGORY_HEX.wall, 0.85),
   wall_exterior: makeMaterial(CATEGORY_HEX.wall_exterior, 0.85),
   wall_interior: makeMaterial(CATEGORY_HEX.wall_interior, 0.85),
   discard: makeMaterial(CATEGORY_HEX.discard, 0.6),
@@ -37,6 +39,7 @@ const NORMAL_MATERIALS: Record<FaceCategory, THREE.MeshBasicMaterial> = {
 
 const DIMMED_MATERIALS: Record<FaceCategory, THREE.MeshBasicMaterial> = {
   floor: makeMaterial(CATEGORY_HEX.floor, 0.08),
+  wall: makeMaterial(CATEGORY_HEX.wall, 0.08),
   wall_exterior: makeMaterial(CATEGORY_HEX.wall_exterior, 0.08),
   wall_interior: makeMaterial(CATEGORY_HEX.wall_interior, 0.08),
   discard: makeMaterial(CATEGORY_HEX.discard, 0.05),
@@ -87,7 +90,7 @@ function buildMergedGeometries(
     FaceCategory,
     { positions: number[]; groupIds: number[] }
   >();
-  for (const cat of ["floor", "wall_exterior", "wall_interior", "discard"] as FaceCategory[]) {
+  for (const cat of ["floor", "wall", "wall_exterior", "wall_interior", "discard"] as FaceCategory[]) {
     byCategory.set(cat, { positions: [], groupIds: [] });
   }
 
