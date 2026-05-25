@@ -12,6 +12,7 @@ const ModelViewer = dynamic(() => import("./ModelViewer"), { ssr: false });
 
 const ALL_CATEGORIES: FaceCategory[] = [
   "floor",
+  "wall",
   "wall_exterior",
   "wall_interior",
   "discard",
@@ -93,15 +94,16 @@ export default function ReviewScreen({
 
   // Stats (per effective category).
   const stats = useMemo(() => {
-    let floors = 0, wallsExt = 0, wallsInt = 0, discarded = 0;
+    let floors = 0, walls = 0, wallsExt = 0, wallsInt = 0, discarded = 0;
     for (const group of phase1.groups) {
       const cat = overrides.get(group.id) ?? group.category;
       if (cat === "floor") floors++;
+      else if (cat === "wall") walls++;
       else if (cat === "wall_exterior") wallsExt++;
       else if (cat === "wall_interior") wallsInt++;
       else discarded++;
     }
-    return { floors, wallsExt, wallsInt, discarded };
+    return { floors, walls, wallsExt, wallsInt, discarded };
   }, [phase1.groups, overrides]);
 
   return (
@@ -145,7 +147,7 @@ export default function ReviewScreen({
           <div className="review-stats">
             <span className="stat-item stat-floor">{stats.floors} pisos</span>
             <span className="stat-sep">·</span>
-            <span className="stat-item stat-wall">{stats.wallsExt + stats.wallsInt} paredes</span>
+            <span className="stat-item stat-wall">{stats.walls + stats.wallsExt + stats.wallsInt} paredes</span>
             <span className="stat-sep">·</span>
             <span className="stat-item stat-discard">{stats.discarded} descartados</span>
             {overrides.size > 0 && (

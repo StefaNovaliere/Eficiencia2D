@@ -14,6 +14,7 @@
 
 import type { Face3D, Vec3 } from "./types";
 import { cross, dot, normalize, sub, vlength } from "./types";
+import { findThinWallFaces } from "./wall-thickness";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -21,6 +22,7 @@ import { cross, dot, normalize, sub, vlength } from "./types";
 
 export type FaceCategory =
   | "floor"
+  | "wall"
   | "wall_exterior"
   | "wall_interior"
   | "discard";
@@ -45,6 +47,7 @@ const VERTICAL_THRESHOLD = 0.5;
 const MIN_AREA = 1e-6;
 const HEIGHT_BAND = 0.05;
 const PERIMETER_MARGIN = 0.15;
+const THIN_WALL_THRESHOLD = 0.40; // walls thinner than 40cm => single "wall" category
 
 function faceArea(f: Face3D): number {
   const verts = f.vertices;
@@ -109,7 +112,7 @@ function classifyAllFaces(faces: Face3D[]): FaceInfo[] {
   if (rangeX < 1.0 || rangeZ < 1.0) {
     for (const fi of infos) {
       if (fi.orientation === "horizontal") fi.category = "floor";
-      else if (fi.orientation === "vertical") fi.category = "wall_exterior";
+      else if (fi.orientation === "vertical") fi.category = "wall";
       else fi.category = "discard";
     }
     return infos;
@@ -154,9 +157,18 @@ function classifyAllFaces(faces: Face3D[]): FaceInfo[] {
     }
   }
 
-  // Classify verticals: exterior vs interior.
+  // Classify verticals:
+  //   - thin walls (paired thickness < 40cm) → single "wall" category
+  //   - thick walls → "wall_exterior" / "wall_interior" based on perimeter distance
   const verticals = infos.filter((fi) => fi.orientation === "vertical");
+  const verticalIndices = verticals.map((fi) => fi.index);
+  const thinWallSet = findThinWallFaces(faces, verticalIndices, THIN_WALL_THRESHOLD);
+
   for (const fi of verticals) {
+    if (thinWallSet.has(fi.index)) {
+      fi.category = "wall";
+      continue;
+    }
     const cx = fi.centroid.x;
     const cz = fi.centroid.z;
     const distX = Math.min(Math.abs(cx - minX) / rangeX, Math.abs(cx - maxX) / rangeX);
@@ -277,6 +289,7 @@ function orientationLabel(normal: Vec3, orientation: string): string {
 
 const CATEGORY_LABELS: Record<FaceCategory, string> = {
   floor: "Piso",
+  wall: "Pared",
   wall_exterior: "Pared Ext.",
   wall_interior: "Pared Int.",
   discard: "Descartado",
@@ -340,8 +353,8 @@ export function classifyIntoGroups(faces: Face3D[]): GeometryGroup[] {
     }
   }
 
-  // Sort: floors first, then exterior walls, interior walls, discarded. Within each, by area desc.
-  const ORDER: Record<FaceCategory, number> = { floor: 0, wall_exterior: 1, wall_interior: 2, discard: 3 };
+  // Sort: floors, thin walls, exterior walls, interior walls, discarded. Within each, by area desc.
+  const ORDER: Record<FaceCategory, number> = { floor: 0, wall: 1, wall_exterior: 2, wall_interior: 3, discard: 4 };
   groups.sort((a, b) => {
     const catDiff = ORDER[a.category] - ORDER[b.category];
     if (catDiff !== 0) return catDiff;
