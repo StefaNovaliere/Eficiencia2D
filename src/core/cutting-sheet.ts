@@ -23,7 +23,8 @@ import { cross, dot, normalize, sub, vlength } from "./types";
 import { detectFloorLevels } from "./floor-plan-extractor";
 import { areThinTwins } from "./wall-thickness";
 
-const GAP_M = 0.5;              // gap between panels in metres
+const GAP_M = 0.003;             // gap between panels in metres (3mm for laser cutting)
+const SHEET_SPACING_M = 0.10;    // visual gap between sheets in multi-sheet DXF
 const NORMAL_CLUSTER_DOT = 0.85; // faces with dot > this are "same direction"
 const HORIZONTAL_THRESHOLD = 0.75; // |upComponent| > this → horizontal face
 const VERTICAL_THRESHOLD = 0.25;   // |upComponent| < this → vertical face
@@ -85,9 +86,9 @@ function r(n: number): string {
 // Panel types
 // ---------------------------------------------------------------------------
 
-type PanelCategory = "wall" | "floor";
+export type PanelCategory = "wall" | "floor";
 
-interface Panel {
+export interface Panel {
   id: string;
   groupName: string;
   category: PanelCategory;
@@ -442,7 +443,7 @@ function filterGroupsForSimpleMode(groups: CoplanarGroup[]): CoplanarGroup[] {
 // Decompose model into classified panels using geometric coplanarity
 // ---------------------------------------------------------------------------
 
-function decomposeIntoPanels(
+export function decomposeIntoPanels(
   faces: Face3D[],
   up: UpAxis,
   simpleMode: boolean,
@@ -612,13 +613,7 @@ const CS_LAYERS = [
 ];
 
 
-function panelsToDxf(placed: PlacedPanel[]): string {
-  const textH = 0.15;     // panel ID text height (metres)
-  const dimTextH = 0.10;  // dimension text height (metres)
-
-  const lines: string[] = [];
-
-  // HEADER section
+function emitDxfHeader(lines: string[], layerCount: number): void {
   lines.push(
     "0", "SECTION",
     "2", "HEADER",
@@ -629,7 +624,6 @@ function panelsToDxf(placed: PlacedPanel[]): string {
     "0", "ENDSEC",
   );
 
-  // TABLES section
   lines.push(
     "0", "SECTION",
     "2", "TABLES",
@@ -646,7 +640,7 @@ function panelsToDxf(placed: PlacedPanel[]): string {
     "0", "ENDTAB",
     "0", "TABLE",
     "2", "LAYER",
-    "70", String(CS_LAYERS.length),
+    "70", String(layerCount),
   );
 
   for (const l of CS_LAYERS) {
@@ -660,58 +654,70 @@ function panelsToDxf(placed: PlacedPanel[]): string {
   }
 
   lines.push("0", "ENDTAB", "0", "ENDSEC");
+}
 
-  // ENTITIES section
+function emitPanelEntities(
+  lines: string[],
+  edges: Array<{ a: Vec2; b: Vec2 }>,
+  pw: number,
+  ph: number,
+  panelId: string,
+  ox: number,
+  oy: number,
+): void {
+  for (const edge of edges) {
+    lines.push(
+      "0", "LINE",
+      "8", "CUT_EXTERIOR",
+      "62", "1",
+      "10", r(ox + edge.a.x),
+      "20", r(oy + edge.a.y),
+      "11", r(ox + edge.b.x),
+      "21", r(oy + edge.b.y),
+    );
+  }
+
+  const textH = Math.min(0.04, Math.min(pw, ph) * 0.12);
+  const dimTextH = textH * 0.7;
+
+  const labelX = r(ox + pw / 2);
+  const labelY = r(oy + ph - textH * 1.8);
+  lines.push(
+    "0", "TEXT",
+    "8", "ENGRAVE_VECTOR",
+    "62", "5",
+    "10", labelX,
+    "20", labelY,
+    "40", r(textH),
+    "1", panelId,
+    "72", "1",
+    "11", labelX,
+    "21", labelY,
+  );
+
+  const dimX = r(ox + pw / 2);
+  const dimY = r(oy + dimTextH * 1.2);
+  lines.push(
+    "0", "TEXT",
+    "8", "ENGRAVE_RASTER",
+    "62", "7",
+    "10", dimX,
+    "20", dimY,
+    "40", r(dimTextH),
+    "1", `${pw.toFixed(2)} x ${ph.toFixed(2)} m`,
+    "72", "1",
+    "11", dimX,
+    "21", dimY,
+  );
+}
+
+function panelsToDxf(placed: PlacedPanel[]): string {
+  const lines: string[] = [];
+  emitDxfHeader(lines, CS_LAYERS.length);
   lines.push("0", "SECTION", "2", "ENTITIES");
 
   for (const { panel, x, y } of placed) {
-    const pw = panel.widthM;
-    const ph = panel.heightM;
-
-    // Draw panel outline edges (CUT_EXTERIOR layer — red).
-    for (const edge of panel.edges) {
-      lines.push(
-        "0", "LINE",
-        "8", "CUT_EXTERIOR",
-        "62", "1",
-        "10", r(x + edge.a.x),
-        "20", r(y + edge.a.y),
-        "11", r(x + edge.b.x),
-        "21", r(y + edge.b.y),
-      );
-    }
-
-    // Panel ID label centered above panel (ENGRAVE_VECTOR layer — blue).
-    const labelX = r(x + pw / 2);
-    const labelY = r(y + ph + GAP_M * 0.2);
-    lines.push(
-      "0", "TEXT",
-      "8", "ENGRAVE_VECTOR",
-      "62", "5",
-      "10", labelX,
-      "20", labelY,
-      "40", r(textH),
-      "1", panel.id,
-      "72", "1",
-      "11", labelX,
-      "21", labelY,
-    );
-
-    // Dimensions below panel (ENGRAVE_RASTER layer — white/7).
-    const dimX = r(x + pw / 2);
-    const dimY = r(y - GAP_M * 0.35);
-    lines.push(
-      "0", "TEXT",
-      "8", "ENGRAVE_RASTER",
-      "62", "7",
-      "10", dimX,
-      "20", dimY,
-      "40", r(dimTextH),
-      "1", `${pw.toFixed(2)} x ${ph.toFixed(2)} m`,
-      "72", "1",
-      "11", dimX,
-      "21", dimY,
-    );
+    emitPanelEntities(lines, panel.edges, panel.widthM, panel.heightM, panel.id, x, y);
   }
 
   lines.push("0", "ENDSEC", "0", "EOF");
@@ -753,4 +759,69 @@ export function generateCuttingSheets(
   }
 
   return results;
+}
+
+// ---------------------------------------------------------------------------
+// Nested-sheet DXF — panels arranged on physical sheets with outlines
+// ---------------------------------------------------------------------------
+
+import type { NestingResult } from "./sheet-nester";
+import { rotateEdges } from "./sheet-nester";
+
+export function nestedSheetsToDxf(nesting: NestingResult): string {
+  const { sheets, config } = nesting;
+  if (sheets.length === 0) return "";
+
+  const lines: string[] = [];
+  emitDxfHeader(lines, CS_LAYERS.length);
+  lines.push("0", "SECTION", "2", "ENTITIES");
+
+  const cols = Math.min(sheets.length, 3);
+
+  for (let si = 0; si < sheets.length; si++) {
+    const col = si % cols;
+    const row = Math.floor(si / cols);
+    const sx = col * (config.widthM + SHEET_SPACING_M);
+    const sy = -(row * (config.heightM + SHEET_SPACING_M));
+
+    // Sheet outline rectangle.
+    const x0 = sx, y0 = sy, x1 = sx + config.widthM, y1 = sy + config.heightM;
+    const corners: [number, number][] = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
+    for (let ci = 0; ci < 4; ci++) {
+      const [ax, ay] = corners[ci];
+      const [bx, by] = corners[(ci + 1) % 4];
+      lines.push(
+        "0", "LINE",
+        "8", "ENGRAVE_RASTER",
+        "62", "7",
+        "10", r(ax), "20", r(ay),
+        "11", r(bx), "21", r(by),
+      );
+    }
+
+    // Sheet label.
+    lines.push(
+      "0", "TEXT",
+      "8", "ENGRAVE_RASTER",
+      "62", "7",
+      "10", r(sx + config.widthM / 2),
+      "20", r(sy + config.heightM + 0.02),
+      "40", r(0.03),
+      "1", `Plancha ${si + 1}`,
+      "72", "1",
+      "11", r(sx + config.widthM / 2),
+      "21", r(sy + config.heightM + 0.02),
+    );
+
+    for (const placed of sheets[si].panels) {
+      const { panel, x, y, rotated, effectiveW, effectiveH } = placed;
+      const edges = rotated
+        ? rotateEdges(panel.edges, panel.widthM)
+        : panel.edges;
+      emitPanelEntities(lines, edges, effectiveW, effectiveH, panel.id, sx + x, sy + y);
+    }
+  }
+
+  lines.push("0", "ENDSEC", "0", "EOF");
+  return lines.join("\n") + "\n";
 }

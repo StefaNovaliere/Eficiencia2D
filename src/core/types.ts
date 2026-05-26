@@ -78,6 +78,13 @@ export interface ElementFilter {
   wallsInterior: boolean;
 }
 
+/** Physical sheet dimensions for laser cutting nesting. */
+export interface SheetConfig {
+  widthM: number;
+  heightM: number;
+  gapM: number;
+}
+
 /** Options that travel through the full pipeline. */
 export interface PipelineOptions {
   scaleDenom: number;
@@ -85,6 +92,7 @@ export interface PipelineOptions {
   includeCuttingSheet?: boolean;
   decompositionMode?: DecompositionMode;
   elementFilter?: ElementFilter;
+  sheetConfig?: SheetConfig;
 }
 
 /** A generated output file ready for download. */

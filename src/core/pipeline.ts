@@ -7,14 +7,17 @@
 // ============================================================================
 
 import { parseObj } from "./obj-parser";
-import { generateCuttingSheets } from "./cutting-sheet";
+import { generateCuttingSheets, decomposeIntoPanels, nestedSheetsToDxf } from "./cutting-sheet";
+import type { Panel } from "./cutting-sheet";
 import { detectUpAxis, extractFacades } from "./facade-extractor";
 import { extractFloorPlans } from "./floor-plan-extractor";
 import { DEFAULT_ELEMENT_FILTER } from "./geometry-classifier";
 import { classifyIntoGroups } from "./group-classifier";
 import type { GeometryGroup } from "./group-classifier";
 import { generatePdf } from "./pdf-writer";
-import type { Face3D, Facade, FloorPlan, OutputFile, PipelineOptions } from "./types";
+import { nestPanels, DEFAULT_SHEET } from "./sheet-nester";
+import type { NestingPanel, NestingResult } from "./sheet-nester";
+import type { Face3D, Facade, FloorPlan, OutputFile, PipelineOptions, SheetConfig } from "./types";
 
 export interface PipelineResult {
   facades: Facade[];
@@ -225,6 +228,144 @@ export function generatePipeline(
       name: `${stem}_planos.pdf`,
       blob: new Blob([pdfContent], { type: "application/pdf" }),
     });
+  }
+
+  if (files.length === 0) {
+    warnings.push(
+      `Se encontraron ${phase1.faces.length} caras pero no se pudieron generar archivos. ` +
+      "Verificá que el modelo contenga superficies válidas.",
+    );
+  }
+
+  return { facades, floorPlans, files, warnings };
+}
+
+// ---------------------------------------------------------------------------
+// Decompose + Nest: intermediate step between review and generation
+// ---------------------------------------------------------------------------
+
+export interface DecomposeResult {
+  wallPanels: Panel[];
+  floorPanels: Panel[];
+}
+
+export interface NestingPreviewData {
+  wallNesting: NestingResult;
+  floorNesting: NestingResult;
+  config: SheetConfig;
+}
+
+function filterFaces(
+  phase1: Phase1Result,
+  overrides?: ClassificationOverride[],
+): Face3D[] {
+  const overrideMap = new Map<number, GeometryGroup["category"]>();
+  if (overrides) {
+    for (const o of overrides) overrideMap.set(o.groupId, o.newCategory);
+  }
+  const faceCategoryMap = new Map<number, GeometryGroup["category"]>();
+  for (const group of phase1.groups) {
+    const effective = overrideMap.get(group.id) ?? group.category;
+    for (const fi of group.faceIndices) faceCategoryMap.set(fi, effective);
+  }
+
+  const filter = DEFAULT_ELEMENT_FILTER;
+  const wallEnabled = filter.wallsExterior || filter.wallsInterior;
+  const result: Face3D[] = [];
+  for (let i = 0; i < phase1.faces.length; i++) {
+    const cat = faceCategoryMap.get(i);
+    if (!cat || cat === "discard") continue;
+    if (cat === "floor" && !filter.floors) continue;
+    if (cat === "wall_exterior" && !filter.wallsExterior) continue;
+    if (cat === "wall_interior" && !filter.wallsInterior) continue;
+    if (cat === "wall" && !wallEnabled) continue;
+    result.push(phase1.faces[i]);
+  }
+  return result;
+}
+
+export function decomposePanels(
+  phase1: Phase1Result,
+  opts: PipelineOptions,
+  overrides?: ClassificationOverride[],
+): DecomposeResult {
+  const filteredFaces = filterFaces(phase1, overrides);
+  const simpleMode = (opts.decompositionMode ?? "simple") === "simple";
+  const panels = decomposeIntoPanels(filteredFaces, "Y", simpleMode);
+
+  return {
+    wallPanels: panels.filter((p) => p.category === "wall"),
+    floorPanels: panels.filter((p) => p.category === "floor"),
+  };
+}
+
+function panelsToNestingPanels(panels: Panel[]): NestingPanel[] {
+  return panels.map((p) => ({
+    id: p.id,
+    category: p.category,
+    widthM: p.widthM,
+    heightM: p.heightM,
+    edges: p.edges,
+  }));
+}
+
+export function nestDecomposedPanels(
+  decomposed: DecomposeResult,
+  config?: SheetConfig,
+): NestingPreviewData {
+  const cfg = config ?? DEFAULT_SHEET;
+  return {
+    wallNesting: nestPanels(panelsToNestingPanels(decomposed.wallPanels), cfg),
+    floorNesting: nestPanels(panelsToNestingPanels(decomposed.floorPanels), cfg),
+    config: cfg,
+  };
+}
+
+export function generateFromNesting(
+  phase1: Phase1Result,
+  nesting: NestingPreviewData,
+  opts: PipelineOptions,
+): PipelineResult {
+  const warnings = [...phase1.warnings];
+  const stem = phase1.stem;
+
+  const facades = extractFacades(phase1.faces, "Y");
+  const floorPlans = extractFloorPlans(phase1.faces, "Y");
+
+  const files: OutputFile[] = [];
+  const scaleDenom = opts.scaleDenom;
+
+  if (nesting.wallNesting.sheets.length > 0) {
+    const content = nestedSheetsToDxf(nesting.wallNesting);
+    files.push({
+      name: `${stem}_Descomposicion_Paredes.dxf`,
+      blob: new Blob([content], { type: "application/dxf" }),
+    });
+  }
+
+  if (nesting.floorNesting.sheets.length > 0) {
+    const content = nestedSheetsToDxf(nesting.floorNesting);
+    files.push({
+      name: `${stem}_Descomposicion_Pisos.dxf`,
+      blob: new Blob([content], { type: "application/dxf" }),
+    });
+  }
+
+  const pdfContent = generatePdf(facades, floorPlans, scaleDenom, opts.paper);
+  if (pdfContent) {
+    files.push({
+      name: `${stem}_planos.pdf`,
+      blob: new Blob([pdfContent], { type: "application/pdf" }),
+    });
+  }
+
+  if (nesting.wallNesting.unplaced.length > 0 || nesting.floorNesting.unplaced.length > 0) {
+    const count = nesting.wallNesting.unplaced.length + nesting.floorNesting.unplaced.length;
+    warnings.push(
+      `${count} componente${count !== 1 ? "s" : ""} no caben en la plancha ` +
+      `(${nesting.config.widthM.toFixed(2)} x ${nesting.config.heightM.toFixed(2)} m) ` +
+      "y fueron excluidos del DXF.",
+    );
   }
 
   if (files.length === 0) {
