@@ -115,7 +115,7 @@ export default function UploadForm() {
         },
       );
 
-      const nesting = nestDecomposedPanels(decomposed, sheetConfig);
+      const nesting = nestDecomposedPanels(decomposed, sheetConfig, scale);
       setNestingData(nesting);
       setStatus("nesting");
     } catch (err: unknown) {
@@ -138,7 +138,7 @@ export default function UploadForm() {
       sheetConfig: newConfig,
     };
     const decomposed = decomposePanels(phase1Result, opts, savedOverrides);
-    const nesting = nestDecomposedPanels(decomposed, newConfig);
+    const nesting = nestDecomposedPanels(decomposed, newConfig, scale);
     setNestingData(nesting);
   }, [phase1Result, savedOverrides, scale, paper, decompositionMode]);
 

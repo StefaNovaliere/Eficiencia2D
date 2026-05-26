@@ -664,6 +664,7 @@ function emitPanelEntities(
   panelId: string,
   ox: number,
   oy: number,
+  scaleDenom: number = 1,
 ): void {
   for (const edge of edges) {
     lines.push(
@@ -677,11 +678,11 @@ function emitPanelEntities(
     );
   }
 
-  const textH = Math.min(0.04, Math.min(pw, ph) * 0.12);
-  const dimTextH = textH * 0.7;
+  const textH = Math.min(0.04, Math.min(pw, ph) * 0.18);
+  const dimTextH = textH * 0.65;
 
   const labelX = r(ox + pw / 2);
-  const labelY = r(oy + ph - textH * 1.8);
+  const labelY = r(oy + ph - textH * 1.6);
   lines.push(
     "0", "TEXT",
     "8", "ENGRAVE_VECTOR",
@@ -695,6 +696,8 @@ function emitPanelEntities(
     "21", labelY,
   );
 
+  const realW = pw * scaleDenom;
+  const realH = ph * scaleDenom;
   const dimX = r(ox + pw / 2);
   const dimY = r(oy + dimTextH * 1.2);
   lines.push(
@@ -704,7 +707,7 @@ function emitPanelEntities(
     "10", dimX,
     "20", dimY,
     "40", r(dimTextH),
-    "1", `${pw.toFixed(2)} x ${ph.toFixed(2)} m`,
+    "1", `${realW.toFixed(2)} x ${realH.toFixed(2)} m`,
     "72", "1",
     "11", dimX,
     "21", dimY,
@@ -818,7 +821,16 @@ export function nestedSheetsToDxf(nesting: NestingResult): string {
       const edges = rotated
         ? rotateEdges(panel.edges, panel.widthM)
         : panel.edges;
-      emitPanelEntities(lines, edges, effectiveW, effectiveH, panel.id, sx + x, sy + y);
+      emitPanelEntities(
+        lines,
+        edges,
+        effectiveW,
+        effectiveH,
+        panel.id,
+        sx + x,
+        sy + y,
+        nesting.scaleDenom,
+      );
     }
   }
 
