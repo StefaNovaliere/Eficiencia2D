@@ -48,6 +48,7 @@ export interface NestingSheet {
 export interface NestingResult {
   sheets: NestingSheet[];
   config: SheetConfig;
+  scaleDenom: number;
   unplaced: NestingPanel[];
 }
 
@@ -125,6 +126,7 @@ function placeOnSheet(
 export function nestPanels(
   panels: NestingPanel[],
   config: SheetConfig,
+  scaleDenom: number = 1,
 ): NestingResult {
   const { widthM, heightM, gapM } = config;
   const sheetArea = widthM * heightM;
@@ -201,7 +203,7 @@ export function nestPanels(
     return { index: i, panels: s.panels, utilization: usedArea / sheetArea };
   });
 
-  return { sheets, config, unplaced };
+  return { sheets, config, scaleDenom, unplaced };
 }
 
 /**

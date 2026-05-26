@@ -299,24 +299,37 @@ export function decomposePanels(
   };
 }
 
-function panelsToNestingPanels(panels: Panel[]): NestingPanel[] {
+function panelsToNestingPanels(panels: Panel[], scaleDenom: number): NestingPanel[] {
+  const s = 1 / scaleDenom;
   return panels.map((p) => ({
     id: p.id,
     category: p.category,
-    widthM: p.widthM,
-    heightM: p.heightM,
-    edges: p.edges,
+    widthM: p.widthM * s,
+    heightM: p.heightM * s,
+    edges: p.edges.map((e) => ({
+      a: { x: e.a.x * s, y: e.a.y * s },
+      b: { x: e.b.x * s, y: e.b.y * s },
+    })),
   }));
 }
 
 export function nestDecomposedPanels(
   decomposed: DecomposeResult,
   config?: SheetConfig,
+  scaleDenom: number = 1,
 ): NestingPreviewData {
   const cfg = config ?? DEFAULT_SHEET;
   return {
-    wallNesting: nestPanels(panelsToNestingPanels(decomposed.wallPanels), cfg),
-    floorNesting: nestPanels(panelsToNestingPanels(decomposed.floorPanels), cfg),
+    wallNesting: nestPanels(
+      panelsToNestingPanels(decomposed.wallPanels, scaleDenom),
+      cfg,
+      scaleDenom,
+    ),
+    floorNesting: nestPanels(
+      panelsToNestingPanels(decomposed.floorPanels, scaleDenom),
+      cfg,
+      scaleDenom,
+    ),
     config: cfg,
   };
 }
