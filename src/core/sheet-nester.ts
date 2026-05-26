@@ -1,11 +1,12 @@
 // ============================================================================
 // Sheet Nester — 2D Bin Packing for Laser Cutting Sheets
 //
-// Packs rectangular panels onto fixed-size sheets using a shelf-first-fit-
-// decreasing (SFFD) algorithm with 90-degree rotation.
+// Uses the Maximal Rectangles (MAXRECTS) algorithm with Best Short Side Fit
+// heuristic. For each panel we evaluate every free rectangle on every sheet
+// (in both orientations) and pick the placement that wastes the least space.
 //
-// Each panel can be rotated to find the best fit. Panels that exceed sheet
-// dimensions in both orientations are reported as "unplaced".
+// MAXRECTS distributes panels naturally throughout each sheet rather than
+// pile-up-from-the-bottom shelf packing.
 // ============================================================================
 
 import type { Vec2 } from "./types";
@@ -53,76 +54,118 @@ export interface NestingResult {
 }
 
 // ---------------------------------------------------------------------------
-// Shelf-based packing
+// MAXRECTS
 // ---------------------------------------------------------------------------
 
-interface Shelf {
+interface FreeRect {
+  x: number;
   y: number;
-  height: number;
-  nextX: number;
+  w: number;
+  h: number;
 }
 
 interface SheetState {
-  shelves: Shelf[];
+  freeRects: FreeRect[];
   panels: PlacedNestingPanel[];
 }
 
-function tryFitOnSheet(
-  sheet: SheetState,
+const EPS = 0.0005;
+
+/** Best Short Side Fit — minimize the shorter leftover dimension. */
+function findBestRect(
+  freeRects: FreeRect[],
   pw: number,
   ph: number,
-  config: SheetConfig,
-): { x: number; y: number; shelfIdx: number } | null {
-  const { widthM, heightM, gapM } = config;
-
-  for (let si = 0; si < sheet.shelves.length; si++) {
-    const shelf = sheet.shelves[si];
-    if (ph <= shelf.height + 0.0005 && shelf.nextX + pw <= widthM + 0.0005) {
-      return { x: shelf.nextX, y: shelf.y, shelfIdx: si };
+): { x: number; y: number; score: number } | null {
+  let best: { x: number; y: number; score: number } | null = null;
+  for (const rect of freeRects) {
+    if (pw <= rect.w + EPS && ph <= rect.h + EPS) {
+      const leftH = rect.w - pw;
+      const leftV = rect.h - ph;
+      const shortSide = Math.min(leftH, leftV);
+      const longSide = Math.max(leftH, leftV);
+      const score = shortSide * 1000 + longSide;
+      if (!best || score < best.score) {
+        best = { x: rect.x, y: rect.y, score };
+      }
     }
   }
-
-  const last = sheet.shelves[sheet.shelves.length - 1];
-  const newY = last ? last.y + last.height + gapM : 0;
-
-  if (newY + ph <= heightM + 0.0005 && pw <= widthM + 0.0005) {
-    sheet.shelves.push({ y: newY, height: ph, nextX: 0 });
-    return { x: 0, y: newY, shelfIdx: sheet.shelves.length - 1 };
-  }
-
-  return null;
+  return best;
 }
 
-function placeOnSheet(
+function pruneContained(rects: FreeRect[]): FreeRect[] {
+  const out: FreeRect[] = [];
+  for (let i = 0; i < rects.length; i++) {
+    const ri = rects[i];
+    let contained = false;
+    for (let j = 0; j < rects.length; j++) {
+      if (i === j) continue;
+      const rj = rects[j];
+      if (
+        ri.x >= rj.x - EPS &&
+        ri.y >= rj.y - EPS &&
+        ri.x + ri.w <= rj.x + rj.w + EPS &&
+        ri.y + ri.h <= rj.y + rj.h + EPS
+      ) {
+        contained = true;
+        break;
+      }
+    }
+    if (!contained) out.push(ri);
+  }
+  return out;
+}
+
+function commitPlacement(
   sheet: SheetState,
   panel: NestingPanel,
-  pos: { x: number; y: number; shelfIdx: number },
+  px: number,
+  py: number,
   rotated: boolean,
   pw: number,
   ph: number,
-  gapM: number,
+  gap: number,
 ): void {
   sheet.panels.push({
     panel,
-    x: pos.x,
-    y: pos.y,
+    x: px,
+    y: py,
     rotated,
     effectiveW: pw,
     effectiveH: ph,
   });
-  sheet.shelves[pos.shelfIdx].nextX = pos.x + pw + gapM;
-  if (ph > sheet.shelves[pos.shelfIdx].height) {
-    sheet.shelves[pos.shelfIdx].height = ph;
+
+  const bx2 = px + pw + gap;
+  const by2 = py + ph + gap;
+  const next: FreeRect[] = [];
+
+  for (const rect of sheet.freeRects) {
+    const rx2 = rect.x + rect.w;
+    const ry2 = rect.y + rect.h;
+
+    if (bx2 <= rect.x || px >= rx2 || by2 <= rect.y || py >= ry2) {
+      next.push(rect);
+      continue;
+    }
+
+    if (px > rect.x) {
+      next.push({ x: rect.x, y: rect.y, w: px - rect.x, h: rect.h });
+    }
+    if (bx2 < rx2) {
+      next.push({ x: bx2, y: rect.y, w: rx2 - bx2, h: rect.h });
+    }
+    if (py > rect.y) {
+      next.push({ x: rect.x, y: rect.y, w: rect.w, h: py - rect.y });
+    }
+    if (by2 < ry2) {
+      next.push({ x: rect.x, y: by2, w: rect.w, h: ry2 - by2 });
+    }
   }
+
+  const cleaned = next.filter((r) => r.w > 0.001 && r.h > 0.001);
+  sheet.freeRects = pruneContained(cleaned);
 }
 
-/**
- * Pack panels onto fixed-size sheets.
- *
- * The algorithm sorts panels by area (descending), then for each panel tries
- * to fit it on existing sheets/shelves in both orientations before opening a
- * new sheet. Rotation is only attempted when the two dimensions differ.
- */
 export function nestPanels(
   panels: NestingPanel[],
   config: SheetConfig,
@@ -141,66 +184,75 @@ export function nestPanels(
   for (const panel of sorted) {
     const pw = panel.widthM;
     const ph = panel.heightM;
+    const fitsN = pw <= widthM + EPS && ph <= heightM + EPS;
+    const fitsR = ph <= widthM + EPS && pw <= heightM + EPS;
+    const canRotate = fitsR && Math.abs(pw - ph) > 0.001;
 
-    const fitsNormal = pw <= widthM + 0.0005 && ph <= heightM + 0.0005;
-    const fitsRotated = ph <= widthM + 0.0005 && pw <= heightM + 0.0005;
-    const canRotate = fitsRotated && Math.abs(pw - ph) > 0.001;
-
-    if (!fitsNormal && !fitsRotated) {
+    if (!fitsN && !fitsR) {
       unplaced.push(panel);
       continue;
     }
 
+    let bestSheet = -1;
+    let bestX = 0, bestY = 0, bestPw = 0, bestPh = 0;
+    let bestRot = false;
+    let bestScore = Infinity;
+
+    for (let si = 0; si < states.length; si++) {
+      if (fitsN) {
+        const r = findBestRect(states[si].freeRects, pw, ph);
+        if (r && r.score < bestScore) {
+          bestScore = r.score;
+          bestSheet = si;
+          bestX = r.x; bestY = r.y;
+          bestPw = pw; bestPh = ph;
+          bestRot = false;
+        }
+      }
+      if (canRotate) {
+        const r = findBestRect(states[si].freeRects, ph, pw);
+        if (r && r.score < bestScore) {
+          bestScore = r.score;
+          bestSheet = si;
+          bestX = r.x; bestY = r.y;
+          bestPw = ph; bestPh = pw;
+          bestRot = true;
+        }
+      }
+    }
+
+    if (bestSheet >= 0) {
+      commitPlacement(states[bestSheet], panel, bestX, bestY, bestRot, bestPw, bestPh, gapM);
+      continue;
+    }
+
+    const newSheet: SheetState = {
+      freeRects: [{ x: 0, y: 0, w: widthM, h: heightM }],
+      panels: [],
+    };
     let placed = false;
-
-    for (const sheet of states) {
-      if (fitsNormal) {
-        const pos = tryFitOnSheet(sheet, pw, ph, config);
-        if (pos) {
-          placeOnSheet(sheet, panel, pos, false, pw, ph, gapM);
-          placed = true;
-          break;
-        }
-      }
-      if (!placed && canRotate) {
-        const pos = tryFitOnSheet(sheet, ph, pw, config);
-        if (pos) {
-          placeOnSheet(sheet, panel, pos, true, ph, pw, gapM);
-          placed = true;
-          break;
-        }
+    if (fitsN) {
+      const r = findBestRect(newSheet.freeRects, pw, ph);
+      if (r) {
+        commitPlacement(newSheet, panel, r.x, r.y, false, pw, ph, gapM);
+        placed = true;
       }
     }
-
-    if (!placed) {
-      const newSheet: SheetState = { shelves: [], panels: [] };
-      states.push(newSheet);
-
-      if (fitsNormal) {
-        const pos = tryFitOnSheet(newSheet, pw, ph, config);
-        if (pos) {
-          placeOnSheet(newSheet, panel, pos, false, pw, ph, gapM);
-          placed = true;
-        }
-      }
-      if (!placed && canRotate) {
-        const pos = tryFitOnSheet(newSheet, ph, pw, config);
-        if (pos) {
-          placeOnSheet(newSheet, panel, pos, true, ph, pw, gapM);
-          placed = true;
-        }
-      }
-      if (!placed) {
-        unplaced.push(panel);
-        states.pop();
+    if (!placed && canRotate) {
+      const r = findBestRect(newSheet.freeRects, ph, pw);
+      if (r) {
+        commitPlacement(newSheet, panel, r.x, r.y, true, ph, pw, gapM);
+        placed = true;
       }
     }
+    if (placed) states.push(newSheet);
+    else unplaced.push(panel);
   }
 
   const sheets: NestingSheet[] = states.map((s, i) => {
-    let usedArea = 0;
-    for (const p of s.panels) usedArea += p.effectiveW * p.effectiveH;
-    return { index: i, panels: s.panels, utilization: usedArea / sheetArea };
+    let used = 0;
+    for (const p of s.panels) used += p.effectiveW * p.effectiveH;
+    return { index: i, panels: s.panels, utilization: used / sheetArea };
   });
 
   return { sheets, config, scaleDenom, unplaced };
@@ -208,7 +260,7 @@ export function nestPanels(
 
 /**
  * Rotate edge coordinates 90 degrees CW within the panel bounding box.
- * Original (widthM x heightM) becomes (heightM x widthM).
+ * A (widthM x heightM) panel becomes (heightM x widthM).
  * Point (x, y) maps to (y, widthM - x).
  */
 export function rotateEdges(

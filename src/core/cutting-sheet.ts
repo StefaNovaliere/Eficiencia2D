@@ -606,9 +606,9 @@ function layoutPanels(panels: Panel[]): PlacedPanel[] {
 
 /** Layer definitions for the 4-layer laser cutting protocol. */
 const CS_LAYERS = [
-  { name: "CUT_EXTERIOR",   aci: "1" }, // red
+  { name: "CUT_EXTERIOR",   aci: "7" }, // black (white in CAD = black on light bg)
   { name: "ENGRAVE_VECTOR", aci: "5" }, // blue
-  { name: "ENGRAVE_RASTER", aci: "7" }, // white
+  { name: "ENGRAVE_RASTER", aci: "8" }, // dark gray
   { name: "CUT_INTERIOR",   aci: "3" }, // green
 ];
 
@@ -656,6 +656,15 @@ function emitDxfHeader(lines: string[], layerCount: number): void {
   lines.push("0", "ENDTAB", "0", "ENDSEC");
 }
 
+/** Approximate ratio of character width to text height (monospace-ish). */
+const CHAR_W_RATIO = 0.62;
+
+function fitTextHeight(text: string, maxW: number, maxH: number): number {
+  if (text.length === 0) return maxH;
+  const byWidth = (maxW * 0.88) / (text.length * CHAR_W_RATIO);
+  return Math.min(byWidth, maxH);
+}
+
 function emitPanelEntities(
   lines: string[],
   edges: Array<{ a: Vec2; b: Vec2 }>,
@@ -670,7 +679,7 @@ function emitPanelEntities(
     lines.push(
       "0", "LINE",
       "8", "CUT_EXTERIOR",
-      "62", "1",
+      "62", "7",
       "10", r(ox + edge.a.x),
       "20", r(oy + edge.a.y),
       "11", r(ox + edge.b.x),
@@ -678,40 +687,46 @@ function emitPanelEntities(
     );
   }
 
-  const textH = Math.min(0.04, Math.min(pw, ph) * 0.18);
-  const dimTextH = textH * 0.65;
-
-  const labelX = r(ox + pw / 2);
-  const labelY = r(oy + ph - textH * 1.6);
-  lines.push(
-    "0", "TEXT",
-    "8", "ENGRAVE_VECTOR",
-    "62", "5",
-    "10", labelX,
-    "20", labelY,
-    "40", r(textH),
-    "1", panelId,
-    "72", "1",
-    "11", labelX,
-    "21", labelY,
-  );
-
   const realW = pw * scaleDenom;
   const realH = ph * scaleDenom;
-  const dimX = r(ox + pw / 2);
-  const dimY = r(oy + dimTextH * 1.2);
-  lines.push(
-    "0", "TEXT",
-    "8", "ENGRAVE_RASTER",
-    "62", "7",
-    "10", dimX,
-    "20", dimY,
-    "40", r(dimTextH),
-    "1", `${realW.toFixed(2)} x ${realH.toFixed(2)} m`,
-    "72", "1",
-    "11", dimX,
-    "21", dimY,
-  );
+  const dimText = `${realW.toFixed(2)} x ${realH.toFixed(2)} m`;
+
+  const labelH = fitTextHeight(panelId, pw, ph * 0.32);
+  const dimH = fitTextHeight(dimText, pw, ph * 0.22);
+
+  if (labelH >= 0.001) {
+    const labelX = r(ox + pw / 2);
+    const labelY = r(oy + ph - labelH * 1.5);
+    lines.push(
+      "0", "TEXT",
+      "8", "ENGRAVE_VECTOR",
+      "62", "5",
+      "10", labelX,
+      "20", labelY,
+      "40", r(labelH),
+      "1", panelId,
+      "72", "1",
+      "11", labelX,
+      "21", labelY,
+    );
+  }
+
+  if (dimH >= 0.001 && labelH + dimH < ph * 0.7) {
+    const dimX = r(ox + pw / 2);
+    const dimY = r(oy + dimH * 0.6);
+    lines.push(
+      "0", "TEXT",
+      "8", "ENGRAVE_RASTER",
+      "62", "8",
+      "10", dimX,
+      "20", dimY,
+      "40", r(dimH),
+      "1", dimText,
+      "72", "1",
+      "11", dimX,
+      "21", dimY,
+    );
+  }
 }
 
 function panelsToDxf(placed: PlacedPanel[]): string {
