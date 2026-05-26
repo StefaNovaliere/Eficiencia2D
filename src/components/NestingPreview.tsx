@@ -179,6 +179,7 @@ export default function NestingPreview({
   const wallPanels = nesting.wallNesting.sheets.reduce((s, sh) => s + sh.panels.length, 0);
   const floorPanels = nesting.floorNesting.sheets.reduce((s, sh) => s + sh.panels.length, 0);
   const unplacedCount = nesting.wallNesting.unplaced.length + nesting.floorNesting.unplaced.length;
+  const scaleDenom = nesting.wallNesting.scaleDenom || nesting.floorNesting.scaleDenom || 1;
 
   return (
     <div className="nesting-overlay">
@@ -243,6 +244,8 @@ export default function NestingPreview({
           <span className="nesting-stat">
             {sheetConfig.widthM.toFixed(2)} &times; {sheetConfig.heightM.toFixed(2)} m
           </span>
+          <span className="stat-sep">&middot;</span>
+          <span className="nesting-stat">Escala 1:{scaleDenom}</span>
           <span className="stat-sep">&middot;</span>
           <span className="nesting-stat">3mm separacion</span>
           <span className="stat-sep">&middot;</span>
