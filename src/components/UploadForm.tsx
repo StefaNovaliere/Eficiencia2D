@@ -1,12 +1,14 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import { parsePipeline, generatePipeline } from "@/core/pipeline";
-import type { Phase1Result, ClassificationOverride } from "@/core/pipeline";
+import { parsePipeline, decomposePanels, nestDecomposedPanels, generateFromNesting } from "@/core/pipeline";
+import type { Phase1Result, ClassificationOverride, NestingPreviewData } from "@/core/pipeline";
 import ReviewScreen from "./ReviewScreen";
-import type { DecompositionMode, PipelineOptions } from "@/core/types";
+import NestingPreview from "./NestingPreview";
+import { DEFAULT_SHEET } from "@/core/sheet-nester";
+import type { DecompositionMode, PipelineOptions, SheetConfig } from "@/core/types";
 
-type Status = "idle" | "parsing" | "reviewing" | "generating" | "done" | "error";
+type Status = "idle" | "parsing" | "reviewing" | "nesting" | "generating" | "done" | "error";
 
 export default function UploadForm() {
   const [file, setFile] = useState<File | null>(null);
@@ -17,6 +19,9 @@ export default function UploadForm() {
   const [error, setError] = useState("");
   const [dragActive, setDragActive] = useState(false);
   const [phase1Result, setPhase1Result] = useState<Phase1Result | null>(null);
+  const [nestingData, setNestingData] = useState<NestingPreviewData | null>(null);
+  const [savedOverrides, setSavedOverrides] = useState<ClassificationOverride[]>([]);
+  const [sheetConfig, setSheetConfig] = useState<SheetConfig>(() => ({ ...DEFAULT_SHEET }));
   const dropRef = useRef<HTMLDivElement>(null);
 
   const accept = ".obj";
@@ -93,6 +98,53 @@ export default function UploadForm() {
   const handleReviewConfirm = async (overrides: ClassificationOverride[]) => {
     if (!phase1Result || !file) return;
 
+    setSavedOverrides(overrides);
+
+    try {
+      const opts: PipelineOptions = {
+        scaleDenom: scale,
+        paper,
+        includeCuttingSheet: true,
+        decompositionMode,
+        sheetConfig,
+      };
+
+      const decomposed = await new Promise<ReturnType<typeof decomposePanels>>(
+        (resolve) => {
+          setTimeout(() => resolve(decomposePanels(phase1Result, opts, overrides)), 50);
+        },
+      );
+
+      const nesting = nestDecomposedPanels(decomposed, sheetConfig);
+      setNestingData(nesting);
+      setStatus("nesting");
+    } catch (err: unknown) {
+      setError(
+        err instanceof Error ? err.message : "Error desconocido al procesar.",
+      );
+      setStatus("error");
+    }
+  };
+
+  const handleSheetConfigChange = useCallback((newConfig: SheetConfig) => {
+    setSheetConfig(newConfig);
+    if (!phase1Result) return;
+
+    const opts: PipelineOptions = {
+      scaleDenom: scale,
+      paper,
+      includeCuttingSheet: true,
+      decompositionMode,
+      sheetConfig: newConfig,
+    };
+    const decomposed = decomposePanels(phase1Result, opts, savedOverrides);
+    const nesting = nestDecomposedPanels(decomposed, newConfig);
+    setNestingData(nesting);
+  }, [phase1Result, savedOverrides, scale, paper, decompositionMode]);
+
+  const handleNestingConfirm = async () => {
+    if (!phase1Result || !file || !nestingData) return;
+
     setStatus("generating");
 
     try {
@@ -101,13 +153,12 @@ export default function UploadForm() {
         paper,
         includeCuttingSheet: true,
         decompositionMode,
+        sheetConfig,
       };
 
-      const result = await new Promise<ReturnType<typeof generatePipeline>>(
+      const result = await new Promise<ReturnType<typeof generateFromNesting>>(
         (resolve) => {
-          setTimeout(() => {
-            resolve(generatePipeline(phase1Result, opts, overrides));
-          }, 50);
+          setTimeout(() => resolve(generateFromNesting(phase1Result, nestingData, opts)), 50);
         },
       );
 
@@ -144,6 +195,11 @@ export default function UploadForm() {
     }
   };
 
+  const handleNestingBack = useCallback(() => {
+    setNestingData(null);
+    setStatus("reviewing");
+  }, []);
+
   const handleReviewCancel = () => {
     setPhase1Result(null);
     setStatus("idle");
@@ -152,9 +208,24 @@ export default function UploadForm() {
   const reset = () => {
     setFile(null);
     setPhase1Result(null);
+    setNestingData(null);
+    setSavedOverrides([]);
     setStatus("idle");
     setError("");
   };
+
+  // Show nesting preview.
+  if (status === "nesting" && nestingData) {
+    return (
+      <NestingPreview
+        nesting={nestingData}
+        onConfirm={handleNestingConfirm}
+        onBack={handleNestingBack}
+        sheetConfig={sheetConfig}
+        onSheetConfigChange={handleSheetConfigChange}
+      />
+    );
+  }
 
   // Show review screen when in review mode.
   if (status === "reviewing" && phase1Result) {
