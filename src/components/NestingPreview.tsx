@@ -118,17 +118,23 @@ function SheetCanvas({
         ctx.lineWidth = 1;
         ctx.strokeRect(toX(px), toY(py), pw * scale, ph * scale);
 
-        // Panel ID
-        const fontSize = Math.max(8, Math.min(13, Math.min(pw, ph) * scale * 0.25));
-        ctx.fillStyle = color;
-        ctx.font = `600 ${fontSize}px Inter, sans-serif`;
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText(
-          placed.panel.id,
-          toX(px + pw / 2),
-          toY(py + ph / 2),
-        );
+        // Panel ID — fixed size in sheet space (8mm) so labels don't scale
+        // with panel size and overlap edges.
+        const LABEL_M = 0.008;
+        const targetPx = LABEL_M * scale;
+        const maxPx = Math.min(pw, ph) * scale * 0.7;
+        const fontSize = Math.max(7, Math.min(targetPx, maxPx));
+        if (fontSize >= 7) {
+          ctx.fillStyle = color;
+          ctx.font = `600 ${fontSize}px Inter, sans-serif`;
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText(
+            placed.panel.id,
+            toX(px + pw / 2),
+            toY(py + ph / 2),
+          );
+        }
       }
     }
   }, [sheets, config, color, dims]);
