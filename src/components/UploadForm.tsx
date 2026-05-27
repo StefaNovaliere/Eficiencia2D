@@ -162,23 +162,6 @@ export default function UploadForm() {
     setNestingData(nesting);
   }, [phase1Result, savedOverrides, paper, decompositionMode, sheetConfig, minAreaM2]);
 
-  const handleMinAreaChange = useCallback((newArea: number) => {
-    setMinAreaM2(newArea);
-    if (!phase1Result) return;
-
-    const opts: PipelineOptions = {
-      scaleDenom: scale,
-      paper,
-      includeCuttingSheet: true,
-      decompositionMode,
-      sheetConfig,
-      minAreaM2: newArea,
-    };
-    const decomposed = decomposePanels(phase1Result, opts, savedOverrides);
-    const nesting = nestDecomposedPanels(decomposed, sheetConfig, scale);
-    setNestingData(nesting);
-  }, [phase1Result, savedOverrides, scale, paper, decompositionMode, sheetConfig]);
-
   const handleNestingConfirm = async () => {
     if (!phase1Result || !file || !nestingData) return;
 
@@ -263,8 +246,6 @@ export default function UploadForm() {
         onSheetConfigChange={handleSheetConfigChange}
         scaleDenom={scale}
         onScaleChange={handleScaleChange}
-        minAreaM2={minAreaM2}
-        onMinAreaChange={handleMinAreaChange}
       />
     );
   }
@@ -277,6 +258,8 @@ export default function UploadForm() {
         onConfirm={handleReviewConfirm}
         onCancel={handleReviewCancel}
         onAxisChange={setPhase1Result}
+        minAreaM2={minAreaM2}
+        onMinAreaChange={setMinAreaM2}
       />
     );
   }
