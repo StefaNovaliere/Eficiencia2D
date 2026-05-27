@@ -90,19 +90,32 @@ export default function ReviewScreen({
     });
   }, []);
 
+  // Combine user overrides with auto-discards from the area threshold.
+  // User overrides always win — explicit choices are never replaced.
+  const effectiveOverrides = useMemo(() => {
+    const merged = new Map(overrides);
+    if (minAreaM2 > 0) {
+      for (const group of phase1.groups) {
+        if (merged.has(group.id)) continue;
+        if (group.totalArea < minAreaM2) merged.set(group.id, "discard");
+      }
+    }
+    return merged;
+  }, [overrides, phase1.groups, minAreaM2]);
+
   const handleConfirm = useCallback(() => {
     const result: ClassificationOverride[] = [];
-    for (const [groupId, newCategory] of overrides.entries()) {
+    for (const [groupId, newCategory] of effectiveOverrides.entries()) {
       result.push({ groupId, newCategory });
     }
     onConfirm(result);
-  }, [overrides, onConfirm]);
+  }, [effectiveOverrides, onConfirm]);
 
   // Stats (per effective category).
   const stats = useMemo(() => {
     let floors = 0, walls = 0, wallsExt = 0, wallsInt = 0, discarded = 0;
     for (const group of phase1.groups) {
-      const cat = overrides.get(group.id) ?? group.category;
+      const cat = effectiveOverrides.get(group.id) ?? group.category;
       if (cat === "floor") floors++;
       else if (cat === "wall") walls++;
       else if (cat === "wall_exterior") wallsExt++;
@@ -110,7 +123,7 @@ export default function ReviewScreen({
       else discarded++;
     }
     return { floors, walls, wallsExt, wallsInt, discarded };
-  }, [phase1.groups, overrides]);
+  }, [phase1.groups, effectiveOverrides]);
 
   return (
     <div className="review-overlay">
@@ -119,7 +132,7 @@ export default function ReviewScreen({
           faces={phase1.faces}
           groups={phase1.groups}
           selectedGroupId={selectedGroupId}
-          categoryOverrides={overrides}
+          categoryOverrides={effectiveOverrides}
           visibleCategories={visibleCategories}
           onSelectGroup={handleSelectGroup}
         />
@@ -160,7 +173,7 @@ export default function ReviewScreen({
         <GroupList
           groups={phase1.groups}
           selectedGroupId={selectedGroupId}
-          categoryOverrides={overrides}
+          categoryOverrides={effectiveOverrides}
           visibleCategories={visibleCategories}
           onSelectGroup={handleSelectGroup}
           onChangeCategory={handleChangeCategory}
