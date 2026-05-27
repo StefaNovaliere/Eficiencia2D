@@ -556,6 +556,41 @@ body {
   background: rgba(39, 39, 42, 0.9);
 }
 
+.min-area-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 6px 12px;
+  background: rgba(24, 24, 27, 0.85);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  pointer-events: auto;
+}
+
+.min-area-label {
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+
+.min-area-select {
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.min-area-select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
 .review-sidebar {
   flex: 2;
   min-width: 320px;
