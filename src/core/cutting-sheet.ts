@@ -659,10 +659,15 @@ function emitDxfHeader(lines: string[], layerCount: number): void {
 /** Approximate ratio of character width to text height (monospace-ish). */
 const CHAR_W_RATIO = 0.62;
 
-function fitTextHeight(text: string, maxW: number, maxH: number): number {
-  if (text.length === 0) return maxH;
+/** Fixed reference text heights in sheet metres (independent of panel size). */
+const LABEL_H_M = 0.008;  // 8mm for panel ID
+const DIM_H_M = 0.005;    // 5mm for dimensions
+
+/** Largest height that fits both the panel bounds and a width budget. */
+function fitTextHeight(text: string, maxW: number, maxH: number, targetH: number): number {
+  if (text.length === 0) return 0;
   const byWidth = (maxW * 0.88) / (text.length * CHAR_W_RATIO);
-  return Math.min(byWidth, maxH);
+  return Math.min(targetH, byWidth, maxH);
 }
 
 function emitPanelEntities(
@@ -694,10 +699,12 @@ function emitPanelEntities(
   const realH = ph * scaleDenom;
   const dimText = `${realW.toFixed(2)} x ${realH.toFixed(2)} m`;
 
-  const labelH = fitTextHeight(panelId, pw, ph * 0.12);
-  const dimH = fitTextHeight(dimText, pw, ph * 0.08);
+  const labelH = fitTextHeight(panelId, pw, ph * 0.45, LABEL_H_M);
+  const dimH = fitTextHeight(dimText, pw, ph * 0.30, DIM_H_M);
 
-  if (labelH >= 0.001) {
+  const MIN_H = 0.002;
+
+  if (labelH >= MIN_H) {
     const labelX = r(ox + pw / 2);
     const labelY = r(oy + ph - labelH * 1.5);
     lines.push(
@@ -714,7 +721,7 @@ function emitPanelEntities(
     );
   }
 
-  if (dimH >= 0.001 && labelH + dimH < ph * 0.7) {
+  if (dimH >= MIN_H && labelH + dimH * 3 < ph) {
     const dimX = r(ox + pw / 2);
     const dimY = r(oy + dimH * 0.6);
     lines.push(
