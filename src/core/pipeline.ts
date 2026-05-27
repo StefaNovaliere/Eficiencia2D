@@ -85,13 +85,23 @@ function rotateZtoY(faces: Face3D[]): Face3D[] {
 export function reclassifyWithAxis(
   phase1: Phase1Result,
   newAxis: "Y" | "Z",
+  minRealArea?: number,
 ): Phase1Result {
   let faces = phase1.rawFaces;
   if (newAxis === "Z") {
     faces = rotateZtoY(faces);
   }
-  const groups = classifyIntoGroups(faces);
+  const groups = classifyIntoGroups(faces, minRealArea);
   return { ...phase1, faces, appliedAxis: newAxis, groups };
+}
+
+/** Re-classify with a different minimum-real-area threshold, keeping the current axis. */
+export function reclassifyWithMinArea(
+  phase1: Phase1Result,
+  minRealArea: number,
+): Phase1Result {
+  const groups = classifyIntoGroups(phase1.faces, minRealArea);
+  return { ...phase1, groups };
 }
 
 /**
