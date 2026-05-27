@@ -11,6 +11,8 @@ export interface NestingPreviewProps {
   onBack: () => void;
   sheetConfig: SheetConfig;
   onSheetConfigChange: (config: SheetConfig) => void;
+  scaleDenom: number;
+  onScaleChange: (scale: number) => void;
 }
 
 const WALL_COLOR = "#3b82f6";
@@ -155,12 +157,16 @@ function SheetCanvas({
   );
 }
 
+const SCALE_OPTIONS = [20, 25, 50, 75, 100, 125, 150, 200, 250, 500];
+
 export default function NestingPreview({
   nesting,
   onConfirm,
   onBack,
   sheetConfig,
   onSheetConfigChange,
+  scaleDenom,
+  onScaleChange,
 }: NestingPreviewProps) {
   const [localWidth, setLocalWidth] = useState(String(sheetConfig.widthM));
   const [localHeight, setLocalHeight] = useState(String(sheetConfig.heightM));
@@ -179,7 +185,7 @@ export default function NestingPreview({
   const wallPanels = nesting.wallNesting.sheets.reduce((s, sh) => s + sh.panels.length, 0);
   const floorPanels = nesting.floorNesting.sheets.reduce((s, sh) => s + sh.panels.length, 0);
   const unplacedCount = nesting.wallNesting.unplaced.length + nesting.floorNesting.unplaced.length;
-  const scaleDenom = nesting.wallNesting.scaleDenom || nesting.floorNesting.scaleDenom || 1;
+  const displayScale = nesting.wallNesting.scaleDenom || nesting.floorNesting.scaleDenom || 1;
 
   return (
     <div className="nesting-overlay">
@@ -189,6 +195,17 @@ export default function NestingPreview({
         </button>
         <h2 className="nesting-title">Vista previa de planchas</h2>
         <div className="nesting-sheet-config">
+          <label className="nesting-config-label">Escala:</label>
+          <select
+            className="nesting-config-select"
+            value={scaleDenom}
+            onChange={(e) => onScaleChange(Number(e.target.value))}
+          >
+            {SCALE_OPTIONS.map((s) => (
+              <option key={s} value={s}>1:{s}</option>
+            ))}
+          </select>
+          <span className="nesting-config-sep" style={{ margin: "0 0.5rem" }}>&middot;</span>
           <label className="nesting-config-label">Plancha:</label>
           <input
             className="nesting-config-input"
@@ -245,7 +262,7 @@ export default function NestingPreview({
             {sheetConfig.widthM.toFixed(2)} &times; {sheetConfig.heightM.toFixed(2)} m
           </span>
           <span className="stat-sep">&middot;</span>
-          <span className="nesting-stat">Escala 1:{scaleDenom}</span>
+          <span className="nesting-stat">Escala 1:{displayScale}</span>
           <span className="stat-sep">&middot;</span>
           <span className="nesting-stat">3mm separacion</span>
           <span className="stat-sep">&middot;</span>

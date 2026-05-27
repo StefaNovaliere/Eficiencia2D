@@ -821,6 +821,21 @@ body {
   border-color: var(--accent);
 }
 
+.nesting-config-select {
+  padding: 5px 8px;
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.nesting-config-select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
 .nesting-config-sep {
   color: var(--muted);
   font-size: 0.9rem;
