@@ -48,7 +48,7 @@ const MIN_AREA = 1e-6;
 const HEIGHT_BAND = 0.05;
 const PERIMETER_MARGIN = 0.15;
 const THIN_WALL_THRESHOLD = 0.40; // walls thinner than 40cm => single "wall" category
-const MIN_REAL_AREA = 1.0;        // subgroups smaller than 1 m² default to "discard"
+const DEFAULT_MIN_REAL_AREA = 1.0; // default: subgroups smaller than 1 m² => "discard"
 
 function faceArea(f: Face3D): number {
   const verts = f.vertices;
@@ -353,7 +353,10 @@ function buildSubgroup(
   };
 }
 
-export function classifyIntoGroups(faces: Face3D[]): GeometryGroup[] {
+export function classifyIntoGroups(
+  faces: Face3D[],
+  minRealArea: number = DEFAULT_MIN_REAL_AREA,
+): GeometryGroup[] {
   if (faces.length === 0) return [];
 
   const allInfos = classifyAllFaces(faces);
@@ -384,7 +387,7 @@ export function classifyIntoGroups(faces: Face3D[]): GeometryGroup[] {
   // < 40 cm pairing rule — each tread stays as its own discard component
   // that the user can promote back to "floor" in the review screen.
   for (const sg of subgroups) {
-    if (sg.totalArea < MIN_REAL_AREA && sg.category !== "discard") {
+    if (sg.totalArea < minRealArea && sg.category !== "discard") {
       sg.category = "discard";
     }
   }
