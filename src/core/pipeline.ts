@@ -291,7 +291,7 @@ export function decomposePanels(
 ): DecomposeResult {
   const filteredFaces = filterFaces(phase1, overrides);
   const simpleMode = (opts.decompositionMode ?? "simple") === "simple";
-  const panels = decomposeIntoPanels(filteredFaces, "Y", simpleMode);
+  const panels = decomposeIntoPanels(filteredFaces, "Y", simpleMode, opts.minAreaM2 ?? 0.01);
 
   return {
     wallPanels: panels.filter((p) => p.category === "wall"),

@@ -447,6 +447,7 @@ export function decomposeIntoPanels(
   faces: Face3D[],
   up: UpAxis,
   simpleMode: boolean,
+  minAreaM2: number = 0.01,
 ): Panel[] {
   // 1. Cluster ALL faces by coplanarity (normal + plane offset).
   let coplanarGroups = clusterByCoplanarity(faces, up);
@@ -481,9 +482,7 @@ export function decomposeIntoPanels(
       const result = projectFacesTo2D(compFaces, group.normal, up);
       if (!result) continue;
 
-      // Skip very small panels (artifacts, edges, trim pieces).
-      if (result.widthM < 0.05 || result.heightM < 0.05) continue;
-      if (result.widthM * result.heightM < 0.01) continue;
+      if (result.widthM * result.heightM < minAreaM2) continue;
 
       // Determine floor index from vertical midpoint.
       const allElevs = compFaces.flatMap((f) =>
