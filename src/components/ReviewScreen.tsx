@@ -27,7 +27,11 @@ export interface ReviewScreenProps {
   onConfirm: (overrides: ClassificationOverride[]) => void;
   onCancel: () => void;
   onAxisChange: (newPhase1: Phase1Result) => void;
+  minAreaM2: number;
+  onMinAreaChange: (area: number) => void;
 }
+
+const MIN_AREA_OPTIONS = [0, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0];
 
 // ---------------------------------------------------------------------------
 // Component
@@ -38,6 +42,8 @@ export default function ReviewScreen({
   onConfirm,
   onCancel,
   onAxisChange,
+  minAreaM2,
+  onMinAreaChange,
 }: ReviewScreenProps) {
   const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null);
   const [overrides, setOverrides] = useState<Map<number, FaceCategory>>(
@@ -130,6 +136,23 @@ export default function ReviewScreen({
           >
             Rotar eje ({phase1.appliedAxis === "Y" ? "Y↑" : "Z↑"})
           </button>
+          <div
+            className="min-area-control"
+            title="Componentes más chicos que este umbral se descartan al generar las planchas"
+          >
+            <label className="min-area-label">Descartar &lt;</label>
+            <select
+              className="min-area-select"
+              value={minAreaM2}
+              onChange={(e) => onMinAreaChange(Number(e.target.value))}
+            >
+              {MIN_AREA_OPTIONS.map((a) => (
+                <option key={a} value={a}>
+                  {a === 0 ? "Ninguno" : `${a} m²`}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
       </div>
 
