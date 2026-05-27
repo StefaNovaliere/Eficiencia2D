@@ -18,6 +18,7 @@ export default function UploadForm() {
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState("");
   const [dragActive, setDragActive] = useState(false);
+  const [minAreaM2, setMinAreaM2] = useState(0.01);
   const [phase1Result, setPhase1Result] = useState<Phase1Result | null>(null);
   const [nestingData, setNestingData] = useState<NestingPreviewData | null>(null);
   const [savedOverrides, setSavedOverrides] = useState<ClassificationOverride[]>([]);
@@ -107,6 +108,7 @@ export default function UploadForm() {
         includeCuttingSheet: true,
         decompositionMode,
         sheetConfig,
+        minAreaM2,
       };
 
       const decomposed = await new Promise<ReturnType<typeof decomposePanels>>(
@@ -136,11 +138,12 @@ export default function UploadForm() {
       includeCuttingSheet: true,
       decompositionMode,
       sheetConfig: newConfig,
+      minAreaM2,
     };
     const decomposed = decomposePanels(phase1Result, opts, savedOverrides);
     const nesting = nestDecomposedPanels(decomposed, newConfig, scale);
     setNestingData(nesting);
-  }, [phase1Result, savedOverrides, scale, paper, decompositionMode]);
+  }, [phase1Result, savedOverrides, scale, paper, decompositionMode, minAreaM2]);
 
   const handleScaleChange = useCallback((newScale: number) => {
     setScale(newScale);
@@ -152,11 +155,29 @@ export default function UploadForm() {
       includeCuttingSheet: true,
       decompositionMode,
       sheetConfig,
+      minAreaM2,
     };
     const decomposed = decomposePanels(phase1Result, opts, savedOverrides);
     const nesting = nestDecomposedPanels(decomposed, sheetConfig, newScale);
     setNestingData(nesting);
-  }, [phase1Result, savedOverrides, paper, decompositionMode, sheetConfig]);
+  }, [phase1Result, savedOverrides, paper, decompositionMode, sheetConfig, minAreaM2]);
+
+  const handleMinAreaChange = useCallback((newArea: number) => {
+    setMinAreaM2(newArea);
+    if (!phase1Result) return;
+
+    const opts: PipelineOptions = {
+      scaleDenom: scale,
+      paper,
+      includeCuttingSheet: true,
+      decompositionMode,
+      sheetConfig,
+      minAreaM2: newArea,
+    };
+    const decomposed = decomposePanels(phase1Result, opts, savedOverrides);
+    const nesting = nestDecomposedPanels(decomposed, sheetConfig, scale);
+    setNestingData(nesting);
+  }, [phase1Result, savedOverrides, scale, paper, decompositionMode, sheetConfig]);
 
   const handleNestingConfirm = async () => {
     if (!phase1Result || !file || !nestingData) return;
@@ -170,6 +191,7 @@ export default function UploadForm() {
         includeCuttingSheet: true,
         decompositionMode,
         sheetConfig,
+        minAreaM2,
       };
 
       const result = await new Promise<ReturnType<typeof generateFromNesting>>(
@@ -241,6 +263,8 @@ export default function UploadForm() {
         onSheetConfigChange={handleSheetConfigChange}
         scaleDenom={scale}
         onScaleChange={handleScaleChange}
+        minAreaM2={minAreaM2}
+        onMinAreaChange={handleMinAreaChange}
       />
     );
   }
