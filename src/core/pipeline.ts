@@ -349,18 +349,24 @@ export function generateFromNesting(
   const scaleDenom = opts.scaleDenom;
 
   if (nesting.wallNesting.sheets.length > 0) {
-    const content = nestedSheetsToDxf(nesting.wallNesting);
     files.push({
-      name: `${stem}_Descomposicion_Paredes.dxf`,
-      blob: new Blob([content], { type: "application/dxf" }),
+      name: `${stem}_Paredes_con_referencias.dxf`,
+      blob: new Blob([nestedSheetsToDxf(nesting.wallNesting, true)], { type: "application/dxf" }),
+    });
+    files.push({
+      name: `${stem}_Paredes_corte.dxf`,
+      blob: new Blob([nestedSheetsToDxf(nesting.wallNesting, false)], { type: "application/dxf" }),
     });
   }
 
   if (nesting.floorNesting.sheets.length > 0) {
-    const content = nestedSheetsToDxf(nesting.floorNesting);
     files.push({
-      name: `${stem}_Descomposicion_Pisos.dxf`,
-      blob: new Blob([content], { type: "application/dxf" }),
+      name: `${stem}_Pisos_con_referencias.dxf`,
+      blob: new Blob([nestedSheetsToDxf(nesting.floorNesting, true)], { type: "application/dxf" }),
+    });
+    files.push({
+      name: `${stem}_Pisos_corte.dxf`,
+      blob: new Blob([nestedSheetsToDxf(nesting.floorNesting, false)], { type: "application/dxf" }),
     });
   }
 

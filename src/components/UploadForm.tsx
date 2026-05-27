@@ -142,6 +142,22 @@ export default function UploadForm() {
     setNestingData(nesting);
   }, [phase1Result, savedOverrides, scale, paper, decompositionMode]);
 
+  const handleScaleChange = useCallback((newScale: number) => {
+    setScale(newScale);
+    if (!phase1Result) return;
+
+    const opts: PipelineOptions = {
+      scaleDenom: newScale,
+      paper,
+      includeCuttingSheet: true,
+      decompositionMode,
+      sheetConfig,
+    };
+    const decomposed = decomposePanels(phase1Result, opts, savedOverrides);
+    const nesting = nestDecomposedPanels(decomposed, sheetConfig, newScale);
+    setNestingData(nesting);
+  }, [phase1Result, savedOverrides, paper, decompositionMode, sheetConfig]);
+
   const handleNestingConfirm = async () => {
     if (!phase1Result || !file || !nestingData) return;
 
@@ -223,6 +239,8 @@ export default function UploadForm() {
         onBack={handleNestingBack}
         sheetConfig={sheetConfig}
         onSheetConfigChange={handleSheetConfigChange}
+        scaleDenom={scale}
+        onScaleChange={handleScaleChange}
       />
     );
   }

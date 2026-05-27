@@ -674,6 +674,7 @@ function emitPanelEntities(
   ox: number,
   oy: number,
   scaleDenom: number = 1,
+  includeText: boolean = true,
 ): void {
   for (const edge of edges) {
     lines.push(
@@ -687,12 +688,14 @@ function emitPanelEntities(
     );
   }
 
+  if (!includeText) return;
+
   const realW = pw * scaleDenom;
   const realH = ph * scaleDenom;
   const dimText = `${realW.toFixed(2)} x ${realH.toFixed(2)} m`;
 
-  const labelH = fitTextHeight(panelId, pw, ph * 0.32);
-  const dimH = fitTextHeight(dimText, pw, ph * 0.22);
+  const labelH = fitTextHeight(panelId, pw, ph * 0.12);
+  const dimH = fitTextHeight(dimText, pw, ph * 0.08);
 
   if (labelH >= 0.001) {
     const labelX = r(ox + pw / 2);
@@ -786,7 +789,7 @@ export function generateCuttingSheets(
 import type { NestingResult } from "./sheet-nester";
 import { rotateEdges } from "./sheet-nester";
 
-export function nestedSheetsToDxf(nesting: NestingResult): string {
+export function nestedSheetsToDxf(nesting: NestingResult, includeText: boolean = true): string {
   const { sheets, config } = nesting;
   if (sheets.length === 0) return "";
 
@@ -817,19 +820,20 @@ export function nestedSheetsToDxf(nesting: NestingResult): string {
       );
     }
 
-    // Sheet label.
-    lines.push(
-      "0", "TEXT",
-      "8", "ENGRAVE_RASTER",
-      "62", "7",
-      "10", r(sx + config.widthM / 2),
-      "20", r(sy + config.heightM + 0.02),
-      "40", r(0.03),
-      "1", `Plancha ${si + 1}`,
-      "72", "1",
-      "11", r(sx + config.widthM / 2),
-      "21", r(sy + config.heightM + 0.02),
-    );
+    if (includeText) {
+      lines.push(
+        "0", "TEXT",
+        "8", "ENGRAVE_RASTER",
+        "62", "8",
+        "10", r(sx + config.widthM / 2),
+        "20", r(sy + config.heightM + 0.02),
+        "40", r(0.03),
+        "1", `Plancha ${si + 1}`,
+        "72", "1",
+        "11", r(sx + config.widthM / 2),
+        "21", r(sy + config.heightM + 0.02),
+      );
+    }
 
     for (const placed of sheets[si].panels) {
       const { panel, x, y, rotated, effectiveW, effectiveH } = placed;
@@ -845,6 +849,7 @@ export function nestedSheetsToDxf(nesting: NestingResult): string {
         sx + x,
         sy + y,
         nesting.scaleDenom,
+        includeText,
       );
     }
   }
