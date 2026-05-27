@@ -93,6 +93,7 @@ export interface PipelineOptions {
   decompositionMode?: DecompositionMode;
   elementFilter?: ElementFilter;
   sheetConfig?: SheetConfig;
+  minAreaM2?: number;
 }
 
 /** A generated output file ready for download. */
