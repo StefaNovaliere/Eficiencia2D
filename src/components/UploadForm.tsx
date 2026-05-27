@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import { parsePipeline, decomposePanels, nestDecomposedPanels, generateFromNesting } from "@/core/pipeline";
+import { parsePipeline, decomposePanels, nestDecomposedPanels, generateFromNesting, reclassifyWithMinArea } from "@/core/pipeline";
 import type { Phase1Result, ClassificationOverride, NestingPreviewData } from "@/core/pipeline";
 import ReviewScreen from "./ReviewScreen";
 import NestingPreview from "./NestingPreview";
@@ -18,7 +18,7 @@ export default function UploadForm() {
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState("");
   const [dragActive, setDragActive] = useState(false);
-  const [minAreaM2, setMinAreaM2] = useState(0.01);
+  const [minAreaM2, setMinAreaM2] = useState(1.0);
   const [phase1Result, setPhase1Result] = useState<Phase1Result | null>(null);
   const [nestingData, setNestingData] = useState<NestingPreviewData | null>(null);
   const [savedOverrides, setSavedOverrides] = useState<ClassificationOverride[]>([]);
@@ -221,6 +221,11 @@ export default function UploadForm() {
     setStatus("reviewing");
   }, []);
 
+  const handleMinAreaChange = useCallback((newArea: number) => {
+    setMinAreaM2(newArea);
+    setPhase1Result((prev) => (prev ? reclassifyWithMinArea(prev, newArea) : prev));
+  }, []);
+
   const handleReviewCancel = () => {
     setPhase1Result(null);
     setStatus("idle");
@@ -259,7 +264,7 @@ export default function UploadForm() {
         onCancel={handleReviewCancel}
         onAxisChange={setPhase1Result}
         minAreaM2={minAreaM2}
-        onMinAreaChange={setMinAreaM2}
+        onMinAreaChange={handleMinAreaChange}
       />
     );
   }

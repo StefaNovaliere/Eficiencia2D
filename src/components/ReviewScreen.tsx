@@ -81,6 +81,12 @@ export default function ReviewScreen({
     onAxisChange(updated);
   }, [phase1, onAxisChange]);
 
+  const handleMinAreaChangeWithReset = useCallback((newArea: number) => {
+    setOverrides(new Map());
+    setSelectedGroupId(null);
+    onMinAreaChange(newArea);
+  }, [onMinAreaChange]);
+
   const handleToggleVisibility = useCallback((cat: FaceCategory) => {
     setVisibleCategories((prev) => {
       const next = new Set(prev);
@@ -90,32 +96,19 @@ export default function ReviewScreen({
     });
   }, []);
 
-  // Combine user overrides with auto-discards from the area threshold.
-  // User overrides always win — explicit choices are never replaced.
-  const effectiveOverrides = useMemo(() => {
-    const merged = new Map(overrides);
-    if (minAreaM2 > 0) {
-      for (const group of phase1.groups) {
-        if (merged.has(group.id)) continue;
-        if (group.totalArea < minAreaM2) merged.set(group.id, "discard");
-      }
-    }
-    return merged;
-  }, [overrides, phase1.groups, minAreaM2]);
-
   const handleConfirm = useCallback(() => {
     const result: ClassificationOverride[] = [];
-    for (const [groupId, newCategory] of effectiveOverrides.entries()) {
+    for (const [groupId, newCategory] of overrides.entries()) {
       result.push({ groupId, newCategory });
     }
     onConfirm(result);
-  }, [effectiveOverrides, onConfirm]);
+  }, [overrides, onConfirm]);
 
   // Stats (per effective category).
   const stats = useMemo(() => {
     let floors = 0, walls = 0, wallsExt = 0, wallsInt = 0, discarded = 0;
     for (const group of phase1.groups) {
-      const cat = effectiveOverrides.get(group.id) ?? group.category;
+      const cat = overrides.get(group.id) ?? group.category;
       if (cat === "floor") floors++;
       else if (cat === "wall") walls++;
       else if (cat === "wall_exterior") wallsExt++;
@@ -123,7 +116,7 @@ export default function ReviewScreen({
       else discarded++;
     }
     return { floors, walls, wallsExt, wallsInt, discarded };
-  }, [phase1.groups, effectiveOverrides]);
+  }, [phase1.groups, overrides]);
 
   return (
     <div className="review-overlay">
@@ -132,7 +125,7 @@ export default function ReviewScreen({
           faces={phase1.faces}
           groups={phase1.groups}
           selectedGroupId={selectedGroupId}
-          categoryOverrides={effectiveOverrides}
+          categoryOverrides={overrides}
           visibleCategories={visibleCategories}
           onSelectGroup={handleSelectGroup}
         />
@@ -157,7 +150,7 @@ export default function ReviewScreen({
             <select
               className="min-area-select"
               value={minAreaM2}
-              onChange={(e) => onMinAreaChange(Number(e.target.value))}
+              onChange={(e) => handleMinAreaChangeWithReset(Number(e.target.value))}
             >
               {MIN_AREA_OPTIONS.map((a) => (
                 <option key={a} value={a}>
@@ -173,7 +166,7 @@ export default function ReviewScreen({
         <GroupList
           groups={phase1.groups}
           selectedGroupId={selectedGroupId}
-          categoryOverrides={effectiveOverrides}
+          categoryOverrides={overrides}
           visibleCategories={visibleCategories}
           onSelectGroup={handleSelectGroup}
           onChangeCategory={handleChangeCategory}
