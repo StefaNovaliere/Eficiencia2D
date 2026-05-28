@@ -240,12 +240,11 @@ export function projectFacesTo2D(
   if (faces.length === 0) return null;
 
   const upComp = Math.abs(getUp(groupNormal, up));
-  const isHorizontal = upComp > HORIZONTAL_THRESHOLD;
 
   let uAxis: Vec3;
   let vAxis: Vec3;
 
-  if (isHorizontal) {
+  if (upComp > HORIZONTAL_THRESHOLD) {
     // Floor/ceiling → top-down projection: u = X, v = other horizontal axis.
     if (up === "Y") {
       uAxis = { x: 1, y: 0, z: 0 };
@@ -254,7 +253,7 @@ export function projectFacesTo2D(
       uAxis = { x: 1, y: 0, z: 0 };
       vAxis = { x: 0, y: 1, z: 0 };
     }
-  } else {
+  } else if (upComp < VERTICAL_THRESHOLD) {
     // Wall → front-view projection: u = horizontal along wall, v = up.
     const hDir: Vec3 =
       up === "Y"
@@ -266,6 +265,23 @@ export function projectFacesTo2D(
     const worldUp = getUpVec(up);
     uAxis = normalize(cross(worldUp, hDir));
     vAxis = worldUp;
+  } else {
+    // Inclined surface (roof, ramp) → project onto the surface's own tangent
+    // plane so the true shape is preserved for cutting.
+    const worldUp = getUpVec(up);
+    uAxis = normalize(cross(worldUp, groupNormal));
+    if (vlength(uAxis) < 0.01) {
+      // Nearly horizontal — fall back to floor projection.
+      if (up === "Y") {
+        uAxis = { x: 1, y: 0, z: 0 };
+        vAxis = { x: 0, y: 0, z: 1 };
+      } else {
+        uAxis = { x: 1, y: 0, z: 0 };
+        vAxis = { x: 0, y: 1, z: 0 };
+      }
+    } else {
+      vAxis = normalize(cross(groupNormal, uAxis));
+    }
   }
 
   // Project all faces to 2D; count how many faces each edge belongs to.

@@ -260,6 +260,7 @@ export default function UploadForm() {
         onAxisChange={setPhase1Result}
         minAreaM2={minAreaM2}
         onMinAreaChange={handleMinAreaChange}
+        initialOverrides={savedOverrides}
       />
     );
   }
