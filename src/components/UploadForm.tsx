@@ -6,7 +6,7 @@ import type { Phase1Result, ClassificationOverride, NestingPreviewData } from "@
 import ReviewScreen from "./ReviewScreen";
 import NestingPreview from "./NestingPreview";
 import { DEFAULT_SHEET } from "@/core/sheet-nester";
-import type { DecompositionMode, PipelineOptions, SheetConfig } from "@/core/types";
+import type { PipelineOptions, SheetConfig } from "@/core/types";
 
 type Status = "idle" | "parsing" | "reviewing" | "nesting" | "generating" | "done" | "error";
 
@@ -14,7 +14,6 @@ export default function UploadForm() {
   const [file, setFile] = useState<File | null>(null);
   const [scale, setScale] = useState(100);
   const [paper, setPaper] = useState("A4");
-  const [decompositionMode, setDecompositionMode] = useState<DecompositionMode>("simple");
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState("");
   const [dragActive, setDragActive] = useState(false);
@@ -106,7 +105,6 @@ export default function UploadForm() {
         scaleDenom: scale,
         paper,
         includeCuttingSheet: true,
-        decompositionMode,
         sheetConfig,
         minAreaM2,
       };
@@ -136,14 +134,13 @@ export default function UploadForm() {
       scaleDenom: scale,
       paper,
       includeCuttingSheet: true,
-      decompositionMode,
       sheetConfig: newConfig,
       minAreaM2,
     };
     const decomposed = decomposePanels(phase1Result, opts, savedOverrides);
     const nesting = nestDecomposedPanels(decomposed, newConfig, scale);
     setNestingData(nesting);
-  }, [phase1Result, savedOverrides, scale, paper, decompositionMode, minAreaM2]);
+  }, [phase1Result, savedOverrides, scale, paper, minAreaM2]);
 
   const handleScaleChange = useCallback((newScale: number) => {
     setScale(newScale);
@@ -153,14 +150,13 @@ export default function UploadForm() {
       scaleDenom: newScale,
       paper,
       includeCuttingSheet: true,
-      decompositionMode,
       sheetConfig,
       minAreaM2,
     };
     const decomposed = decomposePanels(phase1Result, opts, savedOverrides);
     const nesting = nestDecomposedPanels(decomposed, sheetConfig, newScale);
     setNestingData(nesting);
-  }, [phase1Result, savedOverrides, paper, decompositionMode, sheetConfig, minAreaM2]);
+  }, [phase1Result, savedOverrides, paper, sheetConfig, minAreaM2]);
 
   const handleNestingConfirm = async () => {
     if (!phase1Result || !file || !nestingData) return;
@@ -172,7 +168,6 @@ export default function UploadForm() {
         scaleDenom: scale,
         paper,
         includeCuttingSheet: true,
-        decompositionMode,
         sheetConfig,
         minAreaM2,
       };
@@ -379,19 +374,7 @@ export default function UploadForm() {
           </div>
         </div>
 
-        <div className="settings-row">
-          <div className="setting-group" style={{ flex: 1 }}>
-            <label className="setting-label">Modo de descomposicion</label>
-            <select
-              className="setting-select"
-              value={decompositionMode}
-              onChange={(e) => setDecompositionMode(e.target.value as DecompositionMode)}
-            >
-              <option value="simple">Simple — solo cara exterior de cada pared</option>
-              <option value="detailed">Detallado — todas las caras y cantos</option>
-            </select>
-          </div>
-        </div>
+
       </div>
 
       {/* Action button */}

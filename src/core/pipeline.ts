@@ -14,7 +14,7 @@ import { extractFloorPlans } from "./floor-plan-extractor";
 import { DEFAULT_ELEMENT_FILTER } from "./geometry-classifier";
 import { classifyIntoGroups } from "./group-classifier";
 import type { GeometryGroup } from "./group-classifier";
-import { generatePdf } from "./pdf-writer";
+import { generatePdf, generateNestingPdf } from "./pdf-writer";
 import { nestPanels, DEFAULT_SHEET } from "./sheet-nester";
 import type { NestingPanel, NestingResult } from "./sheet-nester";
 import type { Face3D, Facade, FloorPlan, OutputFile, PipelineOptions, SheetConfig } from "./types";
@@ -363,10 +363,24 @@ export function generateFromNesting(
       name: `${stem}_Paredes_con_referencias.dxf`,
       blob: new Blob([nestedSheetsToDxf(nesting.wallNesting, true)], { type: "application/dxf" }),
     });
+    const wallRefPdf = generateNestingPdf(nesting.wallNesting, "Paredes", true);
+    if (wallRefPdf) {
+      files.push({
+        name: `${stem}_Paredes_con_referencias.pdf`,
+        blob: new Blob([wallRefPdf], { type: "application/pdf" }),
+      });
+    }
     files.push({
       name: `${stem}_Paredes_corte.dxf`,
       blob: new Blob([nestedSheetsToDxf(nesting.wallNesting, false)], { type: "application/dxf" }),
     });
+    const wallCutPdf = generateNestingPdf(nesting.wallNesting, "Paredes", false);
+    if (wallCutPdf) {
+      files.push({
+        name: `${stem}_Paredes_corte.pdf`,
+        blob: new Blob([wallCutPdf], { type: "application/pdf" }),
+      });
+    }
   }
 
   if (nesting.floorNesting.sheets.length > 0) {
@@ -374,10 +388,24 @@ export function generateFromNesting(
       name: `${stem}_Pisos_con_referencias.dxf`,
       blob: new Blob([nestedSheetsToDxf(nesting.floorNesting, true)], { type: "application/dxf" }),
     });
+    const floorRefPdf = generateNestingPdf(nesting.floorNesting, "Pisos", true);
+    if (floorRefPdf) {
+      files.push({
+        name: `${stem}_Pisos_con_referencias.pdf`,
+        blob: new Blob([floorRefPdf], { type: "application/pdf" }),
+      });
+    }
     files.push({
       name: `${stem}_Pisos_corte.dxf`,
       blob: new Blob([nestedSheetsToDxf(nesting.floorNesting, false)], { type: "application/dxf" }),
     });
+    const floorCutPdf = generateNestingPdf(nesting.floorNesting, "Pisos", false);
+    if (floorCutPdf) {
+      files.push({
+        name: `${stem}_Pisos_corte.pdf`,
+        blob: new Blob([floorCutPdf], { type: "application/pdf" }),
+      });
+    }
   }
 
   const pdfContent = generatePdf(facades, floorPlans, scaleDenom, opts.paper);
