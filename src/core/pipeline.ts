@@ -7,8 +7,8 @@
 // ============================================================================
 
 import { parseObj } from "./obj-parser";
-import { generateCuttingSheets, decomposeIntoPanels, nestedSheetsToDxf } from "./cutting-sheet";
-import type { Panel } from "./cutting-sheet";
+import { generateCuttingSheets, decomposeIntoPanels, nestedSheetsToDxf, projectFacesTo2D } from "./cutting-sheet";
+import type { Panel, PanelCategory } from "./cutting-sheet";
 import { detectUpAxis, extractFacades } from "./facade-extractor";
 import { extractFloorPlans } from "./floor-plan-extractor";
 import { DEFAULT_ELEMENT_FILTER } from "./geometry-classifier";
@@ -299,14 +299,56 @@ export function decomposePanels(
   opts: PipelineOptions,
   overrides?: ClassificationOverride[],
 ): DecomposeResult {
-  const filteredFaces = filterFaces(phase1, overrides);
-  const simpleMode = (opts.decompositionMode ?? "simple") === "simple";
-  const panels = decomposeIntoPanels(filteredFaces, "Y", simpleMode, opts.minAreaM2 ?? 0.01);
+  const overrideMap = new Map<number, GeometryGroup["category"]>();
+  if (overrides) {
+    for (const o of overrides) overrideMap.set(o.groupId, o.newCategory);
+  }
 
-  return {
-    wallPanels: panels.filter((p) => p.category === "wall"),
-    floorPanels: panels.filter((p) => p.category === "floor"),
-  };
+  const wallPanels: Panel[] = [];
+  const floorPanels: Panel[] = [];
+  let wallCount = 0;
+  let floorCount = 0;
+
+  for (const group of phase1.groups) {
+    const effectiveCat = overrideMap.get(group.id) ?? group.category;
+    if (effectiveCat === "discard") continue;
+
+    const isFloor = effectiveCat === "floor";
+    const panelCat: PanelCategory = isFloor ? "floor" : "wall";
+
+    const faces = group.faceIndices.map((fi) => phase1.faces[fi]).filter(Boolean);
+    if (faces.length === 0) continue;
+
+    const result = projectFacesTo2D(faces, group.representativeNormal, "Y");
+    if (!result) continue;
+    if (result.widthM * result.heightM < (opts.minAreaM2 ?? 0.01)) continue;
+
+    if (isFloor) {
+      floorCount++;
+      floorPanels.push({
+        id: `B${floorCount}`,
+        groupName: `floor_${floorCount}`,
+        category: panelCat,
+        floorIndex: 0,
+        widthM: result.widthM,
+        heightM: result.heightM,
+        edges: result.edges,
+      });
+    } else {
+      wallCount++;
+      wallPanels.push({
+        id: `A${wallCount}`,
+        groupName: `wall_${wallCount}`,
+        category: panelCat,
+        floorIndex: 0,
+        widthM: result.widthM,
+        heightM: result.heightM,
+        edges: result.edges,
+      });
+    }
+  }
+
+  return { wallPanels, floorPanels };
 }
 
 function panelsToNestingPanels(panels: Panel[], scaleDenom: number): NestingPanel[] {
