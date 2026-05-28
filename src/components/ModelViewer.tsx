@@ -198,9 +198,10 @@ interface CategoryMeshProps {
   mesh: MergedMeshData;
   isDimmed: boolean;
   onPick: (groupId: number) => void;
+  onTogglePick: (groupId: number) => void;
 }
 
-function CategoryMesh({ mesh, isDimmed, onPick }: CategoryMeshProps) {
+function CategoryMesh({ mesh, isDimmed, onPick, onTogglePick }: CategoryMeshProps) {
   const material = isDimmed
     ? DIMMED_MATERIALS[mesh.category]
     : NORMAL_MATERIALS[mesh.category];
@@ -214,7 +215,12 @@ function CategoryMesh({ mesh, isDimmed, onPick }: CategoryMeshProps) {
           e.stopPropagation();
           const triIdx = e.faceIndex;
           if (typeof triIdx === "number" && triIdx >= 0 && triIdx < mesh.groupIds.length) {
-            onPick(mesh.groupIds[triIdx]);
+            const groupId = mesh.groupIds[triIdx];
+            if (e.nativeEvent.ctrlKey || e.nativeEvent.metaKey) {
+              onTogglePick(groupId);
+            } else {
+              onPick(groupId);
+            }
           }
         }}
       />
@@ -270,21 +276,23 @@ function CameraControls({ target, maxDistance, minDistance }: CameraControlsProp
 interface SceneProps {
   faces: Face3D[];
   groups: GeometryGroup[];
-  selectedGroupId: number | null;
+  selectedGroupIds: Set<number>;
   categoryOverrides: Map<number, FaceCategory>;
   visibleCategories: Set<FaceCategory>;
   onSelectGroup: (id: number) => void;
+  onToggleGroup: (id: number) => void;
 }
 
 function Scene({
   faces,
   groups,
-  selectedGroupId,
+  selectedGroupIds,
   categoryOverrides,
   visibleCategories,
   onSelectGroup,
+  onToggleGroup,
 }: SceneProps) {
-  const selectedGroup = groups.find((g) => g.id === selectedGroupId);
+  const selectedGroups = groups.filter((g) => selectedGroupIds.has(g.id));
 
   // Bounding-box centre for camera target offset.
   const bounds = useMemo(() => {
@@ -325,11 +333,15 @@ function Scene({
     };
   }, [mergedMeshes]);
 
-  // Highlight geometry for the selected group.
+  // Highlight geometry for all selected groups combined.
   const selectedGeometry = useMemo(() => {
-    if (!selectedGroup) return null;
-    return buildSelectedGeometry(faces, selectedGroup.faceIndices);
-  }, [faces, selectedGroup]);
+    if (selectedGroups.length === 0) return null;
+    const allFaceIndices: number[] = [];
+    for (const g of selectedGroups) {
+      allFaceIndices.push(...g.faceIndices);
+    }
+    return buildSelectedGeometry(faces, allFaceIndices);
+  }, [faces, selectedGroups]);
 
   useEffect(() => {
     return () => {
@@ -337,12 +349,12 @@ function Scene({
     };
   }, [selectedGeometry]);
 
-  // Centred target: selected group, or model centre.
-  const focusTarget: Vec3 = selectedGroup
+  // Centred target: average centroid of selected groups, or model centre.
+  const focusTarget: Vec3 = selectedGroups.length > 0
     ? {
-        x: selectedGroup.centroid.x - bounds.center.x,
-        y: selectedGroup.centroid.y - bounds.center.y,
-        z: selectedGroup.centroid.z - bounds.center.z,
+        x: selectedGroups.reduce((s, g) => s + g.centroid.x, 0) / selectedGroups.length - bounds.center.x,
+        y: selectedGroups.reduce((s, g) => s + g.centroid.y, 0) / selectedGroups.length - bounds.center.y,
+        z: selectedGroups.reduce((s, g) => s + g.centroid.z, 0) / selectedGroups.length - bounds.center.z,
       }
     : { x: 0, y: 0, z: 0 };
 
@@ -359,18 +371,19 @@ function Scene({
       <group position={[-bounds.center.x, -bounds.center.y, -bounds.center.z]}>
         {mergedMeshes.map((mm) => {
           if (!visibleCategories.has(mm.category)) return null;
-          const isDimmed = selectedGroupId !== null;
+          const isDimmed = selectedGroupIds.size > 0;
           return (
             <CategoryMesh
               key={mm.category}
               mesh={mm}
               isDimmed={isDimmed}
               onPick={onSelectGroup}
+              onTogglePick={onToggleGroup}
             />
           );
         })}
 
-        {selectedGeometry && selectedGroup && (
+        {selectedGeometry && selectedGroups.length > 0 && (
           <>
             <mesh geometry={selectedGeometry} material={HIGHLIGHT_MATERIAL} />
             <lineSegments>
@@ -391,19 +404,21 @@ function Scene({
 export interface ModelViewerProps {
   faces: Face3D[];
   groups: GeometryGroup[];
-  selectedGroupId: number | null;
+  selectedGroupIds: Set<number>;
   categoryOverrides: Map<number, FaceCategory>;
   visibleCategories: Set<FaceCategory>;
   onSelectGroup: (id: number) => void;
+  onToggleGroup: (id: number) => void;
 }
 
 export default function ModelViewer({
   faces,
   groups,
-  selectedGroupId,
+  selectedGroupIds,
   categoryOverrides,
   visibleCategories,
   onSelectGroup,
+  onToggleGroup,
 }: ModelViewerProps) {
   const camDist = useMemo(() => {
     let minX = Infinity, minY = Infinity, minZ = Infinity;
@@ -439,10 +454,11 @@ export default function ModelViewer({
       <Scene
         faces={faces}
         groups={groups}
-        selectedGroupId={selectedGroupId}
+        selectedGroupIds={selectedGroupIds}
         categoryOverrides={categoryOverrides}
         visibleCategories={visibleCategories}
         onSelectGroup={onSelectGroup}
+        onToggleGroup={onToggleGroup}
       />
     </Canvas>
   );
