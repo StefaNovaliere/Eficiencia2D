@@ -29,6 +29,7 @@ export interface ReviewScreenProps {
   onAxisChange: (newPhase1: Phase1Result) => void;
   minAreaM2: number;
   onMinAreaChange: (area: number) => void;
+  initialOverrides?: ClassificationOverride[];
 }
 
 const MIN_AREA_OPTIONS = [0, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0];
@@ -44,12 +45,18 @@ export default function ReviewScreen({
   onAxisChange,
   minAreaM2,
   onMinAreaChange,
+  initialOverrides,
 }: ReviewScreenProps) {
   const [selectedGroupIds, setSelectedGroupIds] = useState<Set<number>>(
     () => new Set(),
   );
   const [overrides, setOverrides] = useState<Map<number, FaceCategory>>(
-    () => new Map(),
+    () => {
+      if (!initialOverrides || initialOverrides.length === 0) return new Map();
+      const m = new Map<number, FaceCategory>();
+      for (const o of initialOverrides) m.set(o.groupId, o.newCategory);
+      return m;
+    },
   );
   const [visibleCategories, setVisibleCategories] = useState<Set<FaceCategory>>(
     () => new Set(ALL_CATEGORIES),
