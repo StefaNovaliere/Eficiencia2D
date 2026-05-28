@@ -45,7 +45,9 @@ export default function ReviewScreen({
   minAreaM2,
   onMinAreaChange,
 }: ReviewScreenProps) {
-  const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null);
+  const [selectedGroupIds, setSelectedGroupIds] = useState<Set<number>>(
+    () => new Set(),
+  );
   const [overrides, setOverrides] = useState<Map<number, FaceCategory>>(
     () => new Map(),
   );
@@ -54,36 +56,59 @@ export default function ReviewScreen({
   );
 
   const handleSelectGroup = useCallback((id: number) => {
-    setSelectedGroupId((prev) => (prev === id || id === -1 ? null : id));
+    setSelectedGroupIds((prev) => {
+      if (id === -1) return new Set();
+      if (prev.size === 1 && prev.has(id)) return new Set();
+      return new Set([id]);
+    });
+  }, []);
+
+  const handleToggleGroup = useCallback((id: number) => {
+    setSelectedGroupIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
   }, []);
 
   const handleChangeCategory = useCallback(
     (id: number, category: FaceCategory) => {
       setOverrides((prev) => {
         const next = new Map(prev);
-        const original = phase1.groups.find((g) => g.id === id)?.category;
-        if (original === category) {
-          next.delete(id);
-        } else {
-          next.set(id, category);
+        // Determine which IDs to update: if the changed row is part of the
+        // multi-selection, apply to ALL selected groups; otherwise just the one.
+        const idsToUpdate = selectedGroupIds.has(id)
+          ? Array.from(selectedGroupIds)
+          : [id];
+        for (const gid of idsToUpdate) {
+          const original = phase1.groups.find((g) => g.id === gid)?.category;
+          if (original === category) {
+            next.delete(gid);
+          } else {
+            next.set(gid, category);
+          }
         }
         return next;
       });
     },
-    [phase1.groups],
+    [phase1.groups, selectedGroupIds],
   );
 
   const handleRotateAxis = useCallback(() => {
     const newAxis = phase1.appliedAxis === "Y" ? "Z" : "Y";
     const updated = reclassifyWithAxis(phase1, newAxis);
     setOverrides(new Map());
-    setSelectedGroupId(null);
+    setSelectedGroupIds(new Set());
     onAxisChange(updated);
   }, [phase1, onAxisChange]);
 
   const handleMinAreaChangeWithReset = useCallback((newArea: number) => {
     setOverrides(new Map());
-    setSelectedGroupId(null);
+    setSelectedGroupIds(new Set());
     onMinAreaChange(newArea);
   }, [onMinAreaChange]);
 
@@ -124,10 +149,11 @@ export default function ReviewScreen({
         <ModelViewer
           faces={phase1.faces}
           groups={phase1.groups}
-          selectedGroupId={selectedGroupId}
+          selectedGroupIds={selectedGroupIds}
           categoryOverrides={overrides}
           visibleCategories={visibleCategories}
           onSelectGroup={handleSelectGroup}
+          onToggleGroup={handleToggleGroup}
         />
         <div className="review-viewer-overlay">
           <VisibilityFilters
@@ -165,10 +191,11 @@ export default function ReviewScreen({
       <div className="review-sidebar">
         <GroupList
           groups={phase1.groups}
-          selectedGroupId={selectedGroupId}
+          selectedGroupIds={selectedGroupIds}
           categoryOverrides={overrides}
           visibleCategories={visibleCategories}
           onSelectGroup={handleSelectGroup}
+          onToggleGroup={handleToggleGroup}
           onChangeCategory={handleChangeCategory}
         />
 

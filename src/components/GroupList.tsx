@@ -37,19 +37,21 @@ const ALL_CATEGORIES: FaceCategory[] = [
 
 export interface GroupListProps {
   groups: GeometryGroup[];
-  selectedGroupId: number | null;
+  selectedGroupIds: Set<number>;
   categoryOverrides: Map<number, FaceCategory>;
   visibleCategories: Set<FaceCategory>;
   onSelectGroup: (id: number) => void;
+  onToggleGroup: (id: number) => void;
   onChangeCategory: (id: number, category: FaceCategory) => void;
 }
 
 export default function GroupList({
   groups,
-  selectedGroupId,
+  selectedGroupIds,
   categoryOverrides,
   visibleCategories,
   onSelectGroup,
+  onToggleGroup,
   onChangeCategory,
 }: GroupListProps) {
   const listRef = useRef<HTMLDivElement>(null);
@@ -66,7 +68,7 @@ export default function GroupList({
     if (selectedRef.current) {
       selectedRef.current.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }
-  }, [selectedGroupId]);
+  }, [selectedGroupIds]);
 
   return (
     <div className="group-list" ref={listRef}>
@@ -75,12 +77,15 @@ export default function GroupList({
         <p className="group-list-subtitle">
           {visibleGroups.length} de {groups.length} grupo{groups.length !== 1 ? "s" : ""}
         </p>
+        {groups.length > 1 && (
+          <p className="group-list-hint">Ctrl+click para seleccionar varios</p>
+        )}
       </div>
 
       <div className="group-list-items">
         {visibleGroups.map((group) => {
           const effectiveCat = categoryOverrides.get(group.id) ?? group.category;
-          const isSelected = group.id === selectedGroupId;
+          const isSelected = selectedGroupIds.has(group.id);
           const color = CATEGORY_COLORS[effectiveCat];
 
           return (
@@ -88,7 +93,13 @@ export default function GroupList({
               key={group.id}
               ref={isSelected ? selectedRef : undefined}
               className={`group-row ${isSelected ? "group-row--selected" : ""} ${effectiveCat === "discard" ? "group-row--discard" : ""}`}
-              onClick={() => onSelectGroup(group.id)}
+              onClick={(e) => {
+                if (e.ctrlKey || e.metaKey) {
+                  onToggleGroup(group.id);
+                } else {
+                  onSelectGroup(group.id);
+                }
+              }}
             >
               <div className="group-row-left">
                 <span
