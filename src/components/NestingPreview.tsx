@@ -17,7 +17,7 @@ export interface NestingPreviewProps {
 
 const WALL_COLOR = "#3b82f6";
 const FLOOR_COLOR = "#22c55e";
-const SHEET_STROKE = "#52525b";
+const SHEET_STROKE = "#a1a1aa";
 const PANEL_STROKE = "#a1a1aa";
 const UNPLACED_COLOR = "#ef4444";
 
@@ -84,7 +84,7 @@ function SheetCanvas({
       const sy = row * (config.heightM + spacing);
 
       // Sheet background
-      ctx.fillStyle = "rgba(30, 30, 34, 0.8)";
+      ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
       ctx.fillRect(toX(sx), toY(sy), config.widthM * scale, config.heightM * scale);
 
       // Sheet outline
@@ -95,7 +95,7 @@ function SheetCanvas({
       ctx.setLineDash([]);
 
       // Sheet label
-      ctx.fillStyle = "#a1a1aa";
+      ctx.fillStyle = "#52525b";
       ctx.font = "11px Inter, sans-serif";
       ctx.textAlign = "center";
       ctx.fillText(
