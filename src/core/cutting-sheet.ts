@@ -232,7 +232,7 @@ function splitConnectedComponents(faces: Face3D[]): Face3D[][] {
 // Project coplanar faces to 2D and extract boundary edges
 // ---------------------------------------------------------------------------
 
-function projectFacesTo2D(
+export function projectFacesTo2D(
   faces: Face3D[],
   groupNormal: Vec3,
   up: UpAxis,
