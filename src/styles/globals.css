@@ -34,35 +34,31 @@ body {
 
 /* ───────────── Floating background symbols ───────────── */
 
-.main::before {
-  content:
-    "½|a×b|" "  " "n·p = d" "  " "∑" "  " "1:100" "  "
-    "∠90°" "  " "△" "  " "⊥" "  " "π" "  "
-    "∇f" "  " "dx/dy" "  " "∫" "  " "cos θ" "  "
-    "A = l×h" "  " "⟂" "  " "≈" "  " "√2" "  "
-    "∥" "  " "Σaᵢ" "  " "⌀" "  " "⬡" "  "
-    "½|a×b|" "  " "n·p = d" "  " "1:50" "  " "∠45°" "  "
-    "△" "  " "⊥" "  " "∇" "  " "cos θ";
+.bg-symbols {
   position: fixed;
   inset: 0;
   z-index: 0;
   pointer-events: none;
-  font-family: "Inter", monospace;
-  font-size: 1.1rem;
-  font-weight: 500;
-  color: rgba(0, 0, 0, 0.04);
-  line-height: 3.2;
-  letter-spacing: 0.3em;
-  word-spacing: 1.5em;
-  word-break: break-all;
   overflow: hidden;
-  padding: 20px 40px;
-  animation: floatSymbols 60s linear infinite;
 }
 
-@keyframes floatSymbols {
-  0%   { transform: translateY(0); }
-  100% { transform: translateY(-50px); }
+.bg-symbol {
+  position: absolute;
+  font-family: "Inter", "SF Mono", monospace;
+  font-weight: 500;
+  color: #18181b;
+  white-space: nowrap;
+  transform: translate3d(0, 0, 0) rotate(var(--rot, 0deg));
+  animation-name: bgDrift;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+  animation-direction: alternate;
+  will-change: transform;
+}
+
+@keyframes bgDrift {
+  from { transform: translate3d(0, 0, 0) rotate(var(--rot, 0deg)); }
+  to   { transform: translate3d(var(--dx, 40px), var(--dy, -60px), 0) rotate(var(--rot, 0deg)); }
 }
 
 /* ───────────── Layout ───────────── */
@@ -490,21 +486,10 @@ body {
   position: fixed;
   inset: 0;
   z-index: 100;
-  background: #09090b;
-  color: #fafafa;
+  background: var(--bg);
+  color: var(--text);
   display: flex;
   flex-direction: row;
-  --bg: #09090b;
-  --surface: #18181b;
-  --surface-2: #1e1e22;
-  --border: #27272a;
-  --border-hover: #3f3f46;
-  --text: #fafafa;
-  --text-secondary: #a1a1aa;
-  --muted: #71717a;
-  --accent: #3b82f6;
-  --accent-hover: #2563eb;
-  --accent-subtle: rgba(59, 130, 246, 0.12);
 }
 
 .review-viewer {
@@ -529,11 +514,12 @@ body {
   align-items: center;
   gap: 8px;
   padding: 10px 12px;
-  background: rgba(24, 24, 27, 0.85);
+  background: rgba(255, 255, 255, 0.9);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
   pointer-events: auto;
 }
 
@@ -586,12 +572,13 @@ body {
   gap: 6px;
   margin-top: 8px;
   padding: 6px 14px;
-  background: rgba(24, 24, 27, 0.85);
+  background: rgba(255, 255, 255, 0.9);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   color: var(--text-secondary);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
   font-size: 0.78rem;
   font-weight: 500;
   cursor: pointer;
@@ -602,7 +589,7 @@ body {
 .axis-toggle-btn:hover {
   color: var(--text);
   border-color: var(--border-hover);
-  background: rgba(39, 39, 42, 0.9);
+  background: rgba(255, 255, 255, 1);
 }
 
 .min-area-control {
@@ -611,11 +598,12 @@ body {
   gap: 6px;
   margin-top: 8px;
   padding: 6px 12px;
-  background: rgba(24, 24, 27, 0.85);
+  background: rgba(255, 255, 255, 0.9);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
   pointer-events: auto;
 }
 
@@ -845,21 +833,10 @@ body {
   position: fixed;
   inset: 0;
   z-index: 100;
-  background: #09090b;
-  color: #fafafa;
+  background: var(--bg);
+  color: var(--text);
   display: flex;
   flex-direction: column;
-  --bg: #09090b;
-  --surface: #18181b;
-  --surface-2: #1e1e22;
-  --border: #27272a;
-  --border-hover: #3f3f46;
-  --text: #fafafa;
-  --text-secondary: #a1a1aa;
-  --muted: #71717a;
-  --accent: #3b82f6;
-  --accent-hover: #2563eb;
-  --accent-subtle: rgba(59, 130, 246, 0.12);
 }
 
 .nesting-header {
