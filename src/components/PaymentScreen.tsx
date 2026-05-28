@@ -11,6 +11,8 @@ export interface PaymentScreenProps {
 
 type Stage = "loading" | "ready" | "waiting" | "verifying" | "error";
 
+const WALLET_CONTAINER_ID = "mp-wallet-container";
+
 export default function PaymentScreen({
   onPaymentApproved,
   onPaymentError,
@@ -23,7 +25,6 @@ export default function PaymentScreen({
   const [bypassCode, setBypassCode] = useState("");
   const [bypassError, setBypassError] = useState("");
   const [bypassLoading, setBypassLoading] = useState(false);
-  const walletRef = useRef<HTMLDivElement>(null);
   const brickRef = useRef<any>(null);
 
   // Listen for postMessage from payment-callback popup.
@@ -65,12 +66,17 @@ export default function PaymentScreen({
         const { loadMercadoPago } = await import("@mercadopago/sdk-js");
         await loadMercadoPago();
 
-        if (cancelled || !walletRef.current) return;
+        if (cancelled) return;
+
+        // Wait one tick so the container div with WALLET_CONTAINER_ID is in
+        // the DOM before the SDK tries to look it up.
+        await new Promise((r) => setTimeout(r, 0));
+        if (cancelled) return;
 
         const mp = new (window as any).MercadoPago(publicKey, { locale: "es-AR" });
         const bricks = mp.bricks();
 
-        brickRef.current = await bricks.create("wallet", walletRef.current, {
+        brickRef.current = await bricks.create("wallet", WALLET_CONTAINER_ID, {
           initialization: {
             preferenceId,
             redirectMode: "modal",
@@ -170,7 +176,7 @@ export default function PaymentScreen({
         )}
 
         <div
-          ref={walletRef}
+          id={WALLET_CONTAINER_ID}
           className="payment-wallet-container"
           style={{ display: stage === "loading" || stage === "verifying" ? "none" : "block" }}
         />
