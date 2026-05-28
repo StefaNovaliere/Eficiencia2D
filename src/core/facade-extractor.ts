@@ -110,17 +110,41 @@ function extractWithAxis(faces: Face3D[], up: UpAxis): Facade[] {
   // 2. Cluster by horizontal direction.
   const clusters = clusterByDirection(verticalFaces, up);
 
-  // 3. Build one Facade per cluster.
+  // 3. Build one Facade per cluster, keeping only front-most faces.
   const facades: Facade[] = [];
 
   for (const { dir, faces: clusterFaces } of clusters) {
+    // Compute depth of each face along the cluster direction.
+    // Front-most faces (exterior) have the highest depth.
+    const depthsAndFaces: { depth: number; face: Face3D }[] = [];
+    for (const face of clusterFaces) {
+      let sumDepth = 0;
+      for (const v of face.vertices) sumDepth += dot(v, dir);
+      depthsAndFaces.push({ depth: sumDepth / face.vertices.length, face });
+    }
+
+    const maxDepth = Math.max(...depthsAndFaces.map((d) => d.depth));
+    const minDepth = Math.min(...depthsAndFaces.map((d) => d.depth));
+    const range = maxDepth - minDepth;
+
+    // Keep faces within a tolerance of the front-most surface.
+    // For thin walls (range < 0.5m) keep everything; otherwise only the
+    // front ~0.5m (typical wall thickness) to exclude interior walls and
+    // faces on the opposite side of the building.
+    const depthCutoff = range < 0.5 ? minDepth : maxDepth - 0.5;
+    const frontFaces = depthsAndFaces
+      .filter((d) => d.depth >= depthCutoff)
+      .map((d) => d.face);
+
+    if (frontFaces.length === 0) continue;
+
     const { uAxis, vAxis } = computeFacadeAxes(dir, up);
 
-    // Project all faces, collecting unique edges to remove internal
+    // Project front faces, collecting unique edges to remove internal
     // triangulation lines (edges shared between two faces cancel out).
     const edgeCounts = new Map<string, { ax: number; ay: number; bx: number; by: number }>();
 
-    for (const face of clusterFaces) {
+    for (const face of frontFaces) {
       const pts: Vec2[] = face.vertices.map((v) => ({
         x: dot(v, uAxis),
         y: dot(v, vAxis),
