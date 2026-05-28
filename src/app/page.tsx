@@ -1,8 +1,10 @@
 import UploadForm from "@/components/UploadForm";
+import BackgroundSymbols from "@/components/BackgroundSymbols";
 
 export default function Home() {
   return (
     <main className="main">
+      <BackgroundSymbols />
       <div className="hero">
         <div className="logo-mark">2D</div>
         <h1 className="title">Eficiencia2D</h1>

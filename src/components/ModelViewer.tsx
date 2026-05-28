@@ -46,18 +46,18 @@ const DIMMED_MATERIALS: Record<FaceCategory, THREE.MeshBasicMaterial> = {
 };
 
 const HIGHLIGHT_MATERIAL = new THREE.MeshBasicMaterial({
-  color: 0xffffff,
+  color: 0xf59e0b,
   side: THREE.DoubleSide,
   transparent: true,
-  opacity: 0.55,
+  opacity: 0.45,
 });
 
 const HIGHLIGHT_WIREFRAME = new THREE.LineBasicMaterial({
-  color: 0xffffff,
+  color: 0xf59e0b,
 });
 
 const EDGE_LINE_MATERIAL = new THREE.LineBasicMaterial({
-  color: 0x000000,
+  color: 0x18181b,
   transparent: true,
   opacity: 0.35,
   depthTest: true,
@@ -447,7 +447,7 @@ export default function ModelViewer({
         near: 0.01,
         far: camDist * 10,
       }}
-      style={{ background: "#09090b" }}
+      style={{ background: "#f5f5f7" }}
       onPointerMissed={() => onSelectGroup(-1)}
       dpr={[1, 1.5]}
     >
