@@ -1,14 +1,15 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { parsePipeline, decomposePanels, nestDecomposedPanels, generateFromNesting, reclassifyWithMinArea } from "@/core/pipeline";
 import type { Phase1Result, ClassificationOverride, NestingPreviewData } from "@/core/pipeline";
 import ReviewScreen from "./ReviewScreen";
 import NestingPreview from "./NestingPreview";
+import PaymentScreen from "./PaymentScreen";
 import { DEFAULT_SHEET } from "@/core/sheet-nester";
 import type { PipelineOptions, SheetConfig } from "@/core/types";
 
-type Status = "idle" | "parsing" | "reviewing" | "nesting" | "generating" | "done" | "error";
+type Status = "idle" | "parsing" | "reviewing" | "nesting" | "paying" | "generating" | "done" | "error";
 
 export default function UploadForm() {
   const [file, setFile] = useState<File | null>(null);
@@ -22,9 +23,16 @@ export default function UploadForm() {
   const [nestingData, setNestingData] = useState<NestingPreviewData | null>(null);
   const [savedOverrides, setSavedOverrides] = useState<ClassificationOverride[]>([]);
   const [sheetConfig, setSheetConfig] = useState<SheetConfig>(() => ({ ...DEFAULT_SHEET }));
+  const [paymentBypass, setPaymentBypass] = useState(false);
   const dropRef = useRef<HTMLDivElement>(null);
 
   const accept = ".obj";
+
+  // Check localStorage for bypass key on mount.
+  useEffect(() => {
+    const stored = localStorage.getItem("e2d_bypass");
+    if (stored) setPaymentBypass(true);
+  }, []);
 
   const handleDrag = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -70,7 +78,6 @@ export default function UploadForm() {
     try {
       const buffer = await file.arrayBuffer();
 
-      // Phase 1: Parse + classify (CPU-bound).
       const p1 = await new Promise<Phase1Result>((resolve) => {
         setTimeout(() => {
           resolve(parsePipeline(file.name, buffer));
@@ -158,7 +165,9 @@ export default function UploadForm() {
     setNestingData(nesting);
   }, [phase1Result, savedOverrides, paper, sheetConfig, minAreaM2]);
 
-  const handleNestingConfirm = async () => {
+  // ─── Generation logic (called after payment or bypass) ───
+
+  const proceedToGeneration = useCallback(async () => {
     if (!phase1Result || !file || !nestingData) return;
 
     setStatus("generating");
@@ -209,7 +218,73 @@ export default function UploadForm() {
       );
       setStatus("error");
     }
-  };
+  }, [phase1Result, file, nestingData, scale, paper, sheetConfig, minAreaM2]);
+
+  // ─── Nesting confirm → payment gate or bypass ───
+
+  const handleNestingConfirm = useCallback(async () => {
+    if (!phase1Result || !file || !nestingData) return;
+
+    if (paymentBypass) {
+      const key = localStorage.getItem("e2d_bypass");
+      if (key) {
+        try {
+          const res = await fetch("/api/mp/bypass", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ key }),
+          });
+          const data = await res.json();
+          if (data.valid) {
+            await proceedToGeneration();
+            return;
+          }
+        } catch { /* fall through to payment */ }
+        localStorage.removeItem("e2d_bypass");
+        setPaymentBypass(false);
+      }
+    }
+
+    setStatus("paying");
+  }, [phase1Result, file, nestingData, paymentBypass, proceedToGeneration]);
+
+  // ─── Payment callbacks ───
+
+  const handlePaymentApproved = useCallback(async (paymentId: string) => {
+    try {
+      const res = await fetch("/api/mp/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paymentId }),
+      });
+      const data = await res.json();
+      if (data.verified) {
+        await proceedToGeneration();
+      } else {
+        setError(`Pago no verificado (estado: ${data.status ?? "desconocido"}). Intentá de nuevo.`);
+        setStatus("error");
+      }
+    } catch {
+      setError("Error al verificar el pago.");
+      setStatus("error");
+    }
+  }, [proceedToGeneration]);
+
+  const handlePaymentError = useCallback((msg: string) => {
+    setError(msg);
+    setStatus("error");
+  }, []);
+
+  const handlePaymentCancel = useCallback(() => {
+    setStatus("nesting");
+  }, []);
+
+  const handleBypassSuccess = useCallback(() => {
+    setPaymentBypass(true);
+    proceedToGeneration();
+  }, [proceedToGeneration]);
+
+  // ─── Other handlers ───
 
   const handleNestingBack = useCallback(() => {
     setNestingData(null);
@@ -234,6 +309,20 @@ export default function UploadForm() {
     setStatus("idle");
     setError("");
   };
+
+  // ─── Render by status ───
+
+  // Show payment screen.
+  if (status === "paying") {
+    return (
+      <PaymentScreen
+        onPaymentApproved={handlePaymentApproved}
+        onPaymentError={handlePaymentError}
+        onCancel={handlePaymentCancel}
+        onBypassSuccess={handleBypassSuccess}
+      />
+    );
+  }
 
   // Show nesting preview.
   if (status === "nesting" && nestingData) {
