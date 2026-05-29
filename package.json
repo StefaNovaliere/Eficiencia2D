@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@mercadopago/sdk-js": "^0.0.3",
@@ -21,11 +23,16 @@
     "three": "^0.184.0"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
     "@types/node": "^20",
     "@types/pako": "^2.0.4",
     "@types/react": "^18",
     "@types/react-dom": "^18",
     "@types/three": "^0.184.1",
-    "typescript": "^5"
+    "@vitejs/plugin-react": "^6.0.2",
+    "jsdom": "^29.1.1",
+    "typescript": "^5",
+    "vitest": "^4.1.7"
   }
 }
