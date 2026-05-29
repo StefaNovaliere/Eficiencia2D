@@ -6,10 +6,42 @@ import type { Phase1Result, ClassificationOverride, NestingPreviewData } from "@
 import ReviewScreen from "./ReviewScreen";
 import NestingPreview from "./NestingPreview";
 import PaymentScreen from "./PaymentScreen";
+import DemoButton from "./DemoButton";
 import { DEFAULT_SHEET } from "@/core/sheet-nester";
 import type { PipelineOptions, SheetConfig } from "@/core/types";
 
 type Status = "idle" | "parsing" | "reviewing" | "nesting" | "paying" | "generating" | "done" | "error";
+
+// Persisted session state — saved when entering payment so user can resume
+// after navigating away (e.g. browser back from Mercado Pago redirect).
+const SESSION_KEY = "e2d_pending_session";
+
+interface PersistedSession {
+  fileName: string;
+  fileBase64: string;
+  scale: number;
+  paper: string;
+  minAreaM2: number;
+  sheetConfig: SheetConfig;
+  overrides: ClassificationOverride[];
+}
+
+function bufferToBase64(buf: ArrayBuffer): string {
+  const bytes = new Uint8Array(buf);
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+function base64ToBuffer(b64: string): ArrayBuffer {
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes.buffer;
+}
 
 export default function UploadForm() {
   const [file, setFile] = useState<File | null>(null);
@@ -32,6 +64,52 @@ export default function UploadForm() {
   useEffect(() => {
     const stored = localStorage.getItem("e2d_bypass");
     if (stored) setPaymentBypass(true);
+  }, []);
+
+  // Restore session if user navigated away during payment (e.g. MP redirect).
+  useEffect(() => {
+    const raw = sessionStorage.getItem(SESSION_KEY);
+    if (!raw) return;
+
+    let parsed: PersistedSession;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      sessionStorage.removeItem(SESSION_KEY);
+      return;
+    }
+
+    try {
+      const buffer = base64ToBuffer(parsed.fileBase64);
+      const restoredFile = new File([buffer], parsed.fileName);
+      setFile(restoredFile);
+      setScale(parsed.scale);
+      setPaper(parsed.paper);
+      setMinAreaM2(parsed.minAreaM2);
+      setSheetConfig(parsed.sheetConfig);
+      setSavedOverrides(parsed.overrides);
+
+      const p1 = parsePipeline(parsed.fileName, buffer);
+      if (p1.faces.length === 0) {
+        sessionStorage.removeItem(SESSION_KEY);
+        return;
+      }
+      setPhase1Result(p1);
+
+      const opts: PipelineOptions = {
+        scaleDenom: parsed.scale,
+        paper: parsed.paper,
+        includeCuttingSheet: true,
+        sheetConfig: parsed.sheetConfig,
+        minAreaM2: parsed.minAreaM2,
+      };
+      const decomposed = decomposePanels(p1, opts, parsed.overrides);
+      const nesting = nestDecomposedPanels(decomposed, parsed.sheetConfig, parsed.scale);
+      setNestingData(nesting);
+      setStatus("nesting");
+    } catch {
+      sessionStorage.removeItem(SESSION_KEY);
+    }
   }, []);
 
   const handleDrag = useCallback((e: React.DragEvent) => {
@@ -59,6 +137,34 @@ export default function UploadForm() {
     },
     [],
   );
+
+  const handleLoadDemo = async () => {
+    setStatus("parsing");
+    setError("");
+    try {
+      const res = await fetch("/demo/demo.obj");
+      if (!res.ok) {
+        throw new Error(
+          "El archivo de demo todavía no está disponible. Probá subir tu propio .obj.",
+        );
+      }
+      const buffer = await res.arrayBuffer();
+      const demoFile = new File([buffer], "demo.obj", { type: "model/obj" });
+      setFile(demoFile);
+
+      const p1 = parsePipeline("demo.obj", buffer);
+      if (p1.faces.length === 0) {
+        throw new Error("El archivo de demo no contiene geometría válida.");
+      }
+      setPhase1Result(p1);
+      setStatus("reviewing");
+    } catch (err: unknown) {
+      setError(
+        err instanceof Error ? err.message : "Error al cargar el demo.",
+      );
+      setStatus("error");
+    }
+  };
 
   const handleSubmit = async () => {
     if (!file) return;
@@ -211,6 +317,7 @@ export default function UploadForm() {
       a.click();
       URL.revokeObjectURL(url);
 
+      sessionStorage.removeItem(SESSION_KEY);
       setStatus("done");
     } catch (err: unknown) {
       setError(
@@ -221,6 +328,29 @@ export default function UploadForm() {
   }, [phase1Result, file, nestingData, scale, paper, sheetConfig, minAreaM2]);
 
   // ─── Nesting confirm → payment gate or bypass ───
+
+  const persistSession = useCallback(async () => {
+    if (!file) return;
+    try {
+      const buffer = await file.arrayBuffer();
+      const persisted: PersistedSession = {
+        fileName: file.name,
+        fileBase64: bufferToBase64(buffer),
+        scale,
+        paper,
+        minAreaM2,
+        sheetConfig,
+        overrides: savedOverrides,
+      };
+      sessionStorage.setItem(SESSION_KEY, JSON.stringify(persisted));
+    } catch {
+      // File too large for sessionStorage — silently skip persistence.
+    }
+  }, [file, scale, paper, minAreaM2, sheetConfig, savedOverrides]);
+
+  const clearSession = useCallback(() => {
+    sessionStorage.removeItem(SESSION_KEY);
+  }, []);
 
   const handleNestingConfirm = useCallback(async () => {
     if (!phase1Result || !file || !nestingData) return;
@@ -245,8 +375,9 @@ export default function UploadForm() {
       }
     }
 
+    await persistSession();
     setStatus("paying");
-  }, [phase1Result, file, nestingData, paymentBypass, proceedToGeneration]);
+  }, [phase1Result, file, nestingData, paymentBypass, proceedToGeneration, persistSession]);
 
   // ─── Payment callbacks ───
 
@@ -308,6 +439,7 @@ export default function UploadForm() {
     setSavedOverrides([]);
     setStatus("idle");
     setError("");
+    clearSession();
   };
 
   // ─── Render by status ───
@@ -367,7 +499,9 @@ export default function UploadForm() {
   }
 
   return (
-    <div className="upload-card">
+    <>
+      {status === "idle" && <DemoButton onClick={handleLoadDemo} />}
+      <div className="upload-card">
       {/* Drop zone */}
       <div
         ref={dropRef}
@@ -517,6 +651,7 @@ export default function UploadForm() {
 
       {/* Error */}
       {status === "error" && <p className="error-msg">{error}</p>}
-    </div>
+      </div>
+    </>
   );
 }
