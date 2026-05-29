@@ -26,8 +26,7 @@ import { areThinTwins } from "./wall-thickness";
 const GAP_M = 0.003;             // gap between panels in metres (3mm for laser cutting)
 const SHEET_SPACING_M = 0.10;    // visual gap between sheets in multi-sheet DXF
 const NORMAL_CLUSTER_DOT = 0.85; // faces with dot > this are "same direction"
-const HORIZONTAL_THRESHOLD = 0.75; // |upComponent| > this → horizontal face
-const VERTICAL_THRESHOLD = 0.25;   // |upComponent| < this → vertical face
+const NEAR_PARALLEL_EPS = 0.01;    // cross product near-zero threshold for degenerate axis
 const THIN_TWIN_THRESHOLD = 0.40;  // merge twin coplanar groups closer than this
 
 type UpAxis = "Y" | "Z";
@@ -139,13 +138,9 @@ function clusterByCoplanarity(
     // Plane offset from first vertex.
     const d = dot(n, face.vertices[0]);
 
-    // Classify: horizontal (floor/ceiling) or vertical (wall).
+    // Classify: horizontal (floor/ceiling) or vertical/inclined (wall).
     const upComp = Math.abs(getUp(n, up));
-    const category: PanelCategory =
-      upComp > HORIZONTAL_THRESHOLD ? "floor" : "wall";
-
-    // Skip faces at weird angles (neither wall nor floor).
-    if (category === "wall" && upComp > VERTICAL_THRESHOLD) continue;
+    const category: PanelCategory = upComp > 0.75 ? "floor" : "wall";
 
     // Try to merge into an existing group.
     let placed = false;
@@ -229,6 +224,139 @@ function splitConnectedComponents(faces: Face3D[]): Face3D[][] {
 }
 
 // ---------------------------------------------------------------------------
+// Contour tracing: remove stray internal edges from boundary edge set
+// ---------------------------------------------------------------------------
+
+type RawEdge = { ax: number; ay: number; bx: number; by: number };
+
+/**
+ * Filter boundary edges to keep only those forming closed contour loops
+ * (outer boundary + holes). Removes stray edges from mesh artifacts.
+ */
+export function traceContours(boundaryEdges: RawEdge[]): RawEdge[] {
+  if (boundaryEdges.length <= 2) return boundaryEdges;
+
+  // Build adjacency: vertex → list of edge indices.
+  const adj = new Map<string, number[]>();
+  function addAdj(vk: string, ei: number) {
+    const arr = adj.get(vk);
+    if (arr) arr.push(ei);
+    else adj.set(vk, [ei]);
+  }
+  for (let i = 0; i < boundaryEdges.length; i++) {
+    const e = boundaryEdges[i];
+    addAdj(vertKey(e.ax, e.ay), i);
+    addAdj(vertKey(e.bx, e.by), i);
+  }
+
+  // Iterative leaf pruning: remove edges connected to degree-1 vertices.
+  const removed = new Set<number>();
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const [vk, indices] of adj) {
+      const live = indices.filter((i) => !removed.has(i));
+      if (live.length === 1) {
+        removed.add(live[0]);
+        changed = true;
+      }
+      if (live.length <= 1) {
+        adj.set(vk, []);
+      } else {
+        adj.set(vk, live);
+      }
+    }
+  }
+
+  // After pruning, all remaining vertices have degree >= 2.
+  // Trace closed loops using angle-based traversal at forks.
+  const visited = new Set<number>();
+  const kept = new Set<number>();
+
+  function otherVert(ei: number, fromKey: string): string {
+    const e = boundaryEdges[ei];
+    const aKey = vertKey(e.ax, e.ay);
+    return aKey === fromKey ? vertKey(e.bx, e.by) : aKey;
+  }
+
+  function edgeAngle(ei: number, fromKey: string): number {
+    const e = boundaryEdges[ei];
+    const aKey = vertKey(e.ax, e.ay);
+    let dx: number, dy: number;
+    if (aKey === fromKey) {
+      dx = e.bx - e.ax; dy = e.by - e.ay;
+    } else {
+      dx = e.ax - e.bx; dy = e.ay - e.by;
+    }
+    return Math.atan2(dy, dx);
+  }
+
+  function pickNextEdge(
+    fromVert: string,
+    incomingAngle: number,
+    candidates: number[],
+  ): number {
+    if (candidates.length === 1) return candidates[0];
+    // Pick the edge with the smallest CCW turn from incoming direction.
+    // Incoming direction is reversed (we arrived FROM that direction).
+    const reverseAngle = incomingAngle + Math.PI;
+    let bestIdx = candidates[0];
+    let bestTurn = Infinity;
+    for (const ci of candidates) {
+      const outAngle = edgeAngle(ci, fromVert);
+      let turn = outAngle - reverseAngle;
+      // Normalize to (0, 2*PI] — smallest positive CCW turn.
+      while (turn <= 0) turn += 2 * Math.PI;
+      while (turn > 2 * Math.PI) turn -= 2 * Math.PI;
+      if (turn < bestTurn) {
+        bestTurn = turn;
+        bestIdx = ci;
+      }
+    }
+    return bestIdx;
+  }
+
+  for (let startEi = 0; startEi < boundaryEdges.length; startEi++) {
+    if (removed.has(startEi) || visited.has(startEi)) continue;
+
+    const loop: number[] = [];
+    const e0 = boundaryEdges[startEi];
+    let currentVert = vertKey(e0.ax, e0.ay);
+    const startVert = currentVert;
+    let currentEdge = startEi;
+    let closed = false;
+
+    for (let step = 0; step < boundaryEdges.length + 1; step++) {
+      if (visited.has(currentEdge)) break;
+      visited.add(currentEdge);
+      loop.push(currentEdge);
+
+      const nextVert = otherVert(currentEdge, currentVert);
+      const angle = edgeAngle(currentEdge, currentVert);
+
+      if (nextVert === startVert && loop.length >= 3) {
+        closed = true;
+        break;
+      }
+
+      const candidates = (adj.get(nextVert) ?? []).filter(
+        (i) => !visited.has(i) && !removed.has(i),
+      );
+
+      if (candidates.length === 0) break;
+      currentEdge = pickNextEdge(nextVert, angle, candidates);
+      currentVert = nextVert;
+    }
+
+    if (closed) {
+      for (const ei of loop) kept.add(ei);
+    }
+  }
+
+  return boundaryEdges.filter((_, i) => kept.has(i));
+}
+
+// ---------------------------------------------------------------------------
 // Project coplanar faces to 2D and extract boundary edges
 // ---------------------------------------------------------------------------
 
@@ -239,49 +367,23 @@ export function projectFacesTo2D(
 ): { widthM: number; heightM: number; edges: Array<{ a: Vec2; b: Vec2 }> } | null {
   if (faces.length === 0) return null;
 
-  const upComp = Math.abs(getUp(groupNormal, up));
-
-  let uAxis: Vec3;
+  // Universal tangent-plane projection: always project onto the surface's own
+  // plane so the true cutting shape is preserved for any orientation —
+  // horizontal floors, vertical walls, and inclined roofs alike.
+  const worldUp = getUpVec(up);
+  let uAxis: Vec3 = normalize(cross(worldUp, groupNormal));
   let vAxis: Vec3;
 
-  if (upComp > HORIZONTAL_THRESHOLD) {
-    // Floor/ceiling → top-down projection: u = X, v = other horizontal axis.
-    if (up === "Y") {
-      uAxis = { x: 1, y: 0, z: 0 };
-      vAxis = { x: 0, y: 0, z: 1 };
-    } else {
-      uAxis = { x: 1, y: 0, z: 0 };
-      vAxis = { x: 0, y: 1, z: 0 };
+  if (vlength(uAxis) < NEAR_PARALLEL_EPS) {
+    // Normal is nearly parallel to worldUp (pure floor/ceiling) — pick
+    // an arbitrary horizontal axis as u.
+    uAxis = { x: 1, y: 0, z: 0 };
+    vAxis = normalize(cross(groupNormal, uAxis));
+    if (vlength(vAxis) < NEAR_PARALLEL_EPS) {
+      vAxis = up === "Y" ? { x: 0, y: 0, z: 1 } : { x: 0, y: 1, z: 0 };
     }
-  } else if (upComp < VERTICAL_THRESHOLD) {
-    // Wall → front-view projection: u = horizontal along wall, v = up.
-    const hDir: Vec3 =
-      up === "Y"
-        ? normalize({ x: groupNormal.x, y: 0, z: groupNormal.z })
-        : normalize({ x: groupNormal.x, y: groupNormal.y, z: 0 });
-
-    if (vlength(hDir) < 0.01) return null;
-
-    const worldUp = getUpVec(up);
-    uAxis = normalize(cross(worldUp, hDir));
-    vAxis = worldUp;
   } else {
-    // Inclined surface (roof, ramp) → project onto the surface's own tangent
-    // plane so the true shape is preserved for cutting.
-    const worldUp = getUpVec(up);
-    uAxis = normalize(cross(worldUp, groupNormal));
-    if (vlength(uAxis) < 0.01) {
-      // Nearly horizontal — fall back to floor projection.
-      if (up === "Y") {
-        uAxis = { x: 1, y: 0, z: 0 };
-        vAxis = { x: 0, y: 0, z: 1 };
-      } else {
-        uAxis = { x: 1, y: 0, z: 0 };
-        vAxis = { x: 0, y: 1, z: 0 };
-      }
-    } else {
-      vAxis = normalize(cross(groupNormal, uAxis));
-    }
+    vAxis = normalize(cross(groupNormal, uAxis));
   }
 
   // Project all faces to 2D; count how many faces each edge belongs to.
@@ -323,11 +425,15 @@ export function projectFacesTo2D(
 
   if (boundaryEdges.length === 0) return null;
 
+  // Remove stray internal edges — keep only edges forming closed contours.
+  const contoured = traceContours(boundaryEdges);
+  if (contoured.length === 0) return null;
+
   // Bounding box and normalize to (0,0).
   let minU = Infinity, maxU = -Infinity;
   let minV = Infinity, maxV = -Infinity;
 
-  for (const e of boundaryEdges) {
+  for (const e of contoured) {
     minU = Math.min(minU, e.ax, e.bx);
     maxU = Math.max(maxU, e.ax, e.bx);
     minV = Math.min(minV, e.ay, e.by);
@@ -339,7 +445,7 @@ export function projectFacesTo2D(
   if (w < 0.01 || h < 0.01) return null;
 
   const edges: Array<{ a: Vec2; b: Vec2 }> = [];
-  for (const e of boundaryEdges) {
+  for (const e of contoured) {
     edges.push({
       a: { x: e.ax - minU, y: e.ay - minV },
       b: { x: e.bx - minU, y: e.by - minV },

@@ -18,6 +18,7 @@ import { generatePdf, generateNestingPdf } from "./pdf-writer";
 import { nestPanels, DEFAULT_SHEET } from "./sheet-nester";
 import type { NestingPanel, NestingResult } from "./sheet-nester";
 import type { Face3D, Facade, FloorPlan, OutputFile, PipelineOptions, SheetConfig } from "./types";
+import { collectFloorPlanes, splitWallAtFloors } from "./mesh-splitter";
 
 export interface PipelineResult {
   facades: Facade[];
@@ -304,6 +305,14 @@ export function decomposePanels(
     for (const o of overrides) overrideMap.set(o.groupId, o.newCategory);
   }
 
+  // Collect horizontal floor planes for wall-slab splitting.
+  const floorPlanes = collectFloorPlanes(
+    phase1.groups,
+    overrideMap as Map<number, string>,
+    phase1.faces,
+    "Y",
+  );
+
   const wallPanels: Panel[] = [];
   const floorPanels: Panel[] = [];
   let wallCount = 0;
@@ -319,32 +328,39 @@ export function decomposePanels(
     const faces = group.faceIndices.map((fi) => phase1.faces[fi]).filter(Boolean);
     if (faces.length === 0) continue;
 
-    const result = projectFacesTo2D(faces, group.representativeNormal, "Y");
-    if (!result) continue;
-    if (result.widthM * result.heightM < (opts.minAreaM2 ?? 0.01)) continue;
+    // For wall groups, split at intersecting floor planes.
+    const faceGroups = isFloor
+      ? [faces]
+      : splitWallAtFloors(faces, floorPlanes, "Y");
 
-    if (isFloor) {
-      floorCount++;
-      floorPanels.push({
-        id: `B${floorCount}`,
-        groupName: `floor_${floorCount}`,
-        category: panelCat,
-        floorIndex: 0,
-        widthM: result.widthM,
-        heightM: result.heightM,
-        edges: result.edges,
-      });
-    } else {
-      wallCount++;
-      wallPanels.push({
-        id: `A${wallCount}`,
-        groupName: `wall_${wallCount}`,
-        category: panelCat,
-        floorIndex: 0,
-        widthM: result.widthM,
-        heightM: result.heightM,
-        edges: result.edges,
-      });
+    for (const segmentFaces of faceGroups) {
+      const result = projectFacesTo2D(segmentFaces, group.representativeNormal, "Y");
+      if (!result) continue;
+      if (result.widthM * result.heightM < (opts.minAreaM2 ?? 0.01)) continue;
+
+      if (isFloor) {
+        floorCount++;
+        floorPanels.push({
+          id: `B${floorCount}`,
+          groupName: `floor_${floorCount}`,
+          category: panelCat,
+          floorIndex: 0,
+          widthM: result.widthM,
+          heightM: result.heightM,
+          edges: result.edges,
+        });
+      } else {
+        wallCount++;
+        wallPanels.push({
+          id: `A${wallCount}`,
+          groupName: `wall_${wallCount}`,
+          category: panelCat,
+          floorIndex: 0,
+          widthM: result.widthM,
+          heightM: result.heightM,
+          edges: result.edges,
+        });
+      }
     }
   }
 

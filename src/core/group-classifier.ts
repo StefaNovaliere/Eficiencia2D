@@ -177,9 +177,10 @@ function classifyAllFaces(faces: Face3D[]): FaceInfo[] {
     fi.category = Math.min(distX, distZ) <= PERIMETER_MARGIN ? "wall_exterior" : "wall_interior";
   }
 
-  // Inclined → discard.
+  // Inclined surfaces (roofs, ramps) → classify as floor so they appear in
+  // the review screen as structural elements the user can reclassify.
   for (const fi of infos) {
-    if (fi.orientation === "inclined") fi.category = "discard";
+    if (fi.orientation === "inclined") fi.category = "floor";
   }
 
   return infos;
