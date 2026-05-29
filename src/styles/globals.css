@@ -673,6 +673,32 @@ body {
   opacity: 0.7;
 }
 
+.group-select-all {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.group-select-all input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.group-row-checkbox {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
 .group-list-items {
   flex: 1;
   overflow-y: auto;
@@ -1043,6 +1069,151 @@ body {
   padding: 1px 5px;
   border-radius: 4px;
   font-size: 0.75rem;
+}
+
+/* ───────────── Demo CTA ───────────── */
+
+.demo-cta {
+  position: fixed;
+  top: 20px;
+  right: 24px;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.demo-cta-hint {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--accent);
+  animation: demoBob 2.4s ease-in-out infinite;
+}
+
+@keyframes demoBob {
+  0%, 100% { transform: translateX(0); }
+  50%      { transform: translateX(4px); }
+}
+
+.demo-cta-text {
+  font-size: 0.82rem;
+  font-weight: 500;
+  font-style: italic;
+  white-space: nowrap;
+}
+
+.demo-cta-arrow {
+  flex-shrink: 0;
+}
+
+.demo-cta-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.demo-cta-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
+}
+
+.demo-cta-btn:active {
+  transform: translateY(0);
+}
+
+@media (max-width: 540px) {
+  .demo-cta-hint {
+    display: none;
+  }
+  .demo-cta {
+    top: 12px;
+    right: 12px;
+  }
+}
+
+/* ───────────── Confirm Modal ───────────── */
+
+.confirm-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  animation: fadeIn 0.15s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.confirm-modal {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 28px;
+  max-width: 460px;
+  width: 100%;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--border);
+  text-align: center;
+}
+
+.confirm-modal-icon {
+  color: #f59e0b;
+  display: flex;
+  justify-content: center;
+  margin-bottom: 12px;
+}
+
+.confirm-modal-title {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 10px;
+}
+
+.confirm-modal-text {
+  font-size: 0.88rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin-bottom: 12px;
+}
+
+.confirm-modal-list {
+  text-align: left;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  padding-left: 22px;
+  margin-bottom: 20px;
+}
+
+.confirm-modal-list li {
+  margin-bottom: 4px;
+}
+
+.confirm-modal-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}
+
+.confirm-modal-actions .review-btn {
+  flex: 1;
 }
 
 /* ───────────── Payment Screen ───────────── */
