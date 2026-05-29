@@ -176,6 +176,7 @@ export default function NestingPreview({
 }: NestingPreviewProps) {
   const [localWidth, setLocalWidth] = useState(String(sheetConfig.widthM));
   const [localHeight, setLocalHeight] = useState(String(sheetConfig.heightM));
+  const [showConfirm, setShowConfirm] = useState(false);
 
   const handleApplySize = useCallback(() => {
     const w = parseFloat(localWidth);
@@ -296,11 +297,64 @@ export default function NestingPreview({
           <button className="review-btn review-btn--cancel" onClick={onBack}>
             Volver
           </button>
-          <button className="review-btn review-btn--confirm" onClick={onConfirm}>
+          <button
+            className="review-btn review-btn--confirm"
+            onClick={() => setShowConfirm(true)}
+          >
             Generar y Descargar
           </button>
         </div>
       </div>
+
+      {showConfirm && (
+        <div className="confirm-modal-overlay" onClick={() => setShowConfirm(false)}>
+          <div className="confirm-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="confirm-modal-icon">
+              <svg
+                width="40"
+                height="40"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                <line x1="12" y1="9" x2="12" y2="13" />
+                <line x1="12" y1="17" x2="12.01" y2="17" />
+              </svg>
+            </div>
+            <h3 className="confirm-modal-title">¿Revisaste todo bien?</h3>
+            <p className="confirm-modal-text">
+              Después de pagar no vas a poder modificar las planchas. Asegurate de
+              haber revisado:
+            </p>
+            <ul className="confirm-modal-list">
+              <li>La clasificación de cada componente (pisos, paredes, descartados)</li>
+              <li>La escala y el tamaño de la plancha</li>
+              <li>Que no haya componentes sin ubicar</li>
+            </ul>
+            <div className="confirm-modal-actions">
+              <button
+                className="review-btn review-btn--cancel"
+                onClick={() => setShowConfirm(false)}
+              >
+                Volver a revisar
+              </button>
+              <button
+                className="review-btn review-btn--confirm"
+                onClick={() => {
+                  setShowConfirm(false);
+                  onConfirm();
+                }}
+              >
+                Continuar al pago
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

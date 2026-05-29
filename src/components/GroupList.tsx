@@ -63,6 +63,14 @@ export default function GroupList({
     return visibleCategories.has(eff);
   });
 
+  const selectedVisibleCount = visibleGroups.reduce(
+    (n, g) => (selectedGroupIds.has(g.id) ? n + 1 : n),
+    0,
+  );
+  const allVisibleSelected =
+    visibleGroups.length > 0 && selectedVisibleCount === visibleGroups.length;
+  const someVisibleSelected = selectedVisibleCount > 0;
+
   // Scroll selected item into view.
   useEffect(() => {
     if (selectedRef.current) {
@@ -77,8 +85,31 @@ export default function GroupList({
         <p className="group-list-subtitle">
           {visibleGroups.length} de {groups.length} grupo{groups.length !== 1 ? "s" : ""}
         </p>
-        {groups.length > 1 && (
-          <p className="group-list-hint">Ctrl+click para seleccionar varios</p>
+        {visibleGroups.length > 0 && (
+          <label className="group-select-all">
+            <input
+              type="checkbox"
+              checked={allVisibleSelected}
+              ref={(el) => {
+                if (el) el.indeterminate = someVisibleSelected && !allVisibleSelected;
+              }}
+              onChange={(e) => {
+                e.stopPropagation();
+                if (allVisibleSelected) {
+                  // Deselect all visible
+                  for (const g of visibleGroups) {
+                    if (selectedGroupIds.has(g.id)) onToggleGroup(g.id);
+                  }
+                } else {
+                  // Select all visible that aren't already selected
+                  for (const g of visibleGroups) {
+                    if (!selectedGroupIds.has(g.id)) onToggleGroup(g.id);
+                  }
+                }
+              }}
+            />
+            <span>Seleccionar todos</span>
+          </label>
         )}
       </div>
 
@@ -102,6 +133,17 @@ export default function GroupList({
               }}
             >
               <div className="group-row-left">
+                <input
+                  type="checkbox"
+                  className="group-row-checkbox"
+                  checked={isSelected}
+                  onChange={(e) => {
+                    e.stopPropagation();
+                    onToggleGroup(group.id);
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                  aria-label={`Seleccionar ${group.label}`}
+                />
                 <span
                   className="group-color-dot"
                   style={{ backgroundColor: color }}
