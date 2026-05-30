@@ -7,7 +7,7 @@
 // ============================================================================
 
 import { parseObj } from "./obj-parser";
-import { generateCuttingSheets, decomposeIntoPanels, nestedSheetsToDxf, projectFacesTo2D } from "./cutting-sheet";
+import { generateCuttingSheets, decomposeIntoPanels, nestedSheetsToDxf, projectFacesTo2D, clipPanelAtV } from "./cutting-sheet";
 import type { Panel, PanelCategory } from "./cutting-sheet";
 import { detectUpAxis, extractFacades } from "./facade-extractor";
 import { extractFloorPlans } from "./floor-plan-extractor";
@@ -361,12 +361,26 @@ export function decomposePanels(
       const result = projectFacesTo2D(segmentFaces, group.representativeNormal, "Y");
       if (!result) continue;
 
-      let { widthM, heightM } = result;
+      let { widthM, heightM, edges } = result;
 
-      // Apply assembly compensation: shorten the smaller dimension (height
-      // for walls, since height corresponds to the joint edge).
-      if (delta !== 0 && !isFloor) {
-        heightM = Math.max(0.001, heightM + delta);
+      // Apply assembly compensation: physically remove a strip of height
+      // |delta| from the wall's BASE — the edge where it meets the floor —
+      // so the cut piece fits once the floor's material thickness is in place.
+      // The base is the lowest-elevation side: if the projection's +y points
+      // up (vUp > 0) the base is at y = 0, otherwise at y = heightM.
+      if (delta < 0 && !isFloor) {
+        const strip = Math.min(-delta, heightM - 0.01);
+        if (strip > 0.001) {
+          const baseAtMinV = result.vUp >= 0;
+          const clipped = baseAtMinV
+            ? clipPanelAtV(edges, strip, true)
+            : clipPanelAtV(edges, heightM - strip, false);
+          if (clipped) {
+            widthM = clipped.widthM;
+            heightM = clipped.heightM;
+            edges = clipped.edges;
+          }
+        }
       }
 
       if (widthM * heightM < (opts.minAreaM2 ?? 0.01)) continue;
@@ -380,7 +394,7 @@ export function decomposePanels(
           floorIndex: 0,
           widthM,
           heightM,
-          edges: result.edges,
+          edges,
         });
       } else {
         wallCount++;
@@ -391,7 +405,7 @@ export function decomposePanels(
           floorIndex: 0,
           widthM,
           heightM,
-          edges: result.edges,
+          edges,
         });
       }
     }
