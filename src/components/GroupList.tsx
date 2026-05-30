@@ -152,6 +152,7 @@ export default function GroupList({
                   <span className="group-row-label">{group.label}</span>
                   <span className="group-row-meta">
                     {group.totalArea.toFixed(1)} m² · {group.faceIndices.length} caras
+                    {group.thickness != null && ` · ${(group.thickness * 100).toFixed(1)}cm grosor`}
                   </span>
                 </div>
               </div>
