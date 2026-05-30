@@ -19,6 +19,10 @@ import { nestPanels, DEFAULT_SHEET } from "./sheet-nester";
 import type { NestingPanel, NestingResult } from "./sheet-nester";
 import type { Face3D, Facade, FloorPlan, OutputFile, PipelineOptions, SheetConfig } from "./types";
 import { collectFloorPlanes, splitWallAtFloors } from "./mesh-splitter";
+import { detectJoints } from "./joint-detector";
+import type { Joint } from "./joint-detector";
+import { computeAdjustments } from "./assembly-adjuster";
+import type { DimensionAdjustment } from "./assembly-adjuster";
 
 export interface PipelineResult {
   facades: Facade[];
@@ -32,6 +36,8 @@ export interface Phase1Result {
   rawFaces: Face3D[];
   appliedAxis: "Y" | "Z";
   groups: GeometryGroup[];
+  joints: Joint[];
+  adjustments: DimensionAdjustment[];
   stem: string;
   warnings: string[];
 }
@@ -93,7 +99,9 @@ export function reclassifyWithAxis(
     faces = rotateZtoY(faces);
   }
   const groups = classifyIntoGroups(faces, minRealArea);
-  return { ...phase1, faces, appliedAxis: newAxis, groups };
+  const joints = detectJoints(faces, groups);
+  const adjustments = computeAdjustments(joints, groups);
+  return { ...phase1, faces, appliedAxis: newAxis, groups, joints, adjustments };
 }
 
 /** Re-classify with a different minimum-real-area threshold, keeping the current axis. */
@@ -102,7 +110,9 @@ export function reclassifyWithMinArea(
   minRealArea: number,
 ): Phase1Result {
   const groups = classifyIntoGroups(phase1.faces, minRealArea);
-  return { ...phase1, groups };
+  const joints = detectJoints(phase1.faces, groups);
+  const adjustments = computeAdjustments(joints, groups);
+  return { ...phase1, groups, joints, adjustments };
 }
 
 /**
@@ -126,12 +136,12 @@ export function parsePipeline(
     warnings.push(...result.warnings);
   } else {
     warnings.push(`Formato no soportado: .${ext}. Usa .obj.`);
-    return { faces: [], rawFaces: [], appliedAxis: "Y", groups: [], stem, warnings };
+    return { faces: [], rawFaces: [], appliedAxis: "Y", groups: [], joints: [], adjustments: [], stem, warnings };
   }
 
   if (faces.length === 0) {
     warnings.push("No se encontraron caras en el archivo.");
-    return { faces: [], rawFaces: [], appliedAxis: "Y", groups: [], stem, warnings };
+    return { faces: [], rawFaces: [], appliedAxis: "Y", groups: [], joints: [], adjustments: [], stem, warnings };
   }
 
   // Normalise units.
@@ -165,7 +175,11 @@ export function parsePipeline(
   // Classify into reviewable groups.
   const groups = classifyIntoGroups(faces);
 
-  return { faces, rawFaces, appliedAxis: detectedUp, groups, stem, warnings };
+  // Detect joints and compute assembly adjustments.
+  const joints = detectJoints(faces, groups);
+  const adjustments = computeAdjustments(joints, groups);
+
+  return { faces, rawFaces, appliedAxis: detectedUp, groups, joints, adjustments, stem, warnings };
 }
 
 /**
@@ -305,6 +319,13 @@ export function decomposePanels(
     for (const o of overrides) overrideMap.set(o.groupId, o.newCategory);
   }
 
+  // Build adjustment lookup: groupId → total delta (metres).
+  const adjustmentByGroup = new Map<number, number>();
+  for (const adj of phase1.adjustments) {
+    const prev = adjustmentByGroup.get(adj.groupId) ?? 0;
+    adjustmentByGroup.set(adj.groupId, prev + adj.delta);
+  }
+
   // Collect horizontal floor planes for wall-slab splitting.
   const floorPlanes = collectFloorPlanes(
     phase1.groups,
@@ -333,10 +354,22 @@ export function decomposePanels(
       ? [faces]
       : splitWallAtFloors(faces, floorPlanes, "Y");
 
+    // Assembly adjustment for this group (negative = shorten).
+    const delta = adjustmentByGroup.get(group.id) ?? 0;
+
     for (const segmentFaces of faceGroups) {
       const result = projectFacesTo2D(segmentFaces, group.representativeNormal, "Y");
       if (!result) continue;
-      if (result.widthM * result.heightM < (opts.minAreaM2 ?? 0.01)) continue;
+
+      let { widthM, heightM } = result;
+
+      // Apply assembly compensation: shorten the smaller dimension (height
+      // for walls, since height corresponds to the joint edge).
+      if (delta !== 0 && !isFloor) {
+        heightM = Math.max(0.001, heightM + delta);
+      }
+
+      if (widthM * heightM < (opts.minAreaM2 ?? 0.01)) continue;
 
       if (isFloor) {
         floorCount++;
@@ -345,8 +378,8 @@ export function decomposePanels(
           groupName: `floor_${floorCount}`,
           category: panelCat,
           floorIndex: 0,
-          widthM: result.widthM,
-          heightM: result.heightM,
+          widthM,
+          heightM,
           edges: result.edges,
         });
       } else {
@@ -356,8 +389,8 @@ export function decomposePanels(
           groupName: `wall_${wallCount}`,
           category: panelCat,
           floorIndex: 0,
-          widthM: result.widthM,
-          heightM: result.heightM,
+          widthM,
+          heightM,
           edges: result.edges,
         });
       }

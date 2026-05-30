@@ -27,21 +27,21 @@ export interface TwinCandidate {
 }
 
 /**
- * True if two planar regions are "thin twins": parallel with opposite normals,
- * perpendicular distance below `thicknessThreshold`, and laterally overlapping.
- * A pair of thin twins represents the two skins of the same physical wall or
- * the top/bottom faces of the same physical floor slab.
+ * If two planar regions are "thin twins" (parallel with opposite normals,
+ * perpendicular distance below `thicknessThreshold`, and laterally overlapping),
+ * returns the perpendicular distance (thickness) in metres.
+ * Returns `null` if they are not thin twins.
  */
 export function areThinTwins(
   a: TwinCandidate,
   b: TwinCandidate,
   thicknessThreshold: number,
-): boolean {
+): number | null {
   const ndot =
     a.normal.x * b.normal.x +
     a.normal.y * b.normal.y +
     a.normal.z * b.normal.z;
-  if (ndot > OPPOSITE_NORMAL_DOT) return false;
+  if (ndot > OPPOSITE_NORMAL_DOT) return null;
 
   const distance = Math.abs(
     a.normal.x * b.centroid.x +
@@ -49,7 +49,7 @@ export function areThinTwins(
       a.normal.z * b.centroid.z -
       a.d,
   );
-  if (distance < 1e-4 || distance > thicknessThreshold) return false;
+  if (distance < 1e-4 || distance > thicknessThreshold) return null;
 
   const dx = b.centroid.x - a.centroid.x;
   const dy = b.centroid.y - a.centroid.y;
@@ -61,7 +61,7 @@ export function areThinTwins(
   const lateralDist = Math.sqrt(lx * lx + ly * ly + lz * lz);
 
   const budget = (a.extent + b.extent) * 0.5 * LATERAL_OVERLAP_FACTOR;
-  return lateralDist <= budget;
+  return lateralDist <= budget ? distance : null;
 }
 
 interface VerticalCluster {

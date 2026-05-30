@@ -788,6 +788,47 @@ body {
 
 /* ─── Bottom Bar ─── */
 
+/* Assembly detail panel (shown when a single group is selected) */
+.assembly-detail {
+  border-top: 1px solid var(--border);
+  padding: 12px 20px;
+  background: var(--surface-2);
+  font-size: 0.8rem;
+}
+.assembly-detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.assembly-detail-label {
+  font-weight: 600;
+  color: var(--text-secondary, #666);
+  margin-bottom: 4px;
+  display: block;
+}
+.assembly-detail-value {
+  font-weight: 500;
+}
+.assembly-detail-section {
+  margin-top: 8px;
+}
+.assembly-joint-row,
+.assembly-adj-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 3px 0;
+  font-size: 0.75rem;
+}
+.assembly-joint-meta {
+  color: var(--text-secondary, #888);
+}
+.assembly-adj-delta {
+  font-weight: 600;
+  color: #ef4444;
+}
+
 .review-bottom-bar {
   border-top: 1px solid var(--border);
   padding: 16px 20px;
