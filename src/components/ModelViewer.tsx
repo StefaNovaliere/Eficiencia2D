@@ -81,6 +81,73 @@ function edgeKey(ax: number, ay: number, az: number, bx: number, by: number, bz:
   return a < b ? `${a}|${b}` : `${b}|${a}`;
 }
 
+/**
+ * For a group with detected thickness, fill the open perimeter band between
+ * its two parallel skins so the slab renders as a solid volume instead of two
+ * floating planes. Splits the group's faces into a near/far skin along the
+ * representative normal, finds the near skin's boundary loop, and extrudes it
+ * to the far skin as side quads.
+ */
+function pushThicknessSides(
+  faces: Face3D[],
+  group: GeometryGroup,
+  pushTri: (p0: Vec3, p1: Vec3, p2: Vec3) => void,
+): void {
+  const t = group.thickness;
+  if (t == null || t < 0.001) return;
+  const n = group.representativeNormal;
+  const nlen = Math.hypot(n.x, n.y, n.z);
+  if (nlen < 1e-6) return;
+  const nx = n.x / nlen, ny = n.y / nlen, nz = n.z / nlen;
+
+  const groupFaces = group.faceIndices
+    .map((fi) => faces[fi])
+    .filter((f): f is Face3D => !!f && f.vertices.length >= 3);
+  if (groupFaces.length < 2) return;
+
+  // Offset of each face centroid along the normal; split at the midpoint.
+  const offsets = groupFaces.map((f) => {
+    let cx = 0, cy = 0, cz = 0;
+    for (const v of f.vertices) { cx += v.x; cy += v.y; cz += v.z; }
+    const k = f.vertices.length;
+    return (cx / k) * nx + (cy / k) * ny + (cz / k) * nz;
+  });
+  const minO = Math.min(...offsets);
+  const maxO = Math.max(...offsets);
+  if (maxO - minO < 0.001) return; // single skin, nothing to fill
+  const mid = (minO + maxO) / 2;
+  const near = groupFaces.filter((_, i) => offsets[i] <= mid);
+  if (near.length === 0) return;
+  const shift = maxO - minO; // distance to the far skin
+
+  // Boundary edges of the near skin = edges used by exactly one near face.
+  const snap = (v: number) => Math.round(v * 1000) / 1000;
+  const key = (a: Vec3, b: Vec3) => {
+    const ka = `${snap(a.x)},${snap(a.y)},${snap(a.z)}`;
+    const kb = `${snap(b.x)},${snap(b.y)},${snap(b.z)}`;
+    return ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
+  };
+  const edgeCount = new Map<string, { a: Vec3; b: Vec3; count: number }>();
+  for (const f of near) {
+    for (let i = 0; i < f.vertices.length; i++) {
+      const a = f.vertices[i];
+      const b = f.vertices[(i + 1) % f.vertices.length];
+      const k = key(a, b);
+      const ex = edgeCount.get(k);
+      if (ex) ex.count++;
+      else edgeCount.set(k, { a, b, count: 1 });
+    }
+  }
+
+  for (const { a, b, count } of edgeCount.values()) {
+    if (count !== 1) continue; // interior edge
+    const a2 = { x: a.x + nx * shift, y: a.y + ny * shift, z: a.z + nz * shift };
+    const b2 = { x: b.x + nx * shift, y: b.y + ny * shift, z: b.z + nz * shift };
+    pushTri(a, b, b2);
+    pushTri(a, b2, a2);
+  }
+}
+
 function buildMergedGeometries(
   faces: Face3D[],
   groups: GeometryGroup[],
@@ -113,6 +180,12 @@ function buildMergedGeometries(
         bucket.groupIds.push(group.id);
       }
     }
+
+    // Fill the side band so detected-thickness slabs render as solids.
+    pushThicknessSides(faces, group, (p0, p1, p2) => {
+      bucket.positions.push(p0.x, p0.y, p0.z, p1.x, p1.y, p1.z, p2.x, p2.y, p2.z);
+      bucket.groupIds.push(group.id);
+    });
   }
 
   const result: MergedMeshData[] = [];
