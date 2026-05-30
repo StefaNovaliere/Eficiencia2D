@@ -7,6 +7,8 @@ import VisibilityFilters from "./VisibilityFilters";
 import type { FaceCategory, GeometryGroup } from "@/core/group-classifier";
 import { reclassifyWithAxis } from "@/core/pipeline";
 import type { Phase1Result, ClassificationOverride } from "@/core/pipeline";
+import type { Joint } from "@/core/joint-detector";
+import type { DimensionAdjustment } from "@/core/assembly-adjuster";
 
 const ModelViewer = dynamic(() => import("./ModelViewer"), { ssr: false });
 
@@ -205,6 +207,64 @@ export default function ReviewScreen({
           onToggleGroup={handleToggleGroup}
           onChangeCategory={handleChangeCategory}
         />
+
+        {selectedGroupIds.size === 1 && (() => {
+          const selId = Array.from(selectedGroupIds)[0];
+          const selGroup = phase1.groups.find((g) => g.id === selId);
+          if (!selGroup) return null;
+
+          const groupJoints = phase1.joints.filter(
+            (j) => j.groupA === selId || j.groupB === selId,
+          );
+          const groupAdjs = phase1.adjustments.filter(
+            (a) => a.groupId === selId,
+          );
+
+          if (groupJoints.length === 0 && !selGroup.thickness) return null;
+
+          const groupById = new Map(phase1.groups.map((g) => [g.id, g]));
+
+          return (
+            <div className="assembly-detail">
+              {selGroup.thickness != null && (
+                <div className="assembly-detail-row">
+                  <span className="assembly-detail-label">Grosor detectado</span>
+                  <span className="assembly-detail-value">{(selGroup.thickness * 100).toFixed(1)} cm</span>
+                </div>
+              )}
+              {groupJoints.length > 0 && (
+                <div className="assembly-detail-section">
+                  <span className="assembly-detail-label">Juntas ({groupJoints.length})</span>
+                  {groupJoints.map((j, i) => {
+                    const otherId = j.groupA === selId ? j.groupB : j.groupA;
+                    const other = groupById.get(otherId);
+                    return (
+                      <div key={i} className="assembly-joint-row">
+                        <span>{other?.label ?? `Grupo ${otherId}`}</span>
+                        <span className="assembly-joint-meta">
+                          {j.totalLength.toFixed(2)}m · {j.dihedralAngle.toFixed(0)}°
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              {groupAdjs.length > 0 && (
+                <div className="assembly-detail-section">
+                  <span className="assembly-detail-label">Ajustes de ensamblaje</span>
+                  {groupAdjs.map((a, i) => (
+                    <div key={i} className="assembly-adj-row">
+                      <span>{a.reason}</span>
+                      <span className="assembly-adj-delta">
+                        {(a.delta * 100).toFixed(1)} cm
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         <div className="review-bottom-bar">
           <div className="review-stats">

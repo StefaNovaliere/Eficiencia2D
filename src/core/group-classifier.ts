@@ -36,6 +36,7 @@ export interface GeometryGroup {
   centroid: Vec3;
   orientation: string;
   representativeNormal: Vec3;
+  thickness?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -397,7 +398,10 @@ export function classifyIntoGroups(
   // element, e.g. the inner+outer face of a thin wall or the top+bottom of a
   // thin floor slab) into a single component. Discard subgroups are excluded
   // so that each stair tread / trim piece remains a unique component.
+  // The detected thickness (distance between the twin surfaces) is preserved
+  // as metadata on the merged group.
   const parent = subgroups.map((_, i) => i);
+  const twinThickness = new Map<number, number>();
   function find(x: number): number {
     while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; }
     return x;
@@ -411,8 +415,14 @@ export function classifyIntoGroups(
     if (subgroups[i].category === "discard") continue;
     for (let j = i + 1; j < subgroups.length; j++) {
       if (subgroups[j].category === "discard") continue;
-      if (areThinTwins(subgroups[i], subgroups[j], THIN_WALL_THRESHOLD)) {
+      const thickness = areThinTwins(subgroups[i], subgroups[j], THIN_WALL_THRESHOLD);
+      if (thickness !== null) {
         union(i, j);
+        const root = find(i);
+        const existing = twinThickness.get(root);
+        if (existing === undefined || thickness < existing) {
+          twinThickness.set(root, thickness);
+        }
       }
     }
   }
@@ -437,7 +447,7 @@ export function classifyIntoGroups(
   let nextId = 1;
   const counters: Record<string, number> = {};
 
-  for (const merged of unionMap.values()) {
+  for (const [rootIdx, merged] of unionMap.entries()) {
     // Dominant category: largest area, with non-discard winning ties over discard.
     const areaByCat = new Map<FaceCategory, number>();
     for (const sg of merged) {
@@ -479,6 +489,8 @@ export function classifyIntoGroups(
     const key = `${catLabel}_${orient}`;
     counters[key] = (counters[key] ?? 0) + 1;
 
+    const detectedThickness = twinThickness.get(rootIdx);
+
     groups.push({
       id: nextId++,
       label: `${catLabel} ${orient} #${counters[key]}`,
@@ -488,6 +500,7 @@ export function classifyIntoGroups(
       centroid: { x: cx, y: cy, z: cz },
       orientation: orient,
       representativeNormal: biggest.normal,
+      thickness: detectedThickness,
     });
   }
 
