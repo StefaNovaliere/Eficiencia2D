@@ -3,6 +3,7 @@ import { areThinTwins } from "@/core/wall-thickness";
 import type { TwinCandidate } from "@/core/wall-thickness";
 import { detectJoints } from "@/core/joint-detector";
 import { computeAdjustments } from "@/core/assembly-adjuster";
+import { clipPanelAtV } from "@/core/cutting-sheet";
 import type { GeometryGroup, FaceCategory } from "@/core/group-classifier";
 import type { Face3D, Vec3 } from "@/core/types";
 
@@ -220,5 +221,40 @@ describe("computeAdjustments", () => {
     expect(adjs.length).toBe(1);
     expect(adjs[0].groupId).toBe(2);
     expect(adjs[0].delta).toBeCloseTo(-0.15, 3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// clipPanelAtV — physically shorten a wall panel at its base
+// ---------------------------------------------------------------------------
+
+describe("clipPanelAtV", () => {
+  // A 2m wide × 2.5m tall rectangular wall, base at y = 0.
+  const rect = [
+    { a: { x: 0, y: 0 }, b: { x: 2, y: 0 } },
+    { a: { x: 2, y: 0 }, b: { x: 2, y: 2.5 } },
+    { a: { x: 2, y: 2.5 }, b: { x: 0, y: 2.5 } },
+    { a: { x: 0, y: 2.5 }, b: { x: 0, y: 0 } },
+  ];
+
+  it("removes a 0.10m strip from the base (keepAbove)", () => {
+    const clipped = clipPanelAtV(rect, 0.1, true);
+    expect(clipped).not.toBeNull();
+    expect(clipped!.heightM).toBeCloseTo(2.4, 3);
+    expect(clipped!.widthM).toBeCloseTo(2, 3);
+    // Still a closed rectangle (4 edges).
+    expect(clipped!.edges.length).toBe(4);
+  });
+
+  it("removes a strip from the top when base is at high v (keepBelow)", () => {
+    const clipped = clipPanelAtV(rect, 2.5 - 0.1, false);
+    expect(clipped).not.toBeNull();
+    expect(clipped!.heightM).toBeCloseTo(2.4, 3);
+  });
+
+  it("re-normalises the clipped panel to origin", () => {
+    const clipped = clipPanelAtV(rect, 0.1, true);
+    const minY = Math.min(...clipped!.edges.flatMap((e) => [e.a.y, e.b.y]));
+    expect(minY).toBeCloseTo(0, 6);
   });
 });

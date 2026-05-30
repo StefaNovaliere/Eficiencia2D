@@ -186,6 +186,27 @@ describe("traceContours", () => {
     const result = traceContours(edges);
     expect(result.length).toBe(8);
   });
+
+  it("keeps both loops of an L-notch slab sharing a corner (T-junction)", () => {
+    // Two rectangles touching at the shared corner (2,1): a "notch" outline
+    // where a vertex has degree 4. The previous greedy tracer lost edges
+    // here, producing the incomplete contour reported by the user.
+    //   Left square:  0,0 → 2,0 → 2,1 → 0,1
+    //   Right square: 2,1 → 4,1 → 4,2 → 2,2  (touches left only at 2,1)
+    const edges = [
+      { ax: 0, ay: 0, bx: 2, by: 0 },
+      { ax: 2, ay: 0, bx: 2, by: 1 },
+      { ax: 2, ay: 1, bx: 0, by: 1 },
+      { ax: 0, ay: 1, bx: 0, by: 0 },
+      { ax: 2, ay: 1, bx: 4, by: 1 },
+      { ax: 4, ay: 1, bx: 4, by: 2 },
+      { ax: 4, ay: 2, bx: 2, by: 2 },
+      { ax: 2, ay: 2, bx: 2, by: 1 },
+    ];
+    const result = traceContours(edges);
+    // All 8 edges form valid closed loops — none should be dropped.
+    expect(result.length).toBe(8);
+  });
 });
 
 // ---------------------------------------------------------------------------
