@@ -232,6 +232,16 @@ type RawEdge = { ax: number; ay: number; bx: number; by: number };
 /**
  * Filter boundary edges to keep only those forming closed contour loops
  * (outer boundary + holes). Removes stray edges from mesh artifacts.
+ *
+ * Uses half-edge (dart) face traversal of the planar edge graph. Every
+ * undirected edge yields two darts; each dart belongs to exactly one traced
+ * face, so no legitimate edge is ever lost — even at T-junctions where three
+ * or more edges meet (which broke the previous greedy single-loop tracer).
+ *
+ * Keep rule: an edge is part of a real contour iff its two darts belong to
+ * traced faces of OPPOSITE winding (one CCW interior, one CW exterior/hole
+ * boundary). Internal chords — bordered by two interior faces of the same
+ * winding — are discarded.
  */
 export function traceContours(boundaryEdges: RawEdge[]): RawEdge[] {
   if (boundaryEdges.length <= 2) return boundaryEdges;
@@ -260,97 +270,116 @@ export function traceContours(boundaryEdges: RawEdge[]): RawEdge[] {
         removed.add(live[0]);
         changed = true;
       }
-      if (live.length <= 1) {
-        adj.set(vk, []);
-      } else {
-        adj.set(vk, live);
-      }
+      adj.set(vk, live.length <= 1 ? [] : live);
     }
   }
 
-  // After pruning, all remaining vertices have degree >= 2.
-  // Trace closed loops using angle-based traversal at forks.
-  const visited = new Set<number>();
+  // Coordinates of a vertex key (for angle + area computation).
+  const vertCoord = new Map<string, { x: number; y: number }>();
+  for (const e of boundaryEdges) {
+    const ak = vertKey(e.ax, e.ay);
+    const bk = vertKey(e.bx, e.by);
+    if (!vertCoord.has(ak)) vertCoord.set(ak, { x: e.ax, y: e.ay });
+    if (!vertCoord.has(bk)) vertCoord.set(bk, { x: e.bx, y: e.by });
+  }
+
+  // A dart is a directed traversal of an edge. id = edgeIndex*2 + dir.
+  //   dir 0: a → b,  dir 1: b → a
+  const liveEdges: number[] = [];
+  for (let i = 0; i < boundaryEdges.length; i++) {
+    if (!removed.has(i)) liveEdges.push(i);
+  }
+  if (liveEdges.length === 0) return [];
+
+  function dartFrom(dart: number): string {
+    const ei = dart >> 1;
+    const e = boundaryEdges[ei];
+    return (dart & 1) === 0 ? vertKey(e.ax, e.ay) : vertKey(e.bx, e.by);
+  }
+  function dartTo(dart: number): string {
+    const ei = dart >> 1;
+    const e = boundaryEdges[ei];
+    return (dart & 1) === 0 ? vertKey(e.bx, e.by) : vertKey(e.ax, e.ay);
+  }
+  function dartAngle(dart: number): number {
+    const from = vertCoord.get(dartFrom(dart))!;
+    const to = vertCoord.get(dartTo(dart))!;
+    return Math.atan2(to.y - from.y, to.x - from.x);
+  }
+
+  // Outgoing darts per vertex, sorted CCW by angle.
+  const outgoing = new Map<string, number[]>();
+  for (const ei of liveEdges) {
+    for (const dir of [0, 1]) {
+      const dart = ei * 2 + dir;
+      const from = dartFrom(dart);
+      const arr = outgoing.get(from);
+      if (arr) arr.push(dart);
+      else outgoing.set(from, [dart]);
+    }
+  }
+  for (const arr of outgoing.values()) {
+    arr.sort((d1, d2) => dartAngle(d1) - dartAngle(d2));
+  }
+
+  // Next dart around a face: arrive at vertex w via `dart`; the next dart is
+  // the outgoing dart immediately clockwise from the reverse direction. This
+  // keeps the face consistently on one side and visits every dart once.
+  function nextDart(dart: number): number {
+    const w = dartTo(dart);
+    const arr = outgoing.get(w)!;
+    // Reverse dart is the twin (w → from). Find its position, step clockwise.
+    const twin = (dart & 1) === 0 ? (dart >> 1) * 2 + 1 : (dart >> 1) * 2;
+    const idx = arr.indexOf(twin);
+    const prev = (idx - 1 + arr.length) % arr.length;
+    return arr[prev];
+  }
+
+  // Traverse all faces. Each face is a closed dart loop; record which loop
+  // each dart belongs to and the loop's signed area (winding).
+  const dartFace = new Map<number, number>();
+  const faceSign: number[] = [];
+  let faceId = 0;
+
+  for (const ei of liveEdges) {
+    for (const dir of [0, 1]) {
+      const start = ei * 2 + dir;
+      if (dartFace.has(start)) continue;
+
+      // Walk the face loop.
+      const loopDarts: number[] = [];
+      let d = start;
+      let guard = 0;
+      const limit = liveEdges.length * 2 + 4;
+      do {
+        if (dartFace.has(d)) break;
+        dartFace.set(d, faceId);
+        loopDarts.push(d);
+        d = nextDart(d);
+      } while (d !== start && guard++ < limit);
+
+      // Shoelace signed area of the loop polygon.
+      let area2 = 0;
+      for (const dd of loopDarts) {
+        const from = vertCoord.get(dartFrom(dd))!;
+        const to = vertCoord.get(dartTo(dd))!;
+        area2 += from.x * to.y - to.x * from.y;
+      }
+      faceSign.push(Math.sign(area2));
+      faceId++;
+    }
+  }
+
+  // Keep an edge iff its two darts border faces of opposite winding.
   const kept = new Set<number>();
-
-  function otherVert(ei: number, fromKey: string): string {
-    const e = boundaryEdges[ei];
-    const aKey = vertKey(e.ax, e.ay);
-    return aKey === fromKey ? vertKey(e.bx, e.by) : aKey;
-  }
-
-  function edgeAngle(ei: number, fromKey: string): number {
-    const e = boundaryEdges[ei];
-    const aKey = vertKey(e.ax, e.ay);
-    let dx: number, dy: number;
-    if (aKey === fromKey) {
-      dx = e.bx - e.ax; dy = e.by - e.ay;
-    } else {
-      dx = e.ax - e.bx; dy = e.ay - e.by;
-    }
-    return Math.atan2(dy, dx);
-  }
-
-  function pickNextEdge(
-    fromVert: string,
-    incomingAngle: number,
-    candidates: number[],
-  ): number {
-    if (candidates.length === 1) return candidates[0];
-    // Pick the edge with the smallest CCW turn from incoming direction.
-    // Incoming direction is reversed (we arrived FROM that direction).
-    const reverseAngle = incomingAngle + Math.PI;
-    let bestIdx = candidates[0];
-    let bestTurn = Infinity;
-    for (const ci of candidates) {
-      const outAngle = edgeAngle(ci, fromVert);
-      let turn = outAngle - reverseAngle;
-      // Normalize to (0, 2*PI] — smallest positive CCW turn.
-      while (turn <= 0) turn += 2 * Math.PI;
-      while (turn > 2 * Math.PI) turn -= 2 * Math.PI;
-      if (turn < bestTurn) {
-        bestTurn = turn;
-        bestIdx = ci;
-      }
-    }
-    return bestIdx;
-  }
-
-  for (let startEi = 0; startEi < boundaryEdges.length; startEi++) {
-    if (removed.has(startEi) || visited.has(startEi)) continue;
-
-    const loop: number[] = [];
-    const e0 = boundaryEdges[startEi];
-    let currentVert = vertKey(e0.ax, e0.ay);
-    const startVert = currentVert;
-    let currentEdge = startEi;
-    let closed = false;
-
-    for (let step = 0; step < boundaryEdges.length + 1; step++) {
-      if (visited.has(currentEdge)) break;
-      visited.add(currentEdge);
-      loop.push(currentEdge);
-
-      const nextVert = otherVert(currentEdge, currentVert);
-      const angle = edgeAngle(currentEdge, currentVert);
-
-      if (nextVert === startVert && loop.length >= 3) {
-        closed = true;
-        break;
-      }
-
-      const candidates = (adj.get(nextVert) ?? []).filter(
-        (i) => !visited.has(i) && !removed.has(i),
-      );
-
-      if (candidates.length === 0) break;
-      currentEdge = pickNextEdge(nextVert, angle, candidates);
-      currentVert = nextVert;
-    }
-
-    if (closed) {
-      for (const ei of loop) kept.add(ei);
-    }
+  for (const ei of liveEdges) {
+    const f0 = dartFace.get(ei * 2);
+    const f1 = dartFace.get(ei * 2 + 1);
+    if (f0 === undefined || f1 === undefined) continue;
+    const s0 = faceSign[f0];
+    const s1 = faceSign[f1];
+    // Opposite, non-zero winding → real contour edge (boundary or hole).
+    if (s0 !== 0 && s1 !== 0 && s0 !== s1) kept.add(ei);
   }
 
   return boundaryEdges.filter((_, i) => kept.has(i));
@@ -364,7 +393,13 @@ export function projectFacesTo2D(
   faces: Face3D[],
   groupNormal: Vec3,
   up: UpAxis,
-): { widthM: number; heightM: number; edges: Array<{ a: Vec2; b: Vec2 }> } | null {
+): {
+  widthM: number;
+  heightM: number;
+  edges: Array<{ a: Vec2; b: Vec2 }>;
+  /** dot(vAxis, worldUp): >0 ⇒ 2D +y points up; <0 ⇒ 2D +y points down. */
+  vUp: number;
+} | null {
   if (faces.length === 0) return null;
 
   // Universal tangent-plane projection: always project onto the surface's own
@@ -452,7 +487,71 @@ export function projectFacesTo2D(
     });
   }
 
-  return { widthM: w, heightM: h, edges };
+  return { widthM: w, heightM: h, edges, vUp: dot(vAxis, worldUp) };
+}
+
+// ---------------------------------------------------------------------------
+// Half-plane clip for a contour edge set (used for assembly compensation:
+// shorten a wall by removing a strip on the side where it meets a floor).
+// ---------------------------------------------------------------------------
+
+/**
+ * Clip a set of 2D contour edges by the horizontal line y = cut, keeping the
+ * side indicated by `keepAbove`, then re-cap the cut and re-normalise to (0,0).
+ * Returns the new edges plus recomputed width/height, or `null` if nothing
+ * meaningful survives.
+ */
+export function clipPanelAtV(
+  edges: Array<{ a: Vec2; b: Vec2 }>,
+  cut: number,
+  keepAbove: boolean,
+): { widthM: number; heightM: number; edges: Array<{ a: Vec2; b: Vec2 }> } | null {
+  const inSide = (y: number) => (keepAbove ? y >= cut - 1e-9 : y <= cut + 1e-9);
+  const out: Array<{ a: Vec2; b: Vec2 }> = [];
+  const crossings: number[] = [];
+
+  for (const e of edges) {
+    const aIn = inSide(e.a.y);
+    const bIn = inSide(e.b.y);
+    if (aIn && bIn) {
+      out.push(e);
+    } else if (!aIn && !bIn) {
+      continue;
+    } else {
+      const t = (cut - e.a.y) / (e.b.y - e.a.y);
+      const ix = e.a.x + t * (e.b.x - e.a.x);
+      const cutPt = { x: ix, y: cut };
+      const keep = aIn ? e.a : e.b;
+      out.push(aIn ? { a: keep, b: cutPt } : { a: cutPt, b: keep });
+      crossings.push(ix);
+    }
+  }
+
+  // Cap the cut: pair crossings left-to-right.
+  crossings.sort((p, q) => p - q);
+  for (let i = 0; i + 1 < crossings.length; i += 2) {
+    out.push({ a: { x: crossings[i], y: cut }, b: { x: crossings[i + 1], y: cut } });
+  }
+
+  if (out.length < 3) return null;
+
+  let minU = Infinity, maxU = -Infinity, minV = Infinity, maxV = -Infinity;
+  for (const e of out) {
+    minU = Math.min(minU, e.a.x, e.b.x);
+    maxU = Math.max(maxU, e.a.x, e.b.x);
+    minV = Math.min(minV, e.a.y, e.b.y);
+    maxV = Math.max(maxV, e.a.y, e.b.y);
+  }
+  const w = maxU - minU;
+  const h = maxV - minV;
+  if (w < 0.01 || h < 0.01) return null;
+
+  const normalized = out.map((e) => ({
+    a: { x: e.a.x - minU, y: e.a.y - minV },
+    b: { x: e.b.x - minU, y: e.b.y - minV },
+  }));
+
+  return { widthM: w, heightM: h, edges: normalized };
 }
 
 // ---------------------------------------------------------------------------
