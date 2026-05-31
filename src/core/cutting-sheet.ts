@@ -19,7 +19,7 @@
 // ============================================================================
 
 import type { DecompositionMode, Face3D, Vec2, Vec3 } from "./types";
-import { cross, dot, normalize, sub, vlength } from "./types";
+import { cross, dot, getVertexIndices, normalize, sub, vlength } from "./types";
 import { detectFloorLevels } from "./floor-plan-extractor";
 import { areThinTwins } from "./wall-thickness";
 
@@ -178,19 +178,27 @@ function clusterByCoplanarity(
 /**
  * Within a coplanar group, faces may belong to different walls/slabs that
  * happen to be on the same plane. Split them into connected components
- * by shared (snapped) vertices.
+ * by shared vertices (exact indices when available, snapped fallback).
  */
 function splitConnectedComponents(faces: Face3D[]): Face3D[][] {
   if (faces.length <= 1) return [faces];
 
-  // Build adjacency via shared snapped 3D vertices.
-  const vertToFaces = new Map<string, number[]>();
+  const vertToFaces = new Map<string | number, number[]>();
   for (let fi = 0; fi < faces.length; fi++) {
-    for (const v of faces[fi].vertices) {
-      const key = `${snap3(v.x)},${snap3(v.y)},${snap3(v.z)}`;
-      const arr = vertToFaces.get(key);
-      if (arr) arr.push(fi);
-      else vertToFaces.set(key, [fi]);
+    const indices = getVertexIndices(faces[fi]);
+    if (indices) {
+      for (const vi of indices) {
+        const arr = vertToFaces.get(vi);
+        if (arr) arr.push(fi);
+        else vertToFaces.set(vi, [fi]);
+      }
+    } else {
+      for (const v of faces[fi].vertices) {
+        const key = `${snap3(v.x)},${snap3(v.y)},${snap3(v.z)}`;
+        const arr = vertToFaces.get(key);
+        if (arr) arr.push(fi);
+        else vertToFaces.set(key, [fi]);
+      }
     }
   }
 
@@ -424,6 +432,9 @@ export function projectFacesTo2D(
   // Project all faces to 2D; count how many faces each edge belongs to.
   // Boundary edge = appears in exactly 1 face.
   // Internal edge (triangulation) = shared by 2 faces → discard.
+  //
+  // Use vertex indices for exact edge deduplication when available;
+  // fall back to snapped 2D coordinates for generated faces.
   const edgeFaceCount = new Map<string, number>();
   const edgeCoords = new Map<
     string,
@@ -435,10 +446,13 @@ export function projectFacesTo2D(
       x: dot(v, uAxis),
       y: dot(v, vAxis),
     }));
+    const vi = getVertexIndices(face);
 
     for (let i = 0; i < pts.length; i++) {
       const j = (i + 1) % pts.length;
-      const key = edgeKey(pts[i].x, pts[i].y, pts[j].x, pts[j].y);
+      const key = vi
+        ? (vi[i] < vi[j] ? `${vi[i]}|${vi[j]}` : `${vi[j]}|${vi[i]}`)
+        : edgeKey(pts[i].x, pts[i].y, pts[j].x, pts[j].y);
       edgeFaceCount.set(key, (edgeFaceCount.get(key) ?? 0) + 1);
       if (!edgeCoords.has(key)) {
         edgeCoords.set(key, {
