@@ -94,10 +94,12 @@ export function splitFacesAtPlane(
       const belowVerts = clipPolygon(face.vertices, elevation, up, false, tolerance);
 
       if (aboveVerts.length >= 3) {
-        above.push({ ...face, vertices: aboveVerts, innerLoops: [] });
+        const { vertices: _va, innerLoops: _ia, ...rest } = face;
+        above.push({ ...rest, vertices: aboveVerts, innerLoops: [] } as Face3D);
       }
       if (belowVerts.length >= 3) {
-        below.push({ ...face, vertices: belowVerts, innerLoops: [] });
+        const { vertices: _vb, innerLoops: _ib, ...rest } = face;
+        below.push({ ...rest, vertices: belowVerts, innerLoops: [] } as Face3D);
       }
     }
   }

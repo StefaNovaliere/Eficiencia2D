@@ -7,7 +7,7 @@
 // ============================================================================
 
 import type { Face3D, Vec3 } from "./types";
-import { dot } from "./types";
+import { dot, getVertexIndices } from "./types";
 import type { GeometryGroup } from "./group-classifier";
 
 // ---------------------------------------------------------------------------
@@ -70,12 +70,15 @@ export function detectJoints(
       const face = faces[fi];
       if (!face) continue;
       const verts = face.vertices;
+      const vi = getVertexIndices(face);
       for (let i = 0; i < verts.length; i++) {
         const j = (i + 1) % verts.length;
-        const key = edgeKey3D(
-          verts[i].x, verts[i].y, verts[i].z,
-          verts[j].x, verts[j].y, verts[j].z,
-        );
+        const key = vi
+          ? (vi[i] < vi[j] ? `${vi[i]}|${vi[j]}` : `${vi[j]}|${vi[i]}`)
+          : edgeKey3D(
+              verts[i].x, verts[i].y, verts[i].z,
+              verts[j].x, verts[j].y, verts[j].z,
+            );
         const groups4edge = edgeToGroups.get(key);
         if (groups4edge) {
           groups4edge.add(group.id);

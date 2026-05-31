@@ -12,17 +12,18 @@
 //   - Faces with vertex/texture/normal index formats (v, v/vt, v/vt/vn, v//vn)
 // ============================================================================
 
-import { type Face3D, type Vec3, cross, normalize, sub } from "./types";
+import { type IndexedFace3D, type Vec3, cross, normalize, sub } from "./types";
 
 export interface ObjParseResult {
-  faces: Face3D[];
+  faces: IndexedFace3D[];
+  vertices: Vec3[];
   warnings: string[];
 }
 
 export function parseObj(text: string): ObjParseResult {
   const warnings: string[] = [];
   const vertices: Vec3[] = [];
-  const faces: Face3D[] = [];
+  const faces: IndexedFace3D[] = [];
   let currentGroup = "";
 
   const lines = text.split(/\r?\n/);
@@ -76,7 +77,7 @@ export function parseObj(text: string): ObjParseResult {
       const e2 = sub(faceVerts[2], faceVerts[0]);
       const normal = normalize(cross(e1, e2));
 
-      faces.push({ vertices: faceVerts, normal, innerLoops: [], panelId: currentGroup || undefined });
+      faces.push({ vertices: faceVerts, normal, innerLoops: [], panelId: currentGroup || undefined, vertexIndices: idxList });
     }
   }
 
@@ -84,5 +85,5 @@ export function parseObj(text: string): ObjParseResult {
     warnings.push("No faces found in the .obj file.");
   }
 
-  return { faces, warnings };
+  return { faces, vertices, warnings };
 }

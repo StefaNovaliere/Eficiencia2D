@@ -13,7 +13,7 @@
 // ============================================================================
 
 import type { Face3D, Vec3 } from "./types";
-import { cross, dot, normalize, sub, vlength } from "./types";
+import { cross, dot, getVertexIndices, normalize, sub, vlength } from "./types";
 import { areThinTwins, findThinWallFaces } from "./wall-thickness";
 
 // ---------------------------------------------------------------------------
@@ -236,14 +236,25 @@ function clusterCoplanar(infos: FaceInfo[], faces: Face3D[]): CoplanarCluster[] 
 function splitConnected(faceInfos: FaceInfo[], faces: Face3D[]): FaceInfo[][] {
   if (faceInfos.length <= 1) return [faceInfos];
 
-  const vertToIdx = new Map<string, number[]>();
+  // Build adjacency: prefer exact vertex indices from OBJ topology;
+  // fall back to snapped coordinates for generated faces (mesh-splitter).
+  const vertToIdx = new Map<string | number, number[]>();
   for (let i = 0; i < faceInfos.length; i++) {
     const face = faces[faceInfos[i].index];
-    for (const v of face.vertices) {
-      const key = `${snap3(v.x)},${snap3(v.y)},${snap3(v.z)}`;
-      const arr = vertToIdx.get(key);
-      if (arr) arr.push(i);
-      else vertToIdx.set(key, [i]);
+    const indices = getVertexIndices(face);
+    if (indices) {
+      for (const vi of indices) {
+        const arr = vertToIdx.get(vi);
+        if (arr) arr.push(i);
+        else vertToIdx.set(vi, [i]);
+      }
+    } else {
+      for (const v of face.vertices) {
+        const key = `${snap3(v.x)},${snap3(v.y)},${snap3(v.z)}`;
+        const arr = vertToIdx.get(key);
+        if (arr) arr.push(i);
+        else vertToIdx.set(key, [i]);
+      }
     }
   }
 
