@@ -97,10 +97,11 @@ export function reclassifyWithAxis(
   if (newAxis === "Z") {
     faces = rotateZtoY(faces);
   }
-  const groups = classifyIntoGroups(faces, minRealArea);
+  const warnings = [...phase1.warnings];
+  const groups = classifyIntoGroups(faces, minRealArea, warnings);
   const joints = detectJoints(faces, groups);
   const adjustments = computeAdjustments(joints, groups);
-  return { ...phase1, faces, appliedAxis: newAxis, groups, joints, adjustments };
+  return { ...phase1, faces, appliedAxis: newAxis, groups, joints, adjustments, warnings };
 }
 
 /** Re-classify with a different minimum-real-area threshold, keeping the current axis. */
@@ -108,10 +109,11 @@ export function reclassifyWithMinArea(
   phase1: Phase1Result,
   minRealArea: number,
 ): Phase1Result {
-  const groups = classifyIntoGroups(phase1.faces, minRealArea);
+  const warnings = [...phase1.warnings];
+  const groups = classifyIntoGroups(phase1.faces, minRealArea, warnings);
   const joints = detectJoints(phase1.faces, groups);
   const adjustments = computeAdjustments(joints, groups);
-  return { ...phase1, groups, joints, adjustments };
+  return { ...phase1, groups, joints, adjustments, warnings };
 }
 
 /**
@@ -172,7 +174,7 @@ export function parsePipeline(
   }
 
   // Classify into reviewable groups.
-  const groups = classifyIntoGroups(faces);
+  const groups = classifyIntoGroups(faces, undefined, warnings);
 
   // Detect joints and compute assembly adjustments.
   const joints = detectJoints(faces, groups);

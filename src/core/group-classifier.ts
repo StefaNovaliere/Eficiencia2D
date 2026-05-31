@@ -15,7 +15,7 @@
 import type { Face3D, Vec3 } from "./types";
 import { cross, dot, getVertexIndices, normalize, sub, vlength } from "./types";
 import { areThinTwins, findThinWallFaces } from "./wall-thickness";
-import { detectSlabEdges, findSlabRimFaces } from "./slab-edge-detector";
+import { detectSlabEdges, findSlabRimFaces, validateSlabCandidates } from "./slab-edge-detector";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -377,16 +377,21 @@ function buildSubgroup(
 export function classifyIntoGroups(
   faces: Face3D[],
   minRealArea: number = DEFAULT_MIN_REAL_AREA,
+  outWarnings?: string[],
 ): GeometryGroup[] {
   if (faces.length === 0) return [];
 
   const allInfos = classifyAllFaces(faces);
 
-  // Detect floor-slab rim faces (the vertical thickness band / "canto") per-face
-  // and reclassify them to "floor" BEFORE subgrouping. This isolates them from
-  // real walls in the byCategory partition, so a rim that happens to be coplanar
-  // / edge-connected to a wall never drags that wall into the floor group.
-  const rimFaces = findSlabRimFaces(faces);
+  // Detect → Validate → Apply pattern for slab rim detection.
+  // Layer 1 (Detect): per-face detection with conservative thresholds + physics cap.
+  // Layer 2 (Validate): per-candidate plausibility check (fault isolation).
+  // Layer 3 (Apply): only reclassify faces from valid candidates. If all fail → fallback.
+  const rawRimFaces = findSlabRimFaces(faces);
+  const rimFaces = validateSlabCandidates(rawRimFaces, faces);
+  if (rimFaces.size === 0 && rawRimFaces.size > 0 && outWarnings) {
+    outWarnings.push("Detección de losa desactivada: resultados no pasaron validación");
+  }
   if (rimFaces.size > 0) {
     for (const fi of allInfos) {
       if (rimFaces.has(fi.index)) fi.category = "floor";
