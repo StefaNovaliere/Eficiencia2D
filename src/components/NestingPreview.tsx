@@ -194,6 +194,29 @@ export default function NestingPreview({
   const unplacedCount = nesting.wallNesting.unplaced.length + nesting.floorNesting.unplaced.length;
   const displayScale = nesting.wallNesting.scaleDenom || nesting.floorNesting.scaleDenom || 1;
 
+  // When a whole piece is too big for the sheet, work out the scale denominator
+  // that would make the largest offending piece fit, so we can tell the user
+  // exactly how much smaller to draw it instead of silently dropping it.
+  const allUnplaced = [
+    ...nesting.wallNesting.unplaced,
+    ...nesting.floorNesting.unplaced,
+  ];
+  let suggestedScale = scaleDenom;
+  for (const p of allUnplaced) {
+    // p dimensions are already at the current scale (real / scaleDenom).
+    // Largest side must fit in the largest sheet side (rotation allowed).
+    const pieceMax = Math.max(p.widthM, p.heightM);
+    const pieceMin = Math.min(p.widthM, p.heightM);
+    const sheetMax = Math.max(sheetConfig.widthM, sheetConfig.heightM);
+    const sheetMin = Math.min(sheetConfig.widthM, sheetConfig.heightM);
+    const factor = Math.max(pieceMax / sheetMax, pieceMin / sheetMin);
+    if (factor > 1) {
+      const needed = Math.ceil(scaleDenom * factor);
+      if (needed > suggestedScale) suggestedScale = needed;
+    }
+  }
+  const nextScaleOption = SCALE_OPTIONS.find((s) => s >= suggestedScale) ?? suggestedScale;
+
   return (
     <div className="nesting-overlay">
       <div className="nesting-header">
@@ -256,9 +279,24 @@ export default function NestingPreview({
 
         {unplacedCount > 0 && (
           <div className="nesting-warning">
-            {unplacedCount} componente{unplacedCount !== 1 ? "s" : ""} no caben
-            en la plancha ({sheetConfig.widthM.toFixed(2)} &times;{" "}
-            {sheetConfig.heightM.toFixed(2)} m) y seran excluidos.
+            {unplacedCount} componente{unplacedCount !== 1 ? "s" : ""} no
+            {unplacedCount !== 1 ? "" : ""} entra{unplacedCount !== 1 ? "n" : ""}{" "}
+            enteros en la plancha ({sheetConfig.widthM.toFixed(2)} &times;{" "}
+            {sheetConfig.heightM.toFixed(2)} m).{" "}
+            {nextScaleOption > scaleDenom ? (
+              <>
+                Reduci la escala a <strong>1:{nextScaleOption}</strong> para que
+                quepan.{" "}
+                <button
+                  className="nesting-inline-btn"
+                  onClick={() => onScaleChange(nextScaleOption)}
+                >
+                  Aplicar 1:{nextScaleOption}
+                </button>
+              </>
+            ) : (
+              <>Usa una plancha mas grande o reduci la escala.</>
+            )}
           </div>
         )}
       </div>

@@ -18,7 +18,6 @@ import { generatePdf, generateNestingPdf } from "./pdf-writer";
 import { nestPanels, DEFAULT_SHEET } from "./sheet-nester";
 import type { NestingPanel, NestingResult } from "./sheet-nester";
 import type { Face3D, Facade, FloorPlan, OutputFile, PipelineOptions, SheetConfig } from "./types";
-import { collectFloorPlanes, splitWallAtFloors } from "./mesh-splitter";
 import { detectJoints } from "./joint-detector";
 import type { Joint } from "./joint-detector";
 import { computeAdjustments } from "./assembly-adjuster";
@@ -326,14 +325,6 @@ export function decomposePanels(
     adjustmentByGroup.set(adj.groupId, prev + adj.delta);
   }
 
-  // Collect horizontal floor planes for wall-slab splitting.
-  const floorPlanes = collectFloorPlanes(
-    phase1.groups,
-    overrideMap as Map<number, string>,
-    phase1.faces,
-    "Y",
-  );
-
   const wallPanels: Panel[] = [];
   const floorPanels: Panel[] = [];
   let wallCount = 0;
@@ -349,10 +340,12 @@ export function decomposePanels(
     const faces = group.faceIndices.map((fi) => phase1.faces[fi]).filter(Boolean);
     if (faces.length === 0) continue;
 
-    // For wall groups, split at intersecting floor planes.
-    const faceGroups = isFloor
-      ? [faces]
-      : splitWallAtFloors(faces, floorPlanes, "Y");
+    // Each reviewed group becomes exactly ONE piece. Walls are kept whole
+    // (no per-floor slicing) — what you see as one component in the 3D viewer
+    // is one component in the cutting sheet. If a whole wall is too large for
+    // the sheet, the nester flags it as "unplaced" and the user is told to
+    // adjust the scale rather than silently fragmenting the piece.
+    const faceGroups = [faces];
 
     // Assembly adjustment for this group (negative = shorten).
     const delta = adjustmentByGroup.get(group.id) ?? 0;
