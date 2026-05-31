@@ -42,12 +42,16 @@ const VERTICAL_NORMAL_MAX = 0.5;
 const EDGE_DIR_TOL = Math.sqrt(1 - HORIZONTAL_NORMAL_MIN * HORIZONTAL_NORMAL_MIN);
 // Y levels within this band are treated as the same horizontal plane.
 const HEIGHT_BAND = 0.05;
-// Thin-plate discriminator: slab thickness over skin lateral size. Real slab
-// rims measure <=~0.08; walls >=~0.6 (validated on a real model). 0.25 sits in
-// the middle of that gap with ~3x margin either side. Dimensionless.
-const PLATE_RATIO = 0.25;
+// Physics-based hard cap: no architectural floor slab exceeds 1m thickness.
+// Thickest real slabs (raft foundations / transfer slabs) ≈ 0.6–1.0m. Rejects
+// storey-height faces (2.4–4m) immediately, regardless of building width.
+const MAX_SLAB_THICKNESS = 1.0;
+// Thin-plate discriminator: slab thickness / skin lateral extent. Real slab rims
+// measure ≤~0.08; storey walls on wide buildings ≥~0.23. Conservative threshold
+// that prefers false negatives (harmless) over false positives (catastrophic).
+const PLATE_RATIO = 0.15;
 // The rim face must be wider than tall. Dimensionless; skin-size independent.
-const FACE_ASPECT = 0.5;
+const FACE_ASPECT = 0.35;
 
 /** A rim subgroup that should be absorbed into a floor subgroup. */
 export interface SlabEdgeLink {
@@ -156,7 +160,7 @@ export function findSlabRimFaces(faces: Face3D[]): Map<number, number> {
       if (v.y > ymax) ymax = v.y;
     }
     const t = ymax - ymin;
-    if (t <= 1e-3) continue;
+    if (t <= 1e-3 || t > MAX_SLAB_THICKNESS) continue;
 
     const vi = getVertexIndices(f);
     let topSkin: SkinEdge | null = null;
@@ -258,4 +262,62 @@ export function detectSlabEdges(
     }
   }
   return links;
+}
+
+/**
+ * Validate detected rim faces by grouping them into independent slab candidates
+ * and rejecting any candidate that fails plausibility checks. This provides
+ * per-piece fault isolation: a bad detection in one part of the model doesn't
+ * contaminate valid detections elsewhere.
+ *
+ * @returns A filtered Map containing only rim faces from valid candidates.
+ */
+export function validateSlabCandidates(
+  rimFaces: Map<number, number>,
+  faces: Face3D[],
+): Map<number, number> {
+  if (rimFaces.size === 0) return rimFaces;
+
+  // Group rim faces into candidates by Y-level band (same [Ymin, Ymax] pair).
+  // Each candidate represents one physical slab plate.
+  const candidates = new Map<string, { indices: number[]; thicknesses: number[] }>();
+  for (const [fi, thickness] of rimFaces) {
+    const f = faces[fi];
+    let ymin = Infinity, ymax = -Infinity;
+    for (const v of f.vertices) {
+      if (v.y < ymin) ymin = v.y;
+      if (v.y > ymax) ymax = v.y;
+    }
+    const bandMin = Math.round(ymin / HEIGHT_BAND) * HEIGHT_BAND;
+    const bandMax = Math.round(ymax / HEIGHT_BAND) * HEIGHT_BAND;
+    const key = `${bandMin}|${bandMax}`;
+    const cand = candidates.get(key);
+    if (cand) {
+      cand.indices.push(fi);
+      cand.thicknesses.push(thickness);
+    } else {
+      candidates.set(key, { indices: [fi], thicknesses: [thickness] });
+    }
+  }
+
+  // Validate each candidate independently.
+  const validated = new Map<number, number>();
+  for (const cand of candidates.values()) {
+    const maxT = Math.max(...cand.thicknesses);
+    const minT = Math.min(...cand.thicknesses);
+
+    // Reject: thickness exceeds physics-based cap (defense in depth).
+    if (maxT > MAX_SLAB_THICKNESS) continue;
+
+    // Reject: inconsistent thicknesses within the same candidate indicate
+    // contamination (faces from different structures mixed together).
+    if (maxT - minT > HEIGHT_BAND * 2) continue;
+
+    // Candidate passes — include all its faces.
+    for (let i = 0; i < cand.indices.length; i++) {
+      validated.set(cand.indices[i], cand.thicknesses[i]);
+    }
+  }
+
+  return validated;
 }
