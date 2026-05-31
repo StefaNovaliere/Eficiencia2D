@@ -15,7 +15,7 @@
 import type { Face3D, Vec3 } from "./types";
 import { cross, dot, getVertexIndices, normalize, sub, vlength } from "./types";
 import { areThinTwins, findThinWallFaces } from "./wall-thickness";
-import { detectSlabEdges } from "./slab-edge-detector";
+import { detectSlabEdges, findSlabRimFaces } from "./slab-edge-detector";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -382,6 +382,17 @@ export function classifyIntoGroups(
 
   const allInfos = classifyAllFaces(faces);
 
+  // Detect floor-slab rim faces (the vertical thickness band / "canto") per-face
+  // and reclassify them to "floor" BEFORE subgrouping. This isolates them from
+  // real walls in the byCategory partition, so a rim that happens to be coplanar
+  // / edge-connected to a wall never drags that wall into the floor group.
+  const rimFaces = findSlabRimFaces(faces);
+  if (rimFaces.size > 0) {
+    for (const fi of allInfos) {
+      if (rimFaces.has(fi.index)) fi.category = "floor";
+    }
+  }
+
   // Partition by category.
   const byCategory = new Map<FaceCategory, FaceInfo[]>();
   for (const fi of allInfos) {
@@ -431,36 +442,55 @@ export function classifyIntoGroups(
 
   // Thickness contributions are recorded as (subgroupIndex, thickness) and
   // resolved to final union roots only after ALL unions are applied, so the
-  // recorded root can't go stale as later merges change it.
-  const thicknessContrib: Array<{ idx: number; thickness: number }> = [];
+  // recorded root can't go stale as later merges change it. Thin-twin (wall)
+  // and slab-rim contributions are tracked separately: the slab thickness is
+  // measured directly from the rim and takes priority, so it can't be polluted
+  // by a tiny near-coincident horizontal twin sharing the same root.
+  const twinContrib: Array<{ idx: number; thickness: number }> = [];
+  const slabContrib: Array<{ idx: number; thickness: number }> = [];
+
+  // Slab-rim subgroups (every face is a pre-validated rim) must merge ONLY via
+  // edge-adjacency to their own skin (detectSlabEdges), never via the parallel-
+  // opposite thin-twin rule — otherwise a rim would twin with a nearby parallel
+  // wall and pull it into the floor.
+  const isRimSubgroup = subgroups.map(
+    (sg) => sg.faceInfos.length > 0 && sg.faceInfos.every((fi) => rimFaces.has(fi.index)),
+  );
 
   for (let i = 0; i < subgroups.length; i++) {
-    if (subgroups[i].category === "discard") continue;
+    if (subgroups[i].category === "discard" || isRimSubgroup[i]) continue;
     for (let j = i + 1; j < subgroups.length; j++) {
-      if (subgroups[j].category === "discard") continue;
+      if (subgroups[j].category === "discard" || isRimSubgroup[j]) continue;
       const thickness = areThinTwins(subgroups[i], subgroups[j], THIN_WALL_THRESHOLD);
       if (thickness !== null) {
         union(i, j);
-        thicknessContrib.push({ idx: i, thickness });
+        twinContrib.push({ idx: i, thickness });
       }
     }
   }
 
-  // Absorb floor-slab rim faces (the vertical thickness band / "canto") into
-  // their floor slab, and record the geometrically-measured slab thickness.
-  for (const link of detectSlabEdges(subgroups, faces)) {
+  // Absorb floor-slab rim faces into their floor slab. Rim candidates are
+  // pre-validated per-face, so this only unions genuine slab edges (and joins
+  // the slab's top and bottom skins into one piece).
+  for (const link of detectSlabEdges(subgroups, faces, rimFaces)) {
     union(link.floorSubgroupIndex, link.rimSubgroupIndex);
-    thicknessContrib.push({ idx: link.floorSubgroupIndex, thickness: link.thickness });
+    slabContrib.push({ idx: link.floorSubgroupIndex, thickness: link.thickness });
   }
 
-  // Resolve thickness per final root (smallest positive value wins).
+  // Resolve thickness per final root. Slab-rim measurement (largest, the true
+  // plate thickness) wins; otherwise fall back to the thin-twin distance
+  // (smallest positive).
+  const slabThickness = new Map<number, number>();
+  for (const { idx, thickness } of slabContrib) {
+    const root = find(idx);
+    const existing = slabThickness.get(root);
+    if (existing === undefined || thickness > existing) slabThickness.set(root, thickness);
+  }
   const twinThickness = new Map<number, number>();
-  for (const { idx, thickness } of thicknessContrib) {
+  for (const { idx, thickness } of twinContrib) {
     const root = find(idx);
     const existing = twinThickness.get(root);
-    if (existing === undefined || thickness < existing) {
-      twinThickness.set(root, thickness);
-    }
+    if (existing === undefined || thickness < existing) twinThickness.set(root, thickness);
   }
 
   const unionMap = new Map<number, Subgroup[]>();
@@ -525,7 +555,7 @@ export function classifyIntoGroups(
     const key = `${catLabel}_${orient}`;
     counters[key] = (counters[key] ?? 0) + 1;
 
-    const detectedThickness = twinThickness.get(rootIdx);
+    const detectedThickness = slabThickness.get(rootIdx) ?? twinThickness.get(rootIdx);
 
     groups.push({
       id: nextId++,
