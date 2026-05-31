@@ -22,6 +22,7 @@ import type { DecompositionMode, Face3D, Vec2, Vec3 } from "./types";
 import { cross, dot, getVertexIndices, normalize, sub, vlength } from "./types";
 import { detectFloorLevels } from "./floor-plan-extractor";
 import { areThinTwins } from "./wall-thickness";
+import { union } from "polyclip-ts";
 
 const GAP_M = 0.003;             // gap between panels in metres (3mm for laser cutting)
 const SHEET_SPACING_M = 0.10;    // visual gap between sheets in multi-sheet DXF
@@ -78,6 +79,19 @@ function snap3(v: number): number {
 
 function r(n: number): string {
   return Number(n.toFixed(4)).toString();
+}
+
+/** Minimum hole area (m²) to keep — discards mesh-noise holes, keeps real
+ *  windows/doors (5cm × 5cm = 0.0025 m²). Applied only to inner rings. */
+const MIN_HOLE_AREA = 0.0025;
+
+/** Signed shoelace area of a closed 2D ring (first point == last point). */
+function ring2DArea(ring: ReadonlyArray<readonly [number, number]>): number {
+  let a = 0;
+  for (let i = 0; i + 1 < ring.length; i++) {
+    a += ring[i][0] * ring[i + 1][1] - ring[i + 1][0] * ring[i][1];
+  }
+  return a / 2;
 }
 
 
@@ -406,6 +420,95 @@ export function traceContours(boundaryEdges: RawEdge[]): RawEdge[] {
 // Project coplanar faces to 2D and extract boundary edges
 // ---------------------------------------------------------------------------
 
+/** Round to ~0.1mm so two coincident skins of a thick wall merge exactly. */
+const UNION_SNAP = 1e4;
+function snapUnion(v: number): number {
+  return Math.round(v * UNION_SNAP) / UNION_SNAP;
+}
+
+/**
+ * Boolean union of all face polygons projected onto (uAxis, vAxis).
+ * Returns the outer silhouette + real holes as contour edges, or null if the
+ * union is degenerate (caller falls back to the legacy edge-count method).
+ */
+function unionOutline(faces: Face3D[], uAxis: Vec3, vAxis: Vec3): RawEdge[] | null {
+  const polys: Array<Array<[number, number]>[]> = [];
+  for (const face of faces) {
+    const ring: Array<[number, number]> = face.vertices.map(
+      (v) => [snapUnion(dot(v, uAxis)), snapUnion(dot(v, vAxis))],
+    );
+    if (ring.length < 3) continue;
+    if (Math.abs(ring2DArea(ring)) < 1e-7) continue; // edge-on face → ~0 area
+    polys.push([ring]);
+  }
+  if (polys.length === 0) return null;
+
+  let merged;
+  try {
+    merged = union(polys[0], ...polys.slice(1));
+  } catch {
+    return null;
+  }
+
+  const out: RawEdge[] = [];
+  for (const poly of merged) {
+    for (let ri = 0; ri < poly.length; ri++) {
+      const ring = poly[ri];
+      // ri === 0 is the outer boundary (always kept); ri >= 1 are holes —
+      // drop tiny mesh-noise holes but keep real windows/doors.
+      if (ri >= 1 && Math.abs(ring2DArea(ring)) < MIN_HOLE_AREA) continue;
+      for (let i = 0; i + 1 < ring.length; i++) {
+        out.push({
+          ax: ring[i][0], ay: ring[i][1],
+          bx: ring[i + 1][0], by: ring[i + 1][1],
+        });
+      }
+    }
+  }
+  return out.length > 0 ? out : null;
+}
+
+/**
+ * Legacy boundary extraction: keep edges belonging to exactly one face, then
+ * trace closed contours. Used as a fallback when the polygon union fails.
+ */
+function legacyBoundary(faces: Face3D[], uAxis: Vec3, vAxis: Vec3): RawEdge[] {
+  const edgeFaceCount = new Map<string, number>();
+  const edgeCoords = new Map<string, RawEdge>();
+
+  for (const face of faces) {
+    const pts: Vec2[] = face.vertices.map((v) => ({
+      x: dot(v, uAxis),
+      y: dot(v, vAxis),
+    }));
+    const vi = getVertexIndices(face);
+
+    for (let i = 0; i < pts.length; i++) {
+      const j = (i + 1) % pts.length;
+      const key = vi
+        ? (vi[i] < vi[j] ? `${vi[i]}|${vi[j]}` : `${vi[j]}|${vi[i]}`)
+        : edgeKey(pts[i].x, pts[i].y, pts[j].x, pts[j].y);
+      edgeFaceCount.set(key, (edgeFaceCount.get(key) ?? 0) + 1);
+      if (!edgeCoords.has(key)) {
+        edgeCoords.set(key, {
+          ax: pts[i].x, ay: pts[i].y,
+          bx: pts[j].x, by: pts[j].y,
+          via: vi ? vi[i] : undefined,
+          vib: vi ? vi[j] : undefined,
+        });
+      }
+    }
+  }
+
+  const boundaryEdges: RawEdge[] = [];
+  for (const [key, count] of edgeFaceCount) {
+    if (count === 1) boundaryEdges.push(edgeCoords.get(key)!);
+  }
+  if (boundaryEdges.length === 0) return [];
+
+  return traceContours(boundaryEdges);
+}
+
 export function projectFacesTo2D(
   faces: Face3D[],
   groupNormal: Vec3,
@@ -438,53 +541,14 @@ export function projectFacesTo2D(
     vAxis = normalize(cross(groupNormal, uAxis));
   }
 
-  // Project all faces to 2D; count how many faces each edge belongs to.
-  // Boundary edge = appears in exactly 1 face.
-  // Internal edge (triangulation) = shared by 2 faces → discard.
-  //
-  // Use vertex indices for exact edge deduplication when available;
-  // fall back to snapped 2D coordinates for generated faces.
-  const edgeFaceCount = new Map<string, number>();
-  const edgeCoords = new Map<string, RawEdge>();
-
-  for (const face of faces) {
-    const pts: Vec2[] = face.vertices.map((v) => ({
-      x: dot(v, uAxis),
-      y: dot(v, vAxis),
-    }));
-    const vi = getVertexIndices(face);
-
-    for (let i = 0; i < pts.length; i++) {
-      const j = (i + 1) % pts.length;
-      const key = vi
-        ? (vi[i] < vi[j] ? `${vi[i]}|${vi[j]}` : `${vi[j]}|${vi[i]}`)
-        : edgeKey(pts[i].x, pts[i].y, pts[j].x, pts[j].y);
-      edgeFaceCount.set(key, (edgeFaceCount.get(key) ?? 0) + 1);
-      if (!edgeCoords.has(key)) {
-        edgeCoords.set(key, {
-          ax: pts[i].x, ay: pts[i].y,
-          bx: pts[j].x, by: pts[j].y,
-          via: vi ? vi[i] : undefined,
-          vib: vi ? vi[j] : undefined,
-        });
-      }
-    }
-  }
-
-  // Keep only boundary edges (count === 1).
-  const boundaryEdges: Array<{ ax: number; ay: number; bx: number; by: number }> = [];
-  for (const [key, count] of edgeFaceCount) {
-    if (count === 1) {
-      const coords = edgeCoords.get(key)!;
-      boundaryEdges.push(coords);
-    }
-  }
-
-  if (boundaryEdges.length === 0) return null;
-
-  // Remove stray internal edges — keep only edges forming closed contours.
-  const contoured = traceContours(boundaryEdges);
-  if (contoured.length === 0) return null;
+  // Compute the true 2D outline as the boolean UNION of all face polygons.
+  // This yields exactly the outer silhouette + holes (windows/doors) with no
+  // internal lines, regardless of triangulation, wall thickness (two skins
+  // project onto the same place and collapse), or coplanar seams between
+  // abutting faces. Each black line in the output is a real laser cut, so we
+  // must not emit any interior edge.
+  const contoured = unionOutline(faces, uAxis, vAxis) ?? legacyBoundary(faces, uAxis, vAxis);
+  if (!contoured || contoured.length === 0) return null;
 
   // Bounding box and normalize to (0,0).
   let minU = Infinity, maxU = -Infinity;

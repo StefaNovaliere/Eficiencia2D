@@ -89,12 +89,12 @@ f 2 5 6 3
 // Boundary edge detection — exact via indices
 // ---------------------------------------------------------------------------
 
-describe("projectFacesTo2D — index-based boundary edges", () => {
-  it("correctly identifies boundary edges using vertex indices", () => {
-    // Two adjacent triangles sharing edge 1-2 (indices).
-    // Triangle 1: vertices 0,1,2. Triangle 2: vertices 1,3,2.
-    // Shared edge: 1-2 (internal → not boundary).
-    // Boundary edges: 0-1, 0-2, 1-3, 2-3.
+describe("projectFacesTo2D — union outline", () => {
+  it("merges two adjacent triangles into a single clean outline", () => {
+    // Triangle 1: (0,0),(1,0),(0.5,1). Triangle 2: (1,0),(2,0),(0.5,1).
+    // They share edge (1,0)-(0.5,1) and the base point (1,0) is collinear with
+    // (0,0)-(2,0). The union is therefore a single triangle (0,0)-(2,0)-(0.5,1):
+    // the shared edge and the collinear midpoint both vanish → 3 edges.
     const f1 = makeIndexedFace(
       [{ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, { x: 0.5, y: 0, z: 1 }],
       { x: 0, y: 1, z: 0 },
@@ -108,12 +108,12 @@ describe("projectFacesTo2D — index-based boundary edges", () => {
 
     const result = projectFacesTo2D([f1, f2], { x: 0, y: 1, z: 0 }, "Y");
     expect(result).not.toBeNull();
-    // 4 boundary edges (the shared edge 1-2 is internal).
-    expect(result!.edges.length).toBe(4);
+    expect(result!.edges.length).toBe(3);
+    expect(result!.widthM).toBeCloseTo(2, 1);
+    expect(result!.heightM).toBeCloseTo(1, 1);
   });
 
-  it("keeps shared-index edge as internal (not boundary)", () => {
-    // Two quads sharing edge 1-2 by index. That edge is internal → 6 boundary edges.
+  it("merges two abutting quads into one rectangle with no internal seam", () => {
     const f1 = makeIndexedFace(
       [{ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, { x: 1, y: 0, z: 1 }, { x: 0, y: 0, z: 1 }],
       { x: 0, y: 1, z: 0 },
@@ -127,10 +127,8 @@ describe("projectFacesTo2D — index-based boundary edges", () => {
 
     const result = projectFacesTo2D([f1, f2], { x: 0, y: 1, z: 0 }, "Y");
     expect(result).not.toBeNull();
-    // Combined 2×1 rectangle: 4 outer edges. Shared edge 1-2 is internal.
-    // (traceContours may or may not add edges but the outer loop has 4)
-    expect(result!.edges.length).toBeGreaterThanOrEqual(4);
-    expect(result!.edges.length).toBeLessThanOrEqual(6);
+    // Clean 2×1 rectangle: exactly 4 edges, no internal seam at x=1.
+    expect(result!.edges.length).toBe(4);
     expect(result!.widthM).toBeCloseTo(2, 1);
     expect(result!.heightM).toBeCloseTo(1, 1);
   });
@@ -266,5 +264,92 @@ describe("traceContours — index-based vertex identity", () => {
     ];
     const result = traceContours(edges);
     expect(result.length).toBe(8);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// projectFacesTo2D — polygon union (silhouette + holes, no internal lines)
+// ---------------------------------------------------------------------------
+
+describe("projectFacesTo2D — polygon union", () => {
+  const Y: Vec3 = { x: 0, y: 1, z: 0 };
+
+  it("collapses two coincident thick-wall skins into one outline", () => {
+    // Front and back skin of a wall with thickness project to the SAME 2D
+    // rectangle. The union must yield a single outline, not a double one.
+    const front = makeIndexedFace(
+      [{ x: 0, y: 0, z: 0 }, { x: 3, y: 0, z: 0 }, { x: 3, y: 0, z: 2 }, { x: 0, y: 0, z: 2 }],
+      Y,
+      [0, 1, 2, 3],
+    );
+    const back = makeIndexedFace(
+      [{ x: 0, y: 0.1, z: 0 }, { x: 3, y: 0.1, z: 0 }, { x: 3, y: 0.1, z: 2 }, { x: 0, y: 0.1, z: 2 }],
+      Y,
+      [10, 11, 12, 13],
+    );
+
+    const result = projectFacesTo2D([front, back], Y, "Y");
+    expect(result).not.toBeNull();
+    expect(result!.edges.length).toBe(4); // single rectangle, no doubling
+    expect(result!.widthM).toBeCloseTo(3, 1);
+    expect(result!.heightM).toBeCloseTo(2, 1);
+  });
+
+  it("merges 4 quads around a window into outline + hole", () => {
+    // Wall 4×3 with a 1×1 window hole at [1,1]-[2,2], modeled as 4 quads.
+    const mk = (pts: Array<[number, number]>, idx: number[]) =>
+      makeIndexedFace(
+        pts.map(([x, z]) => ({ x, y: 0, z })),
+        Y,
+        idx,
+      );
+    const below = mk([[0, 0], [4, 0], [4, 1], [0, 1]], [0, 1, 2, 3]);
+    const above = mk([[0, 2], [4, 2], [4, 3], [0, 3]], [4, 5, 6, 7]);
+    const left = mk([[0, 1], [1, 1], [1, 2], [0, 2]], [8, 9, 10, 11]);
+    const right = mk([[2, 1], [4, 1], [4, 2], [2, 2]], [12, 13, 14, 15]);
+
+    const result = projectFacesTo2D([below, above, left, right], Y, "Y");
+    expect(result).not.toBeNull();
+    // Outer rectangle (4) + window hole (4) = 8 edges, no internal seams.
+    expect(result!.edges.length).toBe(8);
+    expect(result!.widthM).toBeCloseTo(4, 1);
+    expect(result!.heightM).toBeCloseTo(3, 1);
+  });
+
+  it("drops a tiny mesh-noise hole but keeps the outer silhouette", () => {
+    // A solid 2×2 panel with a 2cm×2cm pinhole — below MIN_HOLE_AREA.
+    const mk = (pts: Array<[number, number]>, idx: number[]) =>
+      makeIndexedFace(pts.map(([x, z]) => ({ x, y: 0, z })), Y, idx);
+    // Frame around a 0.02×0.02 hole centred at (1,1).
+    const below = mk([[0, 0], [2, 0], [2, 0.99], [0, 0.99]], [0, 1, 2, 3]);
+    const above = mk([[0, 1.01], [2, 1.01], [2, 2], [0, 2]], [4, 5, 6, 7]);
+    const left = mk([[0, 0.99], [0.99, 0.99], [0.99, 1.01], [0, 1.01]], [8, 9, 10, 11]);
+    const right = mk([[1.01, 0.99], [2, 0.99], [2, 1.01], [1.01, 1.01]], [12, 13, 14, 15]);
+
+    const result = projectFacesTo2D([below, above, left, right], Y, "Y");
+    expect(result).not.toBeNull();
+    // Pinhole (0.02×0.02 = 0.0004 m² < 0.0025) is dropped → only the 4 outer edges.
+    expect(result!.edges.length).toBe(4);
+  });
+
+  it("removes the diagonal of a triangulated quad", () => {
+    // A square split into two triangles along the diagonal → union outline
+    // is the square (4 edges), the internal diagonal is gone.
+    const t1 = makeIndexedFace(
+      [{ x: 0, y: 0, z: 0 }, { x: 2, y: 0, z: 0 }, { x: 2, y: 0, z: 2 }],
+      Y,
+      [0, 1, 2],
+    );
+    const t2 = makeIndexedFace(
+      [{ x: 0, y: 0, z: 0 }, { x: 2, y: 0, z: 2 }, { x: 0, y: 0, z: 2 }],
+      Y,
+      [0, 2, 3],
+    );
+
+    const result = projectFacesTo2D([t1, t2], Y, "Y");
+    expect(result).not.toBeNull();
+    expect(result!.edges.length).toBe(4);
+    expect(result!.widthM).toBeCloseTo(2, 1);
+    expect(result!.heightM).toBeCloseTo(2, 1);
   });
 });
