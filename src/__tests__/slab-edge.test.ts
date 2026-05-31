@@ -130,4 +130,53 @@ ${slabFaces(3, 0.25, 4, 4, 8)}
       ).toBe(false);
     }
   });
+
+  it("does NOT absorb a tall wall that is coplanar with a slab rim", () => {
+    // Slab (verts 1..8) whose +Z rim sits on plane z=4, plus a 3m-tall wall in
+    // the SAME plane z=4 but with its own vertices (9..12). The wall must not be
+    // dragged into the floor, and the slab thickness must still be measured.
+    const obj = `
+${slabFaces(0, 0.2)}
+v 0 0 4
+v 4 0 4
+v 4 3 4
+v 0 3 4
+f 9 10 11 12
+`;
+    const groups = classifyIntoGroups(parseObj(obj).faces);
+    const floors = groups.filter((g) => g.category === "floor");
+    const walls = groups.filter((g) => g.category.startsWith("wall"));
+
+    expect(floors.length).toBe(1);
+    expect(floors[0].faceIndices.length).toBe(6); // slab only
+    expect(floors[0].thickness).toBeCloseTo(0.2, 3);
+    expect(walls.length).toBe(1);
+    expect(walls[0].faceIndices.length).toBe(1);
+  });
+
+  it("does NOT treat a room's wall (floor-below + ceiling-above) as a slab rim", () => {
+    // A room: floor at y=0 facing UP, ceiling at y=3 facing DOWN, and a wall
+    // sharing edges with both. The rim bracket requires an UP-skin on top and a
+    // DOWN-skin below (a slab's outward skins); a room has the reverse, so the
+    // wall is rejected by orientation — no false slab, the wall stays a wall.
+    const obj = `
+v 0 0 0
+v 4 0 0
+v 4 0 4
+v 0 0 4
+v 0 3 0
+v 4 3 0
+v 4 3 4
+v 0 3 4
+f 4 3 2 1
+f 5 6 7 8
+f 1 2 6 5
+`;
+    const groups = classifyIntoGroups(parseObj(obj).faces);
+    const walls = groups.filter((g) => g.category.startsWith("wall"));
+    expect(walls.length).toBe(1);
+    expect(walls[0].faceIndices.length).toBe(1);
+    // Neither the floor nor the ceiling is mistaken for a thin slab.
+    expect(groups.every((g) => g.thickness == null)).toBe(true);
+  });
 });
