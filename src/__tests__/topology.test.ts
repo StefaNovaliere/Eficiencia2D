@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { parseObj } from "@/core/obj-parser";
 import { detectJoints } from "@/core/joint-detector";
-import { projectFacesTo2D } from "@/core/cutting-sheet";
+import { projectFacesTo2D, traceContours } from "@/core/cutting-sheet";
 import type { Face3D, IndexedFace3D, Vec3 } from "@/core/types";
 import type { GeometryGroup, FaceCategory } from "@/core/group-classifier";
 
@@ -206,5 +206,65 @@ describe("detectJoints — index-based edge sharing", () => {
 
     const joints = detectJoints([f1, f2], groups);
     expect(joints.length).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// traceContours — index-based vertex identity
+// ---------------------------------------------------------------------------
+
+describe("traceContours — index-based vertex identity", () => {
+  it("preserves hole edges when indices prevent false snap merge", () => {
+    // Outer rectangle (4 edges, indices 0-3).
+    // Inner hole (4 edges, indices 10-13).
+    // Hole corner at (2.005, 1) would snap to (2.00, 1.00) = same as outer
+    // vertex (2, 1) under 1cm snap. With indices, they stay separate.
+    const edges = [
+      { ax: 0, ay: 0, bx: 4, by: 0, via: 0, vib: 1 },
+      { ax: 4, ay: 0, bx: 4, by: 3, via: 1, vib: 2 },
+      { ax: 4, ay: 3, bx: 0, by: 3, via: 2, vib: 3 },
+      { ax: 0, ay: 3, bx: 0, by: 0, via: 3, vib: 0 },
+      { ax: 1, ay: 1, bx: 2.005, by: 1, via: 10, vib: 11 },
+      { ax: 2.005, ay: 1, bx: 2.005, by: 2, via: 11, vib: 12 },
+      { ax: 2.005, ay: 2, bx: 1, by: 2, via: 12, vib: 13 },
+      { ax: 1, ay: 2, bx: 1, by: 1, via: 13, vib: 10 },
+    ];
+    const result = traceContours(edges);
+    expect(result.length).toBe(8);
+  });
+
+  it("preserves door frame hole with close vertices", () => {
+    // Wall: 5m wide x 2.5m tall.
+    // Door opening at the bottom: 0.8m wide x 2.1m tall.
+    // Door bottom edge shares y=0 with wall bottom but different indices.
+    const edges = [
+      { ax: 0, ay: 0, bx: 5, by: 0, via: 0, vib: 1 },
+      { ax: 5, ay: 0, bx: 5, by: 2.5, via: 1, vib: 2 },
+      { ax: 5, ay: 2.5, bx: 0, by: 2.5, via: 2, vib: 3 },
+      { ax: 0, ay: 2.5, bx: 0, by: 0, via: 3, vib: 0 },
+      { ax: 1, ay: 0, bx: 1.8, by: 0, via: 20, vib: 21 },
+      { ax: 1.8, ay: 0, bx: 1.8, by: 2.1, via: 21, vib: 22 },
+      { ax: 1.8, ay: 2.1, bx: 1, by: 2.1, via: 22, vib: 23 },
+      { ax: 1, ay: 2.1, bx: 1, by: 0, via: 23, vib: 20 },
+    ];
+    const result = traceContours(edges);
+    expect(result.length).toBe(8);
+  });
+
+  it("falls back to snap for edges without indices", () => {
+    // Same window-hole scenario as geometry-processing.test.ts,
+    // without via/vib fields — uses snap fallback.
+    const edges = [
+      { ax: 0, ay: 0, bx: 4, by: 0 },
+      { ax: 4, ay: 0, bx: 4, by: 3 },
+      { ax: 4, ay: 3, bx: 0, by: 3 },
+      { ax: 0, ay: 3, bx: 0, by: 0 },
+      { ax: 1, ay: 1, bx: 2, by: 1 },
+      { ax: 2, ay: 1, bx: 2, by: 2 },
+      { ax: 2, ay: 2, bx: 1, by: 2 },
+      { ax: 1, ay: 2, bx: 1, by: 1 },
+    ];
+    const result = traceContours(edges);
+    expect(result.length).toBe(8);
   });
 });

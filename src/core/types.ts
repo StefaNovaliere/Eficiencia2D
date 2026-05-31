@@ -35,7 +35,8 @@ export interface IndexedFace3D extends Face3D {
 /** Type guard: returns vertex indices if available, or undefined for fallback. */
 export function getVertexIndices(face: Face3D): number[] | undefined {
   const indexed = face as Partial<IndexedFace3D>;
-  return indexed.vertexIndices && indexed.vertexIndices.length > 0
+  return indexed.vertexIndices &&
+    indexed.vertexIndices.length === face.vertices.length
     ? indexed.vertexIndices
     : undefined;
 }
