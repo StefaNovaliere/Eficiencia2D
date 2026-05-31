@@ -1066,6 +1066,22 @@ body {
   font-size: 0.85rem;
 }
 
+.nesting-inline-btn {
+  margin-left: 6px;
+  padding: 3px 10px;
+  background: var(--error);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.nesting-inline-btn:hover {
+  opacity: 0.85;
+}
+
 .nesting-bottom-bar {
   border-top: 1px solid var(--border);
   padding: 16px 24px;
