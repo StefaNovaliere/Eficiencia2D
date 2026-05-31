@@ -235,7 +235,11 @@ function splitConnectedComponents(faces: Face3D[]): Face3D[][] {
 // Contour tracing: remove stray internal edges from boundary edge set
 // ---------------------------------------------------------------------------
 
-type RawEdge = { ax: number; ay: number; bx: number; by: number };
+type RawEdge = {
+  ax: number; ay: number; bx: number; by: number;
+  via?: number;
+  vib?: number;
+};
 
 /**
  * Filter boundary edges to keep only those forming closed contour loops
@@ -254,6 +258,11 @@ type RawEdge = { ax: number; ay: number; bx: number; by: number };
 export function traceContours(boundaryEdges: RawEdge[]): RawEdge[] {
   if (boundaryEdges.length <= 2) return boundaryEdges;
 
+  function vertId(e: RawEdge, side: "a" | "b"): string {
+    if (side === "a") return e.via !== undefined ? `i${e.via}` : vertKey(e.ax, e.ay);
+    return e.vib !== undefined ? `i${e.vib}` : vertKey(e.bx, e.by);
+  }
+
   // Build adjacency: vertex → list of edge indices.
   const adj = new Map<string, number[]>();
   function addAdj(vk: string, ei: number) {
@@ -263,8 +272,8 @@ export function traceContours(boundaryEdges: RawEdge[]): RawEdge[] {
   }
   for (let i = 0; i < boundaryEdges.length; i++) {
     const e = boundaryEdges[i];
-    addAdj(vertKey(e.ax, e.ay), i);
-    addAdj(vertKey(e.bx, e.by), i);
+    addAdj(vertId(e, "a"), i);
+    addAdj(vertId(e, "b"), i);
   }
 
   // Iterative leaf pruning: remove edges connected to degree-1 vertices.
@@ -285,8 +294,8 @@ export function traceContours(boundaryEdges: RawEdge[]): RawEdge[] {
   // Coordinates of a vertex key (for angle + area computation).
   const vertCoord = new Map<string, { x: number; y: number }>();
   for (const e of boundaryEdges) {
-    const ak = vertKey(e.ax, e.ay);
-    const bk = vertKey(e.bx, e.by);
+    const ak = vertId(e, "a");
+    const bk = vertId(e, "b");
     if (!vertCoord.has(ak)) vertCoord.set(ak, { x: e.ax, y: e.ay });
     if (!vertCoord.has(bk)) vertCoord.set(bk, { x: e.bx, y: e.by });
   }
@@ -302,12 +311,12 @@ export function traceContours(boundaryEdges: RawEdge[]): RawEdge[] {
   function dartFrom(dart: number): string {
     const ei = dart >> 1;
     const e = boundaryEdges[ei];
-    return (dart & 1) === 0 ? vertKey(e.ax, e.ay) : vertKey(e.bx, e.by);
+    return (dart & 1) === 0 ? vertId(e, "a") : vertId(e, "b");
   }
   function dartTo(dart: number): string {
     const ei = dart >> 1;
     const e = boundaryEdges[ei];
-    return (dart & 1) === 0 ? vertKey(e.bx, e.by) : vertKey(e.ax, e.ay);
+    return (dart & 1) === 0 ? vertId(e, "b") : vertId(e, "a");
   }
   function dartAngle(dart: number): number {
     const from = vertCoord.get(dartFrom(dart))!;
@@ -436,10 +445,7 @@ export function projectFacesTo2D(
   // Use vertex indices for exact edge deduplication when available;
   // fall back to snapped 2D coordinates for generated faces.
   const edgeFaceCount = new Map<string, number>();
-  const edgeCoords = new Map<
-    string,
-    { ax: number; ay: number; bx: number; by: number }
-  >();
+  const edgeCoords = new Map<string, RawEdge>();
 
   for (const face of faces) {
     const pts: Vec2[] = face.vertices.map((v) => ({
@@ -458,6 +464,8 @@ export function projectFacesTo2D(
         edgeCoords.set(key, {
           ax: pts[i].x, ay: pts[i].y,
           bx: pts[j].x, by: pts[j].y,
+          via: vi ? vi[i] : undefined,
+          vib: vi ? vi[j] : undefined,
         });
       }
     }
