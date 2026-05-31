@@ -15,6 +15,7 @@
 import type { Face3D, Vec3 } from "./types";
 import { cross, dot, getVertexIndices, normalize, sub, vlength } from "./types";
 import { areThinTwins, findThinWallFaces } from "./wall-thickness";
+import { detectSlabEdges } from "./slab-edge-detector";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -215,7 +216,14 @@ function clusterCoplanar(infos: FaceInfo[], faces: Face3D[]): CoplanarCluster[] 
 
     let placed = false;
     for (const cl of clusters) {
-      if (Math.abs(dot(n, cl.normal)) > NORMAL_CLUSTER_DOT && Math.abs(d - cl.d) < D_TOLERANCE) {
+      // Cluster by SIGNED normal direction: two opposite-facing skins of a thin
+      // plate (slab top/bottom, or the two faces of a thin wall) must stay in
+      // separate clusters so each keeps its true normal. Otherwise, when their
+      // planes are within D_TOLERANCE, they would collapse into one cluster and
+      // buildSubgroup would assign both the same normal — destroying the
+      // opposite-normal signal that thin-twin merge and slab-edge detection rely
+      // on (silently breaking thickness detection for plates thinner than ~15cm).
+      if (dot(n, cl.normal) > NORMAL_CLUSTER_DOT && Math.abs(d - cl.d) < D_TOLERANCE) {
         cl.faceInfos.push(fi);
         placed = true;
         break;
@@ -313,7 +321,7 @@ const CATEGORY_LABELS: Record<FaceCategory, string> = {
 // Public API
 // ---------------------------------------------------------------------------
 
-interface Subgroup {
+export interface Subgroup {
   category: FaceCategory;
   faceInfos: FaceInfo[];
   normal: Vec3;
@@ -412,7 +420,6 @@ export function classifyIntoGroups(
   // The detected thickness (distance between the twin surfaces) is preserved
   // as metadata on the merged group.
   const parent = subgroups.map((_, i) => i);
-  const twinThickness = new Map<number, number>();
   function find(x: number): number {
     while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; }
     return x;
@@ -422,6 +429,11 @@ export function classifyIntoGroups(
     if (ra !== rb) parent[ra] = rb;
   }
 
+  // Thickness contributions are recorded as (subgroupIndex, thickness) and
+  // resolved to final union roots only after ALL unions are applied, so the
+  // recorded root can't go stale as later merges change it.
+  const thicknessContrib: Array<{ idx: number; thickness: number }> = [];
+
   for (let i = 0; i < subgroups.length; i++) {
     if (subgroups[i].category === "discard") continue;
     for (let j = i + 1; j < subgroups.length; j++) {
@@ -429,12 +441,25 @@ export function classifyIntoGroups(
       const thickness = areThinTwins(subgroups[i], subgroups[j], THIN_WALL_THRESHOLD);
       if (thickness !== null) {
         union(i, j);
-        const root = find(i);
-        const existing = twinThickness.get(root);
-        if (existing === undefined || thickness < existing) {
-          twinThickness.set(root, thickness);
-        }
+        thicknessContrib.push({ idx: i, thickness });
       }
+    }
+  }
+
+  // Absorb floor-slab rim faces (the vertical thickness band / "canto") into
+  // their floor slab, and record the geometrically-measured slab thickness.
+  for (const link of detectSlabEdges(subgroups, faces)) {
+    union(link.floorSubgroupIndex, link.rimSubgroupIndex);
+    thicknessContrib.push({ idx: link.floorSubgroupIndex, thickness: link.thickness });
+  }
+
+  // Resolve thickness per final root (smallest positive value wins).
+  const twinThickness = new Map<number, number>();
+  for (const { idx, thickness } of thicknessContrib) {
+    const root = find(idx);
+    const existing = twinThickness.get(root);
+    if (existing === undefined || thickness < existing) {
+      twinThickness.set(root, thickness);
     }
   }
 
