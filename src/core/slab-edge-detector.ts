@@ -2,44 +2,52 @@
 // Slab Edge Detector
 //
 // A floor slab modelled in the OBJ is a thin closed plate: a top horizontal
-// skin, a bottom horizontal skin, and a ring of thin VERTICAL faces forming
-// its edge / thickness band (the "canto"). Those vertical rim faces have a
-// horizontal normal, so the per-face classifier tags them as walls. This
-// module recognises them as part of the slab so they get absorbed into the
-// floor group instead of becoming spurious wall pieces.
+// skin, a bottom horizontal skin, and a ring of thin VERTICAL faces forming its
+// edge / thickness band (the "canto"). Those rim faces have a horizontal normal,
+// so the per-face classifier tags them as walls. This module recognises them as
+// part of the slab so they get absorbed into the floor group instead of becoming
+// spurious wall pieces, and measures the slab thickness directly from geometry.
 //
-// Geometric invariant (no hardcoded height threshold):
-//   A vertical face is a slab rim iff it is bounded ABOVE and BELOW by
-//   horizontal faces of the SAME slab — i.e. one of its horizontal edges is
-//   shared with the slab's top skin and the opposite horizontal edge with the
-//   bottom skin, and those two skins are the two faces of one thin plate
-//   (verified via areThinTwins). A genuine wall sitting on a floor shares only
-//   its bottom edge with that floor; its top edge connects to a ceiling or a
-//   different-level slab, so it is rejected.
+// Detection is PER-FACE (not per-subgroup): a whole vertical subgroup may bundle
+// a slab rim together with a real wall that is coplanar/edge-connected to it, so
+// absorbing subgroups wholesale wrongly drags real walls into the floor. Working
+// per-face keeps walls out.
 //
-// The slab thickness falls out for free as the vertical gap between the two
-// skins the rim spans — a measured geometric quantity, not a constant.
+// A vertical face is a slab rim iff (all conditions are model-agnostic):
+//   1. It is vertical and spans two Y levels [Ymin, Ymax] (t = Ymax - Ymin).
+//   2. It is BRACKETED: its top horizontal edge is shared (exact OBJ vertex-index
+//      pair, snapped-coord fallback) with an UP-facing horizontal face at Ymax,
+//      and its bottom horizontal edge with a DOWN-facing horizontal face at Ymin.
+//   3. THIN PLATE: t / skinLat < PLATE_RATIO, where skinLat is the smaller of the
+//      two bracketing skins' lateral extent. A slab is intrinsically thin vs its
+//      span; a wall (or a room's floor+ceiling) is not.
+//   4. WIDE FACE: t / faceHorizLen < FACE_ASPECT (the rim is wider than tall).
+//
+// Conditions 3-4 are dimensionless aspect ratios — a universal geometric property
+// of "a thin, wide plate", not an absolute centimetre threshold. The slab
+// thickness is the measured gap t, independent of any wall-thickness constant.
 // ============================================================================
 
 import type { Face3D } from "./types";
 import { getVertexIndices } from "./types";
-import { areThinTwins } from "./wall-thickness";
 import type { Subgroup } from "./group-classifier";
 
-// |n.y| >= this => horizontal face (slab skin). Matches HORIZONTAL_THRESHOLD
-// used by the per-face classifier.
+// |n.y| >= this => horizontal face (slab skin). Matches HORIZONTAL_THRESHOLD.
 const HORIZONTAL_NORMAL_MIN = 0.98;
 // |n.y| <= this => vertical face (rim candidate). Matches VERTICAL_THRESHOLD.
 const VERTICAL_NORMAL_MAX = 0.5;
 // An edge counts as ~horizontal when |dir.y| / |dir| <= EDGE_DIR_TOL. Derived
-// from HORIZONTAL_NORMAL_MIN (the same angular tolerance that defines a
-// horizontal face), so it is dimensionless and scale-invariant — not a new
-// magic constant. sqrt(1 - 0.98^2) ≈ 0.199 (~11.5°).
+// from HORIZONTAL_NORMAL_MIN (same angular tolerance that defines a horizontal
+// face): dimensionless, scale-invariant. sqrt(1 - 0.98^2) ≈ 0.199 (~11.5°).
 const EDGE_DIR_TOL = Math.sqrt(1 - HORIZONTAL_NORMAL_MIN * HORIZONTAL_NORMAL_MIN);
-// Search bound for pairing the top/bottom skin of a slab. This is the range in
-// which two opposite horizontal faces are considered the two skins of one
-// plate, NOT a cutoff for rim-vs-wall (that decision is purely topological).
-const MAX_SLAB_THICKNESS = 1.0;
+// Y levels within this band are treated as the same horizontal plane.
+const HEIGHT_BAND = 0.05;
+// Thin-plate discriminator: slab thickness over skin lateral size. Real slab
+// rims measure <=~0.08; walls >=~0.6 (validated on a real model). 0.25 sits in
+// the middle of that gap with ~3x margin either side. Dimensionless.
+const PLATE_RATIO = 0.25;
+// The rim face must be wider than tall. Dimensionless; skin-size independent.
+const FACE_ASPECT = 0.5;
 
 /** A rim subgroup that should be absorbed into a floor subgroup. */
 export interface SlabEdgeLink {
@@ -70,94 +78,184 @@ function edgeKey(
   return `${sbx},${sby},${sbz}|${sax},${say},${saz}`;
 }
 
+function faceArea(f: Face3D): number {
+  const v = f.vertices;
+  if (v.length < 3) return 0;
+  let sx = 0, sy = 0, sz = 0;
+  for (let i = 1; i < v.length - 1; i++) {
+    const e1x = v[i].x - v[0].x, e1y = v[i].y - v[0].y, e1z = v[i].z - v[0].z;
+    const e2x = v[i + 1].x - v[0].x, e2y = v[i + 1].y - v[0].y, e2z = v[i + 1].z - v[0].z;
+    sx += e1y * e2z - e1z * e2y;
+    sy += e1z * e2x - e1x * e2z;
+    sz += e1x * e2y - e1y * e2x;
+  }
+  return 0.5 * Math.sqrt(sx * sx + sy * sy + sz * sz);
+}
+
+/** Lateral extent (max of the X / Z bounding-box spans) of a face. */
+function lateralExtent(f: Face3D): number {
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  for (const v of f.vertices) {
+    if (v.x < minX) minX = v.x;
+    if (v.x > maxX) maxX = v.x;
+    if (v.z < minZ) minZ = v.z;
+    if (v.z > maxZ) maxZ = v.z;
+  }
+  return Math.max(maxX - minX, maxZ - minZ);
+}
+
+interface SkinEdge {
+  y: number;
+  lat: number;
+  area: number;
+}
+
 /**
- * Detect floor-slab rim subgroups and the floor skins they cap.
+ * Per-face detection of floor-slab rim faces.
  *
- * @param subgroups  Subgroups already built by the classifier (one per
- *                   category + coplanar cluster + connected component).
+ * @returns Map of faceIndex -> measured slab thickness (metres) for every face
+ *          recognised as a slab edge.
+ */
+export function findSlabRimFaces(faces: Face3D[]): Map<number, number> {
+  // Index every ~horizontal edge of every horizontal face, split by whether the
+  // face points up (potential top skin) or down (potential bottom skin). Keep
+  // the largest-area face per edge so skinLat reflects the real slab skin.
+  const up = new Map<string, SkinEdge>();
+  const down = new Map<string, SkinEdge>();
+  for (const f of faces) {
+    const ny = f.normal.y;
+    if (Math.abs(ny) < HORIZONTAL_NORMAL_MIN) continue;
+    const area = faceArea(f);
+    const lat = lateralExtent(f);
+    const vi = getVertexIndices(f);
+    const verts = f.vertices;
+    const map = ny > 0 ? up : down;
+    for (let i = 0; i < verts.length; i++) {
+      const j = (i + 1) % verts.length;
+      const a = verts[i], b = verts[j];
+      const dy = b.y - a.y;
+      const len = Math.sqrt((b.x - a.x) ** 2 + dy * dy + (b.z - a.z) ** 2);
+      if (len < 1e-9 || Math.abs(dy) / len > EDGE_DIR_TOL) continue;
+      const key = edgeKey(f, i, j, vi);
+      const y = (a.y + b.y) / 2;
+      const existing = map.get(key);
+      if (!existing || area > existing.area) map.set(key, { y, lat, area });
+    }
+  }
+
+  const rim = new Map<number, number>();
+  for (let fi = 0; fi < faces.length; fi++) {
+    const f = faces[fi];
+    if (Math.abs(f.normal.y) > VERTICAL_NORMAL_MAX) continue; // not vertical
+    const verts = f.vertices;
+    if (verts.length < 3) continue;
+
+    let ymin = Infinity, ymax = -Infinity;
+    for (const v of verts) {
+      if (v.y < ymin) ymin = v.y;
+      if (v.y > ymax) ymax = v.y;
+    }
+    const t = ymax - ymin;
+    if (t <= 1e-3) continue;
+
+    const vi = getVertexIndices(f);
+    let topSkin: SkinEdge | null = null;
+    let botSkin: SkinEdge | null = null;
+    let maxHorizLen = 0;
+    for (let i = 0; i < verts.length; i++) {
+      const j = (i + 1) % verts.length;
+      const a = verts[i], b = verts[j];
+      const dy = b.y - a.y;
+      const len = Math.sqrt((b.x - a.x) ** 2 + dy * dy + (b.z - a.z) ** 2);
+      if (len < 1e-9 || Math.abs(dy) / len > EDGE_DIR_TOL) continue;
+      if (len > maxHorizLen) maxHorizLen = len;
+      const key = edgeKey(f, i, j, vi);
+      const y = (a.y + b.y) / 2;
+      if (Math.abs(y - ymax) < HEIGHT_BAND) {
+        const e = up.get(key);
+        if (e && (!topSkin || e.area > topSkin.area)) topSkin = e;
+      }
+      if (Math.abs(y - ymin) < HEIGHT_BAND) {
+        const e = down.get(key);
+        if (e && (!botSkin || e.area > botSkin.area)) botSkin = e;
+      }
+    }
+    if (!topSkin || !botSkin) continue; // not bracketed by two skins
+
+    const skinLat = Math.min(topSkin.lat, botSkin.lat);
+    if (skinLat <= 1e-6) continue;
+    if (t / skinLat >= PLATE_RATIO) continue; // not a thin plate
+    if (maxHorizLen <= 1e-6 || t / maxHorizLen >= FACE_ASPECT) continue; // not wide
+
+    rim.set(fi, t);
+  }
+  return rim;
+}
+
+/**
+ * Link slab-rim subgroups to the floor skins they cap, so they can be merged
+ * into one floor group. Rim candidates are restricted to subgroups whose faces
+ * are ALL pre-validated rim faces, so no real wall is ever linked.
+ *
+ * @param subgroups  Subgroups already built by the classifier.
  * @param faces      All faces in the model (Y-up).
- * @returns          Links pairing each rim subgroup with the floor skin(s) it
- *                   spans, carrying the measured slab thickness.
+ * @param rimFaces   Output of findSlabRimFaces (faceIndex -> thickness).
  */
 export function detectSlabEdges(
   subgroups: Subgroup[],
   faces: Face3D[],
+  rimFaces: Map<number, number>,
 ): SlabEdgeLink[] {
-  // Partition by orientation of the cluster normal. Horizontal subgroups are
-  // potential slab skins (include `discard` ones: a thin bottom skin may have
-  // been demoted by the level-area filter). Vertical subgroups are rim
-  // candidates.
+  if (rimFaces.size === 0) return [];
+
+  // Partition: horizontal subgroups are potential skins; rim subgroups are those
+  // made entirely of pre-validated rim faces.
   const floorIdxs: number[] = [];
   const rimIdxs: number[] = [];
   for (let i = 0; i < subgroups.length; i++) {
-    const ny = Math.abs(subgroups[i].normal.y);
-    if (ny >= HORIZONTAL_NORMAL_MIN) floorIdxs.push(i);
-    else if (ny <= VERTICAL_NORMAL_MAX) rimIdxs.push(i);
+    const sg = subgroups[i];
+    if (Math.abs(sg.normal.y) >= HORIZONTAL_NORMAL_MIN) {
+      floorIdxs.push(i);
+    } else if (sg.faceInfos.every((fi) => rimFaces.has(fi.index))) {
+      rimIdxs.push(i);
+    }
   }
   if (floorIdxs.length === 0 || rimIdxs.length === 0) return [];
 
-  // Index every ~horizontal edge of every floor skin: key -> matches, where
-  // each match records the floor subgroup and the edge's elevation.
-  const floorEdges = new Map<string, Array<{ sg: number; y: number }>>();
+  // Index every edge of every floor skin: edgeKey -> floor subgroup index.
+  const floorEdge = new Map<string, number>();
   for (const fIdx of floorIdxs) {
     for (const fi of subgroups[fIdx].faceInfos) {
       const face = faces[fi.index];
-      const verts = face.vertices;
       const vi = getVertexIndices(face);
+      const verts = face.vertices;
       for (let i = 0; i < verts.length; i++) {
         const j = (i + 1) % verts.length;
-        const a = verts[i], b = verts[j];
-        const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
-        const len = Math.sqrt(dx * dx + dy * dy + dz * dz);
-        if (len < 1e-9) continue;
-        if (Math.abs(dy) / len > EDGE_DIR_TOL) continue; // not horizontal
-        const key = edgeKey(face, i, j, vi);
-        const y = (a.y + b.y) / 2;
-        const arr = floorEdges.get(key);
-        if (arr) arr.push({ sg: fIdx, y });
-        else floorEdges.set(key, [{ sg: fIdx, y }]);
+        floorEdge.set(edgeKey(face, i, j, vi), fIdx);
       }
     }
   }
 
   const links: SlabEdgeLink[] = [];
   for (const rIdx of rimIdxs) {
-    // Collect, at the subgroup level (handles triangulated rims), the highest
-    // and lowest floor skins this rim's horizontal edges are shared with.
-    let topY = -Infinity, botY = Infinity;
-    let topSg = -1, botSg = -1;
+    // Thickness of this rim = max measured thickness of its faces.
+    let thickness = 0;
+    const linkedFloors = new Set<number>();
     for (const fi of subgroups[rIdx].faceInfos) {
+      thickness = Math.max(thickness, rimFaces.get(fi.index) ?? 0);
       const face = faces[fi.index];
-      const verts = face.vertices;
       const vi = getVertexIndices(face);
+      const verts = face.vertices;
       for (let i = 0; i < verts.length; i++) {
         const j = (i + 1) % verts.length;
-        const a = verts[i], b = verts[j];
-        const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
-        const len = Math.sqrt(dx * dx + dy * dy + dz * dz);
-        if (len < 1e-9) continue;
-        if (Math.abs(dy) / len > EDGE_DIR_TOL) continue; // not horizontal
-        const matches = floorEdges.get(edgeKey(face, i, j, vi));
-        if (!matches) continue;
-        for (const m of matches) {
-          if (m.y > topY) { topY = m.y; topSg = m.sg; }
-          if (m.y < botY) { botY = m.y; botSg = m.sg; }
-        }
+        const f = floorEdge.get(edgeKey(face, i, j, vi));
+        if (f !== undefined) linkedFloors.add(f);
       }
     }
-    // Must be bracketed by skins at two distinct elevations (top + bottom).
-    if (topSg < 0 || botSg < 0 || topSg === botSg) continue;
-    const thickness = topY - botY;
-    if (thickness <= 1e-4) continue;
-
-    // Slab-consistency check (the rim-vs-wall discriminator): the two skins
-    // must be the two faces of one thin plate. A genuine wall fails here.
-    if (areThinTwins(subgroups[topSg], subgroups[botSg], MAX_SLAB_THICKNESS) === null) {
-      continue;
+    if (thickness <= 0) continue;
+    for (const f of linkedFloors) {
+      links.push({ floorSubgroupIndex: f, rimSubgroupIndex: rIdx, thickness });
     }
-
-    links.push({ floorSubgroupIndex: topSg, rimSubgroupIndex: rIdx, thickness });
-    links.push({ floorSubgroupIndex: botSg, rimSubgroupIndex: rIdx, thickness });
   }
   return links;
 }
