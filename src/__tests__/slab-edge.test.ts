@@ -179,4 +179,57 @@ f 1 2 6 5
     // Neither the floor nor the ceiling is mistaken for a thin slab.
     expect(groups.every((g) => g.thickness == null)).toBe(true);
   });
+
+  it("rejects a storey-height wall between two wide floor slabs (regression)", () => {
+    // Simulates the friend's building bug: a wide multi-storey building (12m)
+    // with a wall spanning from the ground-floor slab bottom (y=0, DOWN-facing)
+    // to the upper-floor slab top (y=3, UP-facing). The wall shares edges with
+    // both slabs. Without MAX_SLAB_THICKNESS, this would pass the bracket test
+    // AND the plate ratio (3.0/12 = 0.25 was < old threshold 0.25).
+    // With the fix: t=3.0 > MAX_SLAB_THICKNESS=1.0 → immediately rejected.
+    const obj = `
+v 0 0 0
+v 12 0 0
+v 12 0 8
+v 0 0 8
+v 0 3 0
+v 12 3 0
+v 12 3 8
+v 0 3 8
+f 1 2 3 4
+f 8 7 6 5
+f 1 2 6 5
+`;
+    // Face 1: bottom skin at y=0 (DOWN-facing, winding 1→2→3→4 from below)
+    // Face 2: top skin at y=3 (UP-facing, winding 8→7→6→5 from above)
+    // Face 3: wall from y=0 to y=3, sharing edges with both skins
+    const groups = classifyIntoGroups(parseObj(obj).faces);
+    const walls = groups.filter((g) => g.category.startsWith("wall"));
+    expect(walls.length).toBe(1);
+    expect(walls[0].faceIndices.length).toBe(1);
+    // No slab thickness detected — the wall is NOT mistaken for a rim.
+    expect(groups.every((g) => g.thickness == null)).toBe(true);
+  });
+
+  it("still detects a real slab even when the model also has storey-height walls", () => {
+    // A model with BOTH: a thin ground-floor slab (0.2m) AND a 3m-tall wall.
+    // The slab must be detected normally; the wall must stay a wall.
+    // This tests per-piece fault isolation.
+    const obj = `
+${slabFaces(0, 0.2, 6, 6, 0)}
+v 0 0.2 0
+v 6 0.2 0
+v 6 3.2 0
+v 0 3.2 0
+f 9 10 11 12
+`;
+    const groups = classifyIntoGroups(parseObj(obj).faces);
+    const floors = groups.filter((g) => g.category === "floor");
+    const walls = groups.filter((g) => g.category.startsWith("wall"));
+
+    expect(floors.length).toBe(1);
+    expect(floors[0].faceIndices.length).toBe(6); // slab (2 skins + 4 rims)
+    expect(floors[0].thickness).toBeCloseTo(0.2, 3);
+    expect(walls.length).toBe(1); // wall stays separate
+  });
 });
