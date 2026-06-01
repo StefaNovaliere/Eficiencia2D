@@ -24,6 +24,8 @@ interface PersistedSession {
   minAreaM2: number;
   sheetConfig: SheetConfig;
   overrides: ClassificationOverride[];
+  /** Wall-wall yield decisions serialized as [jointIndex, yieldGroupId] pairs. */
+  wallWallDecisions: [number, number][];
 }
 
 function bufferToBase64(buf: ArrayBuffer): string {
@@ -54,6 +56,7 @@ export default function UploadForm() {
   const [phase1Result, setPhase1Result] = useState<Phase1Result | null>(null);
   const [nestingData, setNestingData] = useState<NestingPreviewData | null>(null);
   const [savedOverrides, setSavedOverrides] = useState<ClassificationOverride[]>([]);
+  const [savedWallWallDecisions, setSavedWallWallDecisions] = useState<Map<number, number>>(() => new Map());
   const [sheetConfig, setSheetConfig] = useState<SheetConfig>(() => ({ ...DEFAULT_SHEET }));
   const [paymentBypass, setPaymentBypass] = useState(false);
   const dropRef = useRef<HTMLDivElement>(null);
@@ -88,6 +91,8 @@ export default function UploadForm() {
       setMinAreaM2(parsed.minAreaM2);
       setSheetConfig(parsed.sheetConfig);
       setSavedOverrides(parsed.overrides);
+      const restoredDecisions = new Map<number, number>(parsed.wallWallDecisions ?? []);
+      setSavedWallWallDecisions(restoredDecisions);
 
       const p1 = parsePipeline(parsed.fileName, buffer);
       if (p1.faces.length === 0) {
@@ -103,7 +108,7 @@ export default function UploadForm() {
         sheetConfig: parsed.sheetConfig,
         minAreaM2: parsed.minAreaM2,
       };
-      const decomposed = decomposePanels(p1, opts, parsed.overrides);
+      const decomposed = decomposePanels(p1, opts, parsed.overrides, restoredDecisions);
       const nesting = nestDecomposedPanels(decomposed, parsed.sheetConfig, parsed.scale);
       setNestingData(nesting);
       setStatus("nesting");
@@ -208,10 +213,14 @@ export default function UploadForm() {
     }
   };
 
-  const handleReviewConfirm = async (overrides: ClassificationOverride[]) => {
+  const handleReviewConfirm = async (
+    overrides: ClassificationOverride[],
+    wallWallDecisions: Map<number, number>,
+  ) => {
     if (!phase1Result || !file) return;
 
     setSavedOverrides(overrides);
+    setSavedWallWallDecisions(wallWallDecisions);
 
     try {
       const opts: PipelineOptions = {
@@ -224,7 +233,7 @@ export default function UploadForm() {
 
       const decomposed = await new Promise<ReturnType<typeof decomposePanels>>(
         (resolve) => {
-          setTimeout(() => resolve(decomposePanels(phase1Result, opts, overrides)), 50);
+          setTimeout(() => resolve(decomposePanels(phase1Result, opts, overrides, wallWallDecisions)), 50);
         },
       );
 
@@ -250,10 +259,10 @@ export default function UploadForm() {
       sheetConfig: newConfig,
       minAreaM2,
     };
-    const decomposed = decomposePanels(phase1Result, opts, savedOverrides);
+    const decomposed = decomposePanels(phase1Result, opts, savedOverrides, savedWallWallDecisions);
     const nesting = nestDecomposedPanels(decomposed, newConfig, scale);
     setNestingData(nesting);
-  }, [phase1Result, savedOverrides, scale, paper, minAreaM2]);
+  }, [phase1Result, savedOverrides, savedWallWallDecisions, scale, paper, minAreaM2]);
 
   const handleScaleChange = useCallback((newScale: number) => {
     setScale(newScale);
@@ -266,10 +275,10 @@ export default function UploadForm() {
       sheetConfig,
       minAreaM2,
     };
-    const decomposed = decomposePanels(phase1Result, opts, savedOverrides);
+    const decomposed = decomposePanels(phase1Result, opts, savedOverrides, savedWallWallDecisions);
     const nesting = nestDecomposedPanels(decomposed, sheetConfig, newScale);
     setNestingData(nesting);
-  }, [phase1Result, savedOverrides, paper, sheetConfig, minAreaM2]);
+  }, [phase1Result, savedOverrides, savedWallWallDecisions, paper, sheetConfig, minAreaM2]);
 
   // ─── Generation logic (called after payment or bypass) ───
 
@@ -341,12 +350,13 @@ export default function UploadForm() {
         minAreaM2,
         sheetConfig,
         overrides: savedOverrides,
+        wallWallDecisions: Array.from(savedWallWallDecisions.entries()),
       };
       sessionStorage.setItem(SESSION_KEY, JSON.stringify(persisted));
     } catch {
       // File too large for sessionStorage — silently skip persistence.
     }
-  }, [file, scale, paper, minAreaM2, sheetConfig, savedOverrides]);
+  }, [file, scale, paper, minAreaM2, sheetConfig, savedOverrides, savedWallWallDecisions]);
 
   const clearSession = useCallback(() => {
     sessionStorage.removeItem(SESSION_KEY);
@@ -437,6 +447,7 @@ export default function UploadForm() {
     setPhase1Result(null);
     setNestingData(null);
     setSavedOverrides([]);
+    setSavedWallWallDecisions(new Map());
     setStatus("idle");
     setError("");
     clearSession();
@@ -482,6 +493,7 @@ export default function UploadForm() {
         minAreaM2={minAreaM2}
         onMinAreaChange={handleMinAreaChange}
         initialOverrides={savedOverrides}
+        initialWallWallDecisions={savedWallWallDecisions}
       />
     );
   }
