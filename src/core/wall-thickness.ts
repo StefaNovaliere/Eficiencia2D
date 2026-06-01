@@ -5,8 +5,8 @@
 // the two skins of the same physical wall, and measures the perpendicular
 // distance between them (the wall thickness).
 //
-// Used to decide whether a wall is "thin" (single component, no exterior/
-// interior distinction) or "thick" (split into wall_exterior / wall_interior).
+// Used to merge thin-twin wall skins into a single component with measured
+// thickness.
 // ============================================================================
 
 import type { Face3D, Vec3 } from "./types";

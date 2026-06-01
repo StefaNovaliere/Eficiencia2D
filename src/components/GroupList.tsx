@@ -9,25 +9,19 @@ import type { FaceCategory, GeometryGroup } from "@/core/group-classifier";
 
 const CATEGORY_COLORS: Record<FaceCategory, string> = {
   floor: "#22c55e",
-  wall: "#a855f7",
-  wall_exterior: "#3b82f6",
-  wall_interior: "#06b6d4",
+  wall: "#3b82f6",
   discard: "#71717a",
 };
 
 const CATEGORY_LABELS: Record<FaceCategory, string> = {
   floor: "Piso",
   wall: "Pared",
-  wall_exterior: "Pared Exterior",
-  wall_interior: "Pared Interior",
   discard: "Descartar",
 };
 
 const ALL_CATEGORIES: FaceCategory[] = [
   "floor",
   "wall",
-  "wall_exterior",
-  "wall_interior",
   "discard",
 ];
 
