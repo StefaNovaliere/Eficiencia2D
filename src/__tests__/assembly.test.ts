@@ -514,7 +514,7 @@ describe("computeAdjustments axis field", () => {
 // ---------------------------------------------------------------------------
 // End-to-end: decomposePanels width clip
 // ---------------------------------------------------------------------------
-import { decomposePanels } from "@/core/pipeline";
+import { decomposePanels, computePanelIdByGroup } from "@/core/pipeline";
 import type { Phase1Result } from "@/core/pipeline";
 
 describe("decomposePanels wall-wall width clip", () => {
@@ -602,5 +602,47 @@ describe("decomposePanels wall-wall width clip", () => {
     expect(widePanel).toBeDefined();
     // It should be 4.9, not 5.0
     expect(widePanel!.widthM).toBeCloseTo(4.9, 1);
+  });
+});
+
+describe("computePanelIdByGroup", () => {
+  it("matches the DXF A# numbering, skipping groups decomposePanels drops", () => {
+    // Three walls in array order: big, TINY (below minArea), big.
+    // decomposePanels emits A1 (big), skips the tiny one, A2 (big).
+    // The UI label map must agree: {big1:A1, big2:A2}, tiny absent — NOT A1/A2/A3.
+    const big1 = makeFace(
+      [{ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 4 }, { x: 0, y: 3, z: 4 }, { x: 0, y: 3, z: 0 }],
+      { x: 1, y: 0, z: 0 },
+    );
+    const tiny = makeFace(
+      [{ x: 10, y: 0, z: 0 }, { x: 10, y: 0, z: 0.05 }, { x: 10, y: 0.05, z: 0.05 }, { x: 10, y: 0.05, z: 0 }],
+      { x: 1, y: 0, z: 0 },
+    );
+    const big2 = makeFace(
+      [{ x: 20, y: 0, z: 0 }, { x: 20, y: 0, z: 5 }, { x: 20, y: 3, z: 5 }, { x: 20, y: 3, z: 0 }],
+      { x: 1, y: 0, z: 0 },
+    );
+    const faces: Face3D[] = [big1, tiny, big2];
+
+    const groups = [
+      makeGroup({ id: 10, category: "wall", representativeNormal: { x: 1, y: 0, z: 0 }, faceIndices: [0] }),
+      makeGroup({ id: 20, category: "wall", representativeNormal: { x: 1, y: 0, z: 0 }, faceIndices: [1] }),
+      makeGroup({ id: 30, category: "wall", representativeNormal: { x: 1, y: 0, z: 0 }, faceIndices: [2] }),
+    ];
+
+    const phase1: Phase1Result = {
+      faces, rawFaces: faces, appliedAxis: "Y", groups,
+      joints: [], adjustments: [], wallWallJoints: [], stem: "test", warnings: [],
+    };
+
+    const opts = { scaleDenom: 50, paper: "A4", minAreaM2: 0.01 };
+    const result = decomposePanels(phase1, opts);
+    const idMap = computePanelIdByGroup(phase1, opts);
+
+    // The tiny wall (0.05×0.05 = 0.0025 m² < 0.01) is dropped from the DXF.
+    expect(result.wallPanels.map(p => p.id)).toEqual(["A1", "A2"]);
+    expect(idMap.get(10)).toBe("A1");
+    expect(idMap.get(30)).toBe("A2");
+    expect(idMap.has(20)).toBe(false);
   });
 });
