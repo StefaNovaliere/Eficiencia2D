@@ -510,3 +510,97 @@ describe("computeAdjustments axis field", () => {
     expect(adjustments[0].delta).toBeCloseTo(-0.10, 6);
   });
 });
+
+// ---------------------------------------------------------------------------
+// End-to-end: decomposePanels width clip
+// ---------------------------------------------------------------------------
+import { decomposePanels } from "@/core/pipeline";
+import type { Phase1Result } from "@/core/pipeline";
+
+describe("decomposePanels wall-wall width clip", () => {
+  it("reduces the yielding wall's width by the other wall's thickness", () => {
+    // Wall A: 4m wide × 3m tall, normal along +X, thickness 0.1m
+    // Two quad faces (front/back) forming a thin slab from x=0..0.1, y=0..3, z=0..4
+    const wallAFront = makeFace(
+      [{ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 4 }, { x: 0, y: 3, z: 4 }, { x: 0, y: 3, z: 0 }],
+      { x: -1, y: 0, z: 0 },
+    );
+    const wallABack = makeFace(
+      [{ x: 0.1, y: 0, z: 0 }, { x: 0.1, y: 3, z: 0 }, { x: 0.1, y: 3, z: 4 }, { x: 0.1, y: 0, z: 4 }],
+      { x: 1, y: 0, z: 0 },
+    );
+
+    // Wall B: 5m wide × 3m tall, normal along +Z, thickness 0.1m
+    // From x=0..5, y=0..3, z=0..0.1
+    const wallBFront = makeFace(
+      [{ x: 0, y: 0, z: 0 }, { x: 5, y: 0, z: 0 }, { x: 5, y: 3, z: 0 }, { x: 0, y: 3, z: 0 }],
+      { x: 0, y: 0, z: -1 },
+    );
+    const wallBBack = makeFace(
+      [{ x: 0, y: 0, z: 0.1 }, { x: 0, y: 3, z: 0.1 }, { x: 5, y: 3, z: 0.1 }, { x: 5, y: 0, z: 0.1 }],
+      { x: 0, y: 0, z: 1 },
+    );
+
+    const faces: Face3D[] = [wallAFront, wallABack, wallBFront, wallBBack];
+
+    const groupA = makeGroup({
+      id: 1,
+      category: "wall",
+      representativeNormal: { x: 1, y: 0, z: 0 },
+      thickness: 0.1,
+      faceIndices: [0, 1],
+    });
+    const groupB = makeGroup({
+      id: 2,
+      category: "wall",
+      representativeNormal: { x: 0, y: 0, z: 1 },
+      thickness: 0.1,
+      faceIndices: [2, 3],
+    });
+
+    // Shared edge along y-axis at (x=0, z=0): wall A's z=0 edge meets wall B's x=0 edge
+    const joints = [
+      {
+        groupA: 1,
+        groupB: 2,
+        totalLength: 3.0,
+        dihedralAngle: 90,
+        edgeMid: { x: 0, y: 1.5, z: 0 },
+        edgeDir: { x: 0, y: 1, z: 0 },
+        horizontalFrac: 0,
+      },
+    ];
+
+    const { adjustments, wallWallJoints } = computeAdjustments(joints, [groupA, groupB]);
+    expect(wallWallJoints.length).toBe(1);
+    expect(wallWallJoints[0].suggestedYieldGroupId).toBeDefined();
+
+    const phase1: Phase1Result = {
+      faces,
+      rawFaces: faces,
+      appliedAxis: "Y",
+      groups: [groupA, groupB],
+      joints,
+      adjustments,
+      wallWallJoints,
+      stem: "test",
+      warnings: [],
+    };
+
+    // Tell wall B (group 2) to yield — it should be trimmed by 0.1m (wall A's thickness)
+    const decisions = new Map<number, number>();
+    decisions.set(0, 2); // joint 0: group 2 yields
+
+    const result = decomposePanels(phase1, { scaleDenom: 50, paper: "A4", minAreaM2: 0.01 }, [], decisions);
+
+    // Wall B was 5m wide, after yielding should be ≈4.9m
+    const wallB = result.wallPanels.find(p => p.groupName.includes("wall"));
+    console.log("Wall panels:", result.wallPanels.map(p => `${p.id} ${p.widthM}x${p.heightM}`));
+
+    // Find the panel that was originally ~5m wide (wall B)
+    const widePanel = result.wallPanels.find(p => p.widthM > 4);
+    expect(widePanel).toBeDefined();
+    // It should be 4.9, not 5.0
+    expect(widePanel!.widthM).toBeCloseTo(4.9, 1);
+  });
+});
