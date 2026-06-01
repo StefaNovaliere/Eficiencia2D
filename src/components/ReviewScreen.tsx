@@ -38,6 +38,44 @@ export interface ReviewScreenProps {
 const MIN_AREA_OPTIONS = [0, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0];
 
 // ---------------------------------------------------------------------------
+// Corner diagram: two walls (A horizontal, B vertical) meeting at a corner.
+// The wall marked `cut` is pulled back from the contested corner cell, which
+// the other wall then fills — showing visually which piece gets shortened.
+// ---------------------------------------------------------------------------
+
+const WW_BLUE = "#3b82f6"; // wall A
+const WW_PURPLE = "#8b5cf6"; // wall B
+
+function JointCornerDiagram({ cut }: { cut: "A" | "B" | null }) {
+  // Corner cell (the overlap) = x[16..30], y[42..56].
+  const aX = cut === "A" ? 30 : 16; // A pulled back from the corner when cut
+  const aW = 90 - aX;
+  const bBottom = cut === "B" ? 42 : 56; // B pulled up from the corner when cut
+  return (
+    <svg viewBox="0 0 96 72" className="ww-diagram" aria-hidden="true">
+      {/* Contested corner cell */}
+      <rect
+        x={16} y={42} width={14} height={14} rx={2}
+        fill="none" stroke="#ef4444" strokeWidth={1} strokeDasharray="3 2"
+        opacity={cut ? 0.9 : 0.4}
+      />
+      {/* Wall A — horizontal, along the bottom */}
+      <rect
+        x={aX} y={42} width={aW} height={14} rx={2}
+        fill={WW_BLUE} opacity={cut === "A" ? 0.35 : 0.95}
+      />
+      {/* Wall B — vertical, along the left */}
+      <rect
+        x={16} y={8} width={14} height={bBottom - 8} rx={2}
+        fill={WW_PURPLE} opacity={cut === "B" ? 0.35 : 0.95}
+      />
+      <text x={84} y={53} className="ww-diagram-label">A</text>
+      <text x={23} y={18} className="ww-diagram-label" textAnchor="middle">B</text>
+    </svg>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -79,6 +117,7 @@ export default function ReviewScreen({
       return m;
     },
   );
+  const [wallWallOpen, setWallWallOpen] = useState(true);
 
   const handleSelectGroup = useCallback((id: number) => {
     setSelectedGroupIds((prev) => {
@@ -254,6 +293,75 @@ export default function ReviewScreen({
             </select>
           </div>
         </div>
+
+        {wallWallList.length > 0 && (
+          <div className={`ww-card ${wallWallOpen ? "" : "ww-card--collapsed"}`}>
+            <button
+              className="ww-card-header"
+              onClick={() => setWallWallOpen((o) => !o)}
+            >
+              <span className="ww-card-title">
+                Encuentros de paredes ({wallWallList.length})
+              </span>
+              <span className="ww-card-chevron">{wallWallOpen ? "▾" : "▸"}</span>
+            </button>
+            {wallWallOpen && (
+              <div className="ww-card-body">
+                <p className="ww-card-intro">
+                  Donde dos paredes se tocan en esquina, una debe recortarse el
+                  grosor de la otra para que no se superpongan al armar. Elegí
+                  cuál se recorta en cada una.
+                </p>
+                {wallWallList.map(({ ww, labelA, labelB, hasThickness }) => {
+                  const chosen = wallWallDecisions.get(ww.jointIndex);
+                  const cut: "A" | "B" | null =
+                    chosen === ww.groupA ? "A" : chosen === ww.groupB ? "B" : null;
+                  return (
+                    <div
+                      key={ww.jointIndex}
+                      className="ww-joint"
+                      onClick={() => setSelectedGroupIds(new Set([ww.groupA, ww.groupB]))}
+                    >
+                      <JointCornerDiagram cut={hasThickness ? cut : null} />
+                      <div className="ww-joint-main">
+                        {!hasThickness && (
+                          <span className="ww-nothick">
+                            sin grosor detectado — no se recorta
+                          </span>
+                        )}
+                        <span className="ww-q">¿Cuál se recorta?</span>
+                        <div className="ww-choices">
+                          <button
+                            className={`ww-choice ${cut === "A" ? "ww-choice--on" : ""}`}
+                            disabled={!hasThickness}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleWallWallDecision(ww.jointIndex, ww.groupA, ww.groupA, ww.groupB);
+                            }}
+                          >
+                            <span className="ww-tag ww-tag--a">A</span>
+                            <span className="ww-choice-label">{labelA}</span>
+                          </button>
+                          <button
+                            className={`ww-choice ${cut === "B" ? "ww-choice--on" : ""}`}
+                            disabled={!hasThickness}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleWallWallDecision(ww.jointIndex, ww.groupB, ww.groupA, ww.groupB);
+                            }}
+                          >
+                            <span className="ww-tag ww-tag--b">B</span>
+                            <span className="ww-choice-label">{labelB}</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="review-sidebar">
@@ -266,49 +374,6 @@ export default function ReviewScreen({
           onToggleGroup={handleToggleGroup}
           onChangeCategory={handleChangeCategory}
         />
-
-        {wallWallList.length > 0 && (
-          <div className="wallwall-panel">
-            <div className="wallwall-header">
-              <span className="wallwall-title">
-                Juntas pared-pared ({wallWallList.length})
-              </span>
-              <span className="wallwall-hint">
-                Elegí qué pared cede el grosor en cada encuentro. Hay un valor
-                por defecto (cede la más fina) que podés cambiar.
-              </span>
-            </div>
-            {wallWallList.map(({ ww, labelA, labelB, hasThickness }) => {
-              const chosen = wallWallDecisions.get(ww.jointIndex);
-              return (
-                <div key={ww.jointIndex} className="wallwall-row">
-                  <div className="wallwall-pair">
-                    <span className="wallwall-vs">{labelA} ↔ {labelB}</span>
-                    {!hasThickness && (
-                      <span className="wallwall-nothick">sin grosor detectado</span>
-                    )}
-                  </div>
-                  <div className="wallwall-choices">
-                    <button
-                      className={`wallwall-choice ${chosen === ww.groupA ? "wallwall-choice--on" : ""}`}
-                      disabled={!hasThickness}
-                      onClick={() => handleWallWallDecision(ww.jointIndex, ww.groupA, ww.groupA, ww.groupB)}
-                    >
-                      {labelA} cede
-                    </button>
-                    <button
-                      className={`wallwall-choice ${chosen === ww.groupB ? "wallwall-choice--on" : ""}`}
-                      disabled={!hasThickness}
-                      onClick={() => handleWallWallDecision(ww.jointIndex, ww.groupB, ww.groupA, ww.groupB)}
-                    >
-                      {labelB} cede
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
 
         {selectedGroupIds.size === 1 && (() => {
           const selId = Array.from(selectedGroupIds)[0];
