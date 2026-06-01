@@ -6,6 +6,7 @@ import { computeAdjustments } from "@/core/assembly-adjuster";
 import { clipPanelAtV, clipPanelAtU, mirrorEdgesHorizontal } from "@/core/cutting-sheet";
 import type { GeometryGroup, FaceCategory } from "@/core/group-classifier";
 import type { Face3D, Vec3 } from "@/core/types";
+import { splitWallGroupsAtFloors } from "@/core/mesh-splitter";
 
 function makeFace(vertices: Vec3[], normal: Vec3): Face3D {
   return { vertices, normal, innerLoops: [] };
@@ -585,6 +586,7 @@ describe("decomposePanels wall-wall width clip", () => {
       wallWallJoints,
       stem: "test",
       warnings: [],
+      preSplitFaceCount: faces.length,
     };
 
     // Tell wall B (group 2) to yield — it should be trimmed by 0.1m (wall A's thickness)
@@ -633,6 +635,7 @@ describe("computePanelIdByGroup", () => {
     const phase1: Phase1Result = {
       faces, rawFaces: faces, appliedAxis: "Y", groups,
       joints: [], adjustments: [], wallWallJoints: [], stem: "test", warnings: [],
+      preSplitFaceCount: faces.length,
     };
 
     const opts = { scaleDenom: 50, paper: "A4", minAreaM2: 0.01 };
@@ -644,5 +647,159 @@ describe("computePanelIdByGroup", () => {
     expect(idMap.get(10)).toBe("A1");
     expect(idMap.get(30)).toBe("A2");
     expect(idMap.has(20)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Thickness fallback: both yield directions produce adjustments
+// ---------------------------------------------------------------------------
+
+describe("thickness fallback for wall-wall adjustments", () => {
+  it("produces adjustment when only one wall has thickness", () => {
+    // groupA has thickness, groupB does not.
+    const groupA = makeGroup({
+      id: 1, category: "wall",
+      representativeNormal: { x: 0, y: 0, z: 1 },
+      thickness: 0.06,
+    });
+    const groupB = makeGroup({
+      id: 2, category: "wall",
+      representativeNormal: { x: 1, y: 0, z: 0 },
+      thickness: undefined,
+    });
+
+    const joint = makeJoint(1, 2, 1.0, 90, 0.9);
+
+    // Direction 1: groupB yields → delta should be -groupA.thickness
+    const r1 = computeAdjustments([joint], [groupA, groupB], new Map([[0, 2]]));
+    const adj1 = r1.adjustments.filter(a => a.axis === "width");
+    expect(adj1).toHaveLength(1);
+    expect(adj1[0].groupId).toBe(2);
+    expect(adj1[0].delta).toBeCloseTo(-0.06);
+
+    // Direction 2: groupA yields → falls back to groupA.thickness (own)
+    const r2 = computeAdjustments([joint], [groupA, groupB], new Map([[0, 1]]));
+    const adj2 = r2.adjustments.filter(a => a.axis === "width");
+    expect(adj2).toHaveLength(1);
+    expect(adj2[0].groupId).toBe(1);
+    expect(adj2[0].delta).toBeCloseTo(-0.06);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Dedup: multiple width adjustments from different joints survive
+// ---------------------------------------------------------------------------
+
+describe("width adjustment dedup", () => {
+  it("preserves width adjustments from different joints", () => {
+    // A wall at a corner: meets wall B on joint 0, wall C on joint 1.
+    const groupA = makeGroup({ id: 1, category: "wall", representativeNormal: { x: 0, y: 0, z: 1 }, thickness: 0.06 });
+    const groupB = makeGroup({ id: 2, category: "wall", representativeNormal: { x: 1, y: 0, z: 0 }, thickness: 0.08 });
+    const groupC = makeGroup({ id: 3, category: "wall", representativeNormal: { x: -1, y: 0, z: 0 }, thickness: 0.10 });
+
+    const joint0 = makeJoint(1, 2, 1.0, 90, 0.9);
+    const joint1 = makeJoint(1, 3, 1.0, 90, 0.9);
+
+    // groupA yields at both joints
+    const decisions = new Map([[0, 1], [1, 1]]);
+    const r = computeAdjustments([joint0, joint1], [groupA, groupB, groupC], decisions);
+    const widthAdjs = r.adjustments.filter(a => a.axis === "width" && a.groupId === 1);
+
+    expect(widthAdjs).toHaveLength(2);
+    expect(widthAdjs.map(a => a.delta).sort((a, b) => a - b)).toEqual([-0.10, -0.08]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// splitWallGroupsAtFloors
+// ---------------------------------------------------------------------------
+
+describe("splitWallGroupsAtFloors", () => {
+  function makeWallFace(y0: number, y1: number): Face3D {
+    return makeFace([
+      { x: 0, y: y0, z: 0 },
+      { x: 1, y: y0, z: 0 },
+      { x: 1, y: y1, z: 0 },
+      { x: 0, y: y1, z: 0 },
+    ], { x: 0, y: 0, z: 1 });
+  }
+
+  function makeFloorFace(y: number): Face3D {
+    return makeFace([
+      { x: 0, y, z: 0 },
+      { x: 1, y, z: 0 },
+      { x: 1, y, z: 1 },
+      { x: 0, y, z: 1 },
+    ], { x: 0, y: 1, z: 0 });
+  }
+
+  it("splits a wall that spans a floor into two sub-groups", () => {
+    const wallFace = makeWallFace(0, 5);
+    const floorFace = makeFloorFace(2.5);
+    const faces: Face3D[] = [wallFace, floorFace];
+
+    const wallGroup = makeGroup({
+      id: 10, category: "wall",
+      representativeNormal: { x: 0, y: 0, z: 1 },
+      faceIndices: [0],
+      minY: 0, maxY: 5,
+      thickness: 0.06,
+    });
+    const floorGroup = makeGroup({
+      id: 20, category: "floor",
+      representativeNormal: { x: 0, y: 1, z: 0 },
+      faceIndices: [1],
+      minY: 2.5, maxY: 2.5,
+    });
+
+    const result = splitWallGroupsAtFloors(faces, [wallGroup, floorGroup], new Map(), "Y");
+
+    // Floor stays unchanged; wall is split into 2.
+    const walls = result.groups.filter(g => g.category === "wall");
+    const floors = result.groups.filter(g => g.category === "floor");
+    expect(floors).toHaveLength(1);
+    expect(walls).toHaveLength(2);
+
+    // First sub-group keeps the parent ID.
+    expect(walls[0].id).toBe(10);
+    // Second gets a new ID.
+    expect(walls[1].id).not.toBe(10);
+
+    // Bounds are split at the floor elevation.
+    expect(walls[0].maxY!).toBeLessThanOrEqual(2.6);
+    expect(walls[1].minY!).toBeGreaterThanOrEqual(2.4);
+
+    // Both inherit thickness.
+    expect(walls[0].thickness).toBe(0.06);
+    expect(walls[1].thickness).toBe(0.06);
+
+    // Face indices point to new appended faces.
+    expect(walls[0].faceIndices[0]).toBeGreaterThanOrEqual(faces.length);
+    expect(walls[1].faceIndices[0]).toBeGreaterThanOrEqual(faces.length);
+  });
+
+  it("leaves wall unchanged when no floor intersects it", () => {
+    const wallFace = makeWallFace(0, 2);
+    const floorFace = makeFloorFace(5);
+    const faces: Face3D[] = [wallFace, floorFace];
+
+    const wallGroup = makeGroup({
+      id: 10, category: "wall",
+      representativeNormal: { x: 0, y: 0, z: 1 },
+      faceIndices: [0],
+      minY: 0, maxY: 2,
+    });
+    const floorGroup = makeGroup({
+      id: 20, category: "floor",
+      representativeNormal: { x: 0, y: 1, z: 0 },
+      faceIndices: [1],
+    });
+
+    const result = splitWallGroupsAtFloors(faces, [wallGroup, floorGroup], new Map(), "Y");
+
+    const walls = result.groups.filter(g => g.category === "wall");
+    expect(walls).toHaveLength(1);
+    expect(walls[0].id).toBe(10);
+    expect(result.faces.length).toBe(faces.length);
   });
 });

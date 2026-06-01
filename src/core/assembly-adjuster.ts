@@ -128,31 +128,47 @@ export function computeAdjustments(
       if (decision != null) {
         const yieldGroup = groupById.get(decision);
         const otherGroup = groupById.get(decision === gA.id ? gB.id : gA.id);
-        if (yieldGroup && otherGroup && otherGroup.thickness && otherGroup.thickness > 0.001) {
-          wallWallJoints[wallWallJoints.length - 1].yieldGroupId = decision;
-          adjustments.push({
-            groupId: decision,
-            delta: -otherGroup.thickness,
-            axis: "width",
-            reason: `Junta con ${otherGroup.label} (grosor ${(otherGroup.thickness * 100).toFixed(1)}cm)`,
-            jointIndex: ji,
-          });
+        if (yieldGroup && otherGroup) {
+          // Prefer the non-yielding wall's thickness; fall back to the
+          // yielder's own thickness (same stock material assumption).
+          const trimThickness =
+            (otherGroup.thickness && otherGroup.thickness > 0.001)
+              ? otherGroup.thickness
+              : (yieldGroup.thickness && yieldGroup.thickness > 0.001)
+                ? yieldGroup.thickness
+                : 0;
+          if (trimThickness > 0.001) {
+            wallWallJoints[wallWallJoints.length - 1].yieldGroupId = decision;
+            adjustments.push({
+              groupId: decision,
+              delta: -trimThickness,
+              axis: "width",
+              reason: `Junta con ${otherGroup.label} (grosor ${(trimThickness * 100).toFixed(1)}cm)`,
+              jointIndex: ji,
+            });
+          }
         }
       }
     }
   }
 
-  // Deduplicate: keep only the largest adjustment per (group, axis).
-  const seen = new Map<string, DimensionAdjustment>();
+  // Deduplicate height adjustments (wall-floor): keep the largest per group.
+  // Width adjustments (wall-wall) pass through unmerged — a wall at a corner
+  // can be clipped on multiple sides from different joints.
+  const seenHeight = new Map<number, DimensionAdjustment>();
+  const keptWidth: DimensionAdjustment[] = [];
   for (const adj of adjustments) {
-    const key = `${adj.groupId}:${adj.axis}`;
-    const existing = seen.get(key);
-    if (!existing || adj.delta < existing.delta) {
-      seen.set(key, adj);
+    if (adj.axis === "height") {
+      const existing = seenHeight.get(adj.groupId);
+      if (!existing || adj.delta < existing.delta) {
+        seenHeight.set(adj.groupId, adj);
+      }
+    } else {
+      keptWidth.push(adj);
     }
   }
 
-  return { adjustments: Array.from(seen.values()), wallWallJoints };
+  return { adjustments: [...Array.from(seenHeight.values()), ...keptWidth], wallWallJoints };
 }
 
 // ---------------------------------------------------------------------------
