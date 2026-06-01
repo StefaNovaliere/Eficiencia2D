@@ -829,6 +829,77 @@ body {
   color: #ef4444;
 }
 
+/* Wall-wall joint resolution panel */
+.wallwall-panel {
+  border-top: 1px solid var(--border);
+  padding: 12px 20px;
+  background: var(--surface-2);
+  font-size: 0.8rem;
+}
+.wallwall-header {
+  margin-bottom: 8px;
+}
+.wallwall-title {
+  font-weight: 600;
+  color: #3b82f6;
+  display: block;
+}
+.wallwall-hint {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.72rem;
+  color: var(--text-secondary, #888);
+  line-height: 1.3;
+}
+.wallwall-row {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+.wallwall-row:last-child {
+  border-bottom: none;
+}
+.wallwall-pair {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+.wallwall-vs {
+  font-weight: 500;
+  font-size: 0.75rem;
+}
+.wallwall-nothick {
+  font-size: 0.68rem;
+  color: #ef4444;
+}
+.wallwall-choices {
+  display: flex;
+  gap: 6px;
+}
+.wallwall-choice {
+  flex: 1;
+  padding: 4px 6px;
+  font-size: 0.72rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.wallwall-choice:hover:not(:disabled) {
+  border-color: #3b82f6;
+}
+.wallwall-choice--on {
+  background: #3b82f6;
+  color: #fff;
+  border-color: #3b82f6;
+  font-weight: 600;
+}
+.wallwall-choice:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .review-bottom-bar {
   border-top: 1px solid var(--border);
   padding: 16px 20px;

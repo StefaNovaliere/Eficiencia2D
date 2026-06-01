@@ -7,7 +7,7 @@
 // ============================================================================
 
 import { parseObj } from "./obj-parser";
-import { generateCuttingSheets, decomposeIntoPanels, nestedSheetsToDxf, projectFacesTo2D, clipPanelAtV } from "./cutting-sheet";
+import { generateCuttingSheets, decomposeIntoPanels, nestedSheetsToDxf, projectFacesTo2D, clipPanelAtV, mirrorEdgesHorizontal } from "./cutting-sheet";
 import type { Panel, PanelCategory } from "./cutting-sheet";
 import { detectUpAxis, extractFacades } from "./facade-extractor";
 import { extractFloorPlans } from "./floor-plan-extractor";
@@ -309,15 +309,35 @@ export function decomposePanels(
   phase1: Phase1Result,
   opts: PipelineOptions,
   overrides?: ClassificationOverride[],
+  wallWallDecisions?: Map<number, number>,
 ): DecomposeResult {
   const overrideMap = new Map<number, GeometryGroup["category"]>();
   if (overrides) {
     for (const o of overrides) overrideMap.set(o.groupId, o.newCategory);
   }
 
+  // Resolve wall-wall joints: start from each joint's safe default (thinner
+  // wall yields) and let the user's explicit decisions override it, so even
+  // an untouched model never produces overlapping pieces.
+  const effectiveDecisions = new Map<number, number>();
+  for (const ww of phase1.wallWallJoints) {
+    if (ww.suggestedYieldGroupId != null) {
+      effectiveDecisions.set(ww.jointIndex, ww.suggestedYieldGroupId);
+    }
+  }
+  if (wallWallDecisions) {
+    for (const [jointIndex, yieldGroupId] of wallWallDecisions) {
+      effectiveDecisions.set(jointIndex, yieldGroupId);
+    }
+  }
+
+  // Recompute adjustments with the resolved wall-wall decisions. This keeps the
+  // automatic wall-on-floor compensation AND adds the chosen wall-wall yields.
+  const { adjustments } = computeAdjustments(phase1.joints, phase1.groups, effectiveDecisions);
+
   // Build adjustment lookup: groupId → total delta (metres).
   const adjustmentByGroup = new Map<number, number>();
-  for (const adj of phase1.adjustments) {
+  for (const adj of adjustments) {
     const prev = adjustmentByGroup.get(adj.groupId) ?? 0;
     adjustmentByGroup.set(adj.groupId, prev + adj.delta);
   }
@@ -374,6 +394,10 @@ export function decomposePanels(
       }
 
       if (widthM * heightM < (opts.minAreaM2 ?? 0.01)) continue;
+
+      // Mirror every piece horizontally so the laser-burnt face ends up on the
+      // INSIDE of the assembled model (each piece is flipped over on assembly).
+      edges = mirrorEdgesHorizontal(edges, widthM);
 
       if (isFloor) {
         floorCount++;

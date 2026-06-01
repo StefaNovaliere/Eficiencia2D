@@ -3,7 +3,7 @@ import { areThinTwins } from "@/core/wall-thickness";
 import type { TwinCandidate } from "@/core/wall-thickness";
 import { detectJoints } from "@/core/joint-detector";
 import { computeAdjustments } from "@/core/assembly-adjuster";
-import { clipPanelAtV } from "@/core/cutting-sheet";
+import { clipPanelAtV, mirrorEdgesHorizontal } from "@/core/cutting-sheet";
 import type { GeometryGroup, FaceCategory } from "@/core/group-classifier";
 import type { Face3D, Vec3 } from "@/core/types";
 
@@ -312,6 +312,33 @@ describe("computeAdjustments", () => {
     expect(wallWallJoints[0].groupA).toBe(1);
     expect(wallWallJoints[0].groupB).toBe(2);
     expect(wallWallJoints[0].yieldGroupId).toBeUndefined();
+    // Safe default: the thinner wall (group 2, 0.15 < 0.20) yields.
+    expect(wallWallJoints[0].suggestedYieldGroupId).toBe(2);
+  });
+
+  it("suggests the wall WITH a thick partner yields when only one has thickness", () => {
+    const groups: GeometryGroup[] = [
+      makeGroup({ id: 1, category: "wall", representativeNormal: { x: 1, y: 0, z: 0 }, thickness: 0.18, minY: 0, maxY: 3 }),
+      makeGroup({ id: 2, category: "wall", representativeNormal: { x: 0, y: 0, z: 1 }, minY: 0, maxY: 3 }),
+    ];
+
+    const joints = [makeJoint(1, 2, 3.0, 90)];
+
+    const { wallWallJoints } = computeAdjustments(joints, groups);
+    // Only group 1 has a thickness → group 2 yields (shortened by group 1's 0.18).
+    expect(wallWallJoints[0].suggestedYieldGroupId).toBe(2);
+  });
+
+  it("offers no suggestion when neither wall has thickness", () => {
+    const groups: GeometryGroup[] = [
+      makeGroup({ id: 1, category: "wall", representativeNormal: { x: 1, y: 0, z: 0 }, minY: 0, maxY: 3 }),
+      makeGroup({ id: 2, category: "wall", representativeNormal: { x: 0, y: 0, z: 1 }, minY: 0, maxY: 3 }),
+    ];
+
+    const joints = [makeJoint(1, 2, 3.0, 90)];
+
+    const { wallWallJoints } = computeAdjustments(joints, groups);
+    expect(wallWallJoints[0].suggestedYieldGroupId).toBeUndefined();
   });
 
   it("wall-wall joint applies adjustment when user decision is provided", () => {
@@ -364,5 +391,49 @@ describe("clipPanelAtV", () => {
     const clipped = clipPanelAtV(rect, 0.1, true);
     const minY = Math.min(...clipped!.edges.flatMap((e) => [e.a.y, e.b.y]));
     expect(minY).toBeCloseTo(0, 6);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// mirrorEdgesHorizontal — flip each piece so the laser burn ends up inside
+// ---------------------------------------------------------------------------
+
+describe("mirrorEdgesHorizontal", () => {
+  // An L-shaped asymmetric outline so mirroring is observable.
+  const shape = [
+    { a: { x: 0, y: 0 }, b: { x: 3, y: 0 } },
+    { a: { x: 3, y: 0 }, b: { x: 3, y: 1 } },
+    { a: { x: 3, y: 1 }, b: { x: 1, y: 1 } },
+    { a: { x: 1, y: 1 }, b: { x: 1, y: 2 } },
+    { a: { x: 1, y: 2 }, b: { x: 0, y: 2 } },
+    { a: { x: 0, y: 2 }, b: { x: 0, y: 0 } },
+  ];
+  const widthM = 3;
+
+  it("reflects x about the width and preserves y", () => {
+    const m = mirrorEdgesHorizontal(shape, widthM);
+    for (let i = 0; i < shape.length; i++) {
+      expect(m[i].a.x).toBeCloseTo(widthM - shape[i].a.x, 6);
+      expect(m[i].b.x).toBeCloseTo(widthM - shape[i].b.x, 6);
+      expect(m[i].a.y).toBeCloseTo(shape[i].a.y, 6);
+      expect(m[i].b.y).toBeCloseTo(shape[i].b.y, 6);
+    }
+  });
+
+  it("is its own inverse (double-mirror == original)", () => {
+    const back = mirrorEdgesHorizontal(mirrorEdgesHorizontal(shape, widthM), widthM);
+    for (let i = 0; i < shape.length; i++) {
+      expect(back[i].a.x).toBeCloseTo(shape[i].a.x, 6);
+      expect(back[i].a.y).toBeCloseTo(shape[i].a.y, 6);
+      expect(back[i].b.x).toBeCloseTo(shape[i].b.x, 6);
+      expect(back[i].b.y).toBeCloseTo(shape[i].b.y, 6);
+    }
+  });
+
+  it("keeps the bounding box width unchanged", () => {
+    const m = mirrorEdgesHorizontal(shape, widthM);
+    const xs = m.flatMap((e) => [e.a.x, e.b.x]);
+    expect(Math.min(...xs)).toBeCloseTo(0, 6);
+    expect(Math.max(...xs)).toBeCloseTo(widthM, 6);
   });
 });
