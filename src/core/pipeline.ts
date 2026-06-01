@@ -21,7 +21,7 @@ import type { Face3D, Facade, FloorPlan, OutputFile, PipelineOptions, SheetConfi
 import { detectJoints } from "./joint-detector";
 import type { Joint } from "./joint-detector";
 import { computeAdjustments } from "./assembly-adjuster";
-import type { DimensionAdjustment } from "./assembly-adjuster";
+import type { DimensionAdjustment, WallWallJoint } from "./assembly-adjuster";
 
 export interface PipelineResult {
   facades: Facade[];
@@ -37,6 +37,7 @@ export interface Phase1Result {
   groups: GeometryGroup[];
   joints: Joint[];
   adjustments: DimensionAdjustment[];
+  wallWallJoints: WallWallJoint[];
   stem: string;
   warnings: string[];
 }
@@ -100,8 +101,8 @@ export function reclassifyWithAxis(
   const warnings = [...phase1.warnings];
   const groups = classifyIntoGroups(faces, minRealArea, warnings);
   const joints = detectJoints(faces, groups);
-  const adjustments = computeAdjustments(joints, groups);
-  return { ...phase1, faces, appliedAxis: newAxis, groups, joints, adjustments, warnings };
+  const { adjustments, wallWallJoints } = computeAdjustments(joints, groups);
+  return { ...phase1, faces, appliedAxis: newAxis, groups, joints, adjustments, wallWallJoints, warnings };
 }
 
 /** Re-classify with a different minimum-real-area threshold, keeping the current axis. */
@@ -112,8 +113,8 @@ export function reclassifyWithMinArea(
   const warnings = [...phase1.warnings];
   const groups = classifyIntoGroups(phase1.faces, minRealArea, warnings);
   const joints = detectJoints(phase1.faces, groups);
-  const adjustments = computeAdjustments(joints, groups);
-  return { ...phase1, groups, joints, adjustments, warnings };
+  const { adjustments, wallWallJoints } = computeAdjustments(joints, groups);
+  return { ...phase1, groups, joints, adjustments, wallWallJoints, warnings };
 }
 
 /**
@@ -137,12 +138,12 @@ export function parsePipeline(
     warnings.push(...result.warnings);
   } else {
     warnings.push(`Formato no soportado: .${ext}. Usa .obj.`);
-    return { faces: [], rawFaces: [], appliedAxis: "Y", groups: [], joints: [], adjustments: [], stem, warnings };
+    return { faces: [], rawFaces: [], appliedAxis: "Y", groups: [], joints: [], adjustments: [], wallWallJoints: [], stem, warnings };
   }
 
   if (faces.length === 0) {
     warnings.push("No se encontraron caras en el archivo.");
-    return { faces: [], rawFaces: [], appliedAxis: "Y", groups: [], joints: [], adjustments: [], stem, warnings };
+    return { faces: [], rawFaces: [], appliedAxis: "Y", groups: [], joints: [], adjustments: [], wallWallJoints: [], stem, warnings };
   }
 
   // Normalise units.
@@ -178,9 +179,9 @@ export function parsePipeline(
 
   // Detect joints and compute assembly adjustments.
   const joints = detectJoints(faces, groups);
-  const adjustments = computeAdjustments(joints, groups);
+  const { adjustments, wallWallJoints } = computeAdjustments(joints, groups);
 
-  return { faces, rawFaces, appliedAxis: detectedUp, groups, joints, adjustments, stem, warnings };
+  return { faces, rawFaces, appliedAxis: detectedUp, groups, joints, adjustments, wallWallJoints, stem, warnings };
 }
 
 /**
@@ -215,15 +216,12 @@ export function generatePipeline(
   }
 
   const filter = opts.elementFilter ?? DEFAULT_ELEMENT_FILTER;
-  const wallEnabled = filter.wallsExterior || filter.wallsInterior;
   const filteredFaces: typeof phase1.faces = [];
   for (let i = 0; i < phase1.faces.length; i++) {
     const cat = faceCategoryMap.get(i);
     if (!cat || cat === "discard") continue;
     if (cat === "floor" && !filter.floors) continue;
-    if (cat === "wall_exterior" && !filter.wallsExterior) continue;
-    if (cat === "wall_interior" && !filter.wallsInterior) continue;
-    if (cat === "wall" && !wallEnabled) continue;
+    if (cat === "wall" && !filter.walls) continue;
     filteredFaces.push(phase1.faces[i]);
   }
 
@@ -296,15 +294,12 @@ function filterFaces(
   }
 
   const filter = DEFAULT_ELEMENT_FILTER;
-  const wallEnabled = filter.wallsExterior || filter.wallsInterior;
   const result: Face3D[] = [];
   for (let i = 0; i < phase1.faces.length; i++) {
     const cat = faceCategoryMap.get(i);
     if (!cat || cat === "discard") continue;
     if (cat === "floor" && !filter.floors) continue;
-    if (cat === "wall_exterior" && !filter.wallsExterior) continue;
-    if (cat === "wall_interior" && !filter.wallsInterior) continue;
-    if (cat === "wall" && !wallEnabled) continue;
+    if (cat === "wall" && !filter.walls) continue;
     result.push(phase1.faces[i]);
   }
   return result;
