@@ -984,6 +984,17 @@ body {
 .ww-tag--a { background: #3b82f6; }
 .ww-tag--b { background: #8b5cf6; }
 
+.ww-pid {
+  flex-shrink: 0;
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: var(--text-secondary, #94a3b8);
+  background: var(--surface-alt, rgba(148,163,184,0.15));
+  padding: 1px 5px;
+  border-radius: 3px;
+  letter-spacing: 0.02em;
+}
+
 .review-bottom-bar {
   border-top: 1px solid var(--border);
   padding: 16px 20px;
