@@ -794,6 +794,8 @@ body {
   padding: 12px 20px;
   background: var(--surface-2);
   font-size: 0.8rem;
+  max-height: 32vh;
+  overflow-y: auto;
 }
 .assembly-detail-row {
   display: flex;
@@ -829,76 +831,158 @@ body {
   color: #ef4444;
 }
 
-/* Wall-wall joint resolution panel */
-.wallwall-panel {
-  border-top: 1px solid var(--border);
-  padding: 12px 20px;
-  background: var(--surface-2);
-  font-size: 0.8rem;
+/* ─── Wall-wall joint resolver: floating card over the 3D viewer ─── */
+.ww-card {
+  position: absolute;
+  left: 16px;
+  bottom: 16px;
+  z-index: 10;
+  width: 360px;
+  max-width: calc(100% - 32px);
+  max-height: calc(100% - 32px);
+  display: flex;
+  flex-direction: column;
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+  overflow: hidden;
+  pointer-events: auto;
 }
-.wallwall-header {
-  margin-bottom: 8px;
-}
-.wallwall-title {
-  font-weight: 600;
-  color: #3b82f6;
-  display: block;
-}
-.wallwall-hint {
-  display: block;
-  margin-top: 2px;
-  font-size: 0.72rem;
-  color: var(--text-secondary, #888);
-  line-height: 1.3;
-}
-.wallwall-row {
-  padding: 6px 0;
+.ww-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 11px 14px;
+  background: transparent;
+  border: none;
   border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text);
 }
-.wallwall-row:last-child {
+.ww-card--collapsed .ww-card-header {
   border-bottom: none;
 }
-.wallwall-pair {
-  display: flex;
-  justify-content: space-between;
+.ww-card-title {
+  display: inline-flex;
   align-items: center;
-  margin-bottom: 4px;
+  gap: 7px;
 }
-.wallwall-vs {
-  font-weight: 500;
-  font-size: 0.75rem;
+.ww-card-title::before {
+  content: "";
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  background: #f59e0b;
 }
-.wallwall-nothick {
-  font-size: 0.68rem;
+.ww-card-chevron {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.ww-card-body {
+  overflow-y: auto;
+  padding: 4px 0;
+}
+.ww-card-intro {
+  padding: 10px 14px;
+  font-size: 0.74rem;
+  line-height: 1.4;
+  color: var(--text-secondary, #666);
+}
+.ww-joint {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.ww-joint:hover {
+  background: var(--surface-2);
+}
+.ww-diagram {
+  width: 64px;
+  height: 48px;
+  flex-shrink: 0;
+}
+.ww-diagram-label {
+  font-size: 11px;
+  font-weight: 700;
+  fill: #fff;
+}
+.ww-joint-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.ww-q {
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.ww-nothick {
+  font-size: 0.7rem;
   color: #ef4444;
 }
-.wallwall-choices {
+.ww-choices {
   display: flex;
-  gap: 6px;
+  flex-direction: column;
+  gap: 5px;
 }
-.wallwall-choice {
-  flex: 1;
-  padding: 4px 6px;
-  font-size: 0.72rem;
+.ww-choice {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 6px 8px;
+  font-size: 0.74rem;
+  text-align: left;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 7px;
   background: var(--surface);
   cursor: pointer;
   transition: all 0.15s;
 }
-.wallwall-choice:hover:not(:disabled) {
-  border-color: #3b82f6;
+.ww-choice:hover:not(:disabled) {
+  border-color: var(--border-hover);
+  background: var(--surface-2);
 }
-.wallwall-choice--on {
-  background: #3b82f6;
-  color: #fff;
-  border-color: #3b82f6;
+.ww-choice--on {
+  border-color: #f59e0b;
+  background: rgba(245, 158, 11, 0.12);
   font-weight: 600;
 }
-.wallwall-choice:disabled {
+.ww-choice:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
+.ww-choice-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ww-tag {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  font-size: 0.66rem;
+  font-weight: 700;
+  color: #fff;
+}
+.ww-tag--a { background: #3b82f6; }
+.ww-tag--b { background: #8b5cf6; }
 
 .review-bottom-bar {
   border-top: 1px solid var(--border);
