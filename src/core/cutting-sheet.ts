@@ -519,6 +519,11 @@ export function projectFacesTo2D(
   edges: Array<{ a: Vec2; b: Vec2 }>;
   /** dot(vAxis, worldUp): >0 ⇒ 2D +y points up; <0 ⇒ 2D +y points down. */
   vUp: number;
+  /** Projection axes and origin offsets — use to project 3D points into this panel's 2D space. */
+  uAxis: Vec3;
+  vAxis: Vec3;
+  originU: number;
+  originV: number;
 } | null {
   if (faces.length === 0) return null;
 
@@ -573,7 +578,7 @@ export function projectFacesTo2D(
     });
   }
 
-  return { widthM: w, heightM: h, edges, vUp: dot(vAxis, worldUp) };
+  return { widthM: w, heightM: h, edges, vUp: dot(vAxis, worldUp), uAxis, vAxis, originU: minU, originV: minV };
 }
 
 // ---------------------------------------------------------------------------
@@ -617,6 +622,64 @@ export function clipPanelAtV(
   crossings.sort((p, q) => p - q);
   for (let i = 0; i + 1 < crossings.length; i += 2) {
     out.push({ a: { x: crossings[i], y: cut }, b: { x: crossings[i + 1], y: cut } });
+  }
+
+  if (out.length < 3) return null;
+
+  let minU = Infinity, maxU = -Infinity, minV = Infinity, maxV = -Infinity;
+  for (const e of out) {
+    minU = Math.min(minU, e.a.x, e.b.x);
+    maxU = Math.max(maxU, e.a.x, e.b.x);
+    minV = Math.min(minV, e.a.y, e.b.y);
+    maxV = Math.max(maxV, e.a.y, e.b.y);
+  }
+  const w = maxU - minU;
+  const h = maxV - minV;
+  if (w < 0.01 || h < 0.01) return null;
+
+  const normalized = out.map((e) => ({
+    a: { x: e.a.x - minU, y: e.a.y - minV },
+    b: { x: e.b.x - minU, y: e.b.y - minV },
+  }));
+
+  return { widthM: w, heightM: h, edges: normalized };
+}
+
+/**
+ * Clip a set of 2D contour edges by the vertical line x = cut, keeping the
+ * side indicated by `keepRight`, then re-cap the cut and re-normalise to (0,0).
+ * Analogous to clipPanelAtV but on the x axis — used for wall-wall assembly
+ * compensation (trim a wall's width at the side where it meets another wall).
+ */
+export function clipPanelAtU(
+  edges: Array<{ a: Vec2; b: Vec2 }>,
+  cut: number,
+  keepRight: boolean,
+): { widthM: number; heightM: number; edges: Array<{ a: Vec2; b: Vec2 }> } | null {
+  const inSide = (x: number) => (keepRight ? x >= cut - 1e-9 : x <= cut + 1e-9);
+  const out: Array<{ a: Vec2; b: Vec2 }> = [];
+  const crossings: number[] = [];
+
+  for (const e of edges) {
+    const aIn = inSide(e.a.x);
+    const bIn = inSide(e.b.x);
+    if (aIn && bIn) {
+      out.push(e);
+    } else if (!aIn && !bIn) {
+      continue;
+    } else {
+      const t = (cut - e.a.x) / (e.b.x - e.a.x);
+      const iy = e.a.y + t * (e.b.y - e.a.y);
+      const cutPt = { x: cut, y: iy };
+      const keep = aIn ? e.a : e.b;
+      out.push(aIn ? { a: keep, b: cutPt } : { a: cutPt, b: keep });
+      crossings.push(iy);
+    }
+  }
+
+  crossings.sort((p, q) => p - q);
+  for (let i = 0; i + 1 < crossings.length; i += 2) {
+    out.push({ a: { x: cut, y: crossings[i] }, b: { x: cut, y: crossings[i + 1] } });
   }
 
   if (out.length < 3) return null;
