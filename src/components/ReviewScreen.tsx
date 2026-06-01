@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 import GroupList from "./GroupList";
 import VisibilityFilters from "./VisibilityFilters";
 import type { FaceCategory, GeometryGroup } from "@/core/group-classifier";
-import { reclassifyWithAxis } from "@/core/pipeline";
+import { reclassifyWithAxis, computePanelIdByGroup } from "@/core/pipeline";
 import type { Phase1Result, ClassificationOverride } from "@/core/pipeline";
 import type { Joint } from "@/core/joint-detector";
 import type { DimensionAdjustment } from "@/core/assembly-adjuster";
@@ -232,17 +232,22 @@ export default function ReviewScreen({
     return { floors, walls, discarded };
   }, [phase1.groups, overrides]);
 
-  // Map group.id → DXF panel ID ("A1", "B2", etc.) replicating decomposePanels order.
+  // Map group.id → DXF panel ID ("A1", "B2", etc.). Derived from decomposePanels
+  // itself (via computePanelIdByGroup) so the labels match the generated cut
+  // sheet exactly — including the groups decomposePanels skips for being empty
+  // or below minAreaM2, which would otherwise shift the A#/B# numbering.
   const panelIdByGroup = useMemo(() => {
-    const m = new Map<number, string>();
-    let w = 0, f = 0;
-    for (const g of phase1.groups) {
-      const cat = overrides.get(g.id) ?? g.category;
-      if (cat === "discard") continue;
-      m.set(g.id, cat === "floor" ? `B${++f}` : `A${++w}`);
+    const overrideList: ClassificationOverride[] = [];
+    for (const [groupId, newCategory] of overrides.entries()) {
+      overrideList.push({ groupId, newCategory });
     }
-    return m;
-  }, [phase1.groups, overrides]);
+    return computePanelIdByGroup(
+      phase1,
+      { scaleDenom: 50, paper: "A4", minAreaM2 },
+      overrideList,
+      wallWallDecisions,
+    );
+  }, [phase1, overrides, wallWallDecisions, minAreaM2]);
 
   // Wall-wall joints to resolve: skip any whose wall was reclassified to
   // discard (that joint no longer affects the cut).
