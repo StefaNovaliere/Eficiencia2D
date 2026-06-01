@@ -640,6 +640,24 @@ export function clipPanelAtV(
   return { widthM: w, heightM: h, edges: normalized };
 }
 
+/**
+ * Mirror a panel's edges horizontally (flip the U/x axis) within its own width.
+ * Used so the laser-burnt face of every cut piece ends up on the INSIDE of the
+ * assembled model: each piece is flipped over during assembly, and mirroring
+ * here keeps its features (windows, door cutouts, assembly notches) aligned
+ * after that flip. Reflecting x preserves the vertical axis (heights and the
+ * assembly base-clip), the bounding box, and therefore nesting/rotation.
+ */
+export function mirrorEdgesHorizontal(
+  edges: Array<{ a: Vec2; b: Vec2 }>,
+  widthM: number,
+): Array<{ a: Vec2; b: Vec2 }> {
+  return edges.map((e) => ({
+    a: { x: widthM - e.a.x, y: e.a.y },
+    b: { x: widthM - e.b.x, y: e.b.y },
+  }));
+}
+
 // ---------------------------------------------------------------------------
 // Thin-twin merge: collapse parallel-opposite coplanar groups that represent
 // the two skins of the same physical element (thin walls and thin slabs).

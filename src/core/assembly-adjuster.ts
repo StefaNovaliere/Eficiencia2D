@@ -32,6 +32,13 @@ export interface WallWallJoint {
   groupB: number;
   /** Which group yields (user decision). undefined = not yet decided. */
   yieldGroupId?: number;
+  /**
+   * Safe default: which group should yield if the user does not pick. The
+   * thinner wall yields; if only one wall has a measured thickness, the other
+   * yields (so there's a thickness to subtract). undefined = no thickness on
+   * either side, so no adjustment is possible.
+   */
+  suggestedYieldGroupId?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -92,11 +99,25 @@ export function computeAdjustments(
         jointIndex: ji,
       });
     } else if (!aIsFloor && !bIsFloor) {
-      // Wall–wall joint: register for manual resolution.
+      // Wall–wall joint: register for manual resolution, with a safe default.
+      const tA = gA.thickness ?? 0;
+      const tB = gB.thickness ?? 0;
+      let suggestedYieldGroupId: number | undefined;
+      if (tA > 0.001 && tB > 0.001) {
+        // Both measured → thinner wall yields.
+        suggestedYieldGroupId = tA <= tB ? gA.id : gB.id;
+      } else if (tA > 0.001) {
+        // Only A has thickness → B yields (shortened by A's thickness).
+        suggestedYieldGroupId = gB.id;
+      } else if (tB > 0.001) {
+        suggestedYieldGroupId = gA.id;
+      } // else: neither has thickness → no suggestion, no possible adjustment.
+
       wallWallJoints.push({
         jointIndex: ji,
         groupA: gA.id,
         groupB: gB.id,
+        suggestedYieldGroupId,
       });
 
       // Apply user decision if present.
