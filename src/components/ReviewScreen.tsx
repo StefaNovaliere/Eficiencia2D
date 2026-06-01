@@ -232,6 +232,18 @@ export default function ReviewScreen({
     return { floors, walls, discarded };
   }, [phase1.groups, overrides]);
 
+  // Map group.id → DXF panel ID ("A1", "B2", etc.) replicating decomposePanels order.
+  const panelIdByGroup = useMemo(() => {
+    const m = new Map<number, string>();
+    let w = 0, f = 0;
+    for (const g of phase1.groups) {
+      const cat = overrides.get(g.id) ?? g.category;
+      if (cat === "discard") continue;
+      m.set(g.id, cat === "floor" ? `B${++f}` : `A${++w}`);
+    }
+    return m;
+  }, [phase1.groups, overrides]);
+
   // Wall-wall joints to resolve: skip any whose wall was reclassified to
   // discard (that joint no longer affects the cut).
   const wallWallList = useMemo(() => {
@@ -244,11 +256,13 @@ export default function ReviewScreen({
         ww,
         labelA: groupById.get(ww.groupA)?.label ?? `Grupo ${ww.groupA}`,
         labelB: groupById.get(ww.groupB)?.label ?? `Grupo ${ww.groupB}`,
+        pidA: panelIdByGroup.get(ww.groupA),
+        pidB: panelIdByGroup.get(ww.groupB),
         hasThickness:
           (groupById.get(ww.groupA)?.thickness ?? 0) > 0.001 ||
           (groupById.get(ww.groupB)?.thickness ?? 0) > 0.001,
       }));
-  }, [phase1.wallWallJoints, phase1.groups, overrides]);
+  }, [phase1.wallWallJoints, phase1.groups, overrides, panelIdByGroup]);
 
   return (
     <div className="review-overlay">
@@ -312,7 +326,7 @@ export default function ReviewScreen({
                   grosor de la otra para que no se superpongan al armar. Elegí
                   cuál se recorta en cada una.
                 </p>
-                {wallWallList.map(({ ww, labelA, labelB, hasThickness }) => {
+                {wallWallList.map(({ ww, labelA, labelB, pidA, pidB, hasThickness }) => {
                   const chosen = wallWallDecisions.get(ww.jointIndex);
                   const cut: "A" | "B" | null =
                     chosen === ww.groupA ? "A" : chosen === ww.groupB ? "B" : null;
@@ -340,6 +354,7 @@ export default function ReviewScreen({
                             }}
                           >
                             <span className="ww-tag ww-tag--a">A</span>
+                            {pidA && <span className="ww-pid">{pidA}</span>}
                             <span className="ww-choice-label">{labelA}</span>
                           </button>
                           <button
@@ -351,6 +366,7 @@ export default function ReviewScreen({
                             }}
                           >
                             <span className="ww-tag ww-tag--b">B</span>
+                            {pidB && <span className="ww-pid">{pidB}</span>}
                             <span className="ww-choice-label">{labelB}</span>
                           </button>
                         </div>
