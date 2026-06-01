@@ -43,11 +43,198 @@ export interface Phase1Result {
   stem: string;
   warnings: string[];
   preSplitFaceCount: number;
+  suggestedMerges: number[][];
 }
 
 export interface ClassificationOverride {
   groupId: number;
   newCategory: GeometryGroup["category"];
+}
+
+// ---------------------------------------------------------------------------
+// Coplanar merge helpers
+// ---------------------------------------------------------------------------
+
+class UnionFind {
+  parent: number[];
+  rank: number[];
+  constructor(n: number) {
+    this.parent = Array.from({ length: n }, (_, i) => i);
+    this.rank = new Array(n).fill(0);
+  }
+  find(x: number): number {
+    if (this.parent[x] !== x) this.parent[x] = this.find(this.parent[x]);
+    return this.parent[x];
+  }
+  union(a: number, b: number) {
+    const ra = this.find(a), rb = this.find(b);
+    if (ra === rb) return;
+    if (this.rank[ra] < this.rank[rb]) this.parent[ra] = rb;
+    else if (this.rank[ra] > this.rank[rb]) this.parent[rb] = ra;
+    else { this.parent[rb] = ra; this.rank[ra]++; }
+  }
+}
+
+/**
+ * Suggest sets of coplanar wall groups that should be merged because one is a
+ * tiny sliver (< 15% area of its neighbor). Uses union-find over joints with
+ * near-zero dihedral angle between wall groups.
+ */
+export function suggestCoplanarMerges(
+  groups: GeometryGroup[],
+  joints: Joint[],
+): number[][] {
+  const idxById = new Map<number, number>();
+  for (let i = 0; i < groups.length; i++) idxById.set(groups[i].id, i);
+
+  const uf = new UnionFind(groups.length);
+
+  for (const joint of joints) {
+    const iA = idxById.get(joint.groupA);
+    const iB = idxById.get(joint.groupB);
+    if (iA == null || iB == null) continue;
+
+    const gA = groups[iA], gB = groups[iB];
+    if (gA.category !== "wall" || gB.category !== "wall") continue;
+    if (joint.dihedralAngle > 10) continue;
+
+    const areaA = gA.totalArea, areaB = gB.totalArea;
+    const minArea = Math.min(areaA, areaB);
+    const maxArea = Math.max(areaA, areaB);
+    if (maxArea < 0.001) continue;
+    if (minArea / maxArea >= 0.15) continue;
+
+    uf.union(iA, iB);
+  }
+
+  const components = new Map<number, number[]>();
+  for (let i = 0; i < groups.length; i++) {
+    const root = uf.find(i);
+    const arr = components.get(root);
+    if (arr) arr.push(groups[i].id);
+    else components.set(root, [groups[i].id]);
+  }
+
+  const result: number[][] = [];
+  for (const ids of components.values()) {
+    if (ids.length >= 2) result.push(ids);
+  }
+  return result;
+}
+
+/**
+ * Check whether a set of groups are coplanar (parallel normals, close plane
+ * offsets). Used by the UI to validate manual merge requests.
+ */
+export function areGroupsCoplanar(groups: GeometryGroup[]): boolean {
+  if (groups.length < 2) return false;
+  const ref = groups[0].representativeNormal;
+  for (let i = 1; i < groups.length; i++) {
+    const n = groups[i].representativeNormal;
+    const d = Math.abs(
+      ref.x * n.x + ref.y * n.y + ref.z * n.z,
+    );
+    if (d < 0.985) return false;
+  }
+  // Check plane offsets are close.
+  const offsets = groups.map((g) => {
+    const n = g.representativeNormal;
+    return n.x * g.centroid.x + n.y * g.centroid.y + n.z * g.centroid.z;
+  });
+  const refOff = offsets[0];
+  for (let i = 1; i < offsets.length; i++) {
+    if (Math.abs(offsets[i] - refOff) > 0.15) return false;
+  }
+  return true;
+}
+
+/**
+ * Apply a set of merges to a Phase1Result. Each merge-set combines multiple
+ * groups into one survivor (the member with the largest area). Re-runs joint
+ * detection and adjustment computation on the merged topology.
+ */
+export function applyMerges(
+  phase1: Phase1Result,
+  merges: number[][],
+): Phase1Result {
+  if (merges.length === 0) return phase1;
+
+  const groupById = new Map<number, GeometryGroup>();
+  for (const g of phase1.groups) groupById.set(g.id, g);
+
+  // Build a map from absorbed-ID → survivor-ID.
+  const absorbedTo = new Map<number, number>();
+  const mergedGroupIds = new Set<number>();
+
+  for (const mergeSet of merges) {
+    const members = mergeSet
+      .map((id) => groupById.get(id))
+      .filter((g): g is GeometryGroup => g != null && g.category !== "discard");
+    if (members.length < 2) continue;
+
+    // Survivor = largest area.
+    let survivor = members[0];
+    for (let i = 1; i < members.length; i++) {
+      if (members[i].totalArea > survivor.totalArea) survivor = members[i];
+    }
+
+    const combinedFaceIndices: number[] = [];
+    let totalArea = 0;
+    let cx = 0, cy = 0, cz = 0, areaSum = 0;
+    let minY: number | undefined;
+    let maxY: number | undefined;
+
+    for (const m of members) {
+      combinedFaceIndices.push(...m.faceIndices);
+      totalArea += m.totalArea;
+      cx += m.centroid.x * m.totalArea;
+      cy += m.centroid.y * m.totalArea;
+      cz += m.centroid.z * m.totalArea;
+      areaSum += m.totalArea;
+      if (m.minY != null) minY = minY == null ? m.minY : Math.min(minY, m.minY);
+      if (m.maxY != null) maxY = maxY == null ? m.maxY : Math.max(maxY, m.maxY);
+
+      if (m.id !== survivor.id) {
+        absorbedTo.set(m.id, survivor.id);
+        mergedGroupIds.add(m.id);
+      }
+    }
+
+    const centroid = areaSum > 0
+      ? { x: cx / areaSum, y: cy / areaSum, z: cz / areaSum }
+      : survivor.centroid;
+
+    // Mutate survivor in the map with combined metadata.
+    groupById.set(survivor.id, {
+      ...survivor,
+      faceIndices: combinedFaceIndices,
+      totalArea,
+      centroid,
+      minY,
+      maxY,
+    });
+  }
+
+  // Build new groups array: keep non-absorbed groups.
+  const newGroups = phase1.groups
+    .filter((g) => !mergedGroupIds.has(g.id))
+    .map((g) => groupById.get(g.id) ?? g);
+
+  // Re-run joint detection + adjustments on merged topology.
+  const joints = detectJoints(phase1.faces, newGroups);
+  const { adjustments, wallWallJoints } = computeAdjustments(joints, newGroups);
+
+  // Re-run merge suggestions on the new topology.
+  const suggestedMerges = suggestCoplanarMerges(newGroups, joints);
+
+  return {
+    ...phase1,
+    groups: newGroups,
+    joints,
+    adjustments,
+    wallWallJoints,
+    suggestedMerges,
+  };
 }
 
 /** Guess a conversion factor to bring coordinates into meters. */
@@ -109,7 +296,8 @@ export function reclassifyWithAxis(
 
   const joints = detectJoints(split.faces, split.groups);
   const { adjustments, wallWallJoints } = computeAdjustments(joints, split.groups);
-  return { ...phase1, faces: split.faces, appliedAxis: newAxis, groups: split.groups, joints, adjustments, wallWallJoints, warnings, preSplitFaceCount };
+  const suggestedMerges = suggestCoplanarMerges(split.groups, joints);
+  return { ...phase1, faces: split.faces, appliedAxis: newAxis, groups: split.groups, joints, adjustments, wallWallJoints, warnings, preSplitFaceCount, suggestedMerges };
 }
 
 /** Re-classify with a different minimum-real-area threshold, keeping the current axis. */
@@ -128,7 +316,8 @@ export function reclassifyWithMinArea(
 
   const joints = detectJoints(split.faces, split.groups);
   const { adjustments, wallWallJoints } = computeAdjustments(joints, split.groups);
-  return { ...phase1, faces: split.faces, groups: split.groups, joints, adjustments, wallWallJoints, warnings, preSplitFaceCount };
+  const suggestedMerges = suggestCoplanarMerges(split.groups, joints);
+  return { ...phase1, faces: split.faces, groups: split.groups, joints, adjustments, wallWallJoints, warnings, preSplitFaceCount, suggestedMerges };
 }
 
 /**
@@ -152,12 +341,12 @@ export function parsePipeline(
     warnings.push(...result.warnings);
   } else {
     warnings.push(`Formato no soportado: .${ext}. Usa .obj.`);
-    return { faces: [], rawFaces: [], appliedAxis: "Y", groups: [], joints: [], adjustments: [], wallWallJoints: [], stem, warnings, preSplitFaceCount: 0 };
+    return { faces: [], rawFaces: [], appliedAxis: "Y", groups: [], joints: [], adjustments: [], wallWallJoints: [], stem, warnings, preSplitFaceCount: 0, suggestedMerges: [] };
   }
 
   if (faces.length === 0) {
     warnings.push("No se encontraron caras en el archivo.");
-    return { faces: [], rawFaces: [], appliedAxis: "Y", groups: [], joints: [], adjustments: [], wallWallJoints: [], stem, warnings, preSplitFaceCount: 0 };
+    return { faces: [], rawFaces: [], appliedAxis: "Y", groups: [], joints: [], adjustments: [], wallWallJoints: [], stem, warnings, preSplitFaceCount: 0, suggestedMerges: [] };
   }
 
   // Normalise units.
@@ -198,8 +387,9 @@ export function parsePipeline(
   // Detect joints and compute assembly adjustments on the (possibly split) groups.
   const joints = detectJoints(split.faces, split.groups);
   const { adjustments, wallWallJoints } = computeAdjustments(joints, split.groups);
+  const suggestedMerges = suggestCoplanarMerges(split.groups, joints);
 
-  return { faces: split.faces, rawFaces, appliedAxis: detectedUp, groups: split.groups, joints, adjustments, wallWallJoints, stem, warnings, preSplitFaceCount };
+  return { faces: split.faces, rawFaces, appliedAxis: detectedUp, groups: split.groups, joints, adjustments, wallWallJoints, stem, warnings, preSplitFaceCount, suggestedMerges };
 }
 
 /**

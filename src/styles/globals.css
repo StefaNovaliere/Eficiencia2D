@@ -984,6 +984,100 @@ body {
 .ww-tag--a { background: #3b82f6; }
 .ww-tag--b { background: #8b5cf6; }
 
+/* ─── Merge action bar + card ─── */
+.merge-action-bar {
+  border-top: 1px solid var(--border);
+  padding: 10px 20px;
+  display: flex;
+  justify-content: center;
+}
+.merge-btn {
+  padding: 7px 16px;
+  background: #8b5cf6;
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.merge-btn:hover {
+  background: #7c3aed;
+}
+.merge-card {
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.merge-card--collapsed .merge-card-body {
+  display: none;
+}
+.merge-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 10px 20px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.merge-card-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.merge-card-title::before {
+  content: "";
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  background: #8b5cf6;
+}
+.merge-card-body {
+  padding: 0 20px 10px;
+}
+.merge-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 0;
+  border-top: 1px solid var(--border);
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+.merge-row-labels {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.merge-row-remove {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.merge-row-remove:hover {
+  background: var(--error-bg);
+  border-color: var(--error);
+  color: var(--error);
+}
+
 .ww-pid {
   flex-shrink: 0;
   font-size: 0.65rem;
