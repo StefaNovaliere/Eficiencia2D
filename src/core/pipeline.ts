@@ -7,7 +7,7 @@
 // ============================================================================
 
 import { parseObj } from "./obj-parser";
-import { generateCuttingSheets, decomposeIntoPanels, nestedSheetsToDxf, projectFacesTo2D, clipPanelAtV, mirrorEdgesHorizontal } from "./cutting-sheet";
+import { generateCuttingSheets, decomposeIntoPanels, nestedSheetsToDxf, projectFacesTo2D, clipPanelAtV, clipPanelAtU, mirrorEdgesHorizontal } from "./cutting-sheet";
 import type { Panel, PanelCategory } from "./cutting-sheet";
 import { detectUpAxis, extractFacades } from "./facade-extractor";
 import { extractFloorPlans } from "./floor-plan-extractor";
@@ -17,7 +17,8 @@ import type { GeometryGroup } from "./group-classifier";
 import { generatePdf, generateNestingPdf } from "./pdf-writer";
 import { nestPanels, DEFAULT_SHEET } from "./sheet-nester";
 import type { NestingPanel, NestingResult } from "./sheet-nester";
-import type { Face3D, Facade, FloorPlan, OutputFile, PipelineOptions, SheetConfig } from "./types";
+import type { Face3D, Facade, FloorPlan, OutputFile, PipelineOptions, SheetConfig, Vec3 } from "./types";
+import { dot } from "./types";
 import { detectJoints } from "./joint-detector";
 import type { Joint } from "./joint-detector";
 import { computeAdjustments } from "./assembly-adjuster";
@@ -335,11 +336,18 @@ export function decomposePanels(
   // automatic wall-on-floor compensation AND adds the chosen wall-wall yields.
   const { adjustments } = computeAdjustments(phase1.joints, phase1.groups, effectiveDecisions);
 
-  // Build adjustment lookup: groupId → total delta (metres).
-  const adjustmentByGroup = new Map<number, number>();
+  // Build adjustment lookups per group, separated by axis.
+  const heightAdjByGroup = new Map<number, number>();
+  const widthAdjsByGroup = new Map<number, DimensionAdjustment[]>();
   for (const adj of adjustments) {
-    const prev = adjustmentByGroup.get(adj.groupId) ?? 0;
-    adjustmentByGroup.set(adj.groupId, prev + adj.delta);
+    if (adj.axis === "height") {
+      const prev = heightAdjByGroup.get(adj.groupId) ?? 0;
+      heightAdjByGroup.set(adj.groupId, prev + adj.delta);
+    } else {
+      const arr = widthAdjsByGroup.get(adj.groupId);
+      if (arr) arr.push(adj);
+      else widthAdjsByGroup.set(adj.groupId, [adj]);
+    }
   }
 
   const wallPanels: Panel[] = [];
@@ -364,8 +372,9 @@ export function decomposePanels(
     // adjust the scale rather than silently fragmenting the piece.
     const faceGroups = [faces];
 
-    // Assembly adjustment for this group (negative = shorten).
-    const delta = adjustmentByGroup.get(group.id) ?? 0;
+    // Assembly adjustments for this group.
+    const heightDelta = heightAdjByGroup.get(group.id) ?? 0;
+    const widthAdjs = widthAdjsByGroup.get(group.id) ?? [];
 
     for (const segmentFaces of faceGroups) {
       const result = projectFacesTo2D(segmentFaces, group.representativeNormal, "Y");
@@ -373,13 +382,9 @@ export function decomposePanels(
 
       let { widthM, heightM, edges } = result;
 
-      // Apply assembly compensation: physically remove a strip of height
-      // |delta| from the wall's BASE — the edge where it meets the floor —
-      // so the cut piece fits once the floor's material thickness is in place.
-      // The base is the lowest-elevation side: if the projection's +y points
-      // up (vUp > 0) the base is at y = 0, otherwise at y = heightM.
-      if (delta < 0 && !isFloor) {
-        const strip = Math.min(-delta, heightM - 0.01);
+      // Height compensation (wall-floor): remove a strip from the wall's BASE.
+      if (heightDelta < 0 && !isFloor) {
+        const strip = Math.min(-heightDelta, heightM - 0.01);
         if (strip > 0.001) {
           const baseAtMinV = result.vUp >= 0;
           const clipped = baseAtMinV
@@ -390,6 +395,28 @@ export function decomposePanels(
             heightM = clipped.heightM;
             edges = clipped.edges;
           }
+        }
+      }
+
+      // Width compensation (wall-wall): remove a strip from the SIDE where
+      // this wall meets the other wall. Project the joint's 3D midpoint into
+      // the panel's 2D frame to determine left vs right.
+      for (const wAdj of widthAdjs) {
+        if (wAdj.delta >= 0 || isFloor) continue;
+        const strip = Math.min(-wAdj.delta, widthM - 0.01);
+        if (strip <= 0.001) continue;
+
+        const joint = phase1.joints[wAdj.jointIndex];
+        const u = joint ? dot(joint.edgeMid, result.uAxis) - result.originU : 0;
+        const onLeft = u < widthM / 2;
+
+        const clipped = onLeft
+          ? clipPanelAtU(edges, strip, true)
+          : clipPanelAtU(edges, widthM - strip, false);
+        if (clipped) {
+          widthM = clipped.widthM;
+          heightM = clipped.heightM;
+          edges = clipped.edges;
         }
       }
 
