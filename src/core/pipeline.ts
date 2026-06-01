@@ -23,6 +23,7 @@ import { detectJoints } from "./joint-detector";
 import type { Joint } from "./joint-detector";
 import { computeAdjustments } from "./assembly-adjuster";
 import type { DimensionAdjustment, WallWallJoint } from "./assembly-adjuster";
+import { splitWallGroupsAtFloors } from "./mesh-splitter";
 
 export interface PipelineResult {
   facades: Facade[];
@@ -41,6 +42,7 @@ export interface Phase1Result {
   wallWallJoints: WallWallJoint[];
   stem: string;
   warnings: string[];
+  preSplitFaceCount: number;
 }
 
 export interface ClassificationOverride {
@@ -101,9 +103,13 @@ export function reclassifyWithAxis(
   }
   const warnings = [...phase1.warnings];
   const groups = classifyIntoGroups(faces, minRealArea, warnings);
-  const joints = detectJoints(faces, groups);
-  const { adjustments, wallWallJoints } = computeAdjustments(joints, groups);
-  return { ...phase1, faces, appliedAxis: newAxis, groups, joints, adjustments, wallWallJoints, warnings };
+
+  const preSplitFaceCount = faces.length;
+  const split = splitWallGroupsAtFloors(faces, groups, new Map(), "Y");
+
+  const joints = detectJoints(split.faces, split.groups);
+  const { adjustments, wallWallJoints } = computeAdjustments(joints, split.groups);
+  return { ...phase1, faces: split.faces, appliedAxis: newAxis, groups: split.groups, joints, adjustments, wallWallJoints, warnings, preSplitFaceCount };
 }
 
 /** Re-classify with a different minimum-real-area threshold, keeping the current axis. */
@@ -112,10 +118,17 @@ export function reclassifyWithMinArea(
   minRealArea: number,
 ): Phase1Result {
   const warnings = [...phase1.warnings];
-  const groups = classifyIntoGroups(phase1.faces, minRealArea, warnings);
-  const joints = detectJoints(phase1.faces, groups);
-  const { adjustments, wallWallJoints } = computeAdjustments(joints, groups);
-  return { ...phase1, groups, joints, adjustments, wallWallJoints, warnings };
+  // Truncate back to pre-split faces to avoid re-classifying stale split data.
+  const baseFaces = phase1.faces.slice(0, phase1.preSplitFaceCount);
+
+  const groups = classifyIntoGroups(baseFaces, minRealArea, warnings);
+
+  const preSplitFaceCount = baseFaces.length;
+  const split = splitWallGroupsAtFloors(baseFaces, groups, new Map(), "Y");
+
+  const joints = detectJoints(split.faces, split.groups);
+  const { adjustments, wallWallJoints } = computeAdjustments(joints, split.groups);
+  return { ...phase1, faces: split.faces, groups: split.groups, joints, adjustments, wallWallJoints, warnings, preSplitFaceCount };
 }
 
 /**
@@ -139,12 +152,12 @@ export function parsePipeline(
     warnings.push(...result.warnings);
   } else {
     warnings.push(`Formato no soportado: .${ext}. Usa .obj.`);
-    return { faces: [], rawFaces: [], appliedAxis: "Y", groups: [], joints: [], adjustments: [], wallWallJoints: [], stem, warnings };
+    return { faces: [], rawFaces: [], appliedAxis: "Y", groups: [], joints: [], adjustments: [], wallWallJoints: [], stem, warnings, preSplitFaceCount: 0 };
   }
 
   if (faces.length === 0) {
     warnings.push("No se encontraron caras en el archivo.");
-    return { faces: [], rawFaces: [], appliedAxis: "Y", groups: [], joints: [], adjustments: [], wallWallJoints: [], stem, warnings };
+    return { faces: [], rawFaces: [], appliedAxis: "Y", groups: [], joints: [], adjustments: [], wallWallJoints: [], stem, warnings, preSplitFaceCount: 0 };
   }
 
   // Normalise units.
@@ -178,11 +191,15 @@ export function parsePipeline(
   // Classify into reviewable groups.
   const groups = classifyIntoGroups(faces, undefined, warnings);
 
-  // Detect joints and compute assembly adjustments.
-  const joints = detectJoints(faces, groups);
-  const { adjustments, wallWallJoints } = computeAdjustments(joints, groups);
+  // Split walls that extend through floor slabs into separate sub-groups.
+  const preSplitFaceCount = faces.length;
+  const split = splitWallGroupsAtFloors(faces, groups, new Map(), "Y");
 
-  return { faces, rawFaces, appliedAxis: detectedUp, groups, joints, adjustments, wallWallJoints, stem, warnings };
+  // Detect joints and compute assembly adjustments on the (possibly split) groups.
+  const joints = detectJoints(split.faces, split.groups);
+  const { adjustments, wallWallJoints } = computeAdjustments(joints, split.groups);
+
+  return { faces: split.faces, rawFaces, appliedAxis: detectedUp, groups: split.groups, joints, adjustments, wallWallJoints, stem, warnings, preSplitFaceCount };
 }
 
 /**
@@ -382,6 +399,10 @@ export function decomposePanels(
 
       let { widthM, heightM, edges } = result;
 
+      // Skip insignificant geometry before any assembly compensation so that
+      // panel A# numbering stays stable regardless of trim decisions.
+      if (widthM * heightM < (opts.minAreaM2 ?? 0.01)) continue;
+
       // Height compensation (wall-floor): remove a strip from the wall's BASE.
       if (heightDelta < 0 && !isFloor) {
         const strip = Math.min(-heightDelta, heightM - 0.01);
@@ -419,8 +440,6 @@ export function decomposePanels(
           edges = clipped.edges;
         }
       }
-
-      if (widthM * heightM < (opts.minAreaM2 ?? 0.01)) continue;
 
       // Mirror every piece horizontally so the laser-burnt face ends up on the
       // INSIDE of the assembled model (each piece is flipped over on assembly).

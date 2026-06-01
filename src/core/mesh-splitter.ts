@@ -7,6 +7,7 @@
 // ============================================================================
 
 import type { Face3D, Vec3 } from "./types";
+import type { GeometryGroup } from "./group-classifier";
 
 export interface SplitResult {
   above: Face3D[];
@@ -196,4 +197,114 @@ export function collectFloorPlanes(
   }
 
   return elevations.sort((a, b) => a - b);
+}
+
+// ---------------------------------------------------------------------------
+// Compute metadata for a sub-group created from split faces.
+// ---------------------------------------------------------------------------
+
+function subgroupArea(faces: Face3D[]): number {
+  let total = 0;
+  for (const f of faces) {
+    const verts = f.vertices;
+    if (verts.length < 3) continue;
+    let sx = 0, sy = 0, sz = 0;
+    const v0 = verts[0];
+    for (let i = 1; i < verts.length - 1; i++) {
+      const e1x = verts[i].x - v0.x, e1y = verts[i].y - v0.y, e1z = verts[i].z - v0.z;
+      const e2x = verts[i + 1].x - v0.x, e2y = verts[i + 1].y - v0.y, e2z = verts[i + 1].z - v0.z;
+      sx += e1y * e2z - e1z * e2y;
+      sy += e1z * e2x - e1x * e2z;
+      sz += e1x * e2y - e1y * e2x;
+    }
+    total += 0.5 * Math.sqrt(sx * sx + sy * sy + sz * sz);
+  }
+  return total;
+}
+
+function subgroupBounds(faces: Face3D[], up: "Y" | "Z"): { minY: number; maxY: number; cx: number; cy: number; cz: number; count: number } {
+  let minY = Infinity, maxY = -Infinity;
+  let cx = 0, cy = 0, cz = 0, count = 0;
+  for (const f of faces) {
+    for (const v of f.vertices) {
+      const h = getUpVal(v, up);
+      if (h < minY) minY = h;
+      if (h > maxY) maxY = h;
+      cx += v.x; cy += v.y; cz += v.z;
+      count++;
+    }
+  }
+  return { minY, maxY, cx, cy, cz, count };
+}
+
+// ---------------------------------------------------------------------------
+// Split wall GeometryGroups that extend through floor slabs.
+// ---------------------------------------------------------------------------
+
+const MIN_SPLIT_AREA = 0.01; // m² — discard tiny fragments
+
+export function splitWallGroupsAtFloors(
+  faces: Face3D[],
+  groups: GeometryGroup[],
+  overrideMap: Map<number, string>,
+  up: "Y" | "Z" = "Y",
+): { faces: Face3D[]; groups: GeometryGroup[] } {
+  const floorElevations = collectFloorPlanes(groups, overrideMap, faces, up);
+  if (floorElevations.length === 0) return { faces, groups };
+
+  const newFaces = [...faces];
+  const newGroups: GeometryGroup[] = [];
+  let nextId = 0;
+  for (const g of groups) if (g.id >= nextId) nextId = g.id + 1;
+
+  for (const group of groups) {
+    const effectiveCat = overrideMap.get(group.id) ?? group.category;
+    if (effectiveCat !== "wall") {
+      newGroups.push(group);
+      continue;
+    }
+
+    const groupFaces = group.faceIndices.map((fi) => faces[fi]).filter(Boolean);
+    const segments = splitWallAtFloors(groupFaces, floorElevations, up);
+
+    if (segments.length <= 1) {
+      newGroups.push(group);
+      continue;
+    }
+
+    for (let k = 0; k < segments.length; k++) {
+      const seg = segments[k];
+      if (seg.length === 0) continue;
+
+      const area = subgroupArea(seg);
+      if (area < MIN_SPLIT_AREA) continue;
+
+      const faceIndices: number[] = [];
+      for (const face of seg) {
+        faceIndices.push(newFaces.length);
+        newFaces.push(face);
+      }
+
+      const b = subgroupBounds(seg, up);
+      const centroid = b.count > 0
+        ? { x: b.cx / b.count, y: b.cy / b.count, z: b.cz / b.count }
+        : group.centroid;
+
+      newGroups.push({
+        id: k === 0 ? group.id : nextId++,
+        label: `${group.label} (${k + 1}/${segments.length})`,
+        category: group.category,
+        faceIndices,
+        totalArea: area,
+        centroid,
+        orientation: group.orientation,
+        representativeNormal: group.representativeNormal,
+        thickness: group.thickness,
+        minY: b.minY === Infinity ? undefined : b.minY,
+        maxY: b.maxY === -Infinity ? undefined : b.maxY,
+      });
+    }
+  }
+
+  return { faces: newFaces, groups: newGroups };
 }
