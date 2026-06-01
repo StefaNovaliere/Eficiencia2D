@@ -109,6 +109,8 @@ export interface Panel {
   widthM: number;
   heightM: number;
   edges: Array<{ a: Vec2; b: Vec2 }>;
+  /** GeometryGroup.id this panel was decomposed from — lets callers map DXF A#/B# back to a group. */
+  sourceGroupId: number;
 }
 
 interface PlacedPanel {
@@ -924,6 +926,7 @@ export function decomposeIntoPanels(
       widthM: rp.widthM,
       heightM: rp.heightM,
       edges: rp.edges,
+      sourceGroupId: -1, // legacy coplanar-cluster path: no GeometryGroup.id
     });
   }
 
@@ -938,6 +941,7 @@ export function decomposeIntoPanels(
       widthM: rp.widthM,
       heightM: rp.heightM,
       edges: rp.edges,
+      sourceGroupId: -1, // legacy coplanar-cluster path: no GeometryGroup.id
     });
   }
 

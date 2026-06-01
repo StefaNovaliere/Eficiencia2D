@@ -336,12 +336,6 @@ export function decomposePanels(
   // automatic wall-on-floor compensation AND adds the chosen wall-wall yields.
   const { adjustments } = computeAdjustments(phase1.joints, phase1.groups, effectiveDecisions);
 
-  // DEBUG: trace wall-wall adjustment pipeline
-  console.log("[decomposePanels] effectiveDecisions:", Array.from(effectiveDecisions.entries()));
-  console.log("[decomposePanels] adjustments:", adjustments.map(a =>
-    `group=${a.groupId} axis=${a.axis} delta=${a.delta} joint=${a.jointIndex} reason=${a.reason}`
-  ));
-
   // Build adjustment lookups per group, separated by axis.
   const heightAdjByGroup = new Map<number, number>();
   const widthAdjsByGroup = new Map<number, DimensionAdjustment[]>();
@@ -407,9 +401,6 @@ export function decomposePanels(
       // Width compensation (wall-wall): remove a strip from the SIDE where
       // this wall meets the other wall. Project the joint's 3D midpoint into
       // the panel's 2D frame to determine left vs right.
-      if (widthAdjs.length > 0) {
-        console.log(`[width-clip] group=${group.id} label=${group.label} widthAdjs=${widthAdjs.length} widthM=${widthM} isFloor=${isFloor}`);
-      }
       for (const wAdj of widthAdjs) {
         if (wAdj.delta >= 0 || isFloor) continue;
         const strip = Math.min(-wAdj.delta, widthM - 0.01);
@@ -419,12 +410,9 @@ export function decomposePanels(
         const u = joint ? dot(joint.edgeMid, result.uAxis) - result.originU : 0;
         const onLeft = u < widthM / 2;
 
-        console.log(`[width-clip]   delta=${wAdj.delta} strip=${strip} u=${u} widthM=${widthM} onLeft=${onLeft} edgeMid=${JSON.stringify(joint?.edgeMid)} uAxis=${JSON.stringify(result.uAxis)} originU=${result.originU}`);
-
         const clipped = onLeft
           ? clipPanelAtU(edges, strip, true)
           : clipPanelAtU(edges, widthM - strip, false);
-        console.log(`[width-clip]   clipped=${clipped ? `${clipped.widthM}x${clipped.heightM}` : 'null'}`);
         if (clipped) {
           widthM = clipped.widthM;
           heightM = clipped.heightM;
@@ -448,6 +436,7 @@ export function decomposePanels(
           widthM,
           heightM,
           edges,
+          sourceGroupId: group.id,
         });
       } else {
         wallCount++;
@@ -459,12 +448,34 @@ export function decomposePanels(
           widthM,
           heightM,
           edges,
+          sourceGroupId: group.id,
         });
       }
     }
   }
 
   return { wallPanels, floorPanels };
+}
+
+/**
+ * Map each GeometryGroup.id to the DXF panel ID (A#/B#) it produces, deriving
+ * the answer from {@link decomposePanels} itself so the UI labels match the
+ * cut-sheet exactly — including the groups that decomposePanels silently skips
+ * (empty faces, degenerate projection, or area below `minAreaM2`), which would
+ * otherwise shift every later A#/B# number out of sync.
+ */
+export function computePanelIdByGroup(
+  phase1: Phase1Result,
+  opts: PipelineOptions,
+  overrides?: ClassificationOverride[],
+  wallWallDecisions?: Map<number, number>,
+): Map<number, string> {
+  const { wallPanels, floorPanels } = decomposePanels(phase1, opts, overrides, wallWallDecisions);
+  const m = new Map<number, string>();
+  for (const p of [...wallPanels, ...floorPanels]) {
+    m.set(p.sourceGroupId, p.id);
+  }
+  return m;
 }
 
 function panelsToNestingPanels(panels: Panel[], scaleDenom: number): NestingPanel[] {
