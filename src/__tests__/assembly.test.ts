@@ -22,6 +22,18 @@ function makeGroup(overrides: Partial<GeometryGroup> & { id: number; category: F
   };
 }
 
+function makeJoint(groupA: number, groupB: number, totalLength: number, dihedralAngle: number, horizontalFrac = 1) {
+  return {
+    groupA,
+    groupB,
+    totalLength,
+    dihedralAngle,
+    edgeMid: { x: 0, y: 0, z: 0 },
+    edgeDir: { x: 1, y: 0, z: 0 },
+    horizontalFrac,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // areThinTwins — returns thickness (number) instead of boolean
 // ---------------------------------------------------------------------------
@@ -83,7 +95,7 @@ describe("areThinTwins — returns thickness", () => {
 // ---------------------------------------------------------------------------
 
 describe("detectJoints", () => {
-  it("detects a joint between two groups sharing an edge", () => {
+  it("detects a joint between two groups sharing an edge with spatial data", () => {
     // Floor face (horizontal, y=0)
     const floor = makeFace(
       [
@@ -114,6 +126,42 @@ describe("detectJoints", () => {
     expect(joints.length).toBe(1);
     expect(joints[0].totalLength).toBeCloseTo(3, 1);
     expect(joints[0].dihedralAngle).toBeCloseTo(90, 5);
+    expect(joints[0].edgeMid).toBeDefined();
+    expect(joints[0].edgeDir).toBeDefined();
+    // The shared edge runs along Z at x=2, y=0 → horizontal (no Y component).
+    expect(joints[0].horizontalFrac).toBeCloseTo(1, 1);
+  });
+
+  it("reports vertical edge as non-horizontal (wall-wall corner)", () => {
+    // Two perpendicular walls sharing a vertical corner edge (0,0,0)→(0,3,0).
+    const wallA = makeFace(
+      [
+        { x: 0, y: 0, z: 0 },
+        { x: 0, y: 3, z: 0 },
+        { x: 0, y: 3, z: 4 },
+        { x: 0, y: 0, z: 4 },
+      ],
+      { x: -1, y: 0, z: 0 },
+    );
+    const wallB = makeFace(
+      [
+        { x: 0, y: 0, z: 0 },
+        { x: 0, y: 3, z: 0 },
+        { x: 3, y: 3, z: 0 },
+        { x: 3, y: 0, z: 0 },
+      ],
+      { x: 0, y: 0, z: -1 },
+    );
+
+    const groups: GeometryGroup[] = [
+      makeGroup({ id: 1, category: "wall", faceIndices: [0], representativeNormal: { x: -1, y: 0, z: 0 } }),
+      makeGroup({ id: 2, category: "wall", faceIndices: [1], representativeNormal: { x: 0, y: 0, z: -1 } }),
+    ];
+
+    const joints = detectJoints([wallA, wallB], groups);
+    expect(joints.length).toBe(1);
+    // The shared edge is vertical → horizontalFrac ≈ 0.
+    expect(joints[0].horizontalFrac).toBeCloseTo(0, 1);
   });
 
   it("returns empty for groups with no shared edges", () => {
@@ -151,76 +199,136 @@ describe("detectJoints", () => {
 // ---------------------------------------------------------------------------
 
 describe("computeAdjustments", () => {
-  it("shortens wall by floor thickness at 90° joint", () => {
+  it("shortens wall ON TOP of floor by floor thickness at 90° joint", () => {
+    // Wall sits on top of the floor slab (wall.minY ≈ floor.maxY).
     const groups: GeometryGroup[] = [
       makeGroup({
         id: 1,
         category: "floor",
         representativeNormal: { x: 0, y: 1, z: 0 },
         thickness: 0.10,
+        minY: 0,
+        maxY: 0.10,
       }),
       makeGroup({
         id: 2,
         category: "wall",
         representativeNormal: { x: 1, y: 0, z: 0 },
         thickness: 0.20,
+        minY: 0.10,
+        maxY: 3.0,
       }),
     ];
 
-    const joints = [
-      { groupA: 1, groupB: 2, totalLength: 3.0, dihedralAngle: 90 },
+    const joints = [makeJoint(1, 2, 3.0, 90)];
+
+    const { adjustments } = computeAdjustments(joints, groups);
+    expect(adjustments.length).toBe(1);
+    expect(adjustments[0].groupId).toBe(2);
+    expect(adjustments[0].delta).toBeCloseTo(-0.10, 3);
+  });
+
+  it("does NOT shorten wall BESIDE the floor", () => {
+    // Wall is beside the slab (wall.minY < floor.maxY - tol, vertical edge).
+    const groups: GeometryGroup[] = [
+      makeGroup({
+        id: 1,
+        category: "floor",
+        representativeNormal: { x: 0, y: 1, z: 0 },
+        thickness: 0.10,
+        minY: 0,
+        maxY: 0.10,
+      }),
+      makeGroup({
+        id: 2,
+        category: "wall",
+        representativeNormal: { x: 1, y: 0, z: 0 },
+        minY: 0,
+        maxY: 3.0,
+      }),
     ];
 
-    const adjs = computeAdjustments(joints, groups);
-    expect(adjs.length).toBe(1);
-    expect(adjs[0].groupId).toBe(2);
-    expect(adjs[0].delta).toBeCloseTo(-0.10, 3);
+    // Vertical shared edge → horizontalFrac = 0
+    const joints = [makeJoint(1, 2, 3.0, 90, 0)];
+
+    const { adjustments } = computeAdjustments(joints, groups);
+    expect(adjustments.length).toBe(0);
   });
 
   it("produces no adjustment for non-90° joints", () => {
     const groups: GeometryGroup[] = [
-      makeGroup({ id: 1, category: "floor", representativeNormal: { x: 0, y: 1, z: 0 }, thickness: 0.10 }),
-      makeGroup({ id: 2, category: "wall", representativeNormal: { x: 1, y: 0, z: 0 } }),
+      makeGroup({ id: 1, category: "floor", representativeNormal: { x: 0, y: 1, z: 0 }, thickness: 0.10, minY: 0, maxY: 0.10 }),
+      makeGroup({ id: 2, category: "wall", representativeNormal: { x: 1, y: 0, z: 0 }, minY: 0.10, maxY: 3.0 }),
     ];
 
-    const joints = [
-      { groupA: 1, groupB: 2, totalLength: 3.0, dihedralAngle: 45 },
-    ];
+    const joints = [makeJoint(1, 2, 3.0, 45)];
 
-    const adjs = computeAdjustments(joints, groups);
-    expect(adjs.length).toBe(0);
+    const { adjustments } = computeAdjustments(joints, groups);
+    expect(adjustments.length).toBe(0);
   });
 
-  it("skips adjustment when receiver has no thickness", () => {
+  it("skips adjustment when floor has no thickness", () => {
     const groups: GeometryGroup[] = [
-      makeGroup({ id: 1, category: "floor", representativeNormal: { x: 0, y: 1, z: 0 } }),
-      makeGroup({ id: 2, category: "wall", representativeNormal: { x: 1, y: 0, z: 0 } }),
+      makeGroup({ id: 1, category: "floor", representativeNormal: { x: 0, y: 1, z: 0 }, minY: 0, maxY: 0 }),
+      makeGroup({ id: 2, category: "wall", representativeNormal: { x: 1, y: 0, z: 0 }, minY: 0, maxY: 3.0 }),
     ];
 
-    const joints = [
-      { groupA: 1, groupB: 2, totalLength: 3.0, dihedralAngle: 90 },
-    ];
+    const joints = [makeJoint(1, 2, 3.0, 90)];
 
-    const adjs = computeAdjustments(joints, groups);
-    expect(adjs.length).toBe(0);
+    const { adjustments } = computeAdjustments(joints, groups);
+    expect(adjustments.length).toBe(0);
   });
 
   it("deduplicates: keeps largest adjustment per group", () => {
+    // Two adjacent floor slabs of different thickness, wall sits on top of both.
     const groups: GeometryGroup[] = [
-      makeGroup({ id: 1, category: "floor", representativeNormal: { x: 0, y: 1, z: 0 }, thickness: 0.10 }),
-      makeGroup({ id: 3, category: "floor", representativeNormal: { x: 0, y: 1, z: 0 }, thickness: 0.15 }),
-      makeGroup({ id: 2, category: "wall", representativeNormal: { x: 1, y: 0, z: 0 } }),
+      makeGroup({ id: 1, category: "floor", representativeNormal: { x: 0, y: 1, z: 0 }, thickness: 0.10, minY: 0, maxY: 0.10 }),
+      makeGroup({ id: 3, category: "floor", representativeNormal: { x: 0, y: 1, z: 0 }, thickness: 0.15, minY: 0, maxY: 0.15 }),
+      makeGroup({ id: 2, category: "wall", representativeNormal: { x: 1, y: 0, z: 0 }, minY: 0.15, maxY: 3.0 }),
     ];
 
     const joints = [
-      { groupA: 1, groupB: 2, totalLength: 3.0, dihedralAngle: 90 },
-      { groupA: 3, groupB: 2, totalLength: 2.0, dihedralAngle: 90 },
+      makeJoint(1, 2, 3.0, 90),
+      makeJoint(3, 2, 2.0, 90),
     ];
 
-    const adjs = computeAdjustments(joints, groups);
-    expect(adjs.length).toBe(1);
-    expect(adjs[0].groupId).toBe(2);
-    expect(adjs[0].delta).toBeCloseTo(-0.15, 3);
+    const { adjustments } = computeAdjustments(joints, groups);
+    expect(adjustments.length).toBe(1);
+    expect(adjustments[0].groupId).toBe(2);
+    expect(adjustments[0].delta).toBeCloseTo(-0.15, 3);
+  });
+
+  it("wall-wall joints are reported for manual resolution (no auto adjustment)", () => {
+    const groups: GeometryGroup[] = [
+      makeGroup({ id: 1, category: "wall", representativeNormal: { x: 1, y: 0, z: 0 }, thickness: 0.20, minY: 0, maxY: 3 }),
+      makeGroup({ id: 2, category: "wall", representativeNormal: { x: 0, y: 0, z: 1 }, thickness: 0.15, minY: 0, maxY: 3 }),
+    ];
+
+    const joints = [makeJoint(1, 2, 3.0, 90)];
+
+    const { adjustments, wallWallJoints } = computeAdjustments(joints, groups);
+    expect(adjustments.length).toBe(0);
+    expect(wallWallJoints.length).toBe(1);
+    expect(wallWallJoints[0].groupA).toBe(1);
+    expect(wallWallJoints[0].groupB).toBe(2);
+    expect(wallWallJoints[0].yieldGroupId).toBeUndefined();
+  });
+
+  it("wall-wall joint applies adjustment when user decision is provided", () => {
+    const groups: GeometryGroup[] = [
+      makeGroup({ id: 1, category: "wall", representativeNormal: { x: 1, y: 0, z: 0 }, thickness: 0.20, minY: 0, maxY: 3 }),
+      makeGroup({ id: 2, category: "wall", representativeNormal: { x: 0, y: 0, z: 1 }, thickness: 0.15, minY: 0, maxY: 3 }),
+    ];
+
+    const joints = [makeJoint(1, 2, 3.0, 90)];
+    // User decides: group 1 yields → shortened by group 2's thickness (0.15).
+    const decisions = new Map([[0, 1]]);
+
+    const { adjustments, wallWallJoints } = computeAdjustments(joints, groups, decisions);
+    expect(adjustments.length).toBe(1);
+    expect(adjustments[0].groupId).toBe(1);
+    expect(adjustments[0].delta).toBeCloseTo(-0.15, 3);
+    expect(wallWallJoints[0].yieldGroupId).toBe(1);
   });
 });
 

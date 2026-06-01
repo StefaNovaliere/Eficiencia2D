@@ -88,8 +88,7 @@ export type DecompositionMode = "detailed" | "simple";
 /** Which architectural element categories to include in cutting sheets. */
 export interface ElementFilter {
   floors: boolean;
-  wallsExterior: boolean;
-  wallsInterior: boolean;
+  walls: boolean;
 }
 
 /** Physical sheet dimensions for laser cutting nesting. */

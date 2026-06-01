@@ -14,7 +14,7 @@
 
 import type { Face3D, Vec3 } from "./types";
 import { cross, dot, getVertexIndices, normalize, sub, vlength } from "./types";
-import { areThinTwins, findThinWallFaces } from "./wall-thickness";
+import { areThinTwins } from "./wall-thickness";
 import { detectSlabEdges, findSlabRimFaces, validateSlabCandidates } from "./slab-edge-detector";
 
 // ---------------------------------------------------------------------------
@@ -24,8 +24,6 @@ import { detectSlabEdges, findSlabRimFaces, validateSlabCandidates } from "./sla
 export type FaceCategory =
   | "floor"
   | "wall"
-  | "wall_exterior"
-  | "wall_interior"
   | "discard";
 
 export interface GeometryGroup {
@@ -38,6 +36,8 @@ export interface GeometryGroup {
   orientation: string;
   representativeNormal: Vec3;
   thickness?: number;
+  minY?: number;
+  maxY?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -48,8 +48,7 @@ const HORIZONTAL_THRESHOLD = 0.98;
 const VERTICAL_THRESHOLD = 0.5;
 const MIN_AREA = 1e-6;
 const HEIGHT_BAND = 0.05;
-const PERIMETER_MARGIN = 0.15;
-const THIN_WALL_THRESHOLD = 0.40; // walls thinner than 40cm => single "wall" category
+const THIN_WALL_THRESHOLD = 0.40;
 const DEFAULT_MIN_REAL_AREA = 1.0; // default: subgroups smaller than 1 m² => "discard"
 
 function faceArea(f: Face3D): number {
@@ -160,23 +159,9 @@ function classifyAllFaces(faces: Face3D[]): FaceInfo[] {
     }
   }
 
-  // Classify verticals:
-  //   - thin walls (paired thickness < 40cm) → single "wall" category
-  //   - thick walls → "wall_exterior" / "wall_interior" based on perimeter distance
-  const verticals = infos.filter((fi) => fi.orientation === "vertical");
-  const verticalIndices = verticals.map((fi) => fi.index);
-  const thinWallSet = findThinWallFaces(faces, verticalIndices, THIN_WALL_THRESHOLD);
-
-  for (const fi of verticals) {
-    if (thinWallSet.has(fi.index)) {
-      fi.category = "wall";
-      continue;
-    }
-    const cx = fi.centroid.x;
-    const cz = fi.centroid.z;
-    const distX = Math.min(Math.abs(cx - minX) / rangeX, Math.abs(cx - maxX) / rangeX);
-    const distZ = Math.min(Math.abs(cz - minZ) / rangeZ, Math.abs(cz - maxZ) / rangeZ);
-    fi.category = Math.min(distX, distZ) <= PERIMETER_MARGIN ? "wall_exterior" : "wall_interior";
+  // Classify verticals — all become "wall".
+  for (const fi of infos) {
+    if (fi.orientation === "vertical") fi.category = "wall";
   }
 
   // Inclined surfaces (roofs, ramps) → classify as floor so they appear in
@@ -312,8 +297,6 @@ function orientationLabel(normal: Vec3, orientation: string): string {
 const CATEGORY_LABELS: Record<FaceCategory, string> = {
   floor: "Piso",
   wall: "Pared",
-  wall_exterior: "Pared Ext.",
-  wall_interior: "Pared Int.",
   discard: "Descartado",
 };
 
@@ -509,8 +492,6 @@ export function classifyIntoGroups(
   const CATEGORY_PRIORITY: FaceCategory[] = [
     "floor",
     "wall",
-    "wall_exterior",
-    "wall_interior",
     "discard",
   ];
 
@@ -536,14 +517,21 @@ export function classifyIntoGroups(
     }
     if (bestArea < 0) dominant = "discard";
 
-    // Combine faces, recompute centroid, total area.
+    // Combine faces, recompute centroid, total area, and Y extent.
     const allFaceIndices: number[] = [];
     let totalArea = 0;
     let cx = 0, cy = 0, cz = 0;
+    let groupMinY = Infinity, groupMaxY = -Infinity;
     let biggest = merged[0];
     let biggestOrient = merged[0].faceInfos[0].orientation;
     for (const sg of merged) {
-      for (const fi of sg.faceInfos) allFaceIndices.push(fi.index);
+      for (const fi of sg.faceInfos) {
+        allFaceIndices.push(fi.index);
+        for (const v of faces[fi.index].vertices) {
+          if (v.y < groupMinY) groupMinY = v.y;
+          if (v.y > groupMaxY) groupMaxY = v.y;
+        }
+      }
       totalArea += sg.totalArea;
       cx += sg.centroid.x * sg.totalArea;
       cy += sg.centroid.y * sg.totalArea;
@@ -572,11 +560,12 @@ export function classifyIntoGroups(
       orientation: orient,
       representativeNormal: biggest.normal,
       thickness: detectedThickness,
+      minY: groupMinY === Infinity ? undefined : groupMinY,
+      maxY: groupMaxY === -Infinity ? undefined : groupMaxY,
     });
   }
 
-  // Sort: floors, thin walls, exterior walls, interior walls, discarded. Within each, by area desc.
-  const ORDER: Record<FaceCategory, number> = { floor: 0, wall: 1, wall_exterior: 2, wall_interior: 3, discard: 4 };
+  const ORDER: Record<FaceCategory, number> = { floor: 0, wall: 1, discard: 2 };
   groups.sort((a, b) => {
     const catDiff = ORDER[a.category] - ORDER[b.category];
     if (catDiff !== 0) return catDiff;

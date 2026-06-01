@@ -7,7 +7,7 @@
 // ============================================================================
 
 import type { Face3D, Vec3 } from "./types";
-import { dot, getVertexIndices } from "./types";
+import { dot, getVertexIndices, normalize, sub, vlength } from "./types";
 import type { GeometryGroup } from "./group-classifier";
 
 // ---------------------------------------------------------------------------
@@ -19,6 +19,10 @@ export interface Joint {
   groupB: number;
   totalLength: number;
   dihedralAngle: number;
+  edgeMid: Vec3;
+  edgeDir: Vec3;
+  /** Fraction of shared edge length that is approximately horizontal (|dir.y|/|dir| ≤ 0.3). */
+  horizontalFrac: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -62,6 +66,7 @@ export function detectJoints(
   // Map: edge key → list of group IDs that contain faces with this edge.
   const edgeToGroups = new Map<string, Set<number>>();
   const edgeLengths = new Map<string, number>();
+  const edgeVerts = new Map<string, { a: Vec3; b: Vec3 }>();
 
   for (const group of groups) {
     if (group.category === "discard") continue;
@@ -85,24 +90,35 @@ export function detectJoints(
         } else {
           edgeToGroups.set(key, new Set([group.id]));
           edgeLengths.set(key, edgeLength(verts[i], verts[j]));
+          edgeVerts.set(key, { a: verts[i], b: verts[j] });
         }
       }
     }
   }
 
-  // Collect joint lengths per group pair.
-  const pairLengths = new Map<string, number>();
-  const pairGroups = new Map<string, [number, number]>();
+  // Collect joint lengths + edge geometry per group pair.
+  interface PairData {
+    groups: [number, number];
+    totalLength: number;
+    edges: Array<{ a: Vec3; b: Vec3; len: number }>;
+  }
+  const pairData = new Map<string, PairData>();
 
   for (const [key, groupIds] of edgeToGroups) {
     if (groupIds.size < 2) continue;
     const ids = Array.from(groupIds);
     const len = edgeLengths.get(key) ?? 0;
+    const verts = edgeVerts.get(key);
     for (let i = 0; i < ids.length; i++) {
       for (let j = i + 1; j < ids.length; j++) {
         const pk = pairKey(ids[i], ids[j]);
-        pairLengths.set(pk, (pairLengths.get(pk) ?? 0) + len);
-        if (!pairGroups.has(pk)) pairGroups.set(pk, [ids[i], ids[j]]);
+        let pd = pairData.get(pk);
+        if (!pd) {
+          pd = { groups: [ids[i], ids[j]], totalLength: 0, edges: [] };
+          pairData.set(pk, pd);
+        }
+        pd.totalLength += len;
+        if (verts) pd.edges.push({ a: verts.a, b: verts.b, len });
       }
     }
   }
@@ -113,10 +129,12 @@ export function detectJoints(
     groupNormals.set(g.id, g.representativeNormal);
   }
 
+  const HORIZ_DIR_TOL = 0.3;
+
   const joints: Joint[] = [];
-  for (const [pk, totalLength] of pairLengths) {
-    if (totalLength < 0.01) continue;
-    const [gA, gB] = pairGroups.get(pk)!;
+  for (const [, pd] of pairData) {
+    if (pd.totalLength < 0.01) continue;
+    const [gA, gB] = pd.groups;
     const nA = groupNormals.get(gA);
     const nB = groupNormals.get(gB);
     let dihedralAngle = 90;
@@ -125,7 +143,32 @@ export function detectJoints(
       dihedralAngle = (Math.acos(Math.min(1, absDot)) * 180) / Math.PI;
     }
 
-    joints.push({ groupA: gA, groupB: gB, totalLength, dihedralAngle });
+    // Weighted midpoint and dominant direction of shared edges.
+    let mx = 0, my = 0, mz = 0;
+    let horizLen = 0;
+    let longestEdge = pd.edges[0];
+    for (const e of pd.edges) {
+      const w = e.len;
+      mx += (e.a.x + e.b.x) * 0.5 * w;
+      my += (e.a.y + e.b.y) * 0.5 * w;
+      mz += (e.a.z + e.b.z) * 0.5 * w;
+      const dir = sub(e.b, e.a);
+      const dirLen = vlength(dir);
+      if (dirLen > 1e-9) {
+        const absYFrac = Math.abs(dir.y) / dirLen;
+        if (absYFrac <= HORIZ_DIR_TOL) horizLen += e.len;
+      }
+      if (!longestEdge || e.len > longestEdge.len) longestEdge = e;
+    }
+    const edgeMid: Vec3 = pd.totalLength > 0
+      ? { x: mx / pd.totalLength, y: my / pd.totalLength, z: mz / pd.totalLength }
+      : { x: 0, y: 0, z: 0 };
+    const edgeDir: Vec3 = longestEdge
+      ? normalize(sub(longestEdge.b, longestEdge.a))
+      : { x: 1, y: 0, z: 0 };
+    const horizontalFrac = pd.totalLength > 0 ? horizLen / pd.totalLength : 0;
+
+    joints.push({ groupA: gA, groupB: gB, totalLength: pd.totalLength, dihedralAngle, edgeMid, edgeDir, horizontalFrac });
   }
 
   joints.sort((a, b) => b.totalLength - a.totalLength);
