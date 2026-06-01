@@ -3,7 +3,7 @@ import { areThinTwins } from "@/core/wall-thickness";
 import type { TwinCandidate } from "@/core/wall-thickness";
 import { detectJoints } from "@/core/joint-detector";
 import { computeAdjustments } from "@/core/assembly-adjuster";
-import { clipPanelAtV, mirrorEdgesHorizontal } from "@/core/cutting-sheet";
+import { clipPanelAtV, clipPanelAtU, mirrorEdgesHorizontal } from "@/core/cutting-sheet";
 import type { GeometryGroup, FaceCategory } from "@/core/group-classifier";
 import type { Face3D, Vec3 } from "@/core/types";
 
@@ -435,5 +435,78 @@ describe("mirrorEdgesHorizontal", () => {
     const xs = m.flatMap((e) => [e.a.x, e.b.x]);
     expect(Math.min(...xs)).toBeCloseTo(0, 6);
     expect(Math.max(...xs)).toBeCloseTo(widthM, 6);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// clipPanelAtU — vertical clip for wall-wall assembly compensation
+// ---------------------------------------------------------------------------
+
+describe("clipPanelAtU", () => {
+  const rect = [
+    { a: { x: 0, y: 0 }, b: { x: 4, y: 0 } },
+    { a: { x: 4, y: 0 }, b: { x: 4, y: 2.5 } },
+    { a: { x: 4, y: 2.5 }, b: { x: 0, y: 2.5 } },
+    { a: { x: 0, y: 2.5 }, b: { x: 0, y: 0 } },
+  ];
+
+  it("clips from the left (keepRight) and shortens width", () => {
+    const clipped = clipPanelAtU(rect, 0.1, true);
+    expect(clipped).not.toBeNull();
+    expect(clipped!.widthM).toBeCloseTo(3.9, 3);
+    expect(clipped!.heightM).toBeCloseTo(2.5, 3);
+  });
+
+  it("clips from the right (keepLeft) and shortens width", () => {
+    const clipped = clipPanelAtU(rect, 4 - 0.1, false);
+    expect(clipped).not.toBeNull();
+    expect(clipped!.widthM).toBeCloseTo(3.9, 3);
+    expect(clipped!.heightM).toBeCloseTo(2.5, 3);
+  });
+
+  it("re-normalises the clipped panel to origin", () => {
+    const clipped = clipPanelAtU(rect, 0.5, true);
+    const minX = Math.min(...clipped!.edges.flatMap((e) => [e.a.x, e.b.x]));
+    expect(minX).toBeCloseTo(0, 6);
+  });
+
+  it("preserves height when clipping width", () => {
+    const clipped = clipPanelAtU(rect, 1.0, true);
+    expect(clipped).not.toBeNull();
+    expect(clipped!.widthM).toBeCloseTo(3.0, 3);
+    expect(clipped!.heightM).toBeCloseTo(2.5, 3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DimensionAdjustment.axis — wall-floor uses "height", wall-wall uses "width"
+// ---------------------------------------------------------------------------
+
+describe("computeAdjustments axis field", () => {
+  it("wall-floor adjustment has axis 'height'", () => {
+    const groups = [
+      makeGroup({ id: 1, category: "floor", representativeNormal: { x: 0, y: 1, z: 0 }, thickness: 0.05, minY: 0, maxY: 0.05 }),
+      makeGroup({ id: 2, category: "wall", representativeNormal: { x: 1, y: 0, z: 0 }, minY: 0.05, maxY: 3.0 }),
+    ];
+    const joints = [makeJoint(1, 2, 4.0, 90, 1.0)];
+    const { adjustments } = computeAdjustments(joints, groups);
+    expect(adjustments.length).toBe(1);
+    expect(adjustments[0].axis).toBe("height");
+    expect(adjustments[0].groupId).toBe(2);
+  });
+
+  it("wall-wall adjustment has axis 'width'", () => {
+    const groups = [
+      makeGroup({ id: 1, category: "wall", representativeNormal: { x: 1, y: 0, z: 0 }, thickness: 0.10 }),
+      makeGroup({ id: 2, category: "wall", representativeNormal: { x: 0, y: 0, z: 1 }, thickness: 0.05 }),
+    ];
+    const joints = [makeJoint(1, 2, 3.0, 90, 0.0)];
+    const decisions = new Map<number, number>();
+    decisions.set(0, 2);
+    const { adjustments } = computeAdjustments(joints, groups, decisions);
+    expect(adjustments.length).toBe(1);
+    expect(adjustments[0].axis).toBe("width");
+    expect(adjustments[0].groupId).toBe(2);
+    expect(adjustments[0].delta).toBeCloseTo(-0.10, 6);
   });
 });

@@ -22,6 +22,8 @@ import type { GeometryGroup } from "./group-classifier";
 export interface DimensionAdjustment {
   groupId: number;
   delta: number;
+  /** Which dimension to trim: "height" clips the base (wall-floor), "width" clips a side (wall-wall). */
+  axis: "height" | "width";
   reason: string;
   jointIndex: number;
 }
@@ -95,6 +97,7 @@ export function computeAdjustments(
       adjustments.push({
         groupId: wall.id,
         delta,
+        axis: "height",
         reason: `Junta con ${label} (grosor ${(floor.thickness * 100).toFixed(1)}cm)`,
         jointIndex: ji,
       });
@@ -130,6 +133,7 @@ export function computeAdjustments(
           adjustments.push({
             groupId: decision,
             delta: -otherGroup.thickness,
+            axis: "width",
             reason: `Junta con ${otherGroup.label} (grosor ${(otherGroup.thickness * 100).toFixed(1)}cm)`,
             jointIndex: ji,
           });
@@ -138,12 +142,13 @@ export function computeAdjustments(
     }
   }
 
-  // Deduplicate: keep only the largest adjustment per group.
-  const seen = new Map<number, DimensionAdjustment>();
+  // Deduplicate: keep only the largest adjustment per (group, axis).
+  const seen = new Map<string, DimensionAdjustment>();
   for (const adj of adjustments) {
-    const existing = seen.get(adj.groupId);
+    const key = `${adj.groupId}:${adj.axis}`;
+    const existing = seen.get(key);
     if (!existing || adj.delta < existing.delta) {
-      seen.set(adj.groupId, adj);
+      seen.set(key, adj);
     }
   }
 
