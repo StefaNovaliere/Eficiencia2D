@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import GroupList from "./GroupList";
 import VisibilityFilters from "./VisibilityFilters";
@@ -9,6 +9,8 @@ import { reclassifyWithAxis } from "@/core/pipeline";
 import type { Phase1Result, ClassificationOverride } from "@/core/pipeline";
 import type { Joint } from "@/core/joint-detector";
 import type { DimensionAdjustment } from "@/core/assembly-adjuster";
+
+export type WallWallDecisions = Map<number, number>;
 
 const ModelViewer = dynamic(() => import("./ModelViewer"), { ssr: false });
 
@@ -24,12 +26,13 @@ const ALL_CATEGORIES: FaceCategory[] = [
 
 export interface ReviewScreenProps {
   phase1: Phase1Result;
-  onConfirm: (overrides: ClassificationOverride[]) => void;
+  onConfirm: (overrides: ClassificationOverride[], wallWallDecisions: WallWallDecisions) => void;
   onCancel: () => void;
   onAxisChange: (newPhase1: Phase1Result) => void;
   minAreaM2: number;
   onMinAreaChange: (area: number) => void;
   initialOverrides?: ClassificationOverride[];
+  initialWallWallDecisions?: WallWallDecisions;
 }
 
 const MIN_AREA_OPTIONS = [0, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0];
@@ -46,6 +49,7 @@ export default function ReviewScreen({
   minAreaM2,
   onMinAreaChange,
   initialOverrides,
+  initialWallWallDecisions,
 }: ReviewScreenProps) {
   const [selectedGroupIds, setSelectedGroupIds] = useState<Set<number>>(
     () => new Set(),
@@ -60,6 +64,20 @@ export default function ReviewScreen({
   );
   const [visibleCategories, setVisibleCategories] = useState<Set<FaceCategory>>(
     () => new Set(ALL_CATEGORIES),
+  );
+  // Wall-wall joint decisions: jointIndex → groupId that yields. Seeded from
+  // each joint's safe default suggestion (thinner wall yields), overridable.
+  const [wallWallDecisions, setWallWallDecisions] = useState<WallWallDecisions>(
+    () => {
+      if (initialWallWallDecisions && initialWallWallDecisions.size > 0) {
+        return new Map(initialWallWallDecisions);
+      }
+      const m = new Map<number, number>();
+      for (const ww of phase1.wallWallJoints) {
+        if (ww.suggestedYieldGroupId != null) m.set(ww.jointIndex, ww.suggestedYieldGroupId);
+      }
+      return m;
+    },
   );
 
   const handleSelectGroup = useCallback((id: number) => {
@@ -105,6 +123,20 @@ export default function ReviewScreen({
     [phase1.groups, selectedGroupIds],
   );
 
+  // Re-seed wall-wall decisions whenever the underlying phase1 changes (axis
+  // rotation / min-area change recompute the joints and their indices). The ref
+  // guard skips the initial mount so restored / initial decisions survive.
+  const phase1Ref = useRef(phase1);
+  useEffect(() => {
+    if (phase1Ref.current === phase1) return;
+    phase1Ref.current = phase1;
+    const m = new Map<number, number>();
+    for (const ww of phase1.wallWallJoints) {
+      if (ww.suggestedYieldGroupId != null) m.set(ww.jointIndex, ww.suggestedYieldGroupId);
+    }
+    setWallWallDecisions(m);
+  }, [phase1]);
+
   const handleRotateAxis = useCallback(() => {
     const newAxis = phase1.appliedAxis === "Y" ? "Z" : "Y";
     const updated = reclassifyWithAxis(phase1, newAxis);
@@ -118,6 +150,19 @@ export default function ReviewScreen({
     setSelectedGroupIds(new Set());
     onMinAreaChange(newArea);
   }, [onMinAreaChange]);
+
+  const handleWallWallDecision = useCallback(
+    (jointIndex: number, yieldGroupId: number, groupA: number, groupB: number) => {
+      setWallWallDecisions((prev) => {
+        const next = new Map(prev);
+        next.set(jointIndex, yieldGroupId);
+        return next;
+      });
+      // Highlight both walls of the joint in the 3D viewer.
+      setSelectedGroupIds(new Set([groupA, groupB]));
+    },
+    [],
+  );
 
   const handleToggleVisibility = useCallback((cat: FaceCategory) => {
     setVisibleCategories((prev) => {
@@ -133,8 +178,8 @@ export default function ReviewScreen({
     for (const [groupId, newCategory] of overrides.entries()) {
       result.push({ groupId, newCategory });
     }
-    onConfirm(result);
-  }, [overrides, onConfirm]);
+    onConfirm(result, wallWallDecisions);
+  }, [overrides, wallWallDecisions, onConfirm]);
 
   // Stats (per effective category).
   const stats = useMemo(() => {
@@ -147,6 +192,24 @@ export default function ReviewScreen({
     }
     return { floors, walls, discarded };
   }, [phase1.groups, overrides]);
+
+  // Wall-wall joints to resolve: skip any whose wall was reclassified to
+  // discard (that joint no longer affects the cut).
+  const wallWallList = useMemo(() => {
+    const groupById = new Map(phase1.groups.map((g) => [g.id, g]));
+    const effCat = (id: number) =>
+      overrides.get(id) ?? groupById.get(id)?.category ?? "discard";
+    return phase1.wallWallJoints
+      .filter((ww) => effCat(ww.groupA) !== "discard" && effCat(ww.groupB) !== "discard")
+      .map((ww) => ({
+        ww,
+        labelA: groupById.get(ww.groupA)?.label ?? `Grupo ${ww.groupA}`,
+        labelB: groupById.get(ww.groupB)?.label ?? `Grupo ${ww.groupB}`,
+        hasThickness:
+          (groupById.get(ww.groupA)?.thickness ?? 0) > 0.001 ||
+          (groupById.get(ww.groupB)?.thickness ?? 0) > 0.001,
+      }));
+  }, [phase1.wallWallJoints, phase1.groups, overrides]);
 
   return (
     <div className="review-overlay">
@@ -203,6 +266,49 @@ export default function ReviewScreen({
           onToggleGroup={handleToggleGroup}
           onChangeCategory={handleChangeCategory}
         />
+
+        {wallWallList.length > 0 && (
+          <div className="wallwall-panel">
+            <div className="wallwall-header">
+              <span className="wallwall-title">
+                Juntas pared-pared ({wallWallList.length})
+              </span>
+              <span className="wallwall-hint">
+                Elegí qué pared cede el grosor en cada encuentro. Hay un valor
+                por defecto (cede la más fina) que podés cambiar.
+              </span>
+            </div>
+            {wallWallList.map(({ ww, labelA, labelB, hasThickness }) => {
+              const chosen = wallWallDecisions.get(ww.jointIndex);
+              return (
+                <div key={ww.jointIndex} className="wallwall-row">
+                  <div className="wallwall-pair">
+                    <span className="wallwall-vs">{labelA} ↔ {labelB}</span>
+                    {!hasThickness && (
+                      <span className="wallwall-nothick">sin grosor detectado</span>
+                    )}
+                  </div>
+                  <div className="wallwall-choices">
+                    <button
+                      className={`wallwall-choice ${chosen === ww.groupA ? "wallwall-choice--on" : ""}`}
+                      disabled={!hasThickness}
+                      onClick={() => handleWallWallDecision(ww.jointIndex, ww.groupA, ww.groupA, ww.groupB)}
+                    >
+                      {labelA} cede
+                    </button>
+                    <button
+                      className={`wallwall-choice ${chosen === ww.groupB ? "wallwall-choice--on" : ""}`}
+                      disabled={!hasThickness}
+                      onClick={() => handleWallWallDecision(ww.jointIndex, ww.groupB, ww.groupA, ww.groupB)}
+                    >
+                      {labelB} cede
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
 
         {selectedGroupIds.size === 1 && (() => {
           const selId = Array.from(selectedGroupIds)[0];
