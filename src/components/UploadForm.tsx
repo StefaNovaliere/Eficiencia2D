@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { parsePipeline, decomposePanels, nestDecomposedPanels, generateFromNesting, reclassifyWithMinArea } from "@/core/pipeline";
+import { parsePipeline, decomposePanels, nestDecomposedPanels, generateFromNesting, reclassifyWithMinArea, applyMerges } from "@/core/pipeline";
 import type { Phase1Result, ClassificationOverride, NestingPreviewData } from "@/core/pipeline";
 import ReviewScreen from "./ReviewScreen";
 import NestingPreview from "./NestingPreview";
@@ -26,6 +26,7 @@ interface PersistedSession {
   overrides: ClassificationOverride[];
   /** Wall-wall yield decisions serialized as [jointIndex, yieldGroupId] pairs. */
   wallWallDecisions: [number, number][];
+  merges?: number[][];
 }
 
 function bufferToBase64(buf: ArrayBuffer): string {
@@ -57,6 +58,7 @@ export default function UploadForm() {
   const [nestingData, setNestingData] = useState<NestingPreviewData | null>(null);
   const [savedOverrides, setSavedOverrides] = useState<ClassificationOverride[]>([]);
   const [savedWallWallDecisions, setSavedWallWallDecisions] = useState<Map<number, number>>(() => new Map());
+  const [savedMerges, setSavedMerges] = useState<number[][]>([]);
   const [sheetConfig, setSheetConfig] = useState<SheetConfig>(() => ({ ...DEFAULT_SHEET }));
   const [paymentBypass, setPaymentBypass] = useState(false);
   const dropRef = useRef<HTMLDivElement>(null);
@@ -93,6 +95,8 @@ export default function UploadForm() {
       setSavedOverrides(parsed.overrides);
       const restoredDecisions = new Map<number, number>(parsed.wallWallDecisions ?? []);
       setSavedWallWallDecisions(restoredDecisions);
+      const restoredMerges = parsed.merges ?? [];
+      setSavedMerges(restoredMerges);
 
       const p1 = parsePipeline(parsed.fileName, buffer);
       if (p1.faces.length === 0) {
@@ -101,6 +105,7 @@ export default function UploadForm() {
       }
       setPhase1Result(p1);
 
+      const merged = restoredMerges.length > 0 ? applyMerges(p1, restoredMerges) : p1;
       const opts: PipelineOptions = {
         scaleDenom: parsed.scale,
         paper: parsed.paper,
@@ -108,7 +113,7 @@ export default function UploadForm() {
         sheetConfig: parsed.sheetConfig,
         minAreaM2: parsed.minAreaM2,
       };
-      const decomposed = decomposePanels(p1, opts, parsed.overrides, restoredDecisions);
+      const decomposed = decomposePanels(merged, opts, parsed.overrides, restoredDecisions);
       const nesting = nestDecomposedPanels(decomposed, parsed.sheetConfig, parsed.scale);
       setNestingData(nesting);
       setStatus("nesting");
@@ -216,11 +221,13 @@ export default function UploadForm() {
   const handleReviewConfirm = async (
     overrides: ClassificationOverride[],
     wallWallDecisions: Map<number, number>,
+    merges: number[][],
   ) => {
     if (!phase1Result || !file) return;
 
     setSavedOverrides(overrides);
     setSavedWallWallDecisions(wallWallDecisions);
+    setSavedMerges(merges);
 
     try {
       const opts: PipelineOptions = {
@@ -231,9 +238,10 @@ export default function UploadForm() {
         minAreaM2,
       };
 
+      const merged = merges.length > 0 ? applyMerges(phase1Result, merges) : phase1Result;
       const decomposed = await new Promise<ReturnType<typeof decomposePanels>>(
         (resolve) => {
-          setTimeout(() => resolve(decomposePanels(phase1Result, opts, overrides, wallWallDecisions)), 50);
+          setTimeout(() => resolve(decomposePanels(merged, opts, overrides, wallWallDecisions)), 50);
         },
       );
 
@@ -252,6 +260,7 @@ export default function UploadForm() {
     setSheetConfig(newConfig);
     if (!phase1Result) return;
 
+    const merged = savedMerges.length > 0 ? applyMerges(phase1Result, savedMerges) : phase1Result;
     const opts: PipelineOptions = {
       scaleDenom: scale,
       paper,
@@ -259,15 +268,16 @@ export default function UploadForm() {
       sheetConfig: newConfig,
       minAreaM2,
     };
-    const decomposed = decomposePanels(phase1Result, opts, savedOverrides, savedWallWallDecisions);
+    const decomposed = decomposePanels(merged, opts, savedOverrides, savedWallWallDecisions);
     const nesting = nestDecomposedPanels(decomposed, newConfig, scale);
     setNestingData(nesting);
-  }, [phase1Result, savedOverrides, savedWallWallDecisions, scale, paper, minAreaM2]);
+  }, [phase1Result, savedOverrides, savedWallWallDecisions, savedMerges, scale, paper, minAreaM2]);
 
   const handleScaleChange = useCallback((newScale: number) => {
     setScale(newScale);
     if (!phase1Result) return;
 
+    const merged = savedMerges.length > 0 ? applyMerges(phase1Result, savedMerges) : phase1Result;
     const opts: PipelineOptions = {
       scaleDenom: newScale,
       paper,
@@ -275,10 +285,10 @@ export default function UploadForm() {
       sheetConfig,
       minAreaM2,
     };
-    const decomposed = decomposePanels(phase1Result, opts, savedOverrides, savedWallWallDecisions);
+    const decomposed = decomposePanels(merged, opts, savedOverrides, savedWallWallDecisions);
     const nesting = nestDecomposedPanels(decomposed, sheetConfig, newScale);
     setNestingData(nesting);
-  }, [phase1Result, savedOverrides, savedWallWallDecisions, paper, sheetConfig, minAreaM2]);
+  }, [phase1Result, savedOverrides, savedWallWallDecisions, savedMerges, paper, sheetConfig, minAreaM2]);
 
   // ─── Generation logic (called after payment or bypass) ───
 
@@ -351,12 +361,13 @@ export default function UploadForm() {
         sheetConfig,
         overrides: savedOverrides,
         wallWallDecisions: Array.from(savedWallWallDecisions.entries()),
+        merges: savedMerges,
       };
       sessionStorage.setItem(SESSION_KEY, JSON.stringify(persisted));
     } catch {
       // File too large for sessionStorage — silently skip persistence.
     }
-  }, [file, scale, paper, minAreaM2, sheetConfig, savedOverrides, savedWallWallDecisions]);
+  }, [file, scale, paper, minAreaM2, sheetConfig, savedOverrides, savedWallWallDecisions, savedMerges]);
 
   const clearSession = useCallback(() => {
     sessionStorage.removeItem(SESSION_KEY);
@@ -448,6 +459,7 @@ export default function UploadForm() {
     setNestingData(null);
     setSavedOverrides([]);
     setSavedWallWallDecisions(new Map());
+    setSavedMerges([]);
     setStatus("idle");
     setError("");
     clearSession();
@@ -494,6 +506,7 @@ export default function UploadForm() {
         onMinAreaChange={handleMinAreaChange}
         initialOverrides={savedOverrides}
         initialWallWallDecisions={savedWallWallDecisions}
+        initialMerges={savedMerges}
       />
     );
   }

@@ -515,7 +515,7 @@ describe("computeAdjustments axis field", () => {
 // ---------------------------------------------------------------------------
 // End-to-end: decomposePanels width clip
 // ---------------------------------------------------------------------------
-import { decomposePanels, computePanelIdByGroup } from "@/core/pipeline";
+import { decomposePanels, computePanelIdByGroup, suggestCoplanarMerges, applyMerges, areGroupsCoplanar } from "@/core/pipeline";
 import type { Phase1Result } from "@/core/pipeline";
 
 describe("decomposePanels wall-wall width clip", () => {
@@ -587,6 +587,7 @@ describe("decomposePanels wall-wall width clip", () => {
       stem: "test",
       warnings: [],
       preSplitFaceCount: faces.length,
+      suggestedMerges: [],
     };
 
     // Tell wall B (group 2) to yield — it should be trimmed by 0.1m (wall A's thickness)
@@ -636,6 +637,7 @@ describe("computePanelIdByGroup", () => {
       faces, rawFaces: faces, appliedAxis: "Y", groups,
       joints: [], adjustments: [], wallWallJoints: [], stem: "test", warnings: [],
       preSplitFaceCount: faces.length,
+      suggestedMerges: [],
     };
 
     const opts = { scaleDenom: 50, paper: "A4", minAreaM2: 0.01 };
@@ -801,5 +803,168 @@ describe("splitWallGroupsAtFloors", () => {
     expect(walls).toHaveLength(1);
     expect(walls[0].id).toBe(10);
     expect(result.faces.length).toBe(faces.length);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// suggestCoplanarMerges
+// ---------------------------------------------------------------------------
+
+describe("suggestCoplanarMerges", () => {
+  it("suggests merging a tiny coplanar wall into its large neighbor", () => {
+    const big = makeGroup({
+      id: 1, category: "wall",
+      representativeNormal: { x: 1, y: 0, z: 0 },
+      totalArea: 10.0,
+    });
+    const tiny = makeGroup({
+      id: 2, category: "wall",
+      representativeNormal: { x: 1, y: 0, z: 0 },
+      totalArea: 0.5,
+    });
+    const joints = [makeJoint(1, 2, 1.0, 0)];
+
+    const result = suggestCoplanarMerges([big, tiny], joints);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toContain(1);
+    expect(result[0]).toContain(2);
+  });
+
+  it("does NOT merge two same-size walls", () => {
+    const a = makeGroup({
+      id: 1, category: "wall",
+      representativeNormal: { x: 1, y: 0, z: 0 },
+      totalArea: 5.0,
+    });
+    const b = makeGroup({
+      id: 2, category: "wall",
+      representativeNormal: { x: 1, y: 0, z: 0 },
+      totalArea: 5.0,
+    });
+    const joints = [makeJoint(1, 2, 1.0, 0)];
+
+    const result = suggestCoplanarMerges([a, b], joints);
+    expect(result).toHaveLength(0);
+  });
+
+  it("does NOT merge walls with large dihedral angle", () => {
+    const big = makeGroup({
+      id: 1, category: "wall",
+      representativeNormal: { x: 1, y: 0, z: 0 },
+      totalArea: 10.0,
+    });
+    const tiny = makeGroup({
+      id: 2, category: "wall",
+      representativeNormal: { x: 0, y: 0, z: 1 },
+      totalArea: 0.5,
+    });
+    const joints = [makeJoint(1, 2, 1.0, 90)];
+
+    const result = suggestCoplanarMerges([big, tiny], joints);
+    expect(result).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// areGroupsCoplanar
+// ---------------------------------------------------------------------------
+
+describe("areGroupsCoplanar", () => {
+  it("returns true for parallel walls with close plane offsets", () => {
+    const a = makeGroup({
+      id: 1, category: "wall",
+      representativeNormal: { x: 1, y: 0, z: 0 },
+      centroid: { x: 5, y: 0, z: 0 },
+    });
+    const b = makeGroup({
+      id: 2, category: "wall",
+      representativeNormal: { x: 1, y: 0, z: 0 },
+      centroid: { x: 5.05, y: 1, z: 0 },
+    });
+    expect(areGroupsCoplanar([a, b])).toBe(true);
+  });
+
+  it("returns false for perpendicular walls", () => {
+    const a = makeGroup({
+      id: 1, category: "wall",
+      representativeNormal: { x: 1, y: 0, z: 0 },
+      centroid: { x: 5, y: 0, z: 0 },
+    });
+    const b = makeGroup({
+      id: 2, category: "wall",
+      representativeNormal: { x: 0, y: 0, z: 1 },
+      centroid: { x: 5, y: 0, z: 0 },
+    });
+    expect(areGroupsCoplanar([a, b])).toBe(false);
+  });
+
+  it("returns false for parallel walls with distant plane offsets", () => {
+    const a = makeGroup({
+      id: 1, category: "wall",
+      representativeNormal: { x: 1, y: 0, z: 0 },
+      centroid: { x: 1, y: 0, z: 0 },
+    });
+    const b = makeGroup({
+      id: 2, category: "wall",
+      representativeNormal: { x: 1, y: 0, z: 0 },
+      centroid: { x: 3, y: 0, z: 0 },
+    });
+    expect(areGroupsCoplanar([a, b])).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// applyMerges
+// ---------------------------------------------------------------------------
+
+describe("applyMerges", () => {
+  it("merges three groups into one survivor with combined faceIndices", () => {
+    const f1 = makeFace(
+      [{ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, { x: 1, y: 1, z: 0 }, { x: 0, y: 1, z: 0 }],
+      { x: 0, y: 0, z: 1 },
+    );
+    const f2 = makeFace(
+      [{ x: 1, y: 0, z: 0 }, { x: 2, y: 0, z: 0 }, { x: 2, y: 0.1, z: 0 }, { x: 1, y: 0.1, z: 0 }],
+      { x: 0, y: 0, z: 1 },
+    );
+    const f3 = makeFace(
+      [{ x: 2, y: 0, z: 0 }, { x: 4, y: 0, z: 0 }, { x: 4, y: 1, z: 0 }, { x: 2, y: 1, z: 0 }],
+      { x: 0, y: 0, z: 1 },
+    );
+    const faces = [f1, f2, f3];
+
+    const g1 = makeGroup({ id: 10, category: "wall", representativeNormal: { x: 0, y: 0, z: 1 }, faceIndices: [0], totalArea: 1.0 });
+    const g2 = makeGroup({ id: 20, category: "wall", representativeNormal: { x: 0, y: 0, z: 1 }, faceIndices: [1], totalArea: 0.1 });
+    const g3 = makeGroup({ id: 30, category: "wall", representativeNormal: { x: 0, y: 0, z: 1 }, faceIndices: [2], totalArea: 2.0 });
+
+    const phase1: Phase1Result = {
+      faces, rawFaces: faces, appliedAxis: "Y",
+      groups: [g1, g2, g3],
+      joints: [], adjustments: [], wallWallJoints: [],
+      stem: "test", warnings: [],
+      preSplitFaceCount: faces.length,
+      suggestedMerges: [],
+    };
+
+    const merged = applyMerges(phase1, [[10, 20, 30]]);
+
+    // Survivor is group 30 (largest area).
+    expect(merged.groups).toHaveLength(1);
+    expect(merged.groups[0].id).toBe(30);
+    expect(merged.groups[0].faceIndices).toHaveLength(3);
+    expect(merged.groups[0].totalArea).toBeCloseTo(3.1);
+  });
+
+  it("returns unchanged phase1 when merges is empty", () => {
+    const phase1: Phase1Result = {
+      faces: [], rawFaces: [], appliedAxis: "Y",
+      groups: [], joints: [], adjustments: [], wallWallJoints: [],
+      stem: "test", warnings: [],
+      preSplitFaceCount: 0,
+      suggestedMerges: [],
+    };
+
+    const result = applyMerges(phase1, []);
+    expect(result).toBe(phase1);
   });
 });
