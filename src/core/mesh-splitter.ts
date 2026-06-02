@@ -257,13 +257,12 @@ interface SlabPlane {
 }
 
 /**
- * Collect horizontal slab planes that can divide a wall — every group with a
- * strongly-horizontal normal, REGARDLESS of its floor/discard classification.
+ * Collect floor planes that can divide a wall — only groups classified as
+ * "floor" (the green pieces). A wall is split solely where an actual floor
+ * component crosses it; any other horizontal cut is ignored.
  *
- * A small floor slab demoted to "discard" (because its area falls below the
- * level-detection threshold) still physically divides any wall it passes
- * through, so it must act as a split plane. Each plane carries its footprint
- * bounding box so we can later check whether it actually crosses a given wall.
+ * Each plane carries its footprint bounding box so we can later check whether
+ * the floor actually crosses a given wall (and not just shares its elevation).
  */
 function collectSlabPlanes(
   groups: GeometryGroup[],
@@ -276,7 +275,7 @@ function collectSlabPlanes(
 
   for (const group of groups) {
     const effectiveCat = overrideMap.get(group.id) ?? group.category;
-    if (effectiveCat === "wall") continue; // a wall is not a dividing slab
+    if (effectiveCat !== "floor") continue; // only a floor (green) splits a wall
 
     const ny = Math.abs(getUpVal(group.representativeNormal, up));
     if (ny < 0.75) continue; // must be truly horizontal (not an inclined roof/ramp)

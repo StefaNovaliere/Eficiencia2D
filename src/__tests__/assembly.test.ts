@@ -805,9 +805,9 @@ describe("splitWallGroupsAtFloors", () => {
     expect(result.faces.length).toBe(faces.length);
   });
 
-  it("splits a wall at a DISCARDED horizontal slab (small floor demoted to discard)", () => {
-    // The dividing slab is classified "discard" (too small to be a real level),
-    // but it still physically crosses the wall, so the wall must be split.
+  it("does NOT split a wall at a DISCARDED horizontal slab (only floors split)", () => {
+    // A horizontal piece classified as "discard" must NOT cut the wall — only
+    // an actual floor (green) component does.
     const wallFace = makeWallFace(0, 5);
     const slabFace = makeFloorFace(2.5);
     const faces: Face3D[] = [wallFace, slabFace];
@@ -827,7 +827,8 @@ describe("splitWallGroupsAtFloors", () => {
 
     const result = splitWallGroupsAtFloors(faces, [wallGroup, slabGroup], new Map(), "Y");
     const walls = result.groups.filter(g => g.category === "wall");
-    expect(walls).toHaveLength(2);
+    expect(walls).toHaveLength(1);
+    expect(walls[0].id).toBe(10);
   });
 
   it("does NOT split a wall at a slab whose footprint is elsewhere", () => {
