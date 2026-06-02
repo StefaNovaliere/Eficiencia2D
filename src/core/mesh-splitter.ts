@@ -257,9 +257,11 @@ interface SlabPlane {
 }
 
 /**
- * Collect floor planes that can divide a wall — only groups classified as
- * "floor" (the green pieces). A wall is split solely where an actual floor
- * component crosses it; any other horizontal cut is ignored.
+ * Collect floor planes that can divide a wall. Includes groups classified as
+ * "floor" plus horizontal groups that level detection originally classified as
+ * "floor" but were later demoted to "discard" for being small (e.g. a small
+ * landing slab). Horizontal "discard" pieces that were NEVER floors (window
+ * sills, ledges, balcony edges) are excluded — they must not split walls.
  *
  * Each plane carries its footprint bounding box so we can later check whether
  * the floor actually crosses a given wall (and not just shares its elevation).
@@ -273,8 +275,6 @@ function collectSlabPlanes(
   const [axA, axB] = UP_HORIZ[up];
   const planes: SlabPlane[] = [];
 
-  const MIN_SLAB_AREA = 0.10; // m² — minimum for a horizontal to split walls
-
   for (const group of groups) {
     const effectiveCat = overrideMap.get(group.id) ?? group.category;
 
@@ -282,8 +282,8 @@ function collectSlabPlanes(
     if (ny < 0.75) continue; // must be truly horizontal (not an inclined roof/ramp)
 
     const isFloor = effectiveCat === "floor";
-    const isDemotedSlab = effectiveCat === "discard" && group.totalArea >= MIN_SLAB_AREA;
-    if (!isFloor && !isDemotedSlab) continue;
+    const isDemotedFloor = effectiveCat === "discard" && group.originalCategory === "floor";
+    if (!isFloor && !isDemotedFloor) continue;
 
     let sum = 0, count = 0;
     let minA = Infinity, maxA = -Infinity, minB = Infinity, maxB = -Infinity;
@@ -395,6 +395,7 @@ export function splitWallGroupsAtFloors(
         id: k === 0 ? group.id : nextId++,
         label: `${group.label} (${k + 1}/${segments.length})`,
         category: group.category,
+        originalCategory: group.originalCategory,
         faceIndices,
         totalArea: area,
         centroid,

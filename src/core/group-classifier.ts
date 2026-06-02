@@ -38,6 +38,9 @@ export interface GeometryGroup {
   thickness?: number;
   minY?: number;
   maxY?: number;
+  /** Category before the small-area demotion step. Lets consumers tell a
+   *  demoted floor slab apart from a horizontal piece that was never a floor. */
+  originalCategory?: FaceCategory;
 }
 
 // ---------------------------------------------------------------------------
@@ -312,6 +315,7 @@ export interface Subgroup {
   centroid: Vec3;
   extent: number;
   totalArea: number;
+  originalCategory?: FaceCategory;
 }
 
 function buildSubgroup(
@@ -400,6 +404,12 @@ export function classifyIntoGroups(
         if (sg) subgroups.push(sg);
       }
     }
+  }
+
+  // Record the pre-demotion category so a demoted floor slab can later be told
+  // apart from a horizontal piece that was never classified as a floor.
+  for (const sg of subgroups) {
+    sg.originalCategory = sg.category;
   }
 
   // Demote small components to "discard". This runs before thin-twin merging
@@ -517,6 +527,24 @@ export function classifyIntoGroups(
     }
     if (bestArea < 0) dominant = "discard";
 
+    // Dominant *original* category (pre-demotion), computed the same way.
+    const origByCat = new Map<FaceCategory, number>();
+    for (const sg of merged) {
+      const oc = sg.originalCategory ?? sg.category;
+      origByCat.set(oc, (origByCat.get(oc) ?? 0) + sg.totalArea);
+    }
+    let origDominant: FaceCategory = "discard";
+    let origBestArea = -1;
+    for (const cat of CATEGORY_PRIORITY) {
+      const a = origByCat.get(cat);
+      if (a === undefined) continue;
+      if (cat !== "discard" && a > origBestArea) {
+        origDominant = cat;
+        origBestArea = a;
+      }
+    }
+    if (origBestArea < 0) origDominant = "discard";
+
     // Combine faces, recompute centroid, total area, and Y extent.
     const allFaceIndices: number[] = [];
     let totalArea = 0;
@@ -562,6 +590,7 @@ export function classifyIntoGroups(
       thickness: detectedThickness,
       minY: groupMinY === Infinity ? undefined : groupMinY,
       maxY: groupMaxY === -Infinity ? undefined : groupMaxY,
+      originalCategory: origDominant,
     });
   }
 
