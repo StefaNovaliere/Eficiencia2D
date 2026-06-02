@@ -806,12 +806,15 @@ describe("splitWallGroupsAtFloors", () => {
     expect(result.faces.length).toBe(faces.length);
   });
 
-  it("does NOT split a wall at a DISCARDED horizontal slab (only floors split)", () => {
-    // A horizontal piece classified as "discard" must NOT cut the wall — only
-    // an actual floor (green) component does.
+  it("does NOT split a wall at a tiny DISCARDED horizontal piece (modeling garbage)", () => {
     const wallFace = makeWallFace(0, 5);
-    const slabFace = makeFloorFace(2.5);
-    const faces: Face3D[] = [wallFace, slabFace];
+    const tinySlabFace = makeFace([
+      { x: 0, y: 2.5, z: 0 },
+      { x: 0.1, y: 2.5, z: 0 },
+      { x: 0.1, y: 2.5, z: 0.1 },
+      { x: 0, y: 2.5, z: 0.1 },
+    ], { x: 0, y: 1, z: 0 });
+    const faces: Face3D[] = [wallFace, tinySlabFace];
 
     const wallGroup = makeGroup({
       id: 10, category: "wall",
@@ -823,6 +826,7 @@ describe("splitWallGroupsAtFloors", () => {
       id: 20, category: "discard",
       representativeNormal: { x: 0, y: 1, z: 0 },
       faceIndices: [1],
+      totalArea: 0.01,
       minY: 2.5, maxY: 2.5,
     });
 
@@ -830,6 +834,31 @@ describe("splitWallGroupsAtFloors", () => {
     const walls = result.groups.filter(g => g.category === "wall");
     expect(walls).toHaveLength(1);
     expect(walls[0].id).toBe(10);
+  });
+
+  it("DOES split a wall at a demoted slab with sufficient area (>= 0.10 m²)", () => {
+    const wallFace = makeWallFace(0, 5);
+    const slabFace = makeFloorFace(2.5);
+    const faces: Face3D[] = [wallFace, slabFace];
+
+    const wallGroup = makeGroup({
+      id: 10, category: "wall",
+      representativeNormal: { x: 0, y: 0, z: 1 },
+      faceIndices: [0],
+      minY: 0, maxY: 5,
+      thickness: 0.06,
+    });
+    const slabGroup = makeGroup({
+      id: 20, category: "discard",
+      representativeNormal: { x: 0, y: 1, z: 0 },
+      faceIndices: [1],
+      totalArea: 0.30,
+      minY: 2.5, maxY: 2.5,
+    });
+
+    const result = splitWallGroupsAtFloors(faces, [wallGroup, slabGroup], new Map(), "Y");
+    const walls = result.groups.filter(g => g.category === "wall");
+    expect(walls).toHaveLength(2);
   });
 
   it("does NOT split a wall at a slab whose footprint is elsewhere", () => {
@@ -1337,6 +1366,86 @@ describe("computeAdjustments topology enrichment", () => {
     const { wallWallJoints } = computeAdjustments([joint], [gA, gB], undefined, faces);
     expect(wallWallJoints[0].topology).toBe("T");
     // B is at its end (x=0 is the start of B's 0..5 span), A is at middle → B yields
+    expect(wallWallJoints[0].suggestedYieldGroupId).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Wall length tiebreaker in chooseWallWallYielder
+// ---------------------------------------------------------------------------
+
+describe("wall length tiebreaker", () => {
+  it("short wall yields when length ratio < 0.6 and diff > 2m", () => {
+    // Wall A: 3m long (z=0..3). Wall B: 10m long (x=0..10).
+    // ratio = 3/10 = 0.3, diff = 7m → triggers length tiebreaker.
+    const wallAFace = makeFace(
+      [{ x: 0, y: 0, z: 0 }, { x: 0, y: 3, z: 0 }, { x: 0, y: 3, z: 3 }, { x: 0, y: 0, z: 3 }],
+      { x: -1, y: 0, z: 0 },
+    );
+    const wallBFace = makeFace(
+      [{ x: 0, y: 0, z: 0 }, { x: 10, y: 0, z: 0 }, { x: 10, y: 3, z: 0 }, { x: 0, y: 3, z: 0 }],
+      { x: 0, y: 0, z: -1 },
+    );
+    const faces: Face3D[] = [wallAFace, wallBFace];
+
+    const gA = makeGroup({
+      id: 1, category: "wall",
+      representativeNormal: { x: -1, y: 0, z: 0 },
+      faceIndices: [0], thickness: 0.10,
+    });
+    const gB = makeGroup({
+      id: 2, category: "wall",
+      representativeNormal: { x: 0, y: 0, z: -1 },
+      faceIndices: [1], thickness: 0.10,
+    });
+
+    const joint = {
+      groupA: 1, groupB: 2,
+      totalLength: 3, dihedralAngle: 90,
+      edgeMid: { x: 0, y: 1.5, z: 0 },
+      edgeDir: { x: 0, y: 1, z: 0 },
+      horizontalFrac: 0,
+    };
+
+    const { wallWallJoints } = computeAdjustments([joint], [gA, gB], undefined, faces);
+    // Wall A (3m) is clearly shorter → it yields
+    expect(wallWallJoints[0].suggestedYieldGroupId).toBe(1);
+  });
+
+  it("similar lengths fall through to topology/orientation", () => {
+    // Wall A: 4m (z=0..4). Wall B: 5m (x=0..5).
+    // ratio = 4/5 = 0.8 → doesn't meet < 0.6 threshold → falls through.
+    const wallAFace = makeFace(
+      [{ x: 0, y: 0, z: 0 }, { x: 0, y: 3, z: 0 }, { x: 0, y: 3, z: 4 }, { x: 0, y: 0, z: 4 }],
+      { x: -1, y: 0, z: 0 },
+    );
+    const wallBFace = makeFace(
+      [{ x: 0, y: 0, z: 0 }, { x: 5, y: 0, z: 0 }, { x: 5, y: 3, z: 0 }, { x: 0, y: 3, z: 0 }],
+      { x: 0, y: 0, z: -1 },
+    );
+    const faces: Face3D[] = [wallAFace, wallBFace];
+
+    const gA = makeGroup({
+      id: 1, category: "wall",
+      representativeNormal: { x: -1, y: 0, z: 0 },
+      faceIndices: [0], thickness: 0.10,
+    });
+    const gB = makeGroup({
+      id: 2, category: "wall",
+      representativeNormal: { x: 0, y: 0, z: -1 },
+      faceIndices: [1], thickness: 0.10,
+    });
+
+    const joint = {
+      groupA: 1, groupB: 2,
+      totalLength: 3, dihedralAngle: 90,
+      edgeMid: { x: 0, y: 1.5, z: 0 },
+      edgeDir: { x: 0, y: 1, z: 0 },
+      horizontalFrac: 0,
+    };
+
+    const { wallWallJoints } = computeAdjustments([joint], [gA, gB], undefined, faces);
+    // Lengths are similar → falls to orientation (E-W wall gB yields)
     expect(wallWallJoints[0].suggestedYieldGroupId).toBe(2);
   });
 });
