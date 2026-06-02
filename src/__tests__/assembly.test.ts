@@ -515,7 +515,7 @@ describe("computeAdjustments axis field", () => {
 // ---------------------------------------------------------------------------
 // End-to-end: decomposePanels width clip
 // ---------------------------------------------------------------------------
-import { decomposePanels, computePanelIdByGroup, suggestCoplanarMerges, applyMerges, areGroupsCoplanar } from "@/core/pipeline";
+import { decomposePanels, computePanelIdByGroup, suggestCoplanarMerges, applyMerges, areGroupsCoplanar, canMergeGroups } from "@/core/pipeline";
 import type { Phase1Result } from "@/core/pipeline";
 
 describe("decomposePanels wall-wall width clip", () => {
@@ -863,6 +863,50 @@ describe("suggestCoplanarMerges", () => {
     const result = suggestCoplanarMerges([big, tiny], joints);
     expect(result).toHaveLength(0);
   });
+
+  it("does NOT merge coplanar walls separated by a floor slab", () => {
+    const upper = makeGroup({
+      id: 1, category: "wall",
+      representativeNormal: { x: 1, y: 0, z: 0 },
+      totalArea: 10.0, minY: 3.0, maxY: 6.0,
+    });
+    const lower = makeGroup({
+      id: 2, category: "wall",
+      representativeNormal: { x: 1, y: 0, z: 0 },
+      totalArea: 0.5, minY: 0.0, maxY: 3.0,
+    });
+    const floor = makeGroup({
+      id: 3, category: "floor",
+      representativeNormal: { x: 0, y: 1, z: 0 },
+      totalArea: 20.0, minY: 2.9, maxY: 3.1,
+    });
+    const joints = [makeJoint(1, 2, 1.0, 0)];
+
+    const result = suggestCoplanarMerges([upper, lower, floor], joints);
+    expect(result).toHaveLength(0);
+  });
+
+  it("DOES merge coplanar walls at the same height level (no floor between)", () => {
+    const big = makeGroup({
+      id: 1, category: "wall",
+      representativeNormal: { x: 1, y: 0, z: 0 },
+      totalArea: 10.0, minY: 0.0, maxY: 3.0,
+    });
+    const tiny = makeGroup({
+      id: 2, category: "wall",
+      representativeNormal: { x: 1, y: 0, z: 0 },
+      totalArea: 0.5, minY: 0.0, maxY: 3.0,
+    });
+    const floor = makeGroup({
+      id: 3, category: "floor",
+      representativeNormal: { x: 0, y: 1, z: 0 },
+      totalArea: 20.0, minY: -0.1, maxY: 0.1,
+    });
+    const joints = [makeJoint(1, 2, 1.0, 0)];
+
+    const result = suggestCoplanarMerges([big, tiny, floor], joints);
+    expect(result).toHaveLength(1);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -910,6 +954,49 @@ describe("areGroupsCoplanar", () => {
       centroid: { x: 3, y: 0, z: 0 },
     });
     expect(areGroupsCoplanar([a, b])).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// canMergeGroups (coplanar + no floor between)
+// ---------------------------------------------------------------------------
+
+describe("canMergeGroups", () => {
+  it("returns true for coplanar walls at the same level", () => {
+    const a = makeGroup({
+      id: 1, category: "wall",
+      representativeNormal: { x: 1, y: 0, z: 0 },
+      centroid: { x: 5, y: 1.5, z: 0 },
+      minY: 0, maxY: 3,
+    });
+    const b = makeGroup({
+      id: 2, category: "wall",
+      representativeNormal: { x: 1, y: 0, z: 0 },
+      centroid: { x: 5.05, y: 1.5, z: 2 },
+      minY: 0, maxY: 3,
+    });
+    expect(canMergeGroups([a, b], [a, b])).toBe(true);
+  });
+
+  it("returns false for coplanar walls separated by a floor", () => {
+    const a = makeGroup({
+      id: 1, category: "wall",
+      representativeNormal: { x: 1, y: 0, z: 0 },
+      centroid: { x: 5, y: 1.5, z: 0 },
+      minY: 0, maxY: 3,
+    });
+    const b = makeGroup({
+      id: 2, category: "wall",
+      representativeNormal: { x: 1, y: 0, z: 0 },
+      centroid: { x: 5.05, y: 4.5, z: 0 },
+      minY: 3, maxY: 6,
+    });
+    const floor = makeGroup({
+      id: 3, category: "floor",
+      representativeNormal: { x: 0, y: 1, z: 0 },
+      totalArea: 20, minY: 2.9, maxY: 3.1,
+    });
+    expect(canMergeGroups([a, b], [a, b, floor])).toBe(false);
   });
 });
 
