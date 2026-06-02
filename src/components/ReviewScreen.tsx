@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 import GroupList from "./GroupList";
 import VisibilityFilters from "./VisibilityFilters";
 import type { FaceCategory, GeometryGroup } from "@/core/group-classifier";
-import { reclassifyWithAxis, computePanelIdByGroup, applyMerges, canMergeGroups } from "@/core/pipeline";
+import { reclassifyWithAxis, computePanelIdByGroup, applyMerges, areGroupsCoplanar } from "@/core/pipeline";
 import type { Phase1Result, ClassificationOverride } from "@/core/pipeline";
 import type { Joint } from "@/core/joint-detector";
 import type { DimensionAdjustment } from "@/core/assembly-adjuster";
@@ -209,7 +209,7 @@ export default function ReviewScreen({
       .map((id) => effectivePhase1.groups.find((g) => g.id === id))
       .filter((g): g is GeometryGroup => g != null);
     if (selected.length < 2) return false;
-    return canMergeGroups(selected, effectivePhase1.groups);
+    return areGroupsCoplanar(selected);
   }, [selectedGroupIds, effectivePhase1.groups]);
 
   const handleMergeSelected = useCallback(() => {
