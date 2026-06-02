@@ -14,6 +14,9 @@
 
 import type { Joint } from "./joint-detector";
 import type { GeometryGroup } from "./group-classifier";
+import type { Face3D } from "./types";
+import { classifyJointTopology, isCriticalJoint } from "./joint-topology";
+import type { JointTopology, JointTopologyInfo } from "./joint-topology";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -41,6 +44,10 @@ export interface WallWallJoint {
    * either side, so no adjustment is possible.
    */
   suggestedYieldGroupId?: number;
+  /** Geometric type of the joint (L corner / T / X crossing). */
+  topology?: JointTopology;
+  /** Whether this joint's decision visibly affects the result (worth surfacing). */
+  critical?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -55,6 +62,7 @@ export function computeAdjustments(
   joints: Joint[],
   groups: GeometryGroup[],
   wallWallDecisions?: Map<number, number>,
+  faces?: Face3D[],
 ): { adjustments: DimensionAdjustment[]; wallWallJoints: WallWallJoint[] } {
   const groupById = new Map<number, GeometryGroup>();
   for (const g of groups) groupById.set(g.id, g);
@@ -102,25 +110,25 @@ export function computeAdjustments(
         jointIndex: ji,
       });
     } else if (!aIsFloor && !bIsFloor) {
-      // Wall–wall joint: register for manual resolution, with a safe default.
+      // Wall–wall joint: register with a deterministic physical default.
       const tA = gA.thickness ?? 0;
       const tB = gB.thickness ?? 0;
-      let suggestedYieldGroupId: number | undefined;
-      if (tA > 0.001 && tB > 0.001) {
-        // Both measured → thinner wall yields.
-        suggestedYieldGroupId = tA <= tB ? gA.id : gB.id;
-      } else if (tA > 0.001) {
-        // Only A has thickness → B yields (shortened by A's thickness).
-        suggestedYieldGroupId = gB.id;
-      } else if (tB > 0.001) {
-        suggestedYieldGroupId = gA.id;
-      } // else: neither has thickness → no suggestion, no possible adjustment.
+
+      // Geometric type of the joint (needs face footprints). Used for the
+      // tie-break default and to flag joints worth surfacing to the user.
+      const topoInfo = faces ? classifyJointTopology(joint, gA, gB, faces) : undefined;
+      const topology: JointTopology = topoInfo?.topology ?? "unknown";
+
+      const suggestedYieldGroupId = chooseWallWallYielder(gA, gB, tA, tB, topoInfo);
+      const critical = isCriticalJoint(topology, tA, tB);
 
       wallWallJoints.push({
         jointIndex: ji,
         groupA: gA.id,
         groupB: gB.id,
         suggestedYieldGroupId,
+        topology,
+        critical,
       });
 
       // Apply user decision if present.
@@ -174,6 +182,56 @@ export function computeAdjustments(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Decide which wall yields at a wall–wall joint, using deterministic physical
+ * rules so an untouched model never produces overlapping pieces:
+ *
+ *   1. Clearly different thickness → the THINNER wall yields (thicker passes
+ *      through, like a partition meeting a load-bearing wall).
+ *   2. Near-equal thickness, joint is a T → the STEM yields (the wall that ends
+ *      against the middle of the other).
+ *   3. Near-equal thickness, L or X → the EAST–WEST wall yields (the North–South
+ *      wall "wins"): arbitrary but consistent so the result is predictable.
+ *
+ * Returns undefined only when neither wall has a measurable thickness.
+ */
+function chooseWallWallYielder(
+  gA: GeometryGroup,
+  gB: GeometryGroup,
+  tA: number,
+  tB: number,
+  topoInfo?: JointTopologyInfo,
+): number | undefined {
+  // No thickness on either side → nothing to subtract.
+  if (tA <= 0.001 && tB <= 0.001) return undefined;
+  // Only one side measured → the other yields (so there's a thickness to trim).
+  if (tA > 0.001 && tB <= 0.001) return gB.id;
+  if (tB > 0.001 && tA <= 0.001) return gA.id;
+
+  // Both measured. Clearly different (ratio < 0.9) → thinner yields.
+  const lo = Math.min(tA, tB);
+  const hi = Math.max(tA, tB);
+  if (lo / hi < 0.9) return tA <= tB ? gA.id : gB.id;
+
+  // Near-equal thickness: break the tie geometrically.
+  if (topoInfo && topoInfo.topology === "T") {
+    // The stem (the wall whose edge sits at its own end) yields.
+    if (topoInfo.aAtEnd && !topoInfo.bAtEnd) return gA.id;
+    if (topoInfo.bAtEnd && !topoInfo.aAtEnd) return gB.id;
+  }
+
+  // L / X / unknown tie → North–South wall wins, East–West wall yields.
+  // A wall running North–South has an East–West normal (|x| dominant); the
+  // East–West wall has a North–South normal (|z| dominant) and is the yielder.
+  const aIsEastWest = Math.abs(gA.representativeNormal.z) >= Math.abs(gA.representativeNormal.x);
+  const bIsEastWest = Math.abs(gB.representativeNormal.z) >= Math.abs(gB.representativeNormal.x);
+  if (aIsEastWest && !bIsEastWest) return gA.id;
+  if (bIsEastWest && !aIsEastWest) return gB.id;
+
+  // Same orientation family → stable fallback by id order.
+  return gA.id <= gB.id ? gA.id : gB.id;
+}
 
 /**
  * Check if a wall sits on top of a floor slab.
