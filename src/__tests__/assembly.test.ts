@@ -822,6 +822,7 @@ describe("splitWallGroupsAtFloors", () => {
       faceIndices: [0],
       minY: 0, maxY: 5,
     });
+    // Garbage: never promoted to floor (originalCategory left undefined / "discard").
     const slabGroup = makeGroup({
       id: 20, category: "discard",
       representativeNormal: { x: 0, y: 1, z: 0 },
@@ -836,7 +837,40 @@ describe("splitWallGroupsAtFloors", () => {
     expect(walls[0].id).toBe(10);
   });
 
-  it("DOES split a wall at a demoted slab with sufficient area (>= 0.10 m²)", () => {
+  it("does NOT split a wall at a horizontal discard that was never a floor (e.g. window sill)", () => {
+    // A 0.5 m² horizontal piece — well above the old 0.10 m² area bar — but it
+    // was never a floor (originalCategory = "discard"), so it must not split.
+    const wallFace = makeWallFace(0, 5);
+    const sillFace = makeFace([
+      { x: 0, y: 2.5, z: 0 },
+      { x: 1, y: 2.5, z: 0 },
+      { x: 1, y: 2.5, z: 0.5 },
+      { x: 0, y: 2.5, z: 0.5 },
+    ], { x: 0, y: 1, z: 0 });
+    const faces: Face3D[] = [wallFace, sillFace];
+
+    const wallGroup = makeGroup({
+      id: 10, category: "wall",
+      representativeNormal: { x: 0, y: 0, z: 1 },
+      faceIndices: [0],
+      minY: 0, maxY: 5,
+    });
+    const sillGroup = makeGroup({
+      id: 20, category: "discard",
+      representativeNormal: { x: 0, y: 1, z: 0 },
+      faceIndices: [1],
+      totalArea: 0.50,
+      minY: 2.5, maxY: 2.5,
+      originalCategory: "discard",
+    });
+
+    const result = splitWallGroupsAtFloors(faces, [wallGroup, sillGroup], new Map(), "Y");
+    const walls = result.groups.filter(g => g.category === "wall");
+    expect(walls).toHaveLength(1);
+    expect(walls[0].id).toBe(10);
+  });
+
+  it("DOES split a wall at a demoted floor (originalCategory = floor)", () => {
     const wallFace = makeWallFace(0, 5);
     const slabFace = makeFloorFace(2.5);
     const faces: Face3D[] = [wallFace, slabFace];
@@ -848,12 +882,14 @@ describe("splitWallGroupsAtFloors", () => {
       minY: 0, maxY: 5,
       thickness: 0.06,
     });
+    // A small real floor slab that level detection found but the area gate demoted.
     const slabGroup = makeGroup({
       id: 20, category: "discard",
       representativeNormal: { x: 0, y: 1, z: 0 },
       faceIndices: [1],
       totalArea: 0.30,
       minY: 2.5, maxY: 2.5,
+      originalCategory: "floor",
     });
 
     const result = splitWallGroupsAtFloors(faces, [wallGroup, slabGroup], new Map(), "Y");
