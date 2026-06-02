@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 import GroupList from "./GroupList";
 import VisibilityFilters from "./VisibilityFilters";
 import type { FaceCategory, GeometryGroup } from "@/core/group-classifier";
-import { reclassifyWithAxis, computePanelIdByGroup, applyMerges, areGroupsCoplanar } from "@/core/pipeline";
+import { reclassifyWithAxis, computePanelIdByGroup, applyMerges, canMergeGroups } from "@/core/pipeline";
 import type { Phase1Result, ClassificationOverride } from "@/core/pipeline";
 import type { Joint } from "@/core/joint-detector";
 import type { DimensionAdjustment } from "@/core/assembly-adjuster";
@@ -205,11 +205,11 @@ export default function ReviewScreen({
   // Merge selected coplanar groups into one panel.
   const canMergeSelected = useMemo(() => {
     if (selectedGroupIds.size < 2) return false;
-    const groups = Array.from(selectedGroupIds)
+    const selected = Array.from(selectedGroupIds)
       .map((id) => effectivePhase1.groups.find((g) => g.id === id))
       .filter((g): g is GeometryGroup => g != null);
-    if (groups.length < 2) return false;
-    return areGroupsCoplanar(groups);
+    if (selected.length < 2) return false;
+    return canMergeGroups(selected, effectivePhase1.groups);
   }, [selectedGroupIds, effectivePhase1.groups]);
 
   const handleMergeSelected = useCallback(() => {
