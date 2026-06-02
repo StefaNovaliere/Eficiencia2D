@@ -9,7 +9,6 @@ import { reclassifyWithAxis, computePanelIdByGroup, applyMerges, areGroupsCoplan
 import type { Phase1Result, ClassificationOverride } from "@/core/pipeline";
 import type { Joint } from "@/core/joint-detector";
 import type { DimensionAdjustment } from "@/core/assembly-adjuster";
-import type { NodeMarker } from "./ModelViewer";
 
 export type WallWallDecisions = Map<number, number>;
 
@@ -38,44 +37,6 @@ export interface ReviewScreenProps {
 }
 
 const MIN_AREA_OPTIONS = [0, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0];
-
-// ---------------------------------------------------------------------------
-// Corner diagram: two walls (A horizontal, B vertical) meeting at a corner.
-// The wall marked `cut` is pulled back from the contested corner cell, which
-// the other wall then fills — showing visually which piece gets shortened.
-// ---------------------------------------------------------------------------
-
-const WW_BLUE = "#3b82f6"; // wall A
-const WW_PURPLE = "#8b5cf6"; // wall B
-
-function JointCornerDiagram({ cut }: { cut: "A" | "B" | null }) {
-  // Corner cell (the overlap) = x[16..30], y[42..56].
-  const aX = cut === "A" ? 30 : 16; // A pulled back from the corner when cut
-  const aW = 90 - aX;
-  const bBottom = cut === "B" ? 42 : 56; // B pulled up from the corner when cut
-  return (
-    <svg viewBox="0 0 96 72" className="ww-diagram" aria-hidden="true">
-      {/* Contested corner cell */}
-      <rect
-        x={16} y={42} width={14} height={14} rx={2}
-        fill="none" stroke="#ef4444" strokeWidth={1} strokeDasharray="3 2"
-        opacity={cut ? 0.9 : 0.4}
-      />
-      {/* Wall A — horizontal, along the bottom */}
-      <rect
-        x={aX} y={42} width={aW} height={14} rx={2}
-        fill={WW_BLUE} opacity={cut === "A" ? 0.35 : 0.95}
-      />
-      {/* Wall B — vertical, along the left */}
-      <rect
-        x={16} y={8} width={14} height={bBottom - 8} rx={2}
-        fill={WW_PURPLE} opacity={cut === "B" ? 0.35 : 0.95}
-      />
-      <text x={84} y={53} className="ww-diagram-label">A</text>
-      <text x={23} y={18} className="ww-diagram-label" textAnchor="middle">B</text>
-    </svg>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Component
@@ -120,11 +81,6 @@ export default function ReviewScreen({
       return m;
     },
   );
-  const [wallWallOpen, setWallWallOpen] = useState(false);
-  const [showOnlyCritical, setShowOnlyCritical] = useState(true);
-  const [xrayOn, setXrayOn] = useState(false);
-  const [focusedJoint, setFocusedJoint] = useState<number | undefined>();
-
   // Merge state: sets of group IDs to combine into single panels.
   const [merges, setMerges] = useState<number[][]>(
     () => initialMerges ?? phase1.suggestedMerges ?? [],
@@ -306,40 +262,6 @@ export default function ReviewScreen({
       }));
   }, [effectivePhase1.wallWallJoints, effectivePhase1.groups, overrides, panelIdByGroup]);
 
-  // Filtered wall-wall lists for progressive disclosure.
-  const criticalList = useMemo(
-    () => wallWallList.filter((w) => w.ww.critical),
-    [wallWallList],
-  );
-  const visibleWallWallList = showOnlyCritical ? criticalList : wallWallList;
-  const resolvedCount = wallWallList.filter((w) => w.hasThickness).length;
-  const criticalCount = criticalList.length;
-
-  // Node markers for 3D "X-ray" mode.
-  const nodeMarkers: NodeMarker[] = useMemo(() => {
-    if (!xrayOn) return [];
-    return visibleWallWallList.map(({ ww }) => {
-      const joint = effectivePhase1.joints[ww.jointIndex];
-      if (!joint) return null;
-      const isFocused = focusedJoint === ww.jointIndex ||
-        (selectedGroupIds.has(ww.groupA) && selectedGroupIds.has(ww.groupB));
-      return {
-        id: ww.jointIndex,
-        position: joint.edgeMid,
-        color: ww.critical ? 0xef4444 : 0x9ca3af,
-        selected: isFocused,
-      };
-    }).filter((m): m is NodeMarker => m != null);
-  }, [xrayOn, visibleWallWallList, effectivePhase1.joints, focusedJoint, selectedGroupIds]);
-
-  const handleSelectNode = useCallback((jointIndex: number) => {
-    const ww = effectivePhase1.wallWallJoints.find((w) => w.jointIndex === jointIndex);
-    if (!ww) return;
-    setSelectedGroupIds(new Set([ww.groupA, ww.groupB]));
-    setFocusedJoint(jointIndex);
-    setWallWallOpen(true);
-  }, [effectivePhase1.wallWallJoints]);
-
   return (
     <div className="review-overlay">
       <div className="review-viewer">
@@ -351,8 +273,6 @@ export default function ReviewScreen({
           visibleCategories={visibleCategories}
           onSelectGroup={handleSelectGroup}
           onToggleGroup={handleToggleGroup}
-          nodeMarkers={nodeMarkers}
-          onSelectNode={handleSelectNode}
         />
         <div className="review-viewer-overlay">
           <VisibilityFilters
@@ -367,18 +287,6 @@ export default function ReviewScreen({
           >
             Rotar eje ({phase1.appliedAxis === "Y" ? "Y↑" : "Z↑"})
           </button>
-          {wallWallList.length > 0 && (
-            <button
-              className={`axis-toggle-btn xray-toggle-btn ${xrayOn ? "xray-toggle-btn--on" : ""}`}
-              onClick={() => {
-                setXrayOn((on) => !on);
-                if (!xrayOn) setWallWallOpen(true);
-              }}
-              title="Mostrar nodos de uniones pared-pared en el modelo 3D"
-            >
-              Uniones 3D
-            </button>
-          )}
           <div
             className="min-area-control"
             title="Componentes más chicos que este umbral se descartan al generar las planchas"
@@ -396,118 +304,12 @@ export default function ReviewScreen({
               ))}
             </select>
           </div>
+          {wallWallList.length > 0 && (
+            <span className="viewer-hint">
+              Seleccioná una pared para ver o editar sus uniones
+            </span>
+          )}
         </div>
-
-        {wallWallList.length > 0 && (
-          <>
-            <div className="assembly-summary">
-              <span className="assembly-summary-ok">
-                {resolvedCount} uniones resueltas
-              </span>
-              {criticalCount > 0 && (
-                <span className="assembly-summary-crit">
-                  {criticalCount} para revisar
-                </span>
-              )}
-            </div>
-            <div className={`ww-card ${wallWallOpen ? "" : "ww-card--collapsed"}`}>
-              <button
-                className="ww-card-header"
-                onClick={() => setWallWallOpen((o) => !o)}
-              >
-                <span className="ww-card-title">
-                  Uniones a revisar ({showOnlyCritical ? criticalCount : wallWallList.length})
-                </span>
-                <span className="ww-card-chevron">{wallWallOpen ? "▾" : "▸"}</span>
-              </button>
-              {wallWallOpen && (
-                <div className="ww-card-body">
-                  <div className="ww-filter">
-                    <button
-                      className={`ww-filter-btn ${showOnlyCritical ? "ww-filter-btn--on" : ""}`}
-                      onClick={() => setShowOnlyCritical(true)}
-                    >
-                      Importantes ({criticalCount})
-                    </button>
-                    <button
-                      className={`ww-filter-btn ${!showOnlyCritical ? "ww-filter-btn--on" : ""}`}
-                      onClick={() => setShowOnlyCritical(false)}
-                    >
-                      Todas ({wallWallList.length})
-                    </button>
-                  </div>
-                  {visibleWallWallList.length === 0 && (
-                    <p className="ww-card-intro">
-                      No hay uniones importantes — todas fueron resueltas automáticamente.
-                    </p>
-                  )}
-                  {visibleWallWallList.map(({ ww, labelA, labelB, pidA, pidB, hasThickness }) => {
-                    const chosen = wallWallDecisions.get(ww.jointIndex);
-                    const cut: "A" | "B" | null =
-                      chosen === ww.groupA ? "A" : chosen === ww.groupB ? "B" : null;
-                    const isFocused = focusedJoint === ww.jointIndex;
-                    const topoLabel = ww.topology === "L" ? "L"
-                      : ww.topology === "T" ? "T"
-                      : ww.topology === "X" ? "+" : null;
-                    return (
-                      <div
-                        key={ww.jointIndex}
-                        className={`ww-joint ${isFocused ? "ww-joint--focused" : ""}`}
-                        onClick={() => {
-                          setSelectedGroupIds(new Set([ww.groupA, ww.groupB]));
-                          setFocusedJoint(ww.jointIndex);
-                        }}
-                      >
-                        <JointCornerDiagram cut={hasThickness ? cut : null} />
-                        <div className="ww-joint-main">
-                          <div className="ww-joint-header">
-                            {topoLabel && (
-                              <span className={`ww-topo ${ww.critical ? "ww-topo--critical" : ""}`}>
-                                {topoLabel}
-                              </span>
-                            )}
-                            {!hasThickness && (
-                              <span className="ww-nothick">
-                                sin grosor — no se recorta
-                              </span>
-                            )}
-                          </div>
-                          <span className="ww-q">¿Cuál se recorta?</span>
-                          <div className="ww-choices">
-                            <button
-                              className={`ww-choice ${cut === "A" ? "ww-choice--on" : ""}`}
-                              disabled={!hasThickness}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleWallWallDecision(ww.jointIndex, ww.groupA, ww.groupA, ww.groupB);
-                              }}
-                            >
-                              <span className="ww-tag ww-tag--a">A</span>
-                              {pidA && <span className="ww-pid">{pidA}</span>}
-                              <span className="ww-choice-label">{labelA}</span>
-                            </button>
-                            <button
-                              className={`ww-choice ${cut === "B" ? "ww-choice--on" : ""}`}
-                              disabled={!hasThickness}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleWallWallDecision(ww.jointIndex, ww.groupB, ww.groupA, ww.groupB);
-                              }}
-                            >
-                              <span className="ww-tag ww-tag--b">B</span>
-                              {pidB && <span className="ww-pid">{pidB}</span>}
-                              <span className="ww-choice-label">{labelB}</span>
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </>
-        )}
       </div>
 
       <div className="review-sidebar">
@@ -538,7 +340,7 @@ export default function ReviewScreen({
               <span className="merge-card-title">
                 Fusiones ({merges.length})
               </span>
-              <span className="ww-card-chevron">{mergeCardOpen ? "▾" : "▸"}</span>
+              <span className="merge-card-chevron">{mergeCardOpen ? "▾" : "▸"}</span>
             </button>
             {mergeCardOpen && (
               <div className="merge-card-body">
@@ -576,8 +378,11 @@ export default function ReviewScreen({
           const groupAdjs = effectivePhase1.adjustments.filter(
             (a) => a.groupId === selId,
           );
+          const groupWWJoints = wallWallList.filter(
+            ({ ww }) => ww.groupA === selId || ww.groupB === selId,
+          );
 
-          if (groupJoints.length === 0 && !selGroup.thickness) return null;
+          if (groupJoints.length === 0 && !selGroup.thickness && groupWWJoints.length === 0) return null;
 
           const groupById = new Map(effectivePhase1.groups.map((g) => [g.id, g]));
 
@@ -619,6 +424,48 @@ export default function ReviewScreen({
                   ))}
                 </div>
               )}
+              {groupWWJoints.length > 0 && (
+                <div className="assembly-detail-section">
+                  <span className="assembly-detail-label">
+                    Uniones pared-pared ({groupWWJoints.length})
+                  </span>
+                  {groupWWJoints.map(({ ww, labelA, labelB, pidA, pidB, hasThickness }) => {
+                    const otherId = ww.groupA === selId ? ww.groupB : ww.groupA;
+                    const otherLabel = ww.groupA === selId ? labelB : labelA;
+                    const otherPid = ww.groupA === selId ? pidB : pidA;
+                    const chosen = wallWallDecisions.get(ww.jointIndex);
+                    const thisYields = chosen === selId;
+
+                    return (
+                      <div key={ww.jointIndex} className="ww-ctx-row">
+                        <div className="ww-ctx-info">
+                          {otherPid && <span className="ww-ctx-pid">{otherPid}</span>}
+                          <span className="ww-ctx-name">{otherLabel}</span>
+                        </div>
+                        <div className="ww-ctx-action">
+                          {!hasThickness ? (
+                            <span className="ww-ctx-nothick">sin grosor</span>
+                          ) : thisYields ? (
+                            <button className="ww-ctx-flip" onClick={(e) => {
+                              e.stopPropagation();
+                              handleWallWallDecision(ww.jointIndex, otherId, ww.groupA, ww.groupB);
+                            }}>
+                              Se recorta ← Invertir
+                            </button>
+                          ) : (
+                            <button className="ww-ctx-flip ww-ctx-flip--passive" onClick={(e) => {
+                              e.stopPropagation();
+                              handleWallWallDecision(ww.jointIndex, selId, ww.groupA, ww.groupB);
+                            }}>
+                              Pasante ← Invertir
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           );
         })()}
@@ -637,6 +484,12 @@ export default function ReviewScreen({
               </>
             )}
           </div>
+          {wallWallList.length > 0 && (
+            <p className="ww-preconfirm-hint">
+              Las uniones entre paredes fueron resueltas automáticamente.
+              Podés revisarlas seleccionando una pared antes de confirmar.
+            </p>
+          )}
           <div className="review-actions">
             <button className="review-btn review-btn--cancel" onClick={onCancel}>
               Volver

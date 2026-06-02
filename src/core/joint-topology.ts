@@ -37,7 +37,7 @@ export const CRITICAL_RATIO = 0.6;
  * Horizontal running axis of a vertical wall — perpendicular to its (horizontal)
  * normal in the XZ plane. A wall facing East/West runs North–South and vice-versa.
  */
-function runningAxis(normal: Vec3): Vec3 {
+export function runningAxis(normal: Vec3): Vec3 {
   return normalize({ x: -normal.z, y: 0, z: normal.x });
 }
 
@@ -47,7 +47,7 @@ function projOnto(p: Vec3, axis: Vec3): number {
 }
 
 /** Min/max projection of a wall's footprint vertices onto a running axis. */
-function spanAlong(faces: Face3D[], faceIndices: number[], axis: Vec3): { min: number; max: number } {
+export function spanAlong(faces: Face3D[], faceIndices: number[], axis: Vec3): { min: number; max: number } {
   let min = Infinity, max = -Infinity;
   for (const fi of faceIndices) {
     const face = faces[fi];
@@ -59,6 +59,12 @@ function spanAlong(faces: Face3D[], faceIndices: number[], axis: Vec3): { min: n
     }
   }
   return { min, max };
+}
+
+export function wallRunLength(group: GeometryGroup, faces: Face3D[]): number {
+  const axis = runningAxis(group.representativeNormal);
+  const { min, max } = spanAlong(faces, group.faceIndices, axis);
+  return isFinite(max - min) ? max - min : 0;
 }
 
 /** Whether the shared edge midpoint sits at an END of the given wall's span. */
