@@ -272,7 +272,7 @@ export function applyMerges(
 
   // Re-run joint detection + adjustments on merged topology.
   const joints = detectJoints(phase1.faces, newGroups);
-  const { adjustments, wallWallJoints } = computeAdjustments(joints, newGroups);
+  const { adjustments, wallWallJoints } = computeAdjustments(joints, newGroups, undefined, phase1.faces);
 
   // Re-run merge suggestions on the new topology.
   const suggestedMerges = suggestCoplanarMerges(newGroups, joints);
@@ -345,7 +345,7 @@ export function reclassifyWithAxis(
   const split = splitWallGroupsAtFloors(faces, groups, new Map(), "Y");
 
   const joints = detectJoints(split.faces, split.groups);
-  const { adjustments, wallWallJoints } = computeAdjustments(joints, split.groups);
+  const { adjustments, wallWallJoints } = computeAdjustments(joints, split.groups, undefined, split.faces);
   const suggestedMerges = suggestCoplanarMerges(split.groups, joints);
   return { ...phase1, faces: split.faces, appliedAxis: newAxis, groups: split.groups, joints, adjustments, wallWallJoints, warnings, preSplitFaceCount, suggestedMerges };
 }
@@ -365,7 +365,7 @@ export function reclassifyWithMinArea(
   const split = splitWallGroupsAtFloors(baseFaces, groups, new Map(), "Y");
 
   const joints = detectJoints(split.faces, split.groups);
-  const { adjustments, wallWallJoints } = computeAdjustments(joints, split.groups);
+  const { adjustments, wallWallJoints } = computeAdjustments(joints, split.groups, undefined, split.faces);
   const suggestedMerges = suggestCoplanarMerges(split.groups, joints);
   return { ...phase1, faces: split.faces, groups: split.groups, joints, adjustments, wallWallJoints, warnings, preSplitFaceCount, suggestedMerges };
 }
@@ -436,7 +436,7 @@ export function parsePipeline(
 
   // Detect joints and compute assembly adjustments on the (possibly split) groups.
   const joints = detectJoints(split.faces, split.groups);
-  const { adjustments, wallWallJoints } = computeAdjustments(joints, split.groups);
+  const { adjustments, wallWallJoints } = computeAdjustments(joints, split.groups, undefined, split.faces);
   const suggestedMerges = suggestCoplanarMerges(split.groups, joints);
 
   return { faces: split.faces, rawFaces, appliedAxis: detectedUp, groups: split.groups, joints, adjustments, wallWallJoints, stem, warnings, preSplitFaceCount, suggestedMerges };
@@ -591,7 +591,7 @@ export function decomposePanels(
 
   // Recompute adjustments with the resolved wall-wall decisions. This keeps the
   // automatic wall-on-floor compensation AND adds the chosen wall-wall yields.
-  const { adjustments } = computeAdjustments(phase1.joints, phase1.groups, effectiveDecisions);
+  const { adjustments } = computeAdjustments(phase1.joints, phase1.groups, effectiveDecisions, phase1.faces);
 
   // Build adjustment lookups per group, separated by axis.
   const heightAdjByGroup = new Map<number, number>();
