@@ -273,12 +273,17 @@ function collectSlabPlanes(
   const [axA, axB] = UP_HORIZ[up];
   const planes: SlabPlane[] = [];
 
+  const MIN_SLAB_AREA = 0.10; // m² — minimum for a horizontal to split walls
+
   for (const group of groups) {
     const effectiveCat = overrideMap.get(group.id) ?? group.category;
-    if (effectiveCat !== "floor") continue; // only a floor (green) splits a wall
 
     const ny = Math.abs(getUpVal(group.representativeNormal, up));
     if (ny < 0.75) continue; // must be truly horizontal (not an inclined roof/ramp)
+
+    const isFloor = effectiveCat === "floor";
+    const isDemotedSlab = effectiveCat === "discard" && group.totalArea >= MIN_SLAB_AREA;
+    if (!isFloor && !isDemotedSlab) continue;
 
     let sum = 0, count = 0;
     let minA = Infinity, maxA = -Infinity, minB = Infinity, maxB = -Infinity;

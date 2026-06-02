@@ -15,7 +15,7 @@
 import type { Joint } from "./joint-detector";
 import type { GeometryGroup } from "./group-classifier";
 import type { Face3D } from "./types";
-import { classifyJointTopology, isCriticalJoint } from "./joint-topology";
+import { classifyJointTopology, isCriticalJoint, wallRunLength } from "./joint-topology";
 import type { JointTopology, JointTopologyInfo } from "./joint-topology";
 
 // ---------------------------------------------------------------------------
@@ -119,7 +119,7 @@ export function computeAdjustments(
       const topoInfo = faces ? classifyJointTopology(joint, gA, gB, faces) : undefined;
       const topology: JointTopology = topoInfo?.topology ?? "unknown";
 
-      const suggestedYieldGroupId = chooseWallWallYielder(gA, gB, tA, tB, topoInfo);
+      const suggestedYieldGroupId = chooseWallWallYielder(gA, gB, tA, tB, topoInfo, faces);
       const critical = isCriticalJoint(topology, tA, tB);
 
       wallWallJoints.push({
@@ -202,6 +202,7 @@ function chooseWallWallYielder(
   tA: number,
   tB: number,
   topoInfo?: JointTopologyInfo,
+  faces?: Face3D[],
 ): number | undefined {
   // No thickness on either side → nothing to subtract.
   if (tA <= 0.001 && tB <= 0.001) return undefined;
@@ -214,6 +215,17 @@ function chooseWallWallYielder(
   const hi = Math.max(tA, tB);
   if (lo / hi < 0.9) return tA <= tB ? gA.id : gB.id;
 
+  // Wall length: the clearly shorter wall yields (double guard avoids false positives).
+  if (faces) {
+    const lenA = wallRunLength(gA, faces);
+    const lenB = wallRunLength(gB, faces);
+    const loLen = Math.min(lenA, lenB);
+    const hiLen = Math.max(lenA, lenB);
+    if (hiLen > 0.5 && loLen / hiLen < 0.6 && (hiLen - loLen) > 2.0) {
+      return lenA <= lenB ? gA.id : gB.id;
+    }
+  }
+
   // Near-equal thickness: break the tie geometrically.
   if (topoInfo && topoInfo.topology === "T") {
     // The stem (the wall whose edge sits at its own end) yields.
@@ -222,8 +234,6 @@ function chooseWallWallYielder(
   }
 
   // L / X / unknown tie → North–South wall wins, East–West wall yields.
-  // A wall running North–South has an East–West normal (|x| dominant); the
-  // East–West wall has a North–South normal (|z| dominant) and is the yielder.
   const aIsEastWest = Math.abs(gA.representativeNormal.z) >= Math.abs(gA.representativeNormal.x);
   const bIsEastWest = Math.abs(gB.representativeNormal.z) >= Math.abs(gB.representativeNormal.x);
   if (aIsEastWest && !bIsEastWest) return gA.id;
