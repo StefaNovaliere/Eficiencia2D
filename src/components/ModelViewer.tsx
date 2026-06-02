@@ -57,6 +57,10 @@ const EDGE_LINE_MATERIAL = new THREE.LineBasicMaterial({
   depthTest: true,
 });
 
+// Shared unit sphere reused (scaled) for every joint node marker.
+const NODE_SPHERE_GEOMETRY = new THREE.SphereGeometry(1, 12, 12);
+const NODE_SELECTED_HEX = 0xf59e0b;
+
 // ---------------------------------------------------------------------------
 // Merged geometry per (effective category)
 // ---------------------------------------------------------------------------
@@ -299,6 +303,51 @@ function CategoryMesh({ mesh, isDimmed, onPick, onTogglePick }: CategoryMeshProp
 }
 
 // ---------------------------------------------------------------------------
+// Joint node markers ("X-ray" mode) — clickable spheres at joint midpoints,
+// drawn with depthTest off so they're visible through the walls.
+// ---------------------------------------------------------------------------
+
+export interface NodeMarker {
+  id: number;
+  position: Vec3;
+  color: number;
+  selected: boolean;
+}
+
+interface JointNodesProps {
+  markers: NodeMarker[];
+  radius: number;
+  onSelectNode?: (id: number) => void;
+}
+
+function JointNodes({ markers, radius, onSelectNode }: JointNodesProps) {
+  return (
+    <>
+      {markers.map((m) => (
+        <mesh
+          key={m.id}
+          geometry={NODE_SPHERE_GEOMETRY}
+          position={[m.position.x, m.position.y, m.position.z]}
+          scale={m.selected ? radius * 1.6 : radius}
+          renderOrder={999}
+          onPointerDown={(e) => {
+            e.stopPropagation();
+            onSelectNode?.(m.id);
+          }}
+        >
+          <meshBasicMaterial
+            color={m.selected ? NODE_SELECTED_HEX : m.color}
+            depthTest={false}
+            transparent
+            opacity={0.95}
+          />
+        </mesh>
+      ))}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Camera + controls — constrained orbit
 // ---------------------------------------------------------------------------
 
@@ -348,6 +397,8 @@ interface SceneProps {
   visibleCategories: Set<FaceCategory>;
   onSelectGroup: (id: number) => void;
   onToggleGroup: (id: number) => void;
+  nodeMarkers?: NodeMarker[];
+  onSelectNode?: (id: number) => void;
 }
 
 function Scene({
@@ -358,6 +409,8 @@ function Scene({
   visibleCategories,
   onSelectGroup,
   onToggleGroup,
+  nodeMarkers,
+  onSelectNode,
 }: SceneProps) {
   const selectedGroups = groups.filter((g) => selectedGroupIds.has(g.id));
 
@@ -459,6 +512,14 @@ function Scene({
             </lineSegments>
           </>
         )}
+
+        {nodeMarkers && nodeMarkers.length > 0 && (
+          <JointNodes
+            markers={nodeMarkers}
+            radius={Math.max(bounds.diag * 0.015, 0.02)}
+            onSelectNode={onSelectNode}
+          />
+        )}
       </group>
     </>
   );
@@ -476,6 +537,8 @@ export interface ModelViewerProps {
   visibleCategories: Set<FaceCategory>;
   onSelectGroup: (id: number) => void;
   onToggleGroup: (id: number) => void;
+  nodeMarkers?: NodeMarker[];
+  onSelectNode?: (id: number) => void;
 }
 
 export default function ModelViewer({
@@ -486,6 +549,8 @@ export default function ModelViewer({
   visibleCategories,
   onSelectGroup,
   onToggleGroup,
+  nodeMarkers,
+  onSelectNode,
 }: ModelViewerProps) {
   const camDist = useMemo(() => {
     let minX = Infinity, minY = Infinity, minZ = Infinity;
@@ -526,6 +591,8 @@ export default function ModelViewer({
         visibleCategories={visibleCategories}
         onSelectGroup={onSelectGroup}
         onToggleGroup={onToggleGroup}
+        nodeMarkers={nodeMarkers}
+        onSelectNode={onSelectNode}
       />
     </Canvas>
   );
