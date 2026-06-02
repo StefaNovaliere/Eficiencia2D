@@ -804,6 +804,62 @@ describe("splitWallGroupsAtFloors", () => {
     expect(walls[0].id).toBe(10);
     expect(result.faces.length).toBe(faces.length);
   });
+
+  it("splits a wall at a DISCARDED horizontal slab (small floor demoted to discard)", () => {
+    // The dividing slab is classified "discard" (too small to be a real level),
+    // but it still physically crosses the wall, so the wall must be split.
+    const wallFace = makeWallFace(0, 5);
+    const slabFace = makeFloorFace(2.5);
+    const faces: Face3D[] = [wallFace, slabFace];
+
+    const wallGroup = makeGroup({
+      id: 10, category: "wall",
+      representativeNormal: { x: 0, y: 0, z: 1 },
+      faceIndices: [0],
+      minY: 0, maxY: 5,
+    });
+    const slabGroup = makeGroup({
+      id: 20, category: "discard",
+      representativeNormal: { x: 0, y: 1, z: 0 },
+      faceIndices: [1],
+      minY: 2.5, maxY: 2.5,
+    });
+
+    const result = splitWallGroupsAtFloors(faces, [wallGroup, slabGroup], new Map(), "Y");
+    const walls = result.groups.filter(g => g.category === "wall");
+    expect(walls).toHaveLength(2);
+  });
+
+  it("does NOT split a wall at a slab whose footprint is elsewhere", () => {
+    // Slab is at a mid elevation but sits far away in plan (z = 50..51), so it
+    // does not cross this wall and must not split it.
+    const wallFace = makeWallFace(0, 5);
+    const farSlab = makeFace([
+      { x: 0, y: 2.5, z: 50 },
+      { x: 1, y: 2.5, z: 50 },
+      { x: 1, y: 2.5, z: 51 },
+      { x: 0, y: 2.5, z: 51 },
+    ], { x: 0, y: 1, z: 0 });
+    const faces: Face3D[] = [wallFace, farSlab];
+
+    const wallGroup = makeGroup({
+      id: 10, category: "wall",
+      representativeNormal: { x: 0, y: 0, z: 1 },
+      faceIndices: [0],
+      minY: 0, maxY: 5,
+    });
+    const slabGroup = makeGroup({
+      id: 20, category: "floor",
+      representativeNormal: { x: 0, y: 1, z: 0 },
+      faceIndices: [1],
+      minY: 2.5, maxY: 2.5,
+    });
+
+    const result = splitWallGroupsAtFloors(faces, [wallGroup, slabGroup], new Map(), "Y");
+    const walls = result.groups.filter(g => g.category === "wall");
+    expect(walls).toHaveLength(1);
+    expect(walls[0].id).toBe(10);
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -243,14 +243,78 @@ function subgroupBounds(faces: Face3D[], up: "Y" | "Z"): { minY: number; maxY: n
 
 const MIN_SPLIT_AREA = 0.01; // m² — discard tiny fragments
 
+/** The two horizontal axes (footprint plane) for a given up-axis. */
+const UP_HORIZ: Record<"Y" | "Z", [keyof Vec3, keyof Vec3]> = {
+  Y: ["x", "z"],
+  Z: ["x", "y"],
+};
+
+interface SlabPlane {
+  elevation: number;
+  /** Footprint bounding box in the two horizontal axes. */
+  minA: number; maxA: number;
+  minB: number; maxB: number;
+}
+
+/**
+ * Collect horizontal slab planes that can divide a wall — every group with a
+ * strongly-horizontal normal, REGARDLESS of its floor/discard classification.
+ *
+ * A small floor slab demoted to "discard" (because its area falls below the
+ * level-detection threshold) still physically divides any wall it passes
+ * through, so it must act as a split plane. Each plane carries its footprint
+ * bounding box so we can later check whether it actually crosses a given wall.
+ */
+function collectSlabPlanes(
+  groups: GeometryGroup[],
+  overrideMap: Map<number, string>,
+  faces: Face3D[],
+  up: "Y" | "Z",
+): SlabPlane[] {
+  const [axA, axB] = UP_HORIZ[up];
+  const planes: SlabPlane[] = [];
+
+  for (const group of groups) {
+    const effectiveCat = overrideMap.get(group.id) ?? group.category;
+    if (effectiveCat === "wall") continue; // a wall is not a dividing slab
+
+    const ny = Math.abs(getUpVal(group.representativeNormal, up));
+    if (ny < 0.75) continue; // must be truly horizontal (not an inclined roof/ramp)
+
+    let sum = 0, count = 0;
+    let minA = Infinity, maxA = -Infinity, minB = Infinity, maxB = -Infinity;
+    for (const fi of group.faceIndices) {
+      const face = faces[fi];
+      if (!face) continue;
+      for (const v of face.vertices) {
+        sum += getUpVal(v, up);
+        count++;
+        const a = v[axA], b = v[axB];
+        if (a < minA) minA = a;
+        if (a > maxA) maxA = a;
+        if (b < minB) minB = b;
+        if (b > maxB) maxB = b;
+      }
+    }
+    if (count === 0) continue;
+    planes.push({ elevation: sum / count, minA, maxA, minB, maxB });
+  }
+
+  return planes;
+}
+
 export function splitWallGroupsAtFloors(
   faces: Face3D[],
   groups: GeometryGroup[],
   overrideMap: Map<number, string>,
   up: "Y" | "Z" = "Y",
 ): { faces: Face3D[]; groups: GeometryGroup[] } {
-  const floorElevations = collectFloorPlanes(groups, overrideMap, faces, up);
-  if (floorElevations.length === 0) return { faces, groups };
+  const slabPlanes = collectSlabPlanes(groups, overrideMap, faces, up);
+  if (slabPlanes.length === 0) return { faces, groups };
+
+  const [axA, axB] = UP_HORIZ[up];
+  const FOOTPRINT_TOL = 0.10; // 10cm slack when matching a slab to a wall footprint
+  const DEDUP_TOL = 0.10;     // collapse split planes within 10cm
 
   const newFaces = [...faces];
   const newGroups: GeometryGroup[] = [];
@@ -265,7 +329,40 @@ export function splitWallGroupsAtFloors(
     }
 
     const groupFaces = group.faceIndices.map((fi) => faces[fi]).filter(Boolean);
-    const segments = splitWallAtFloors(groupFaces, floorElevations, up);
+
+    // Wall footprint in the horizontal plane.
+    let wMinA = Infinity, wMaxA = -Infinity, wMinB = Infinity, wMaxB = -Infinity;
+    for (const f of groupFaces) {
+      for (const v of f.vertices) {
+        const a = v[axA], b = v[axB];
+        if (a < wMinA) wMinA = a;
+        if (a > wMaxA) wMaxA = a;
+        if (b < wMinB) wMinB = b;
+        if (b > wMaxB) wMaxB = b;
+      }
+    }
+    const tol = Math.max(group.thickness ?? 0, FOOTPRINT_TOL);
+
+    // Keep only the slabs whose footprint actually overlaps this wall — a slab
+    // elsewhere in the building at the same elevation must NOT split this wall.
+    const candidate: number[] = [];
+    for (const sp of slabPlanes) {
+      const overlapA = Math.min(wMaxA, sp.maxA) - Math.max(wMinA, sp.minA);
+      const overlapB = Math.min(wMaxB, sp.maxB) - Math.max(wMinB, sp.minB);
+      if (overlapA < -tol || overlapB < -tol) continue;
+      candidate.push(sp.elevation);
+    }
+
+    // Deduplicate near-equal elevations.
+    candidate.sort((a, b) => a - b);
+    const elevations: number[] = [];
+    for (const e of candidate) {
+      if (elevations.length === 0 || Math.abs(e - elevations[elevations.length - 1]) > DEDUP_TOL) {
+        elevations.push(e);
+      }
+    }
+
+    const segments = splitWallAtFloors(groupFaces, elevations, up);
 
     if (segments.length <= 1) {
       newGroups.push(group);
