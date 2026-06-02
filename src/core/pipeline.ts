@@ -78,10 +78,7 @@ class UnionFind {
 function floorElevationsFromGroups(groups: GeometryGroup[]): number[] {
   const elevations: number[] = [];
   for (const g of groups) {
-    // Any horizontal slab divides a wall — including small ones demoted to
-    // "discard" — so mirror the split logic and consider every non-wall group
-    // with a strongly-horizontal normal.
-    if (g.category === "wall") continue;
+    if (g.category !== "floor") continue;
     if (Math.abs(g.representativeNormal.y) < 0.75) continue;
     if (g.minY != null && g.maxY != null) {
       elevations.push((g.minY + g.maxY) / 2);
