@@ -75,10 +75,41 @@ class UnionFind {
   }
 }
 
+function floorElevationsFromGroups(groups: GeometryGroup[]): number[] {
+  const elevations: number[] = [];
+  for (const g of groups) {
+    if (g.category !== "floor") continue;
+    if (g.minY != null && g.maxY != null) {
+      elevations.push((g.minY + g.maxY) / 2);
+    }
+  }
+  return elevations;
+}
+
+function isFloorBetween(gA: GeometryGroup, gB: GeometryGroup, floorElevations: number[]): boolean {
+  if (gA.minY == null || gA.maxY == null || gB.minY == null || gB.maxY == null) return false;
+  if (floorElevations.length === 0) return false;
+
+  const midA = (gA.minY + gA.maxY) / 2;
+  const midB = (gB.minY + gB.maxY) / 2;
+  const lo = Math.min(midA, midB);
+  const hi = Math.max(midA, midB);
+
+  if (hi - lo < 0.05) return false;
+
+  for (const elev of floorElevations) {
+    if (elev >= lo && elev <= hi) return true;
+  }
+
+  return false;
+}
+
 /**
  * Suggest sets of coplanar wall groups that should be merged because one is a
  * tiny sliver (< 15% area of its neighbor). Uses union-find over joints with
  * near-zero dihedral angle between wall groups.
+ *
+ * Walls separated by a floor slab are never merged, even if coplanar.
  */
 export function suggestCoplanarMerges(
   groups: GeometryGroup[],
@@ -87,6 +118,7 @@ export function suggestCoplanarMerges(
   const idxById = new Map<number, number>();
   for (let i = 0; i < groups.length; i++) idxById.set(groups[i].id, i);
 
+  const floorElevs = floorElevationsFromGroups(groups);
   const uf = new UnionFind(groups.length);
 
   for (const joint of joints) {
@@ -103,6 +135,8 @@ export function suggestCoplanarMerges(
     const maxArea = Math.max(areaA, areaB);
     if (maxArea < 0.001) continue;
     if (minArea / maxArea >= 0.15) continue;
+
+    if (isFloorBetween(gA, gB, floorElevs)) continue;
 
     uf.union(iA, iB);
   }
@@ -144,6 +178,21 @@ export function areGroupsCoplanar(groups: GeometryGroup[]): boolean {
   const refOff = offsets[0];
   for (let i = 1; i < offsets.length; i++) {
     if (Math.abs(offsets[i] - refOff) > 0.15) return false;
+  }
+  return true;
+}
+
+/**
+ * Check whether groups can be merged: coplanar AND no floor slab between any pair.
+ */
+export function canMergeGroups(selected: GeometryGroup[], allGroups: GeometryGroup[]): boolean {
+  if (!areGroupsCoplanar(selected)) return false;
+  const floorElevs = floorElevationsFromGroups(allGroups);
+  if (floorElevs.length === 0) return true;
+  for (let i = 0; i < selected.length; i++) {
+    for (let j = i + 1; j < selected.length; j++) {
+      if (isFloorBetween(selected[i], selected[j], floorElevs)) return false;
+    }
   }
   return true;
 }
