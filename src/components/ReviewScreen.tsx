@@ -9,6 +9,7 @@ import { reclassifyWithAxis, computePanelIdByGroup, applyMerges, areGroupsCoplan
 import type { Phase1Result, ClassificationOverride } from "@/core/pipeline";
 import type { Joint } from "@/core/joint-detector";
 import type { DimensionAdjustment } from "@/core/assembly-adjuster";
+import type { NodeMarker } from "./ModelViewer";
 
 export type WallWallDecisions = Map<number, number>;
 
@@ -119,7 +120,10 @@ export default function ReviewScreen({
       return m;
     },
   );
-  const [wallWallOpen, setWallWallOpen] = useState(true);
+  const [wallWallOpen, setWallWallOpen] = useState(false);
+  const [showOnlyCritical, setShowOnlyCritical] = useState(true);
+  const [xrayOn, setXrayOn] = useState(false);
+  const [focusedJoint, setFocusedJoint] = useState<number | undefined>();
 
   // Merge state: sets of group IDs to combine into single panels.
   const [merges, setMerges] = useState<number[][]>(
@@ -302,6 +306,40 @@ export default function ReviewScreen({
       }));
   }, [effectivePhase1.wallWallJoints, effectivePhase1.groups, overrides, panelIdByGroup]);
 
+  // Filtered wall-wall lists for progressive disclosure.
+  const criticalList = useMemo(
+    () => wallWallList.filter((w) => w.ww.critical),
+    [wallWallList],
+  );
+  const visibleWallWallList = showOnlyCritical ? criticalList : wallWallList;
+  const resolvedCount = wallWallList.filter((w) => w.hasThickness).length;
+  const criticalCount = criticalList.length;
+
+  // Node markers for 3D "X-ray" mode.
+  const nodeMarkers: NodeMarker[] = useMemo(() => {
+    if (!xrayOn) return [];
+    return visibleWallWallList.map(({ ww }) => {
+      const joint = effectivePhase1.joints[ww.jointIndex];
+      if (!joint) return null;
+      const isFocused = focusedJoint === ww.jointIndex ||
+        (selectedGroupIds.has(ww.groupA) && selectedGroupIds.has(ww.groupB));
+      return {
+        id: ww.jointIndex,
+        position: joint.edgeMid,
+        color: ww.critical ? 0xef4444 : 0x9ca3af,
+        selected: isFocused,
+      };
+    }).filter((m): m is NodeMarker => m != null);
+  }, [xrayOn, visibleWallWallList, effectivePhase1.joints, focusedJoint, selectedGroupIds]);
+
+  const handleSelectNode = useCallback((jointIndex: number) => {
+    const ww = effectivePhase1.wallWallJoints.find((w) => w.jointIndex === jointIndex);
+    if (!ww) return;
+    setSelectedGroupIds(new Set([ww.groupA, ww.groupB]));
+    setFocusedJoint(jointIndex);
+    setWallWallOpen(true);
+  }, [effectivePhase1.wallWallJoints]);
+
   return (
     <div className="review-overlay">
       <div className="review-viewer">
@@ -313,6 +351,8 @@ export default function ReviewScreen({
           visibleCategories={visibleCategories}
           onSelectGroup={handleSelectGroup}
           onToggleGroup={handleToggleGroup}
+          nodeMarkers={nodeMarkers}
+          onSelectNode={handleSelectNode}
         />
         <div className="review-viewer-overlay">
           <VisibilityFilters
@@ -327,6 +367,18 @@ export default function ReviewScreen({
           >
             Rotar eje ({phase1.appliedAxis === "Y" ? "Y↑" : "Z↑"})
           </button>
+          {wallWallList.length > 0 && (
+            <button
+              className={`axis-toggle-btn xray-toggle-btn ${xrayOn ? "xray-toggle-btn--on" : ""}`}
+              onClick={() => {
+                setXrayOn((on) => !on);
+                if (!xrayOn) setWallWallOpen(true);
+              }}
+              title="Mostrar nodos de uniones pared-pared en el modelo 3D"
+            >
+              Uniones 3D
+            </button>
+          )}
           <div
             className="min-area-control"
             title="Componentes más chicos que este umbral se descartan al generar las planchas"
@@ -347,74 +399,114 @@ export default function ReviewScreen({
         </div>
 
         {wallWallList.length > 0 && (
-          <div className={`ww-card ${wallWallOpen ? "" : "ww-card--collapsed"}`}>
-            <button
-              className="ww-card-header"
-              onClick={() => setWallWallOpen((o) => !o)}
-            >
-              <span className="ww-card-title">
-                Encuentros de paredes ({wallWallList.length})
+          <>
+            <div className="assembly-summary">
+              <span className="assembly-summary-ok">
+                {resolvedCount} uniones resueltas
               </span>
-              <span className="ww-card-chevron">{wallWallOpen ? "▾" : "▸"}</span>
-            </button>
-            {wallWallOpen && (
-              <div className="ww-card-body">
-                <p className="ww-card-intro">
-                  Donde dos paredes se tocan en esquina, una debe recortarse el
-                  grosor de la otra para que no se superpongan al armar. Elegí
-                  cuál se recorta en cada una.
-                </p>
-                {wallWallList.map(({ ww, labelA, labelB, pidA, pidB, hasThickness }) => {
-                  const chosen = wallWallDecisions.get(ww.jointIndex);
-                  const cut: "A" | "B" | null =
-                    chosen === ww.groupA ? "A" : chosen === ww.groupB ? "B" : null;
-                  return (
-                    <div
-                      key={ww.jointIndex}
-                      className="ww-joint"
-                      onClick={() => setSelectedGroupIds(new Set([ww.groupA, ww.groupB]))}
+              {criticalCount > 0 && (
+                <span className="assembly-summary-crit">
+                  {criticalCount} para revisar
+                </span>
+              )}
+            </div>
+            <div className={`ww-card ${wallWallOpen ? "" : "ww-card--collapsed"}`}>
+              <button
+                className="ww-card-header"
+                onClick={() => setWallWallOpen((o) => !o)}
+              >
+                <span className="ww-card-title">
+                  Uniones a revisar ({showOnlyCritical ? criticalCount : wallWallList.length})
+                </span>
+                <span className="ww-card-chevron">{wallWallOpen ? "▾" : "▸"}</span>
+              </button>
+              {wallWallOpen && (
+                <div className="ww-card-body">
+                  <div className="ww-filter">
+                    <button
+                      className={`ww-filter-btn ${showOnlyCritical ? "ww-filter-btn--on" : ""}`}
+                      onClick={() => setShowOnlyCritical(true)}
                     >
-                      <JointCornerDiagram cut={hasThickness ? cut : null} />
-                      <div className="ww-joint-main">
-                        {!hasThickness && (
-                          <span className="ww-nothick">
-                            sin grosor detectado — no se recorta
-                          </span>
-                        )}
-                        <span className="ww-q">¿Cuál se recorta?</span>
-                        <div className="ww-choices">
-                          <button
-                            className={`ww-choice ${cut === "A" ? "ww-choice--on" : ""}`}
-                            disabled={!hasThickness}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleWallWallDecision(ww.jointIndex, ww.groupA, ww.groupA, ww.groupB);
-                            }}
-                          >
-                            <span className="ww-tag ww-tag--a">A</span>
-                            {pidA && <span className="ww-pid">{pidA}</span>}
-                            <span className="ww-choice-label">{labelA}</span>
-                          </button>
-                          <button
-                            className={`ww-choice ${cut === "B" ? "ww-choice--on" : ""}`}
-                            disabled={!hasThickness}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleWallWallDecision(ww.jointIndex, ww.groupB, ww.groupA, ww.groupB);
-                            }}
-                          >
-                            <span className="ww-tag ww-tag--b">B</span>
-                            {pidB && <span className="ww-pid">{pidB}</span>}
-                            <span className="ww-choice-label">{labelB}</span>
-                          </button>
+                      Importantes ({criticalCount})
+                    </button>
+                    <button
+                      className={`ww-filter-btn ${!showOnlyCritical ? "ww-filter-btn--on" : ""}`}
+                      onClick={() => setShowOnlyCritical(false)}
+                    >
+                      Todas ({wallWallList.length})
+                    </button>
+                  </div>
+                  {visibleWallWallList.length === 0 && (
+                    <p className="ww-card-intro">
+                      No hay uniones importantes — todas fueron resueltas automáticamente.
+                    </p>
+                  )}
+                  {visibleWallWallList.map(({ ww, labelA, labelB, pidA, pidB, hasThickness }) => {
+                    const chosen = wallWallDecisions.get(ww.jointIndex);
+                    const cut: "A" | "B" | null =
+                      chosen === ww.groupA ? "A" : chosen === ww.groupB ? "B" : null;
+                    const isFocused = focusedJoint === ww.jointIndex;
+                    const topoLabel = ww.topology === "L" ? "L"
+                      : ww.topology === "T" ? "T"
+                      : ww.topology === "X" ? "+" : null;
+                    return (
+                      <div
+                        key={ww.jointIndex}
+                        className={`ww-joint ${isFocused ? "ww-joint--focused" : ""}`}
+                        onClick={() => {
+                          setSelectedGroupIds(new Set([ww.groupA, ww.groupB]));
+                          setFocusedJoint(ww.jointIndex);
+                        }}
+                      >
+                        <JointCornerDiagram cut={hasThickness ? cut : null} />
+                        <div className="ww-joint-main">
+                          <div className="ww-joint-header">
+                            {topoLabel && (
+                              <span className={`ww-topo ${ww.critical ? "ww-topo--critical" : ""}`}>
+                                {topoLabel}
+                              </span>
+                            )}
+                            {!hasThickness && (
+                              <span className="ww-nothick">
+                                sin grosor — no se recorta
+                              </span>
+                            )}
+                          </div>
+                          <span className="ww-q">¿Cuál se recorta?</span>
+                          <div className="ww-choices">
+                            <button
+                              className={`ww-choice ${cut === "A" ? "ww-choice--on" : ""}`}
+                              disabled={!hasThickness}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleWallWallDecision(ww.jointIndex, ww.groupA, ww.groupA, ww.groupB);
+                              }}
+                            >
+                              <span className="ww-tag ww-tag--a">A</span>
+                              {pidA && <span className="ww-pid">{pidA}</span>}
+                              <span className="ww-choice-label">{labelA}</span>
+                            </button>
+                            <button
+                              className={`ww-choice ${cut === "B" ? "ww-choice--on" : ""}`}
+                              disabled={!hasThickness}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleWallWallDecision(ww.jointIndex, ww.groupB, ww.groupA, ww.groupB);
+                              }}
+                            >
+                              <span className="ww-tag ww-tag--b">B</span>
+                              {pidB && <span className="ww-pid">{pidB}</span>}
+                              <span className="ww-choice-label">{labelB}</span>
+                            </button>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </>
         )}
       </div>
 

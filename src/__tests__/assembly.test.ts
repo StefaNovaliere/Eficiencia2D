@@ -7,6 +7,7 @@ import { clipPanelAtV, clipPanelAtU, mirrorEdgesHorizontal } from "@/core/cuttin
 import type { GeometryGroup, FaceCategory } from "@/core/group-classifier";
 import type { Face3D, Vec3 } from "@/core/types";
 import { splitWallGroupsAtFloors } from "@/core/mesh-splitter";
+import { classifyJointTopology, isCriticalJoint, END_FRAC } from "@/core/joint-topology";
 
 function makeFace(vertices: Vec3[], normal: Vec3): Face3D {
   return { vertices, normal, innerLoops: [] };
@@ -1067,5 +1068,275 @@ describe("applyMerges", () => {
 
     const result = applyMerges(phase1, []);
     expect(result).toBe(phase1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// classifyJointTopology — L / T / X
+// ---------------------------------------------------------------------------
+
+describe("classifyJointTopology", () => {
+  // Two perpendicular walls meeting at a corner. Wall A runs along Z (0..4m),
+  // Wall B runs along X (0..5m). They share a vertical edge at (0,0..3,0).
+  function buildLCornerScenario() {
+    const wallAFace = makeFace(
+      [{ x: 0, y: 0, z: 0 }, { x: 0, y: 3, z: 0 }, { x: 0, y: 3, z: 4 }, { x: 0, y: 0, z: 4 }],
+      { x: -1, y: 0, z: 0 },
+    );
+    const wallBFace = makeFace(
+      [{ x: 0, y: 0, z: 0 }, { x: 5, y: 0, z: 0 }, { x: 5, y: 3, z: 0 }, { x: 0, y: 3, z: 0 }],
+      { x: 0, y: 0, z: -1 },
+    );
+    const faces: Face3D[] = [wallAFace, wallBFace];
+
+    const gA = makeGroup({
+      id: 1, category: "wall",
+      representativeNormal: { x: -1, y: 0, z: 0 },
+      faceIndices: [0],
+    });
+    const gB = makeGroup({
+      id: 2, category: "wall",
+      representativeNormal: { x: 0, y: 0, z: -1 },
+      faceIndices: [1],
+    });
+
+    // Shared edge midpoint at the corner (z=0 for A → end of A's span; x=0 for B → end of B's span)
+    const joint = {
+      groupA: 1, groupB: 2,
+      totalLength: 3, dihedralAngle: 90,
+      edgeMid: { x: 0, y: 1.5, z: 0 },
+      edgeDir: { x: 0, y: 1, z: 0 },
+      horizontalFrac: 0,
+    };
+
+    return { faces, gA, gB, joint };
+  }
+
+  it("classifies L when both edges are at wall ends", () => {
+    const { faces, gA, gB, joint } = buildLCornerScenario();
+    const info = classifyJointTopology(joint, gA, gB, faces);
+    expect(info.topology).toBe("L");
+    expect(info.aAtEnd).toBe(true);
+    expect(info.bAtEnd).toBe(true);
+  });
+
+  it("classifies T when one wall ends at the middle of the other", () => {
+    // Wall A runs z=0..10. Wall B runs x=0..5.
+    // Shared edge at z=5 (middle of A) and x=0 (end of B) → T joint.
+    const wallAFace = makeFace(
+      [{ x: 0, y: 0, z: 0 }, { x: 0, y: 3, z: 0 }, { x: 0, y: 3, z: 10 }, { x: 0, y: 0, z: 10 }],
+      { x: -1, y: 0, z: 0 },
+    );
+    const wallBFace = makeFace(
+      [{ x: 0, y: 0, z: 5 }, { x: 5, y: 0, z: 5 }, { x: 5, y: 3, z: 5 }, { x: 0, y: 3, z: 5 }],
+      { x: 0, y: 0, z: -1 },
+    );
+    const faces: Face3D[] = [wallAFace, wallBFace];
+
+    const gA = makeGroup({
+      id: 1, category: "wall",
+      representativeNormal: { x: -1, y: 0, z: 0 },
+      faceIndices: [0],
+    });
+    const gB = makeGroup({
+      id: 2, category: "wall",
+      representativeNormal: { x: 0, y: 0, z: -1 },
+      faceIndices: [1],
+    });
+
+    const joint = {
+      groupA: 1, groupB: 2,
+      totalLength: 3, dihedralAngle: 90,
+      edgeMid: { x: 0, y: 1.5, z: 5 },
+      edgeDir: { x: 0, y: 1, z: 0 },
+      horizontalFrac: 0,
+    };
+
+    const info = classifyJointTopology(joint, gA, gB, faces);
+    expect(info.topology).toBe("T");
+    expect(info.aAtEnd).toBe(false); // z=5 is middle of 0..10
+    expect(info.bAtEnd).toBe(true);  // x=0 is end of 0..5
+  });
+
+  it("classifies X when both edges are in the middle", () => {
+    // Wall A runs z=0..10, wall B runs x=0..10. Shared edge at z=5, x=5.
+    const wallAFace = makeFace(
+      [{ x: 5, y: 0, z: 0 }, { x: 5, y: 3, z: 0 }, { x: 5, y: 3, z: 10 }, { x: 5, y: 0, z: 10 }],
+      { x: -1, y: 0, z: 0 },
+    );
+    const wallBFace = makeFace(
+      [{ x: 0, y: 0, z: 5 }, { x: 10, y: 0, z: 5 }, { x: 10, y: 3, z: 5 }, { x: 0, y: 3, z: 5 }],
+      { x: 0, y: 0, z: -1 },
+    );
+    const faces: Face3D[] = [wallAFace, wallBFace];
+
+    const gA = makeGroup({
+      id: 1, category: "wall",
+      representativeNormal: { x: -1, y: 0, z: 0 },
+      faceIndices: [0],
+    });
+    const gB = makeGroup({
+      id: 2, category: "wall",
+      representativeNormal: { x: 0, y: 0, z: -1 },
+      faceIndices: [1],
+    });
+
+    const joint = {
+      groupA: 1, groupB: 2,
+      totalLength: 3, dihedralAngle: 90,
+      edgeMid: { x: 5, y: 1.5, z: 5 },
+      edgeDir: { x: 0, y: 1, z: 0 },
+      horizontalFrac: 0,
+    };
+
+    const info = classifyJointTopology(joint, gA, gB, faces);
+    expect(info.topology).toBe("X");
+    expect(info.aAtEnd).toBe(false);
+    expect(info.bAtEnd).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isCriticalJoint
+// ---------------------------------------------------------------------------
+
+describe("isCriticalJoint", () => {
+  it("L corner is always critical", () => {
+    expect(isCriticalJoint("L", 0.1, 0.1)).toBe(true);
+  });
+
+  it("T joint with similar thickness is NOT critical", () => {
+    expect(isCriticalJoint("T", 0.10, 0.10)).toBe(false);
+  });
+
+  it("T joint with large thickness difference IS critical", () => {
+    expect(isCriticalJoint("T", 0.03, 0.10)).toBe(true);
+  });
+
+  it("X crossing with similar thickness is NOT critical", () => {
+    expect(isCriticalJoint("X", 0.10, 0.10)).toBe(false);
+  });
+
+  it("unknown topology with similar thickness is NOT critical", () => {
+    expect(isCriticalJoint("unknown", 0.10, 0.10)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// computeAdjustments — topology and critical fields on wallWallJoints
+// ---------------------------------------------------------------------------
+
+describe("computeAdjustments topology enrichment", () => {
+  it("populates topology and critical on wall-wall joints when faces are provided", () => {
+    // L-corner scenario: two walls meeting at ends
+    const wallAFace = makeFace(
+      [{ x: 0, y: 0, z: 0 }, { x: 0, y: 3, z: 0 }, { x: 0, y: 3, z: 4 }, { x: 0, y: 0, z: 4 }],
+      { x: -1, y: 0, z: 0 },
+    );
+    const wallBFace = makeFace(
+      [{ x: 0, y: 0, z: 0 }, { x: 5, y: 0, z: 0 }, { x: 5, y: 3, z: 0 }, { x: 0, y: 3, z: 0 }],
+      { x: 0, y: 0, z: -1 },
+    );
+    const faces: Face3D[] = [wallAFace, wallBFace];
+
+    const gA = makeGroup({
+      id: 1, category: "wall",
+      representativeNormal: { x: -1, y: 0, z: 0 },
+      faceIndices: [0], thickness: 0.10,
+    });
+    const gB = makeGroup({
+      id: 2, category: "wall",
+      representativeNormal: { x: 0, y: 0, z: -1 },
+      faceIndices: [1], thickness: 0.10,
+    });
+
+    const joint = {
+      groupA: 1, groupB: 2,
+      totalLength: 3, dihedralAngle: 90,
+      edgeMid: { x: 0, y: 1.5, z: 0 },
+      edgeDir: { x: 0, y: 1, z: 0 },
+      horizontalFrac: 0,
+    };
+
+    const { wallWallJoints } = computeAdjustments([joint], [gA, gB], undefined, faces);
+    expect(wallWallJoints).toHaveLength(1);
+    expect(wallWallJoints[0].topology).toBe("L");
+    expect(wallWallJoints[0].critical).toBe(true);
+  });
+
+  it("equal-thickness L corner: East-West wall yields (N-S wins)", () => {
+    // gA normal = (-1,0,0) → wall runs N-S (running axis = Z)
+    // gB normal = (0,0,-1) → wall runs E-W (running axis = X)
+    // At equal thickness, gB (E-W, |normal.z| dominant) should yield.
+    const wallAFace = makeFace(
+      [{ x: 0, y: 0, z: 0 }, { x: 0, y: 3, z: 0 }, { x: 0, y: 3, z: 4 }, { x: 0, y: 0, z: 4 }],
+      { x: -1, y: 0, z: 0 },
+    );
+    const wallBFace = makeFace(
+      [{ x: 0, y: 0, z: 0 }, { x: 5, y: 0, z: 0 }, { x: 5, y: 3, z: 0 }, { x: 0, y: 3, z: 0 }],
+      { x: 0, y: 0, z: -1 },
+    );
+    const faces: Face3D[] = [wallAFace, wallBFace];
+
+    const gA = makeGroup({
+      id: 1, category: "wall",
+      representativeNormal: { x: -1, y: 0, z: 0 },
+      faceIndices: [0], thickness: 0.10,
+    });
+    const gB = makeGroup({
+      id: 2, category: "wall",
+      representativeNormal: { x: 0, y: 0, z: -1 },
+      faceIndices: [1], thickness: 0.10,
+    });
+
+    const joint = {
+      groupA: 1, groupB: 2,
+      totalLength: 3, dihedralAngle: 90,
+      edgeMid: { x: 0, y: 1.5, z: 0 },
+      edgeDir: { x: 0, y: 1, z: 0 },
+      horizontalFrac: 0,
+    };
+
+    const { wallWallJoints } = computeAdjustments([joint], [gA, gB], undefined, faces);
+    // gB has |normal.z| = 1 (E-W wall), so it should yield.
+    expect(wallWallJoints[0].suggestedYieldGroupId).toBe(2);
+  });
+
+  it("T joint: stem wall yields", () => {
+    // Wall A runs z=0..10 (long). Wall B runs x=0..5 (short, ends at z=5 which is A's middle).
+    // B is the stem (its edge is at its END), so B yields.
+    const wallAFace = makeFace(
+      [{ x: 0, y: 0, z: 0 }, { x: 0, y: 3, z: 0 }, { x: 0, y: 3, z: 10 }, { x: 0, y: 0, z: 10 }],
+      { x: -1, y: 0, z: 0 },
+    );
+    const wallBFace = makeFace(
+      [{ x: 0, y: 0, z: 5 }, { x: 5, y: 0, z: 5 }, { x: 5, y: 3, z: 5 }, { x: 0, y: 3, z: 5 }],
+      { x: 0, y: 0, z: -1 },
+    );
+    const faces: Face3D[] = [wallAFace, wallBFace];
+
+    const gA = makeGroup({
+      id: 1, category: "wall",
+      representativeNormal: { x: -1, y: 0, z: 0 },
+      faceIndices: [0], thickness: 0.10,
+    });
+    const gB = makeGroup({
+      id: 2, category: "wall",
+      representativeNormal: { x: 0, y: 0, z: -1 },
+      faceIndices: [1], thickness: 0.10,
+    });
+
+    const joint = {
+      groupA: 1, groupB: 2,
+      totalLength: 3, dihedralAngle: 90,
+      edgeMid: { x: 0, y: 1.5, z: 5 },
+      edgeDir: { x: 0, y: 1, z: 0 },
+      horizontalFrac: 0,
+    };
+
+    const { wallWallJoints } = computeAdjustments([joint], [gA, gB], undefined, faces);
+    expect(wallWallJoints[0].topology).toBe("T");
+    // B is at its end (x=0 is the start of B's 0..5 span), A is at middle → B yields
+    expect(wallWallJoints[0].suggestedYieldGroupId).toBe(2);
   });
 });
