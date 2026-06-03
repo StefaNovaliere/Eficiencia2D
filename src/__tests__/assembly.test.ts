@@ -1611,3 +1611,154 @@ describe("wall length tiebreaker", () => {
     expect(wallWallJoints[0].suggestedYieldGroupId).toBe(2);
   });
 });
+
+// ---------------------------------------------------------------------------
+// polishGroups — final validation pass
+// ---------------------------------------------------------------------------
+
+import { polishGroups } from "@/core/group-classifier";
+
+describe("polishGroups", () => {
+  it("fixes 'Piso Vertical' → 'Pared Vertical' (vertical floor → wall)", () => {
+    const groups: GeometryGroup[] = [
+      makeGroup({
+        id: 1,
+        category: "floor",
+        representativeNormal: { x: 0, y: 0.3, z: -0.95 },
+        orientation: "Vertical - Sur",
+        label: "Piso Vertical - Sur #1",
+        totalArea: 17.6,
+        originalCategory: "floor",
+      }),
+    ];
+
+    polishGroups(groups, 1.0);
+    expect(groups[0].category).toBe("wall");
+    expect(groups[0].originalCategory).toBe("wall");
+    expect(groups[0].label).toBe("Pared Vertical - Sur #1");
+  });
+
+  it("fixes 'Pared Horizontal' → 'Piso Horizontal' (horizontal wall → floor)", () => {
+    const groups: GeometryGroup[] = [
+      makeGroup({
+        id: 1,
+        category: "wall",
+        representativeNormal: { x: 0, y: 1, z: 0 },
+        orientation: "Horizontal",
+        label: "Pared Horizontal #1",
+        totalArea: 50.0,
+        originalCategory: "wall",
+      }),
+    ];
+
+    polishGroups(groups, 1.0);
+    expect(groups[0].category).toBe("floor");
+    expect(groups[0].originalCategory).toBe("floor");
+    expect(groups[0].label).toBe("Piso Horizontal #1");
+  });
+
+  it("demotes small post-split fragments to discard", () => {
+    const groups: GeometryGroup[] = [
+      makeGroup({
+        id: 1,
+        category: "wall",
+        representativeNormal: { x: 1, y: 0, z: 0 },
+        orientation: "Vertical - Este",
+        label: "Pared Vertical - Este #1 (1/3)",
+        totalArea: 0.2,
+        originalCategory: "wall",
+      }),
+      makeGroup({
+        id: 2,
+        category: "wall",
+        representativeNormal: { x: 1, y: 0, z: 0 },
+        orientation: "Vertical - Este",
+        label: "Pared Vertical - Este #1 (2/3)",
+        totalArea: 15.0,
+        originalCategory: "wall",
+      }),
+    ];
+
+    polishGroups(groups, 1.0);
+
+    const small = groups.find(g => g.id === 1)!;
+    expect(small.category).toBe("discard");
+    expect(small.label).toBe("Descartado Vertical - Este #1 (1/3)");
+    expect(small.originalCategory).toBe("wall");
+
+    const big = groups.find(g => g.id === 2)!;
+    expect(big.category).toBe("wall");
+  });
+
+  it("does not touch correctly classified groups", () => {
+    const groups: GeometryGroup[] = [
+      makeGroup({
+        id: 1,
+        category: "floor",
+        representativeNormal: { x: 0, y: 1, z: 0 },
+        orientation: "Horizontal",
+        label: "Piso Horizontal #1",
+        totalArea: 25.0,
+        originalCategory: "floor",
+      }),
+      makeGroup({
+        id: 2,
+        category: "wall",
+        representativeNormal: { x: 1, y: 0, z: 0 },
+        orientation: "Vertical - Este",
+        label: "Pared Vertical - Este #1",
+        totalArea: 10.0,
+        originalCategory: "wall",
+      }),
+    ];
+
+    polishGroups(groups, 1.0);
+    expect(groups.find(g => g.id === 1)!.category).toBe("floor");
+    expect(groups.find(g => g.id === 2)!.category).toBe("wall");
+  });
+
+  it("skips already-discarded groups (does not reclassify them)", () => {
+    const groups: GeometryGroup[] = [
+      makeGroup({
+        id: 1,
+        category: "discard",
+        representativeNormal: { x: 0, y: 1, z: 0 },
+        orientation: "Horizontal",
+        label: "Descartado Horizontal #1",
+        totalArea: 0.5,
+        originalCategory: "floor",
+      }),
+    ];
+
+    polishGroups(groups, 1.0);
+    expect(groups[0].category).toBe("discard");
+    expect(groups[0].label).toBe("Descartado Horizontal #1");
+  });
+
+  it("re-sorts groups by category after fixes", () => {
+    const groups: GeometryGroup[] = [
+      makeGroup({
+        id: 1,
+        category: "wall",
+        representativeNormal: { x: 1, y: 0, z: 0 },
+        orientation: "Vertical - Este",
+        label: "Pared Vertical - Este #1",
+        totalArea: 10.0,
+      }),
+      makeGroup({
+        id: 2,
+        category: "floor",
+        representativeNormal: { x: 0, y: 0.3, z: -0.95 },
+        orientation: "Vertical - Sur",
+        label: "Piso Vertical - Sur #1",
+        totalArea: 5.0,
+      }),
+    ];
+
+    polishGroups(groups, 1.0);
+    // Both are walls now; larger one first
+    expect(groups[0].id).toBe(1);
+    expect(groups[1].id).toBe(2);
+    expect(groups.every(g => g.category === "wall")).toBe(true);
+  });
+});
