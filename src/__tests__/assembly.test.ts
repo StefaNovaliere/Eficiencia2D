@@ -4,6 +4,7 @@ import type { TwinCandidate } from "@/core/wall-thickness";
 import { detectJoints } from "@/core/joint-detector";
 import { computeAdjustments } from "@/core/assembly-adjuster";
 import { clipPanelAtV, clipPanelAtU, mirrorEdgesHorizontal } from "@/core/cutting-sheet";
+import { classifyIntoGroups } from "@/core/group-classifier";
 import type { GeometryGroup, FaceCategory } from "@/core/group-classifier";
 import type { Face3D, Vec3 } from "@/core/types";
 import { splitWallGroupsAtFloors } from "@/core/mesh-splitter";
@@ -926,6 +927,105 @@ describe("splitWallGroupsAtFloors", () => {
     const walls = result.groups.filter(g => g.category === "wall");
     expect(walls).toHaveLength(1);
     expect(walls[0].id).toBe(10);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// classifyIntoGroups — late demotion + slab-wall merge
+// ---------------------------------------------------------------------------
+
+describe("classifyIntoGroups — late demotion", () => {
+  it("demotes a small group to discard while preserving originalCategory", () => {
+    // A tiny wall (0.05 m²) should be demoted to "discard" with originalCategory = "wall".
+    const faces: Face3D[] = [
+      makeFace([
+        { x: 0, y: 0, z: 0 },
+        { x: 0, y: 0.1, z: 0 },
+        { x: 0, y: 0.1, z: 0.5 },
+        { x: 0, y: 0, z: 0.5 },
+      ], { x: 1, y: 0, z: 0 }),
+      // Add a large floor so the model has meaningful extent (> 1m in X and Z).
+      makeFace([
+        { x: 0, y: 0, z: 0 },
+        { x: 5, y: 0, z: 0 },
+        { x: 5, y: 0, z: 5 },
+        { x: 0, y: 0, z: 5 },
+      ], { x: 0, y: -1, z: 0 }),
+    ];
+
+    const groups = classifyIntoGroups(faces, 1.0);
+    const discarded = groups.filter(g => g.category === "discard");
+    const wallOrig = discarded.find(g => g.originalCategory === "wall");
+    expect(wallOrig).toBeDefined();
+    expect(wallOrig!.totalArea).toBeLessThan(1.0);
+  });
+
+  it("merges a thin horizontal slab touching a wall into the wall", () => {
+    // Wall from y=0 to y=3, and a thin slab at y=3 (top of wall).
+    // The slab is small relative to the wall → absorbed.
+    const faces: Face3D[] = [
+      // Wall front face
+      makeFace([
+        { x: 0, y: 0, z: 0 },
+        { x: 5, y: 0, z: 0 },
+        { x: 5, y: 3, z: 0 },
+        { x: 0, y: 3, z: 0 },
+      ], { x: 0, y: 0, z: -1 }),
+      // Wall back face
+      makeFace([
+        { x: 0, y: 0, z: 0.15 },
+        { x: 5, y: 0, z: 0.15 },
+        { x: 5, y: 3, z: 0.15 },
+        { x: 0, y: 3, z: 0.15 },
+      ], { x: 0, y: 0, z: 1 }),
+      // Thin slab on top of wall — small (0.15 × 5 = 0.75 m²)
+      makeFace([
+        { x: 0, y: 3, z: 0 },
+        { x: 5, y: 3, z: 0 },
+        { x: 5, y: 3, z: 0.15 },
+        { x: 0, y: 3, z: 0.15 },
+      ], { x: 0, y: 1, z: 0 }),
+      // Large floor so the model has > 1m extent in both X and Z.
+      makeFace([
+        { x: 0, y: 0, z: 0 },
+        { x: 10, y: 0, z: 0 },
+        { x: 10, y: 0, z: 10 },
+        { x: 0, y: 0, z: 10 },
+      ], { x: 0, y: -1, z: 0 }),
+    ];
+
+    const groups = classifyIntoGroups(faces, 1.0);
+    // The thin slab should be absorbed into the wall group — no separate
+    // small horizontal group should remain.
+    const walls = groups.filter(g => g.category === "wall");
+    expect(walls.length).toBeGreaterThanOrEqual(1);
+    const wallFaceCount = walls.reduce((s, w) => s + w.faceIndices.length, 0);
+    // Wall should contain at least the 2 wall skins + the slab face.
+    expect(wallFaceCount).toBeGreaterThanOrEqual(3);
+  });
+
+  it("does NOT absorb a large floor slab into a wall", () => {
+    // A real floor (10 × 10 = 100 m²) should never be absorbed into a wall.
+    const faces: Face3D[] = [
+      makeFace([
+        { x: 0, y: 0, z: 0 },
+        { x: 5, y: 0, z: 0 },
+        { x: 5, y: 3, z: 0 },
+        { x: 0, y: 3, z: 0 },
+      ], { x: 0, y: 0, z: -1 }),
+      makeFace([
+        { x: 0, y: 3, z: 0 },
+        { x: 10, y: 3, z: 0 },
+        { x: 10, y: 3, z: 10 },
+        { x: 0, y: 3, z: 10 },
+      ], { x: 0, y: 1, z: 0 }),
+    ];
+
+    const groups = classifyIntoGroups(faces, 1.0);
+    const floors = groups.filter(g => g.category === "floor");
+    const walls = groups.filter(g => g.category === "wall");
+    expect(floors.length).toBeGreaterThanOrEqual(1);
+    expect(walls.length).toBeGreaterThanOrEqual(1);
   });
 });
 
