@@ -517,8 +517,9 @@ describe("computeAdjustments axis field", () => {
 // ---------------------------------------------------------------------------
 // End-to-end: decomposePanels width clip
 // ---------------------------------------------------------------------------
-import { decomposePanels, computePanelIdByGroup, suggestCoplanarMerges, applyMerges, areGroupsCoplanar } from "@/core/pipeline";
+import { decomposePanels, computePanelIdByGroup, suggestCoplanarMerges, applyMerges, areGroupsCoplanar, nestDecomposedPanels } from "@/core/pipeline";
 import type { Phase1Result } from "@/core/pipeline";
+import { nestedSheetsToDxf } from "@/core/cutting-sheet";
 
 describe("decomposePanels wall-wall width clip", () => {
   it("reduces the yielding wall's width by the other wall's thickness", () => {
@@ -1760,5 +1761,136 @@ describe("polishGroups", () => {
     expect(groups[0].id).toBe(1);
     expect(groups[1].id).toBe(2);
     expect(groups.every(g => g.category === "wall")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// End-to-end: wall-wall decision → decompose → nest → DXF
+// ---------------------------------------------------------------------------
+
+describe("wall-wall decision reaches DXF (end-to-end)", () => {
+  // L-corner: Wall A (4m wide × 3m tall, thickness 0.10m along +X) meets
+  // Wall B (5m wide × 3m tall, thickness 0.06m along +Z) at a vertical corner.
+  function buildLCornerPhase1() {
+    const wallAFront = makeFace(
+      [{ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 4 }, { x: 0, y: 3, z: 4 }, { x: 0, y: 3, z: 0 }],
+      { x: -1, y: 0, z: 0 },
+    );
+    const wallABack = makeFace(
+      [{ x: 0.10, y: 0, z: 0 }, { x: 0.10, y: 3, z: 0 }, { x: 0.10, y: 3, z: 4 }, { x: 0.10, y: 0, z: 4 }],
+      { x: 1, y: 0, z: 0 },
+    );
+    const wallBFront = makeFace(
+      [{ x: 0, y: 0, z: 0 }, { x: 5, y: 0, z: 0 }, { x: 5, y: 3, z: 0 }, { x: 0, y: 3, z: 0 }],
+      { x: 0, y: 0, z: -1 },
+    );
+    const wallBBack = makeFace(
+      [{ x: 0, y: 0, z: 0.06 }, { x: 0, y: 3, z: 0.06 }, { x: 5, y: 3, z: 0.06 }, { x: 5, y: 0, z: 0.06 }],
+      { x: 0, y: 0, z: 1 },
+    );
+
+    const faces: Face3D[] = [wallAFront, wallABack, wallBFront, wallBBack];
+
+    const groupA = makeGroup({
+      id: 1,
+      category: "wall",
+      representativeNormal: { x: 1, y: 0, z: 0 },
+      thickness: 0.10,
+      faceIndices: [0, 1],
+    });
+    const groupB = makeGroup({
+      id: 2,
+      category: "wall",
+      representativeNormal: { x: 0, y: 0, z: 1 },
+      thickness: 0.06,
+      faceIndices: [2, 3],
+    });
+
+    const joints = [{
+      groupA: 1,
+      groupB: 2,
+      totalLength: 3.0,
+      dihedralAngle: 90,
+      edgeMid: { x: 0, y: 1.5, z: 0 },
+      edgeDir: { x: 0, y: 1, z: 0 },
+      horizontalFrac: 0,
+    }];
+
+    const { adjustments, wallWallJoints } = computeAdjustments(joints, [groupA, groupB]);
+
+    const phase1: Phase1Result = {
+      faces,
+      rawFaces: faces,
+      appliedAxis: "Y",
+      groups: [groupA, groupB],
+      joints,
+      adjustments,
+      wallWallJoints,
+      stem: "test",
+      warnings: [],
+      preSplitFaceCount: faces.length,
+      suggestedMerges: [],
+    };
+
+    return phase1;
+  }
+
+  const opts = { scaleDenom: 50, paper: "A4" as const, minAreaM2: 0.01 };
+
+  it("flipping the yield decision changes panel widths", () => {
+    const phase1 = buildLCornerPhase1();
+
+    // Decision A: group 2 (wall B, 5m wide) yields — trimmed by A's thickness (0.10m)
+    const decA = new Map([[0, 2]]);
+    const resA = decomposePanels(phase1, opts, [], decA);
+
+    // Decision B: group 1 (wall A, 4m wide) yields — trimmed by B's thickness (0.06m)
+    const decB = new Map([[0, 1]]);
+    const resB = decomposePanels(phase1, opts, [], decB);
+
+    // In decision A, wall B should be trimmed: 5.0 - 0.10 = 4.90
+    const panelB_A = resA.wallPanels.find(p => p.sourceGroupId === 2);
+    expect(panelB_A).toBeDefined();
+    expect(panelB_A!.widthM).toBeCloseTo(4.90, 1);
+
+    // Wall A should be untrimmed: 4.0
+    const panelA_A = resA.wallPanels.find(p => p.sourceGroupId === 1);
+    expect(panelA_A).toBeDefined();
+    expect(panelA_A!.widthM).toBeCloseTo(4.0, 1);
+
+    // In decision B, wall A should be trimmed: 4.0 - 0.06 = 3.94
+    const panelA_B = resB.wallPanels.find(p => p.sourceGroupId === 1);
+    expect(panelA_B).toBeDefined();
+    expect(panelA_B!.widthM).toBeCloseTo(3.94, 1);
+
+    // Wall B should be untrimmed: 5.0
+    const panelB_B = resB.wallPanels.find(p => p.sourceGroupId === 2);
+    expect(panelB_B).toBeDefined();
+    expect(panelB_B!.widthM).toBeCloseTo(5.0, 1);
+  });
+
+  it("different decisions produce different DXF output", () => {
+    const phase1 = buildLCornerPhase1();
+
+    const decA = new Map([[0, 2]]);
+    const decB = new Map([[0, 1]]);
+
+    const resA = decomposePanels(phase1, opts, [], decA);
+    const resB = decomposePanels(phase1, opts, [], decB);
+
+    const nestA = nestDecomposedPanels(resA, undefined, opts.scaleDenom);
+    const nestB = nestDecomposedPanels(resB, undefined, opts.scaleDenom);
+
+    const dxfA = nestedSheetsToDxf(nestA.wallNesting, true);
+    const dxfB = nestedSheetsToDxf(nestB.wallNesting, true);
+
+    expect(dxfA.length).toBeGreaterThan(0);
+    expect(dxfB.length).toBeGreaterThan(0);
+    expect(dxfA).not.toBe(dxfB);
+
+    // Decision A: wall B yields → DXF should contain "4.90 x 3.00 m" (trimmed)
+    expect(dxfA).toContain("4.90");
+    // Decision B: wall A yields → DXF should contain "3.94 x 3.00 m" (trimmed)
+    expect(dxfB).toContain("3.94");
   });
 });
