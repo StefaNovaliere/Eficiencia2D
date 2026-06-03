@@ -930,19 +930,28 @@ body {
 }
 
 /* ─── Contextual wall-wall editing (in assembly-detail sidebar) ─── */
-.ww-ctx-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 4px 0;
-  font-size: 0.75rem;
+.ww-ctx-help {
+  display: block;
+  font-size: 0.68rem;
+  line-height: 1.35;
+  color: var(--muted);
+  margin: 2px 0 6px;
 }
-.ww-ctx-info {
+.ww-joint-card {
+  padding: 6px 0;
+  font-size: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+.ww-joint-card:first-of-type {
+  border-top: none;
+}
+.ww-joint-header {
   display: flex;
   align-items: center;
-  gap: 5px;
-  min-width: 0;
-  flex: 1;
+  gap: 4px;
+  margin-bottom: 4px;
+  font-size: 0.72rem;
+  color: var(--text-secondary);
 }
 .ww-ctx-pid {
   font-size: 0.65rem;
@@ -951,6 +960,7 @@ body {
   background: rgba(148, 163, 184, 0.15);
   padding: 1px 5px;
   border-radius: 3px;
+  flex-shrink: 0;
 }
 .ww-ctx-name {
   overflow: hidden;
@@ -961,26 +971,55 @@ body {
   font-size: 0.7rem;
   color: var(--muted);
 }
-.ww-ctx-flip {
-  padding: 3px 8px;
-  font-size: 0.7rem;
-  font-weight: 600;
-  background: rgba(245, 158, 11, 0.12);
-  color: #92400e;
-  border: 1px solid #f59e0b;
+.ww-seg-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ww-seg-label {
+  font-size: 0.68rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.ww-seg {
+  display: flex;
+  gap: 0;
   border-radius: 5px;
-  cursor: pointer;
+  overflow: hidden;
+  border: 1px solid var(--border);
 }
-.ww-ctx-flip:hover {
-  background: rgba(245, 158, 11, 0.25);
-}
-.ww-ctx-flip--passive {
+.ww-seg-option {
+  padding: 3px 8px;
+  font-size: 0.68rem;
+  font-weight: 500;
   background: var(--surface-2);
   color: var(--text-secondary);
-  border-color: var(--border);
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
 }
-.ww-ctx-flip--passive:hover {
-  border-color: var(--border-hover);
+.ww-seg-option + .ww-seg-option {
+  border-left: 1px solid var(--border);
+}
+.ww-seg-option:hover {
+  background: var(--surface-3, rgba(148, 163, 184, 0.15));
+}
+.ww-seg-option--active {
+  background: rgba(245, 158, 11, 0.18);
+  color: #92400e;
+  font-weight: 600;
+}
+.ww-seg-option--active:hover {
+  background: rgba(245, 158, 11, 0.28);
+}
+.ww-seg-pid {
+  font-size: 0.6rem;
+  font-weight: 700;
+  opacity: 0.7;
 }
 
 /* ─── Viewer hint text ─── */
