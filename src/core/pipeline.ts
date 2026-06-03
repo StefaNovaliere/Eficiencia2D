@@ -12,7 +12,7 @@ import type { Panel, PanelCategory } from "./cutting-sheet";
 import { detectUpAxis, extractFacades } from "./facade-extractor";
 import { extractFloorPlans } from "./floor-plan-extractor";
 import { DEFAULT_ELEMENT_FILTER } from "./geometry-classifier";
-import { classifyIntoGroups } from "./group-classifier";
+import { classifyIntoGroups, polishGroups, DEFAULT_MIN_REAL_AREA } from "./group-classifier";
 import type { GeometryGroup } from "./group-classifier";
 import { generatePdf, generateNestingPdf } from "./pdf-writer";
 import { nestPanels, DEFAULT_SHEET } from "./sheet-nester";
@@ -343,6 +343,7 @@ export function reclassifyWithAxis(
 
   const preSplitFaceCount = faces.length;
   const split = splitWallGroupsAtFloors(faces, groups, new Map(), "Y");
+  polishGroups(split.groups, minRealArea ?? DEFAULT_MIN_REAL_AREA);
 
   const joints = detectJoints(split.faces, split.groups);
   const { adjustments, wallWallJoints } = computeAdjustments(joints, split.groups, undefined, split.faces);
@@ -363,6 +364,7 @@ export function reclassifyWithMinArea(
 
   const preSplitFaceCount = baseFaces.length;
   const split = splitWallGroupsAtFloors(baseFaces, groups, new Map(), "Y");
+  polishGroups(split.groups, minRealArea);
 
   const joints = detectJoints(split.faces, split.groups);
   const { adjustments, wallWallJoints } = computeAdjustments(joints, split.groups, undefined, split.faces);
@@ -433,6 +435,7 @@ export function parsePipeline(
   // Split walls that extend through floor slabs into separate sub-groups.
   const preSplitFaceCount = faces.length;
   const split = splitWallGroupsAtFloors(faces, groups, new Map(), "Y");
+  polishGroups(split.groups, DEFAULT_MIN_REAL_AREA);
 
   // Detect joints and compute assembly adjustments on the (possibly split) groups.
   const joints = detectJoints(split.faces, split.groups);
