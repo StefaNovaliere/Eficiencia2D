@@ -664,7 +664,9 @@ export function decomposePanels(
 
       // Width compensation (wall-wall): remove a strip from the SIDE where
       // this wall meets the other wall. Project the joint's 3D midpoint into
-      // the panel's 2D frame to determine left vs right.
+      // the panel's 2D frame to determine left vs right. The panel will be
+      // mirrored horizontally AFTER this clip, so we cut from the OPPOSITE
+      // side — the mirror flips it back to the correct joint edge.
       for (const wAdj of widthAdjs) {
         if (wAdj.delta >= 0 || isFloor) continue;
         const strip = Math.min(-wAdj.delta, widthM - 0.01);
@@ -672,11 +674,11 @@ export function decomposePanels(
 
         const joint = phase1.joints[wAdj.jointIndex];
         const u = joint ? dot(joint.edgeMid, result.uAxis) - result.originU : 0;
-        const onLeft = u < widthM / 2;
+        const jointOnLeft = u < widthM / 2;
 
-        const clipped = onLeft
-          ? clipPanelAtU(edges, strip, true)
-          : clipPanelAtU(edges, widthM - strip, false);
+        const clipped = jointOnLeft
+          ? clipPanelAtU(edges, widthM - strip, false)
+          : clipPanelAtU(edges, strip, true);
         if (clipped) {
           widthM = clipped.widthM;
           heightM = clipped.heightM;
