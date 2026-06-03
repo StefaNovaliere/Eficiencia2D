@@ -439,6 +439,11 @@ export default function ReviewScreen({
                     const selPid = panelIdByGroup.get(selId);
                     const effYielder = wallWallDecisions.get(ww.jointIndex) ?? ww.suggestedYieldGroupId;
 
+                    const selThick = groupById.get(selId)?.thickness ?? 0;
+                    const otherThick = groupById.get(otherId)?.thickness ?? 0;
+                    const trimIfSel = otherThick > 0.001 ? otherThick : selThick > 0.001 ? selThick : 0;
+                    const trimIfOther = selThick > 0.001 ? selThick : otherThick > 0.001 ? otherThick : 0;
+
                     return (
                       <div key={ww.jointIndex} className="ww-joint-card">
                         <div className="ww-joint-header">
@@ -461,6 +466,9 @@ export default function ReviewScreen({
                               >
                                 {selPid && <span className="ww-seg-pid">{selPid}</span>}
                                 Esta
+                                {effYielder === selId && trimIfSel > 0.001 && (
+                                  <span className="ww-trim-tag">&minus;{(trimIfSel * 100).toFixed(1)} cm</span>
+                                )}
                               </button>
                               <button
                                 className={`ww-seg-option${effYielder === otherId ? " ww-seg-option--active" : ""}`}
@@ -471,6 +479,9 @@ export default function ReviewScreen({
                               >
                                 {otherPid && <span className="ww-seg-pid">{otherPid}</span>}
                                 Otra
+                                {effYielder === otherId && trimIfOther > 0.001 && (
+                                  <span className="ww-trim-tag">&minus;{(trimIfOther * 100).toFixed(1)} cm</span>
+                                )}
                               </button>
                             </div>
                           </div>
