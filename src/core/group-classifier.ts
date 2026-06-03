@@ -459,14 +459,18 @@ export function classifyIntoGroups(
     slabContrib.push({ idx: link.floorSubgroupIndex, thickness: link.thickness });
   }
 
-  // Absorb thin horizontal slabs that sit on top of or below a wall into that
-  // wall. These are irrelevant geometric slivers (e.g. a modelling artefact at
-  // the junction between wall and slab) that should not be separate components.
-  const THIN_SLAB_MAX_H = 0.20;
-  const TOUCH_TOL = 0.05;
+  // Merge two floor slabs that are stacked very close together into one "wide
+  // slab" (losa ancha). When the clear VERTICAL gap between two horizontal
+  // floor slabs is too small to be a real wall/storey, they are the same
+  // physical slab modelled in pieces — not two separate floors with a wall
+  // between them. The gate is the vertical distance between the slabs, NOT the
+  // enclosed area: two large slabs 10 cm apart enclose a huge volume yet are
+  // still one slab. Floor↔floor merging never crosses orientation, so it can
+  // never produce a horizontal "wall".
+  const WIDE_SLAB_MAX_GAP = 0.5; // 50cm — far below any real wall/storey height
+  const FOOTPRINT_TOL = 0.05;
 
-  interface SgBounds { minX: number; maxX: number; minY: number; maxY: number; minZ: number; maxZ: number; }
-  const sgBounds: SgBounds[] = subgroups.map((sg) => {
+  const sgBounds = subgroups.map((sg) => {
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
     for (const fi of sg.faceInfos) {
       for (const v of faces[fi.index].vertices) {
@@ -478,36 +482,29 @@ export function classifyIntoGroups(
     return { minX, maxX, minY, maxY, minZ, maxZ };
   });
 
-  for (let i = 0; i < subgroups.length; i++) {
-    const sg = subgroups[i];
-    const isHoriz = Math.abs(sg.normal.y) >= HORIZONTAL_THRESHOLD;
-    if (!isHoriz) continue;
-    const ib = sgBounds[i];
-    if (ib.maxY - ib.minY > THIN_SLAB_MAX_H) continue;
+  const isFloorHoriz = (i: number) =>
+    subgroups[i].category === "floor" &&
+    Math.abs(subgroups[i].normal.y) >= HORIZONTAL_THRESHOLD;
 
-    let bestWall = -1;
-    let bestArea = 0;
-    for (let j = 0; j < subgroups.length; j++) {
+  for (let i = 0; i < subgroups.length; i++) {
+    if (!isFloorHoriz(i)) continue;
+    const ib = sgBounds[i];
+    for (let j = i + 1; j < subgroups.length; j++) {
+      if (!isFloorHoriz(j)) continue;
       if (find(i) === find(j)) continue;
-      if (subgroups[j].category !== "wall") continue;
-      if (sg.totalArea > subgroups[j].totalArea * 0.3) continue;
       const jb = sgBounds[j];
 
-      const touchesTop = Math.abs(ib.minY - jb.maxY) < TOUCH_TOL || Math.abs(ib.maxY - jb.maxY) < TOUCH_TOL;
-      const touchesBot = Math.abs(ib.maxY - jb.minY) < TOUCH_TOL || Math.abs(ib.minY - jb.minY) < TOUCH_TOL;
-      const within = ib.minY >= jb.minY - TOUCH_TOL && ib.maxY <= jb.maxY + TOUCH_TOL;
-      if (!touchesTop && !touchesBot && !within) continue;
-
+      // Footprints must overlap in plan.
       const overlapX = Math.min(ib.maxX, jb.maxX) - Math.max(ib.minX, jb.minX);
       const overlapZ = Math.min(ib.maxZ, jb.maxZ) - Math.max(ib.minZ, jb.minZ);
-      if (overlapX < -TOUCH_TOL || overlapZ < -TOUCH_TOL) continue;
+      if (overlapX < -FOOTPRINT_TOL || overlapZ < -FOOTPRINT_TOL) continue;
 
-      if (subgroups[j].totalArea > bestArea) {
-        bestArea = subgroups[j].totalArea;
-        bestWall = j;
-      }
+      // Clear vertical gap between the two Y-ranges (0 if they touch/overlap).
+      const gap = Math.max(ib.minY, jb.minY) - Math.min(ib.maxY, jb.maxY);
+      if (gap >= WIDE_SLAB_MAX_GAP) continue;
+
+      union(i, j);
     }
-    if (bestWall >= 0) union(i, bestWall);
   }
 
   // Resolve thickness per final root. Slab-rim measurement (largest, the true
@@ -534,34 +531,11 @@ export function classifyIntoGroups(
     else unionMap.set(root, [subgroups[i]]);
   }
 
-  const CATEGORY_PRIORITY: FaceCategory[] = [
-    "floor",
-    "wall",
-    "discard",
-  ];
-
   const groups: GeometryGroup[] = [];
   let nextId = 1;
   const counters: Record<string, number> = {};
 
   for (const [rootIdx, merged] of unionMap.entries()) {
-    // Dominant category: largest area, with non-discard winning ties over discard.
-    const areaByCat = new Map<FaceCategory, number>();
-    for (const sg of merged) {
-      areaByCat.set(sg.category, (areaByCat.get(sg.category) ?? 0) + sg.totalArea);
-    }
-    let dominant: FaceCategory = "discard";
-    let bestArea = -1;
-    for (const cat of CATEGORY_PRIORITY) {
-      const a = areaByCat.get(cat);
-      if (a === undefined) continue;
-      if (cat !== "discard" && a > bestArea) {
-        dominant = cat;
-        bestArea = a;
-      }
-    }
-    if (bestArea < 0) dominant = "discard";
-
     // Combine faces, recompute centroid, total area, and Y extent.
     const allFaceIndices: number[] = [];
     let totalArea = 0;
@@ -588,6 +562,13 @@ export function classifyIntoGroups(
     }
     cx /= totalArea; cy /= totalArea; cz /= totalArea;
 
+    // Category follows orientation: take BOTH the category and the orientation
+    // label from the single biggest subgroup. Every subgroup's category is
+    // orientation-bound by classifyAllFaces (horizontal => floor/discard,
+    // vertical => wall), so a group can never end up self-contradictory
+    // (e.g. a horizontal "wall"). What is horizontal is a floor; what is
+    // vertical is a wall.
+    const dominant = biggest.category;
     const orient = orientationLabel(biggest.normal, biggestOrient);
     const catLabel = CATEGORY_LABELS[dominant];
     const key = `${catLabel}_${orient}`;
