@@ -429,38 +429,52 @@ export default function ReviewScreen({
                   <span className="assembly-detail-label">
                     Uniones pared-pared ({groupWWJoints.length})
                   </span>
+                  <span className="ww-ctx-help">
+                    La pared que se recorta se acorta el grosor de la otra para que encajen sin superponerse.
+                  </span>
                   {groupWWJoints.map(({ ww, labelA, labelB, pidA, pidB, hasThickness }) => {
                     const otherId = ww.groupA === selId ? ww.groupB : ww.groupA;
                     const otherLabel = ww.groupA === selId ? labelB : labelA;
                     const otherPid = ww.groupA === selId ? pidB : pidA;
-                    const chosen = wallWallDecisions.get(ww.jointIndex);
-                    const thisYields = chosen === selId;
+                    const selPid = panelIdByGroup.get(selId);
+                    const effYielder = wallWallDecisions.get(ww.jointIndex) ?? ww.suggestedYieldGroupId;
 
                     return (
-                      <div key={ww.jointIndex} className="ww-ctx-row">
-                        <div className="ww-ctx-info">
-                          {otherPid && <span className="ww-ctx-pid">{otherPid}</span>}
+                      <div key={ww.jointIndex} className="ww-joint-card">
+                        <div className="ww-joint-header">
+                          Unión con{" "}
+                          {otherPid && <span className="ww-ctx-pid">{otherPid}</span>}{" "}
                           <span className="ww-ctx-name">{otherLabel}</span>
                         </div>
-                        <div className="ww-ctx-action">
-                          {!hasThickness ? (
-                            <span className="ww-ctx-nothick">sin grosor</span>
-                          ) : thisYields ? (
-                            <button className="ww-ctx-flip" onClick={(e) => {
-                              e.stopPropagation();
-                              handleWallWallDecision(ww.jointIndex, otherId, ww.groupA, ww.groupB);
-                            }}>
-                              Se recorta ← Invertir
-                            </button>
-                          ) : (
-                            <button className="ww-ctx-flip ww-ctx-flip--passive" onClick={(e) => {
-                              e.stopPropagation();
-                              handleWallWallDecision(ww.jointIndex, selId, ww.groupA, ww.groupB);
-                            }}>
-                              Pasante ← Invertir
-                            </button>
-                          )}
-                        </div>
+                        {!hasThickness ? (
+                          <span className="ww-ctx-nothick">Sin grosor — no se puede recortar</span>
+                        ) : (
+                          <div className="ww-seg-row">
+                            <span className="ww-seg-label">Se recorta:</span>
+                            <div className="ww-seg">
+                              <button
+                                className={`ww-seg-option${effYielder === selId ? " ww-seg-option--active" : ""}`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleWallWallDecision(ww.jointIndex, selId, ww.groupA, ww.groupB);
+                                }}
+                              >
+                                {selPid && <span className="ww-seg-pid">{selPid}</span>}
+                                Esta
+                              </button>
+                              <button
+                                className={`ww-seg-option${effYielder === otherId ? " ww-seg-option--active" : ""}`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleWallWallDecision(ww.jointIndex, otherId, ww.groupA, ww.groupB);
+                                }}
+                              >
+                                {otherPid && <span className="ww-seg-pid">{otherPid}</span>}
+                                Otra
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -487,7 +501,7 @@ export default function ReviewScreen({
           {wallWallList.length > 0 && (
             <p className="ww-preconfirm-hint">
               Las uniones entre paredes fueron resueltas automáticamente.
-              Podés revisarlas seleccionando una pared antes de confirmar.
+              Seleccioná una pared para revisar qué pared se recorta en cada unión.
             </p>
           )}
           <div className="review-actions">
