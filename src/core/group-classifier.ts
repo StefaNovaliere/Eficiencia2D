@@ -315,7 +315,6 @@ export interface Subgroup {
   centroid: Vec3;
   extent: number;
   totalArea: number;
-  originalCategory?: FaceCategory;
 }
 
 function buildSubgroup(
@@ -406,26 +405,11 @@ export function classifyIntoGroups(
     }
   }
 
-  // Record the pre-demotion category so a demoted floor slab can later be told
-  // apart from a horizontal piece that was never classified as a floor.
-  for (const sg of subgroups) {
-    sg.originalCategory = sg.category;
-  }
-
-  // Demote small components to "discard". This runs before thin-twin merging
-  // so that, e.g., adjacent stair treads don't get linked together by the
-  // < 40 cm pairing rule — each tread stays as its own discard component
-  // that the user can promote back to "floor" in the review screen.
-  for (const sg of subgroups) {
-    if (sg.totalArea < minRealArea && sg.category !== "discard") {
-      sg.category = "discard";
-    }
-  }
-
   // Merge thin-twin subgroups (two parallel-opposite skins of the same physical
   // element, e.g. the inner+outer face of a thin wall or the top+bottom of a
-  // thin floor slab) into a single component. Discard subgroups are excluded
-  // so that each stair tread / trim piece remains a unique component.
+  // thin floor slab) into a single component. Discard subgroups (from level
+  // detection) are excluded. Small-area demotion runs AFTER all merging so that
+  // small pieces can be absorbed into larger neighbours first.
   // The detected thickness (distance between the twin surfaces) is preserved
   // as metadata on the merged group.
   const parent = subgroups.map((_, i) => i);
@@ -473,6 +457,57 @@ export function classifyIntoGroups(
   for (const link of detectSlabEdges(subgroups, faces, rimFaces)) {
     union(link.floorSubgroupIndex, link.rimSubgroupIndex);
     slabContrib.push({ idx: link.floorSubgroupIndex, thickness: link.thickness });
+  }
+
+  // Absorb thin horizontal slabs that sit on top of or below a wall into that
+  // wall. These are irrelevant geometric slivers (e.g. a modelling artefact at
+  // the junction between wall and slab) that should not be separate components.
+  const THIN_SLAB_MAX_H = 0.20;
+  const TOUCH_TOL = 0.05;
+
+  interface SgBounds { minX: number; maxX: number; minY: number; maxY: number; minZ: number; maxZ: number; }
+  const sgBounds: SgBounds[] = subgroups.map((sg) => {
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
+    for (const fi of sg.faceInfos) {
+      for (const v of faces[fi.index].vertices) {
+        if (v.x < minX) minX = v.x; if (v.x > maxX) maxX = v.x;
+        if (v.y < minY) minY = v.y; if (v.y > maxY) maxY = v.y;
+        if (v.z < minZ) minZ = v.z; if (v.z > maxZ) maxZ = v.z;
+      }
+    }
+    return { minX, maxX, minY, maxY, minZ, maxZ };
+  });
+
+  for (let i = 0; i < subgroups.length; i++) {
+    const sg = subgroups[i];
+    const isHoriz = Math.abs(sg.normal.y) >= HORIZONTAL_THRESHOLD;
+    if (!isHoriz) continue;
+    const ib = sgBounds[i];
+    if (ib.maxY - ib.minY > THIN_SLAB_MAX_H) continue;
+
+    let bestWall = -1;
+    let bestArea = 0;
+    for (let j = 0; j < subgroups.length; j++) {
+      if (find(i) === find(j)) continue;
+      if (subgroups[j].category !== "wall") continue;
+      if (sg.totalArea > subgroups[j].totalArea * 0.3) continue;
+      const jb = sgBounds[j];
+
+      const touchesTop = Math.abs(ib.minY - jb.maxY) < TOUCH_TOL || Math.abs(ib.maxY - jb.maxY) < TOUCH_TOL;
+      const touchesBot = Math.abs(ib.maxY - jb.minY) < TOUCH_TOL || Math.abs(ib.minY - jb.minY) < TOUCH_TOL;
+      const within = ib.minY >= jb.minY - TOUCH_TOL && ib.maxY <= jb.maxY + TOUCH_TOL;
+      if (!touchesTop && !touchesBot && !within) continue;
+
+      const overlapX = Math.min(ib.maxX, jb.maxX) - Math.max(ib.minX, jb.minX);
+      const overlapZ = Math.min(ib.maxZ, jb.maxZ) - Math.max(ib.minZ, jb.minZ);
+      if (overlapX < -TOUCH_TOL || overlapZ < -TOUCH_TOL) continue;
+
+      if (subgroups[j].totalArea > bestArea) {
+        bestArea = subgroups[j].totalArea;
+        bestWall = j;
+      }
+    }
+    if (bestWall >= 0) union(i, bestWall);
   }
 
   // Resolve thickness per final root. Slab-rim measurement (largest, the true
@@ -527,24 +562,6 @@ export function classifyIntoGroups(
     }
     if (bestArea < 0) dominant = "discard";
 
-    // Dominant *original* category (pre-demotion), computed the same way.
-    const origByCat = new Map<FaceCategory, number>();
-    for (const sg of merged) {
-      const oc = sg.originalCategory ?? sg.category;
-      origByCat.set(oc, (origByCat.get(oc) ?? 0) + sg.totalArea);
-    }
-    let origDominant: FaceCategory = "discard";
-    let origBestArea = -1;
-    for (const cat of CATEGORY_PRIORITY) {
-      const a = origByCat.get(cat);
-      if (a === undefined) continue;
-      if (cat !== "discard" && a > origBestArea) {
-        origDominant = cat;
-        origBestArea = a;
-      }
-    }
-    if (origBestArea < 0) origDominant = "discard";
-
     // Combine faces, recompute centroid, total area, and Y extent.
     const allFaceIndices: number[] = [];
     let totalArea = 0;
@@ -590,8 +607,19 @@ export function classifyIntoGroups(
       thickness: detectedThickness,
       minY: groupMinY === Infinity ? undefined : groupMinY,
       maxY: groupMaxY === -Infinity ? undefined : groupMaxY,
-      originalCategory: origDominant,
+      originalCategory: dominant,
     });
+  }
+
+  // Late demotion: now that all merging is done, demote small groups to
+  // "discard". originalCategory preserves the pre-demotion value so that
+  // downstream code (e.g. collectSlabPlanes) can tell a demoted floor apart
+  // from a piece that was never a floor.
+  for (const g of groups) {
+    if (g.totalArea < minRealArea && g.category !== "discard") {
+      g.category = "discard";
+      g.label = `${CATEGORY_LABELS["discard"]} ${g.orientation} #${g.id}`;
+    }
   }
 
   const ORDER: Record<FaceCategory, number> = { floor: 0, wall: 1, discard: 2 };
