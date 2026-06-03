@@ -52,7 +52,7 @@ const VERTICAL_THRESHOLD = 0.5;
 const MIN_AREA = 1e-6;
 const HEIGHT_BAND = 0.05;
 const THIN_WALL_THRESHOLD = 0.40;
-const DEFAULT_MIN_REAL_AREA = 1.0; // default: subgroups smaller than 1 m² => "discard"
+export const DEFAULT_MIN_REAL_AREA = 1.0; // default: subgroups smaller than 1 m² => "discard"
 
 function faceArea(f: Face3D): number {
   const verts = f.vertices;
@@ -611,4 +611,46 @@ export function classifyIntoGroups(
   });
 
   return groups;
+}
+
+/**
+ * Final validation pass: fix category↔orientation mismatches and demote
+ * small post-split fragments. Runs AFTER splitWallGroupsAtFloors so it
+ * catches sub-groups that escaped the initial late demotion.
+ *
+ * Rules:
+ *  - Horizontal orientation + category "wall" → fix to "floor"
+ *  - Vertical orientation   + category "floor" → fix to "wall"
+ *  - totalArea < minRealArea → demote to "discard"
+ */
+export function polishGroups(groups: GeometryGroup[], minRealArea: number): void {
+  for (const g of groups) {
+    if (g.category === "discard") continue;
+
+    const isHorizontal = g.orientation === "Horizontal";
+
+    if (isHorizontal && g.category === "wall") {
+      g.category = "floor";
+      g.originalCategory = "floor";
+      g.label = g.label.replace(/^Pared/, CATEGORY_LABELS.floor);
+    } else if (!isHorizontal && g.category === "floor") {
+      g.category = "wall";
+      g.originalCategory = "wall";
+      g.label = g.label.replace(/^Piso/, CATEGORY_LABELS.wall);
+    }
+  }
+
+  for (const g of groups) {
+    if (g.totalArea < minRealArea && g.category !== "discard") {
+      g.category = "discard";
+      g.label = g.label.replace(/^(Piso|Pared)/, CATEGORY_LABELS.discard);
+    }
+  }
+
+  const ORDER: Record<FaceCategory, number> = { floor: 0, wall: 1, discard: 2 };
+  groups.sort((a, b) => {
+    const catDiff = ORDER[a.category] - ORDER[b.category];
+    if (catDiff !== 0) return catDiff;
+    return b.totalArea - a.totalArea;
+  });
 }
