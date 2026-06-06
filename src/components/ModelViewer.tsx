@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef } from "react";
 import { Canvas, useThree, useFrame } from "@react-three/fiber";
-import { OrbitControls } from "@react-three/drei";
+import { OrbitControls, GizmoHelper, GizmoViewport } from "@react-three/drei";
 import * as THREE from "three";
 import type { Face3D, Vec3 } from "@/core/types";
 import type { FaceCategory, GeometryGroup } from "@/core/group-classifier";
@@ -348,6 +348,8 @@ interface SceneProps {
   visibleCategories: Set<FaceCategory>;
   onSelectGroup: (id: number) => void;
   onToggleGroup: (id: number) => void;
+  appliedAxis?: "Y" | "Z";
+  showCenterAxes?: boolean;
 }
 
 function Scene({
@@ -358,6 +360,8 @@ function Scene({
   visibleCategories,
   onSelectGroup,
   onToggleGroup,
+  appliedAxis = "Y",
+  showCenterAxes = true,
 }: SceneProps) {
   const selectedGroups = groups.filter((g) => selectedGroupIds.has(g.id));
 
@@ -428,6 +432,8 @@ function Scene({
   const maxDist = bounds.diag * 3;
   const minDist = bounds.diag * 0.05;
 
+  const isZUp = appliedAxis === "Z";
+
   return (
     <>
       <CameraControls
@@ -435,6 +441,15 @@ function Scene({
         maxDistance={maxDist}
         minDistance={minDist}
       />
+      
+      {/* Ejes cartesianos en el centro del modelo */}
+      {showCenterAxes && (
+        <axesHelper
+          args={[bounds.diag * 0.5]}
+          rotation={isZUp ? [-Math.PI / 2, 0, 0] : [0, 0, 0]}
+        />
+      )}
+      
       <group position={[-bounds.center.x, -bounds.center.y, -bounds.center.z]}>
         {mergedMeshes.map((mm) => {
           if (!visibleCategories.has(mm.category)) return null;
@@ -477,6 +492,8 @@ export interface ModelViewerProps {
   visibleCategories: Set<FaceCategory>;
   onSelectGroup: (id: number) => void;
   onToggleGroup: (id: number) => void;
+  appliedAxis?: "Y" | "Z";
+  showCenterAxes?: boolean;
 }
 
 export default function ModelViewer({
@@ -487,6 +504,8 @@ export default function ModelViewer({
   visibleCategories,
   onSelectGroup,
   onToggleGroup,
+  appliedAxis = "Y",
+  showCenterAxes = true,
 }: ModelViewerProps) {
   const camDist = useMemo(() => {
     let minX = Infinity, minY = Infinity, minZ = Infinity;
@@ -527,7 +546,22 @@ export default function ModelViewer({
         visibleCategories={visibleCategories}
         onSelectGroup={onSelectGroup}
         onToggleGroup={onToggleGroup}
+        appliedAxis={appliedAxis}
+        showCenterAxes={showCenterAxes}
       />
+      
+      {/* Gizmo en la esquina para referencia de orientación constante */}
+      <GizmoHelper alignment="bottom-right" margin={[80, 80]}>
+        <GizmoViewport 
+          axisColors={
+            appliedAxis === "Z" 
+              ? ["#ef4444", "#3b82f6", "#22c55e"] // X=Red, Y(Up)=Blue(Z), Z(Depth)=Green(Y)
+              : ["#ef4444", "#22c55e", "#3b82f6"] // X=Red, Y=Green, Z=Blue
+          } 
+          labels={appliedAxis === "Z" ? ["X", "Z", "Y"] : ["X", "Y", "Z"]}
+          labelColor="white" 
+        />
+      </GizmoHelper>
     </Canvas>
   );
 }

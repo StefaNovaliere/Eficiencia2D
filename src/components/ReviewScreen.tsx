@@ -67,6 +67,7 @@ export default function ReviewScreen({
   const [visibleCategories, setVisibleCategories] = useState<Set<FaceCategory>>(
     () => new Set(ALL_CATEGORIES),
   );
+  const [showCenterAxes, setShowCenterAxes] = useState(true);
   // Wall-wall joint decisions: jointIndex → groupId that yields. Seeded from
   // each joint's safe default suggestion (thinner wall yields), overridable.
   const [wallWallDecisions, setWallWallDecisions] = useState<WallWallDecisions>(
@@ -273,6 +274,8 @@ export default function ReviewScreen({
           visibleCategories={visibleCategories}
           onSelectGroup={handleSelectGroup}
           onToggleGroup={handleToggleGroup}
+          appliedAxis={phase1.appliedAxis}
+          showCenterAxes={showCenterAxes}
         />
         <div className="review-viewer-overlay">
           <VisibilityFilters
@@ -286,6 +289,14 @@ export default function ReviewScreen({
             title="Intercambiar eje vertical (Y/Z) si pisos y paredes están invertidos"
           >
             Rotar eje ({phase1.appliedAxis === "Y" ? "Y↑" : "Z↑"})
+          </button>
+          <button
+            className="axis-toggle-btn"
+            onClick={() => setShowCenterAxes((s) => !s)}
+            title="Mostrar u ocultar el eje en el centro de la pieza"
+            style={{ marginLeft: "8px" }}
+          >
+            {showCenterAxes ? "Ocultar eje" : "Mostrar eje"}
           </button>
           <div
             className="min-area-control"
