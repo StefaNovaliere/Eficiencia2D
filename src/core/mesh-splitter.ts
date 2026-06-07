@@ -8,6 +8,7 @@
 
 import type { Face3D, Vec3 } from "./types";
 import type { GeometryGroup } from "./group-classifier";
+import { DEFAULT_MIN_REAL_AREA } from "./group-classifier";
 
 export interface SplitResult {
   above: Face3D[];
@@ -237,6 +238,48 @@ function subgroupBounds(faces: Face3D[], up: "Y" | "Z"): { minY: number; maxY: n
   return { minY, maxY, cx, cy, cz, count };
 }
 
+/**
+ * Merge thin split segments back into their adjacent neighbour.
+ *
+ * A wall cut at a floor elevation that sits close to the wall's bottom/top
+ * (or between two nearby slabs) produces a sliver segment whose area falls
+ * below `minArea`. Left alone, the emit loop turns it into its own group which
+ * `polishGroups` later demotes to "discard" — appearing as a thin orphan line
+ * below the real wall pieces. Folding the sliver into its neighbour keeps the
+ * wall whole. Segments are ordered bottom-to-top.
+ */
+function mergeThinSegments(
+  segments: Face3D[][],
+  minArea: number,
+): Face3D[][] {
+  if (segments.length <= 1) return segments;
+
+  const list = segments.map((faces) => ({ faces, area: subgroupArea(faces) }));
+
+  // Each pass removes exactly one thin entry, so this runs at most n-1 times.
+  for (;;) {
+    if (list.length <= 1) break;
+    const idx = list.findIndex((e) => e.area < minArea);
+    if (idx === -1) break;
+
+    let target: number;
+    if (idx === 0) {
+      target = 1; // bottom sliver: only neighbour is above
+    } else if (idx === list.length - 1) {
+      target = idx - 1; // top sliver: only neighbour is below
+    } else {
+      // interior: merge into the larger neighbour (tie → the one below).
+      target = list[idx - 1].area >= list[idx + 1].area ? idx - 1 : idx + 1;
+    }
+
+    list[target].faces = list[target].faces.concat(list[idx].faces);
+    list[target].area = subgroupArea(list[target].faces);
+    list.splice(idx, 1);
+  }
+
+  return list.map((e) => e.faces);
+}
+
 // ---------------------------------------------------------------------------
 // Split wall GeometryGroups that extend through floor slabs.
 // ---------------------------------------------------------------------------
@@ -312,6 +355,7 @@ export function splitWallGroupsAtFloors(
   groups: GeometryGroup[],
   overrideMap: Map<number, string>,
   up: "Y" | "Z" = "Y",
+  minRealArea: number = DEFAULT_MIN_REAL_AREA,
 ): { faces: Face3D[]; groups: GeometryGroup[] } {
   const slabPlanes = collectSlabPlanes(groups, overrideMap, faces, up);
   if (slabPlanes.length === 0) return { faces, groups };
@@ -367,14 +411,15 @@ export function splitWallGroupsAtFloors(
     }
 
     const segments = splitWallAtFloors(groupFaces, elevations, up);
+    const merged = mergeThinSegments(segments, minRealArea);
 
-    if (segments.length <= 1) {
+    if (merged.length <= 1) {
       newGroups.push(group);
       continue;
     }
 
-    for (let k = 0; k < segments.length; k++) {
-      const seg = segments[k];
+    for (let k = 0; k < merged.length; k++) {
+      const seg = merged[k];
       if (seg.length === 0) continue;
 
       const area = subgroupArea(seg);
@@ -393,7 +438,7 @@ export function splitWallGroupsAtFloors(
 
       newGroups.push({
         id: k === 0 ? group.id : nextId++,
-        label: `${group.label} (${k + 1}/${segments.length})`,
+        label: `${group.label} (${k + 1}/${merged.length})`,
         category: group.category,
         originalCategory: group.originalCategory,
         faceIndices,
