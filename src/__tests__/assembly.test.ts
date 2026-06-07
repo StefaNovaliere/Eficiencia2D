@@ -929,6 +929,106 @@ describe("splitWallGroupsAtFloors", () => {
     expect(walls).toHaveLength(1);
     expect(walls[0].id).toBe(10);
   });
+
+  it("merges a thin bottom sliver back into the wall (no discarded orphan)", () => {
+    // A slab 0.2 m above the wall's foot would split off a 0.2 m² sliver
+    // (1 m wide × 0.2 m). It must be absorbed back so the wall stays whole.
+    const wallFace = makeWallFace(0, 3);
+    const slabFace = makeFloorFace(0.2);
+    const faces: Face3D[] = [wallFace, slabFace];
+
+    const wallGroup = makeGroup({
+      id: 10, category: "wall",
+      representativeNormal: { x: 0, y: 0, z: 1 },
+      faceIndices: [0],
+      totalArea: 3, minY: 0, maxY: 3,
+      thickness: 0.06,
+    });
+    const slabGroup = makeGroup({
+      id: 20, category: "floor",
+      representativeNormal: { x: 0, y: 1, z: 0 },
+      faceIndices: [1],
+      minY: 0.2, maxY: 0.2,
+    });
+
+    const result = splitWallGroupsAtFloors(faces, [wallGroup, slabGroup], new Map(), "Y", 1.0);
+
+    const walls = result.groups.filter(g => g.category === "wall");
+    expect(walls).toHaveLength(1);
+    // Collapsed to a single segment → the original group is pushed unchanged.
+    expect(walls[0].id).toBe(10);
+    expect(walls[0].minY!).toBeCloseTo(0, 3);
+    expect(walls[0].maxY!).toBeCloseTo(3, 3);
+    expect(walls[0].totalArea).toBeCloseTo(3, 3);
+    expect(walls[0].label).not.toContain("(");
+
+    // After the polish pass, nothing from this wall is demoted to "Descartado".
+    polishGroups(result.groups, 1.0);
+    expect(result.groups.some(g => g.category === "discard")).toBe(false);
+  });
+
+  it("keeps a genuine multi-storey split while merging an interior sliver", () => {
+    // Wall 0..6 with slabs at 2.0 and 2.4 → raw segments
+    // [0..2 (2.0 m²), 2..2.4 (0.4 m² sliver), 2.4..6 (3.6 m²)].
+    // The sliver folds into its larger neighbour (above) → two pieces.
+    const wallFace = makeWallFace(0, 6);
+    const slabA = makeFloorFace(2.0);
+    const slabB = makeFloorFace(2.4);
+    const faces: Face3D[] = [wallFace, slabA, slabB];
+
+    const wallGroup = makeGroup({
+      id: 10, category: "wall",
+      representativeNormal: { x: 0, y: 0, z: 1 },
+      faceIndices: [0],
+      totalArea: 6, minY: 0, maxY: 6,
+    });
+    const slabGroupA = makeGroup({
+      id: 20, category: "floor",
+      representativeNormal: { x: 0, y: 1, z: 0 },
+      faceIndices: [1], minY: 2.0, maxY: 2.0,
+    });
+    const slabGroupB = makeGroup({
+      id: 21, category: "floor",
+      representativeNormal: { x: 0, y: 1, z: 0 },
+      faceIndices: [2], minY: 2.4, maxY: 2.4,
+    });
+
+    const result = splitWallGroupsAtFloors(
+      faces, [wallGroup, slabGroupA, slabGroupB], new Map(), "Y", 1.0,
+    );
+
+    const walls = result.groups.filter(g => g.category === "wall");
+    expect(walls).toHaveLength(2);
+    // No sliver survives: every piece clears the area bar.
+    for (const w of walls) expect(w.totalArea).toBeGreaterThanOrEqual(1.0);
+    // Label denominators reflect the post-merge count (2), not the raw 3.
+    for (const w of walls) expect(w.label).toContain("/2)");
+  });
+
+  it("keeps a fully thin wall whole instead of dropping it", () => {
+    // Wall is only 0.3 m tall; a slab at its mid-height must not shatter it.
+    const wallFace = makeWallFace(0, 0.3);
+    const slabFace = makeFloorFace(0.15);
+    const faces: Face3D[] = [wallFace, slabFace];
+
+    const wallGroup = makeGroup({
+      id: 10, category: "wall",
+      representativeNormal: { x: 0, y: 0, z: 1 },
+      faceIndices: [0],
+      totalArea: 0.3, minY: 0, maxY: 0.3,
+    });
+    const slabGroup = makeGroup({
+      id: 20, category: "floor",
+      representativeNormal: { x: 0, y: 1, z: 0 },
+      faceIndices: [1], minY: 0.15, maxY: 0.15,
+    });
+
+    const result = splitWallGroupsAtFloors(faces, [wallGroup, slabGroup], new Map(), "Y", 1.0);
+    const walls = result.groups.filter(g => g.category === "wall");
+    expect(walls).toHaveLength(1);
+    expect(walls[0].id).toBe(10);
+    expect(walls[0].label).not.toContain("(");
+  });
 });
 
 // ---------------------------------------------------------------------------
