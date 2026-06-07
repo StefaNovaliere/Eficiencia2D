@@ -342,7 +342,7 @@ export function reclassifyWithAxis(
   const groups = classifyIntoGroups(faces, minRealArea, warnings);
 
   const preSplitFaceCount = faces.length;
-  const split = splitWallGroupsAtFloors(faces, groups, new Map(), "Y");
+  const split = splitWallGroupsAtFloors(faces, groups, new Map(), "Y", minRealArea ?? DEFAULT_MIN_REAL_AREA);
   polishGroups(split.groups, minRealArea ?? DEFAULT_MIN_REAL_AREA);
 
   const joints = detectJoints(split.faces, split.groups);
@@ -363,7 +363,7 @@ export function reclassifyWithMinArea(
   const groups = classifyIntoGroups(baseFaces, minRealArea, warnings);
 
   const preSplitFaceCount = baseFaces.length;
-  const split = splitWallGroupsAtFloors(baseFaces, groups, new Map(), "Y");
+  const split = splitWallGroupsAtFloors(baseFaces, groups, new Map(), "Y", minRealArea);
   polishGroups(split.groups, minRealArea);
 
   const joints = detectJoints(split.faces, split.groups);
@@ -434,7 +434,7 @@ export function parsePipeline(
 
   // Split walls that extend through floor slabs into separate sub-groups.
   const preSplitFaceCount = faces.length;
-  const split = splitWallGroupsAtFloors(faces, groups, new Map(), "Y");
+  const split = splitWallGroupsAtFloors(faces, groups, new Map(), "Y", DEFAULT_MIN_REAL_AREA);
   polishGroups(split.groups, DEFAULT_MIN_REAL_AREA);
 
   // Detect joints and compute assembly adjustments on the (possibly split) groups.
