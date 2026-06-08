@@ -92,11 +92,11 @@ export default function BackgroundSymbols() {
   const placements = useMemo(() => buildPlacements(48), []);
 
   return (
-    <div className="bg-symbols" aria-hidden="true">
+    <div className="fixed inset-0 pointer-events-none overflow-hidden z-0" aria-hidden="true">
       {placements.map((p, i) => (
         <span
           key={i}
-          className="bg-symbol"
+          className="absolute font-mono whitespace-nowrap select-none opacity-0 animate-[bgDrift_linear_infinite]"
           style={{
             left: `${p.left}%`,
             top: `${p.top}%`,

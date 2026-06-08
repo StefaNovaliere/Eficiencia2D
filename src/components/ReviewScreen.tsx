@@ -264,8 +264,8 @@ export default function ReviewScreen({
   }, [effectivePhase1.wallWallJoints, effectivePhase1.groups, overrides, panelIdByGroup]);
 
   return (
-    <div className="review-overlay">
-      <div className="review-viewer">
+    <div className="fixed inset-0 z-50 bg-base-100 flex flex-col md:flex-row overflow-hidden">
+      <div className="flex-1 relative bg-base-200/30 overflow-hidden">
         <ModelViewer
           faces={effectivePhase1.faces}
           groups={effectivePhase1.groups}
@@ -277,53 +277,58 @@ export default function ReviewScreen({
           appliedAxis={phase1.appliedAxis}
           showCenterAxes={showCenterAxes}
         />
-        <div className="review-viewer-overlay">
-          <VisibilityFilters
-            stats={stats}
-            visibleCategories={visibleCategories}
-            onToggle={handleToggleVisibility}
-          />
-          <button
-            className="axis-toggle-btn"
-            onClick={handleRotateAxis}
-            title="Intercambiar eje vertical (Y/Z) si pisos y paredes están invertidos"
-          >
-            Rotar eje ({phase1.appliedAxis === "Y" ? "Y↑" : "Z↑"})
-          </button>
-          <button
-            className="axis-toggle-btn"
-            onClick={() => setShowCenterAxes((s) => !s)}
-            title="Mostrar u ocultar el eje en el centro de la pieza"
-            style={{ marginLeft: "8px" }}
-          >
-            {showCenterAxes ? "Ocultar eje" : "Mostrar eje"}
-          </button>
-          <div
-            className="min-area-control"
-            title="Componentes más chicos que este umbral se descartan al generar las planchas"
-          >
-            <label className="min-area-label">Descartar &lt;</label>
-            <select
-              className="min-area-select"
-              value={minAreaM2}
-              onChange={(e) => handleMinAreaChangeWithReset(Number(e.target.value))}
+        <div className="absolute top-6 left-6 right-6 z-10 flex flex-wrap items-center gap-3 pointer-events-auto">
+          <div className="flex flex-wrap items-center gap-3 bg-base-100/70 backdrop-blur-xl border border-base-200/50 p-2 rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)]">
+            <VisibilityFilters
+              stats={stats}
+              visibleCategories={visibleCategories}
+              onToggle={handleToggleVisibility}
+            />
+            <div className="w-[1px] h-8 bg-base-300/50 mx-1"></div>
+            <button
+              className="btn btn-sm btn-ghost hover:bg-base-200 rounded-xl"
+              onClick={handleRotateAxis}
+              title="Intercambiar eje vertical (Y/Z) si pisos y paredes están invertidos"
             >
-              {MIN_AREA_OPTIONS.map((a) => (
-                <option key={a} value={a}>
-                  {a === 0 ? "Ninguno" : `${a} m²`}
-                </option>
-              ))}
-            </select>
+              Rotar eje ({phase1.appliedAxis === "Y" ? "Y↑" : "Z↑"})
+            </button>
+            <button
+              className="btn btn-sm btn-ghost hover:bg-base-200 rounded-xl"
+              onClick={() => setShowCenterAxes((s) => !s)}
+              title="Mostrar u ocultar el eje en el centro de la pieza"
+            >
+              {showCenterAxes ? "Ocultar eje" : "Mostrar eje"}
+            </button>
+            <div className="w-[1px] h-8 bg-base-300/50 mx-1"></div>
+            <div
+              className="flex items-center bg-base-200/40 border border-base-200/80 rounded-lg overflow-hidden h-8 shadow-sm transition-colors hover:bg-base-200/60"
+              title="Componentes más chicos que este umbral se descartan al generar las planchas"
+            >
+              <span className="text-[10px] font-bold uppercase tracking-wider text-base-content/70 px-2.5 border-r border-base-200/80 bg-base-200/70 h-full flex items-center">
+                Descartar &lt;
+              </span>
+              <select
+                className="select select-ghost select-sm h-full min-h-0 rounded-none focus:outline-none focus:bg-transparent text-xs font-mono font-bold px-2"
+                value={minAreaM2}
+                onChange={(e) => handleMinAreaChangeWithReset(Number(e.target.value))}
+              >
+                {MIN_AREA_OPTIONS.map((a) => (
+                  <option key={a} value={a}>
+                    {a === 0 ? "Ninguno" : `${a} m²`}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
           {wallWallList.length > 0 && (
-            <span className="viewer-hint">
+            <span className="text-xs font-medium bg-info/10 text-info px-3 py-1.5 rounded-full border border-info/20 shadow-sm hidden md:inline-block animate-pulse">
               Seleccioná una pared para ver o editar sus uniones
             </span>
           )}
         </div>
       </div>
 
-      <div className="review-sidebar">
+      <div className="w-full md:w-[22rem] lg:w-[26rem] flex flex-col border-t md:border-t-0 md:border-l border-base-200/60 bg-base-100/95 backdrop-blur-3xl shrink-0 h-[40vh] md:h-full shadow-[-20px_0_40px_-15px_rgba(0,0,0,0.05)] z-20">
         <GroupList
           groups={effectivePhase1.groups}
           selectedGroupIds={selectedGroupIds}
@@ -335,36 +340,36 @@ export default function ReviewScreen({
         />
 
         {selectedGroupIds.size >= 2 && canMergeSelected && (
-          <div className="merge-action-bar">
-            <button className="merge-btn" onClick={handleMergeSelected}>
+          <div className="p-4 border-b border-base-200/50 bg-base-200/20 backdrop-blur-sm relative z-10">
+            <button className="btn btn-primary w-full rounded-xl shadow-sm" onClick={handleMergeSelected}>
               Fusionar seleccionados ({selectedGroupIds.size})
             </button>
           </div>
         )}
 
         {merges.length > 0 && (
-          <div className={`merge-card ${mergeCardOpen ? "" : "merge-card--collapsed"}`}>
+          <div className="border-b border-base-200/50 relative z-10 bg-base-100/50">
             <button
-              className="merge-card-header"
+              className="flex w-full items-center justify-between p-4 hover:bg-base-200/50 transition-colors font-semibold"
               onClick={() => setMergeCardOpen((o) => !o)}
             >
-              <span className="merge-card-title">
+              <span className="text-sm">
                 Fusiones ({merges.length})
               </span>
-              <span className="merge-card-chevron">{mergeCardOpen ? "▾" : "▸"}</span>
+              <span className="text-base-content/50 bg-base-200 rounded-full w-6 h-6 flex items-center justify-center">{mergeCardOpen ? "▾" : "▸"}</span>
             </button>
             {mergeCardOpen && (
-              <div className="merge-card-body">
+              <div className="px-4 pb-4 flex flex-col gap-2">
                 {merges.map((ids, i) => {
                   const labels = ids.map((id) => {
                     const g = phase1.groups.find((gr) => gr.id === id);
                     return g?.label ?? `Grupo ${id}`;
                   });
                   return (
-                    <div key={i} className="merge-row">
-                      <span className="merge-row-labels">{labels.join(" + ")}</span>
+                    <div key={i} className="flex justify-between items-center bg-base-200/70 border border-base-200 rounded-xl px-3 py-2 text-xs transition-transform hover:scale-[1.02]">
+                      <span className="truncate mr-2 font-medium">{labels.join(" + ")}</span>
                       <button
-                        className="merge-row-remove"
+                        className="text-base-content/50 hover:text-error hover:bg-error/10 w-6 h-6 rounded-md flex items-center justify-center text-lg leading-none transition-colors"
                         onClick={() => handleUnmerge(i)}
                         title="Deshacer fusión"
                       >
@@ -398,139 +403,148 @@ export default function ReviewScreen({
           const groupById = new Map(effectivePhase1.groups.map((g) => [g.id, g]));
 
           return (
-            <div className="assembly-detail">
+            <div className="p-5 border-b border-base-200/50 overflow-y-auto max-h-[30vh] bg-base-100 relative z-10 custom-scrollbar">
               {selGroup.thickness != null && (
-                <div className="assembly-detail-row">
-                  <span className="assembly-detail-label">Grosor detectado</span>
-                  <span className="assembly-detail-value">{(selGroup.thickness * 100).toFixed(1)} cm</span>
+                <div className="flex justify-between items-center mb-4 bg-base-200/50 p-3 rounded-xl border border-base-200">
+                  <span className="text-xs font-bold text-base-content/70">Grosor detectado</span>
+                  <span className="text-xs font-mono bg-base-100 shadow-sm border border-base-300/50 px-2 py-1 rounded-md text-primary">{(selGroup.thickness * 100).toFixed(1)} cm</span>
                 </div>
               )}
               {groupJoints.length > 0 && (
-                <div className="assembly-detail-section">
-                  <span className="assembly-detail-label">Juntas ({groupJoints.length})</span>
-                  {groupJoints.map((j, i) => {
-                    const otherId = j.groupA === selId ? j.groupB : j.groupA;
-                    const other = groupById.get(otherId);
-                    return (
-                      <div key={i} className="assembly-joint-row">
-                        <span>{other?.label ?? `Grupo ${otherId}`}</span>
-                        <span className="assembly-joint-meta">
-                          {j.totalLength.toFixed(2)}m · {j.dihedralAngle.toFixed(0)}°
-                        </span>
-                      </div>
-                    );
-                  })}
+                <div className="mt-5 flex flex-col gap-2">
+                  <span className="text-[11px] font-black uppercase tracking-wider text-base-content/50 ml-1">Juntas ({groupJoints.length})</span>
+                  <div className="bg-base-200/30 border border-base-200 rounded-xl divide-y divide-base-200/50">
+                    {groupJoints.map((j, i) => {
+                      const otherId = j.groupA === selId ? j.groupB : j.groupA;
+                      const other = groupById.get(otherId);
+                      return (
+                        <div key={i} className="flex justify-between items-center p-3 text-xs hover:bg-base-200/50 transition-colors">
+                          <span className="font-medium">{other?.label ?? `Grupo ${otherId}`}</span>
+                          <span className="text-base-content/60 font-mono bg-base-100 px-2 py-0.5 rounded shadow-sm border border-base-200/50">
+                            {j.totalLength.toFixed(2)}m <span className="opacity-50 mx-1">·</span> {j.dihedralAngle.toFixed(0)}°
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
               {groupAdjs.length > 0 && (
-                <div className="assembly-detail-section">
-                  <span className="assembly-detail-label">Ajustes de ensamblaje</span>
-                  {groupAdjs.map((a, i) => (
-                    <div key={i} className="assembly-adj-row">
-                      <span>{a.reason}</span>
-                      <span className="assembly-adj-delta">
-                        {(a.delta * 100).toFixed(1)} cm
-                      </span>
-                    </div>
-                  ))}
+                <div className="mt-5 flex flex-col gap-2">
+                  <span className="text-[11px] font-black uppercase tracking-wider text-base-content/50 ml-1">Ajustes de ensamblaje</span>
+                  <div className="bg-base-200/30 border border-base-200 rounded-xl divide-y divide-base-200/50">
+                    {groupAdjs.map((a, i) => (
+                      <div key={i} className="flex justify-between items-center p-3 text-xs hover:bg-base-200/50 transition-colors">
+                        <span className="font-medium">{a.reason}</span>
+                        <span className="text-base-content/60 font-mono bg-base-100 px-2 py-0.5 rounded shadow-sm border border-base-200/50">
+                          {(a.delta * 100).toFixed(1)} cm
+                        </span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
               {groupWWJoints.length > 0 && (
-                <div className="assembly-detail-section">
-                  <span className="assembly-detail-label">
+                <div className="mt-5 flex flex-col gap-2">
+                  <span className="text-[11px] font-black uppercase tracking-wider text-base-content/50 ml-1">
                     Uniones pared-pared ({groupWWJoints.length})
                   </span>
-                  <span className="ww-ctx-help">
+                  <span className="text-[10px] leading-tight text-base-content/50 italic mb-2 ml-1">
                     La pared que se recorta se acorta el grosor de la otra para que encajen sin superponerse.
                   </span>
-                  {groupWWJoints.map(({ ww, labelA, labelB, pidA, pidB, hasThickness }) => {
-                    const otherId = ww.groupA === selId ? ww.groupB : ww.groupA;
-                    const otherLabel = ww.groupA === selId ? labelB : labelA;
-                    const otherPid = ww.groupA === selId ? pidB : pidA;
-                    const selPid = panelIdByGroup.get(selId);
-                    const effYielder = wallWallDecisions.get(ww.jointIndex) ?? ww.suggestedYieldGroupId;
+                  <div className="flex flex-col gap-3">
+                    {groupWWJoints.map(({ ww, labelA, labelB, pidA, pidB, hasThickness }) => {
+                      const otherId = ww.groupA === selId ? ww.groupB : ww.groupA;
+                      const otherLabel = ww.groupA === selId ? labelB : labelA;
+                      const otherPid = ww.groupA === selId ? pidB : pidA;
+                      const selPid = panelIdByGroup.get(selId);
+                      const effYielder = wallWallDecisions.get(ww.jointIndex) ?? ww.suggestedYieldGroupId;
 
-                    const selThick = groupById.get(selId)?.thickness ?? 0;
-                    const otherThick = groupById.get(otherId)?.thickness ?? 0;
-                    const trimIfSel = otherThick > 0.001 ? otherThick : selThick > 0.001 ? selThick : 0;
-                    const trimIfOther = selThick > 0.001 ? selThick : otherThick > 0.001 ? otherThick : 0;
+                      const selThick = groupById.get(selId)?.thickness ?? 0;
+                      const otherThick = groupById.get(otherId)?.thickness ?? 0;
+                      const trimIfSel = otherThick > 0.001 ? otherThick : selThick > 0.001 ? selThick : 0;
+                      const trimIfOther = selThick > 0.001 ? selThick : otherThick > 0.001 ? otherThick : 0;
 
-                    return (
-                      <div key={ww.jointIndex} className="ww-joint-card">
-                        <div className="ww-joint-header">
-                          Unión con{" "}
-                          {otherPid && <span className="ww-ctx-pid">{otherPid}</span>}{" "}
-                          <span className="ww-ctx-name">{otherLabel}</span>
-                        </div>
-                        {!hasThickness ? (
-                          <span className="ww-ctx-nothick">Sin grosor — no se puede recortar</span>
-                        ) : (
-                          <div className="ww-seg-row">
-                            <span className="ww-seg-label">Se recorta:</span>
-                            <div className="ww-seg">
-                              <button
-                                className={`ww-seg-option${effYielder === selId ? " ww-seg-option--active" : ""}`}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleWallWallDecision(ww.jointIndex, selId, ww.groupA, ww.groupB);
-                                }}
-                              >
-                                {selPid && <span className="ww-seg-pid">{selPid}</span>}
-                                Esta
-                                {effYielder === selId && trimIfSel > 0.001 && (
-                                  <span className="ww-trim-tag">&minus;{(trimIfSel * 100).toFixed(1)} cm</span>
-                                )}
-                              </button>
-                              <button
-                                className={`ww-seg-option${effYielder === otherId ? " ww-seg-option--active" : ""}`}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleWallWallDecision(ww.jointIndex, otherId, ww.groupA, ww.groupB);
-                                }}
-                              >
-                                {otherPid && <span className="ww-seg-pid">{otherPid}</span>}
-                                Otra
-                                {effYielder === otherId && trimIfOther > 0.001 && (
-                                  <span className="ww-trim-tag">&minus;{(trimIfOther * 100).toFixed(1)} cm</span>
-                                )}
-                              </button>
-                            </div>
+                      return (
+                        <div key={ww.jointIndex} className="bg-base-200/50 border border-base-200 rounded-xl p-3 flex flex-col gap-3 shadow-sm hover:shadow-md transition-shadow">
+                          <div className="text-xs font-semibold flex items-center gap-1.5 text-base-content/80">
+                            Unión con{" "}
+                            {otherPid && <span className="font-mono bg-base-100 shadow-sm border border-base-300/50 px-1.5 rounded text-[10px]">{otherPid}</span>}{" "}
+                            <span className="truncate">{otherLabel}</span>
                           </div>
-                        )}
-                      </div>
-                    );
-                  })}
+                          {!hasThickness ? (
+                            <span className="text-[10px] text-base-content/50 italic bg-base-100 p-2 rounded-lg border border-base-200/50">Sin grosor — no se puede recortar</span>
+                          ) : (
+                            <div className="flex items-center justify-between bg-base-100 p-2 rounded-lg border border-base-200/50">
+                              <span className="text-[10px] uppercase font-bold text-base-content/50 tracking-wide">Se recorta:</span>
+                              <div className="join shadow-sm">
+                                <button
+                                  className={`btn btn-xs join-item font-medium h-7 px-3 border-base-300/50 ${effYielder === selId ? "btn-active bg-primary hover:bg-primary border-primary text-primary-content" : "bg-base-100 hover:bg-base-200"}`}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleWallWallDecision(ww.jointIndex, selId, ww.groupA, ww.groupB);
+                                  }}
+                                >
+                                  {selPid && <span className="font-mono opacity-80 mr-1.5 text-[10px]">{selPid}</span>}
+                                  Esta
+                                  {effYielder === selId && trimIfSel > 0.001 && (
+                                    <span className="ml-1.5 bg-black/10 rounded px-1 text-[10px] font-mono">&minus;{(trimIfSel * 100).toFixed(1)}</span>
+                                  )}
+                                </button>
+                                <button
+                                  className={`btn btn-xs join-item font-medium h-7 px-3 border-base-300/50 ${effYielder === otherId ? "btn-active bg-primary hover:bg-primary border-primary text-primary-content" : "bg-base-100 hover:bg-base-200"}`}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleWallWallDecision(ww.jointIndex, otherId, ww.groupA, ww.groupB);
+                                  }}
+                                >
+                                  {otherPid && <span className="font-mono opacity-80 mr-1.5 text-[10px]">{otherPid}</span>}
+                                  Otra
+                                  {effYielder === otherId && trimIfOther > 0.001 && (
+                                    <span className="ml-1.5 bg-black/10 rounded px-1 text-[10px] font-mono">&minus;{(trimIfOther * 100).toFixed(1)}</span>
+                                  )}
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
             </div>
           );
         })()}
 
-        <div className="review-bottom-bar">
-          <div className="review-stats">
-            <span className="stat-item stat-floor">{stats.floors} pisos</span>
-            <span className="stat-sep">·</span>
-            <span className="stat-item stat-wall">{stats.walls} paredes</span>
-            <span className="stat-sep">·</span>
-            <span className="stat-item stat-discard">{stats.discarded} descartados</span>
+        <div className="mt-auto border-t border-base-200/50 p-5 bg-base-100 relative z-10 shadow-[0_-10px_30px_rgba(0,0,0,0.03)]">
+          <div className="flex flex-wrap items-center gap-2 mb-4 text-xs font-medium">
+            <div className="px-2.5 py-1 bg-success/10 text-success rounded-lg border border-success/20 flex items-center gap-1">
+              {stats.floors} pisos
+            </div>
+            <div className="px-2.5 py-1 bg-info/10 text-info rounded-lg border border-info/20 flex items-center gap-1">
+              {stats.walls} paredes
+            </div>
+            <div className="px-2.5 py-1 bg-base-200 text-base-content/60 rounded-lg border border-base-300/50 flex items-center gap-1">
+              {stats.discarded} descartados
+            </div>
             {overrides.size > 0 && (
-              <>
-                <span className="stat-sep">·</span>
-                <span className="stat-item stat-changes">{overrides.size} cambio{overrides.size !== 1 ? "s" : ""}</span>
-              </>
+              <div className="px-2.5 py-1 bg-warning/10 text-warning-content rounded-lg border border-warning/20 flex items-center gap-1 font-bold">
+                {overrides.size} cambio{overrides.size !== 1 ? "s" : ""}
+              </div>
             )}
           </div>
           {wallWallList.length > 0 && (
-            <p className="ww-preconfirm-hint">
+            <p className="text-[11px] leading-relaxed text-base-content/50 mb-4 bg-base-200/50 p-3 rounded-xl border border-base-200">
               Las uniones entre paredes fueron resueltas automáticamente.
               Seleccioná una pared para revisar qué pared se recorta en cada unión.
             </p>
           )}
-          <div className="review-actions">
-            <button className="review-btn review-btn--cancel" onClick={onCancel}>
+          <div className="flex gap-3">
+            <button className="btn flex-1 btn-ghost bg-base-200 hover:bg-base-300 rounded-xl" onClick={onCancel}>
               Volver
             </button>
-            <button className="review-btn review-btn--confirm" onClick={handleConfirm}>
+            <button className="btn flex-1 btn-primary shadow-lg shadow-primary/30 rounded-xl text-primary-content" onClick={handleConfirm}>
               Confirmar y Generar
             </button>
           </div>
