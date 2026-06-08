@@ -73,41 +73,36 @@ export default function GroupList({
   }, [selectedGroupIds]);
 
   return (
-    <div className="group-list" ref={listRef}>
-      <div className="group-list-header">
-        <h3 className="group-list-title">Clasificacion de Grupos</h3>
-        <p className="group-list-subtitle">
-          {visibleGroups.length} de {groups.length} grupo{groups.length !== 1 ? "s" : ""}
-        </p>
+    <div className="flex flex-col flex-1 min-h-0 bg-base-100/50 relative z-10" ref={listRef}>
+      <div className="flex items-center justify-between p-4 border-b border-base-200/50 bg-base-100/80 backdrop-blur-md sticky top-0 z-20 shadow-[0_4px_20px_rgba(0,0,0,0.02)]">
+        <h3 className="font-bold text-base tracking-tight flex items-center gap-2">
+          Capas
+          <span className="badge badge-sm badge-neutral font-mono">{visibleGroups.length}</span>
+        </h3>
         {visibleGroups.length > 0 && (
-          <label className="group-select-all">
+          <label className="flex items-center gap-2 text-xs cursor-pointer hover:bg-base-200 px-2 py-1 rounded-md transition-colors">
             <input
               type="checkbox"
+              className="checkbox checkbox-xs checkbox-primary rounded-sm"
               checked={allVisibleSelected}
-              ref={(el) => {
-                if (el) el.indeterminate = someVisibleSelected && !allVisibleSelected;
-              }}
               onChange={(e) => {
-                e.stopPropagation();
                 if (allVisibleSelected) {
-                  // Deselect all visible
                   for (const g of visibleGroups) {
                     if (selectedGroupIds.has(g.id)) onToggleGroup(g.id);
                   }
                 } else {
-                  // Select all visible that aren't already selected
                   for (const g of visibleGroups) {
                     if (!selectedGroupIds.has(g.id)) onToggleGroup(g.id);
                   }
                 }
               }}
             />
-            <span>Seleccionar todos</span>
+            <span className="font-medium text-base-content/70">Seleccionar todos</span>
           </label>
         )}
       </div>
 
-      <div className="group-list-items">
+      <div className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar">
         {visibleGroups.map((group) => {
           const effectiveCat = categoryOverrides.get(group.id) ?? group.category;
           const isSelected = selectedGroupIds.has(group.id);
@@ -117,7 +112,7 @@ export default function GroupList({
             <div
               key={group.id}
               ref={isSelected ? selectedRef : undefined}
-              className={`group-row ${isSelected ? "group-row--selected" : ""} ${effectiveCat === "discard" ? "group-row--discard" : ""}`}
+              className={`flex items-center justify-between p-2.5 rounded-xl cursor-pointer transition-all duration-200 border shadow-sm hover:shadow-md ${isSelected ? "bg-primary/10 border-primary/30" : "bg-base-100 border-base-200/50 hover:bg-base-200/50 hover:-translate-y-[1px]"} ${effectiveCat === "discard" ? "opacity-60 grayscale-[50%]" : ""}`}
               onClick={(e) => {
                 if (e.ctrlKey || e.metaKey) {
                   onToggleGroup(group.id);
@@ -126,10 +121,10 @@ export default function GroupList({
                 }
               }}
             >
-              <div className="group-row-left">
+              <div className="flex items-center gap-3 overflow-hidden pl-1">
                 <input
                   type="checkbox"
-                  className="group-row-checkbox"
+                  className="checkbox checkbox-xs checkbox-primary rounded-sm"
                   checked={isSelected}
                   onChange={(e) => {
                     e.stopPropagation();
@@ -139,12 +134,12 @@ export default function GroupList({
                   aria-label={`Seleccionar ${group.label}`}
                 />
                 <span
-                  className="group-color-dot"
+                  className="w-2.5 h-2.5 rounded-full shrink-0 shadow-sm"
                   style={{ backgroundColor: color }}
                 />
-                <div className="group-row-info">
-                  <span className="group-row-label">{group.label}</span>
-                  <span className="group-row-meta">
+                <div className="flex flex-col overflow-hidden">
+                  <span className="text-sm font-semibold truncate">{group.label}</span>
+                  <span className="text-[10px] text-base-content/60 truncate">
                     {group.totalArea.toFixed(1)} m² · {group.faceIndices.length} caras
                     {group.thickness != null && ` · ${(group.thickness * 100).toFixed(1)}cm grosor`}
                   </span>
@@ -152,7 +147,7 @@ export default function GroupList({
               </div>
 
               <select
-                className="category-select"
+                className="select select-bordered select-xs w-28 bg-base-100/80 hover:bg-base-200 transition-colors shadow-sm ml-2 rounded-lg"
                 value={effectiveCat}
                 onChange={(e) => {
                   e.stopPropagation();
