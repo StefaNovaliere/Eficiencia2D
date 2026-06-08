@@ -9,6 +9,7 @@ import { reclassifyWithAxis, computePanelIdByGroup, applyMerges, areGroupsCoplan
 import type { Phase1Result, ClassificationOverride } from "@/core/pipeline";
 import type { Joint } from "@/core/joint-detector";
 import type { DimensionAdjustment } from "@/core/assembly-adjuster";
+import type { LeaderMarker } from "./ModelViewer";
 
 export type WallWallDecisions = Map<number, number>;
 
@@ -68,6 +69,9 @@ export default function ReviewScreen({
     () => new Set(ALL_CATEGORIES),
   );
   const [showCenterAxes, setShowCenterAxes] = useState(true);
+  // Which wall-wall joint (by jointIndex) is highlighted with leader labels in
+  // the 3D viewer. Null = none selected.
+  const [selectedJointIndex, setSelectedJointIndex] = useState<number | null>(null);
   // Wall-wall joint decisions: jointIndex → groupId that yields. Seeded from
   // each joint's safe default suggestion (thinner wall yields), overridable.
   const [wallWallDecisions, setWallWallDecisions] = useState<WallWallDecisions>(
@@ -148,6 +152,12 @@ export default function ReviewScreen({
     }
     setWallWallDecisions(m);
   }, [effectivePhase1]);
+
+  // Clear the highlighted joint whenever the wall selection changes (switch
+  // wall, deselect, merge) so stale leader labels never linger.
+  useEffect(() => {
+    setSelectedJointIndex(null);
+  }, [selectedGroupIds]);
 
   const handleRotateAxis = useCallback(() => {
     const newAxis = phase1.appliedAxis === "Y" ? "Z" : "Y";
@@ -263,6 +273,28 @@ export default function ReviewScreen({
       }));
   }, [effectivePhase1.wallWallJoints, effectivePhase1.groups, overrides, panelIdByGroup]);
 
+  // Floating reference labels for the selected joint: one per wall of the joint,
+  // anchored at each wall's centroid and tagged with its panel id (A#/B#).
+  const leaderMarkers = useMemo<LeaderMarker[]>(() => {
+    if (selectedJointIndex == null) return [];
+    const ww = effectivePhase1.wallWallJoints.find((w) => w.jointIndex === selectedJointIndex);
+    if (!ww) return [];
+    const selId = selectedGroupIds.size === 1 ? Array.from(selectedGroupIds)[0] : ww.groupA;
+    const byId = new Map(effectivePhase1.groups.map((g) => [g.id, g]));
+    const out: LeaderMarker[] = [];
+    for (const gid of [ww.groupA, ww.groupB]) {
+      const g = byId.get(gid);
+      if (!g) continue;
+      out.push({
+        groupId: gid,
+        anchor: g.centroid,
+        label: panelIdByGroup.get(gid) ?? "",
+        primary: gid === selId,
+      });
+    }
+    return out;
+  }, [selectedJointIndex, effectivePhase1, selectedGroupIds, panelIdByGroup]);
+
   return (
     <div className="fixed inset-0 z-50 bg-base-100 flex flex-col md:flex-row overflow-hidden">
       <div className="flex-1 relative bg-base-200/30 overflow-hidden">
@@ -276,6 +308,7 @@ export default function ReviewScreen({
           onToggleGroup={handleToggleGroup}
           appliedAxis={phase1.appliedAxis}
           showCenterAxes={showCenterAxes}
+          leaderMarkers={leaderMarkers}
         />
         <div className="absolute top-6 left-6 right-6 z-10 flex flex-wrap items-center gap-3 pointer-events-auto">
           <div className="flex flex-wrap items-center gap-3 bg-base-100/70 backdrop-blur-xl border border-base-200/50 p-2 rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)]">
@@ -466,7 +499,19 @@ export default function ReviewScreen({
                       const trimIfOther = selThick > 0.001 ? selThick : otherThick > 0.001 ? otherThick : 0;
 
                       return (
-                        <div key={ww.jointIndex} className="bg-base-200/50 border border-base-200 rounded-xl p-3 flex flex-col gap-3 shadow-sm hover:shadow-md transition-shadow">
+                        <div
+                          key={ww.jointIndex}
+                          onClick={() =>
+                            setSelectedJointIndex((cur) =>
+                              cur === ww.jointIndex ? null : ww.jointIndex,
+                            )
+                          }
+                          className={`bg-base-200/50 border rounded-xl p-3 flex flex-col gap-3 shadow-sm hover:shadow-md transition-shadow cursor-pointer ${
+                            selectedJointIndex === ww.jointIndex
+                              ? "border-primary ring-2 ring-primary/40 bg-primary/5"
+                              : "border-base-200"
+                          }`}
+                        >
                           <div className="text-xs font-semibold flex items-center gap-1.5 text-base-content/80">
                             Unión con{" "}
                             {otherPid && <span className="font-mono bg-base-100 shadow-sm border border-base-300/50 px-1.5 rounded text-[10px]">{otherPid}</span>}{" "}
