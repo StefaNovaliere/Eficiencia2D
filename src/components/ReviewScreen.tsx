@@ -517,7 +517,7 @@ export default function ReviewScreen({
           );
         })()}
 
-        <div className="mt-auto border-t border-base-200/50 p-5 bg-base-100 relative z-10 shadow-[0_-10px_30px_rgba(0,0,0,0.03)]">
+        <div className="mt-auto border-t border-base-200/50 p-5 bg-base-100 relative z-10 shadow-[0_-10px_30px_rgba(0,0,0,0.03)] shrink-0">
           <div className="flex flex-wrap items-center gap-2 mb-4 text-xs font-medium">
             <div className="px-2.5 py-1 bg-success/10 text-success rounded-lg border border-success/20 flex items-center gap-1">
               {stats.floors} pisos
