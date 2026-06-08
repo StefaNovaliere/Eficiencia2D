@@ -365,17 +365,11 @@ export default function ReviewScreen({
           const selGroup = effectivePhase1.groups.find((g) => g.id === selId);
           if (!selGroup) return null;
 
-          const groupJoints = effectivePhase1.joints.filter(
-            (j) => j.groupA === selId || j.groupB === selId,
-          );
-          const groupAdjs = effectivePhase1.adjustments.filter(
-            (a) => a.groupId === selId,
-          );
           const groupWWJoints = wallWallList.filter(
             ({ ww }) => ww.groupA === selId || ww.groupB === selId,
           );
 
-          if (groupJoints.length === 0 && !selGroup.thickness && groupWWJoints.length === 0) return null;
+          if (groupWWJoints.length === 0) return null;
 
           const groupById = new Map(effectivePhase1.groups.map((g) => [g.id, g]));
 
@@ -387,48 +381,8 @@ export default function ReviewScreen({
                 )}
                 <span className="text-xs font-bold text-base-content/70 truncate">{selGroup.label}</span>
               </div>
-              {selGroup.thickness != null && (
-                <div className="flex justify-between items-center mb-3 bg-base-200/50 p-2.5 rounded-xl border border-base-200">
-                  <span className="text-xs font-bold text-base-content/70">Grosor detectado</span>
-                  <span className="text-xs font-mono bg-base-100 shadow-sm border border-base-300/50 px-2 py-1 rounded-md text-primary">{(selGroup.thickness * 100).toFixed(1)} cm</span>
-                </div>
-              )}
-              {groupJoints.length > 0 && (
-                <div className="mt-3 flex flex-col gap-2">
-                  <span className="text-[11px] font-black uppercase tracking-wider text-base-content/50 ml-1">Juntas ({groupJoints.length})</span>
-                  <div className="bg-base-200/30 border border-base-200 rounded-xl divide-y divide-base-200/50">
-                    {groupJoints.map((j, i) => {
-                      const otherId = j.groupA === selId ? j.groupB : j.groupA;
-                      const other = groupById.get(otherId);
-                      return (
-                        <div key={i} className="flex justify-between items-center p-2.5 text-xs hover:bg-base-200/50 transition-colors">
-                          <span className="font-medium">{other?.label ?? `Grupo ${otherId}`}</span>
-                          <span className="text-base-content/60 font-mono bg-base-100 px-2 py-0.5 rounded shadow-sm border border-base-200/50">
-                            {j.totalLength.toFixed(2)}m <span className="opacity-50 mx-1">·</span> {j.dihedralAngle.toFixed(0)}°
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-              {groupAdjs.length > 0 && (
-                <div className="mt-3 flex flex-col gap-2">
-                  <span className="text-[11px] font-black uppercase tracking-wider text-base-content/50 ml-1">Ajustes de ensamblaje</span>
-                  <div className="bg-base-200/30 border border-base-200 rounded-xl divide-y divide-base-200/50">
-                    {groupAdjs.map((a, i) => (
-                      <div key={i} className="flex justify-between items-center p-2.5 text-xs hover:bg-base-200/50 transition-colors">
-                        <span className="font-medium">{a.reason}</span>
-                        <span className="text-base-content/60 font-mono bg-base-100 px-2 py-0.5 rounded shadow-sm border border-base-200/50">
-                          {(a.delta * 100).toFixed(1)} cm
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
               {groupWWJoints.length > 0 && (
-                <div className="mt-3 flex flex-col gap-2">
+                <div className="flex flex-col gap-2">
                   <span className="text-[11px] font-black uppercase tracking-wider text-base-content/50 ml-1">
                     Uniones pared-pared ({groupWWJoints.length})
                   </span>
