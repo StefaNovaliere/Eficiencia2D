@@ -142,16 +142,16 @@ function SheetCanvas({
   if (sheets.length === 0) return null;
 
   return (
-    <div className="nesting-section">
-      <div className="nesting-section-header">
-        <span className="nesting-section-dot" style={{ background: color }} />
-        <span className="nesting-section-label">{label}</span>
-        <span className="nesting-section-count">
+    <div className="flex flex-col gap-4 mb-8">
+      <div className="flex items-center gap-2 mb-2 font-medium">
+        <span className="w-3 h-3 rounded-full" style={{ background: color }} />
+        <span className="text-lg font-bold text-base-content">{label}</span>
+        <span className="text-sm text-base-content/60">
           {sheets.reduce((s, sh) => s + sh.panels.length, 0)} componentes en{" "}
           {sheets.length} plancha{sheets.length !== 1 ? "s" : ""}
         </span>
       </div>
-      <div className="nesting-canvas-wrap" ref={containerRef}>
+      <div className="w-full h-[300px] bg-base-200/50 rounded-xl overflow-hidden relative" ref={containerRef}>
         <canvas
           ref={canvasRef}
           width={dims.w}
@@ -218,16 +218,16 @@ export default function NestingPreview({
   const nextScaleOption = SCALE_OPTIONS.find((s) => s >= suggestedScale) ?? suggestedScale;
 
   return (
-    <div className="nesting-overlay">
-      <div className="nesting-header">
-        <button className="nesting-back-btn" onClick={onBack}>
-          &larr; Volver a revision
+    <div className="fixed inset-0 z-50 bg-base-100 flex flex-col">
+      <div className="flex flex-wrap items-center justify-between gap-4 p-4 border-b border-base-300 bg-base-200/50 shrink-0">
+        <button className="btn btn-ghost btn-sm" onClick={onBack}>
+          &larr; Volver a revisión
         </button>
-        <h2 className="nesting-title">Vista previa de planchas</h2>
-        <div className="nesting-sheet-config">
-          <label className="nesting-config-label">Escala:</label>
+        <h2 className="text-lg font-bold hidden sm:block">Vista previa de planchas</h2>
+        <div className="flex items-center gap-2 flex-wrap text-sm">
+          <label className="font-medium text-base-content/70">Escala:</label>
           <select
-            className="nesting-config-select"
+            className="select select-bordered select-sm w-24 bg-base-100"
             value={scaleDenom}
             onChange={(e) => onScaleChange(Number(e.target.value))}
           >
@@ -235,10 +235,10 @@ export default function NestingPreview({
               <option key={s} value={s}>1:{s}</option>
             ))}
           </select>
-          <span className="nesting-config-sep" style={{ margin: "0 0.5rem" }}>&middot;</span>
-          <label className="nesting-config-label">Plancha:</label>
+          <span className="text-base-content/40 mx-2">&middot;</span>
+          <label className="font-medium text-base-content/70">Plancha:</label>
           <input
-            className="nesting-config-input"
+            className="input input-bordered input-sm w-20 bg-base-100"
             type="number"
             step="0.01"
             min="0.1"
@@ -246,9 +246,9 @@ export default function NestingPreview({
             onChange={(e) => setLocalWidth(e.target.value)}
             onBlur={handleApplySize}
           />
-          <span className="nesting-config-sep">&times;</span>
+          <span className="text-base-content/40">&times;</span>
           <input
-            className="nesting-config-input"
+            className="input input-bordered input-sm w-20 bg-base-100"
             type="number"
             step="0.01"
             min="0.1"
@@ -256,14 +256,14 @@ export default function NestingPreview({
             onChange={(e) => setLocalHeight(e.target.value)}
             onBlur={handleApplySize}
           />
-          <span className="nesting-config-unit">m</span>
-          <button className="nesting-apply-btn" onClick={handleApplySize}>
+          <span className="text-base-content/60 font-medium">m</span>
+          <button className="btn btn-primary btn-sm ml-2" onClick={handleApplySize}>
             Aplicar
           </button>
         </div>
       </div>
 
-      <div className="nesting-content">
+      <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-base-100">
         <SheetCanvas
           sheets={nesting.wallNesting.sheets}
           config={nesting.config}
@@ -278,65 +278,67 @@ export default function NestingPreview({
         />
 
         {unplacedCount > 0 && (
-          <div className="nesting-warning">
-            {unplacedCount} componente{unplacedCount !== 1 ? "s" : ""} no
-            {unplacedCount !== 1 ? "" : ""} entra{unplacedCount !== 1 ? "n" : ""}{" "}
-            enteros en la plancha ({sheetConfig.widthM.toFixed(2)} &times;{" "}
-            {sheetConfig.heightM.toFixed(2)} m).{" "}
-            {nextScaleOption > scaleDenom ? (
-              <>
-                Reduci la escala a <strong>1:{nextScaleOption}</strong> para que
-                quepan.{" "}
-                <button
-                  className="nesting-inline-btn"
-                  onClick={() => onScaleChange(nextScaleOption)}
-                >
-                  Aplicar 1:{nextScaleOption}
-                </button>
-              </>
-            ) : (
-              <>Usa una plancha mas grande o reduci la escala.</>
-            )}
+          <div className="alert alert-warning shadow-sm mt-4 rounded-xl">
+            <svg xmlns="http://www.w3.org/2000/svg" className="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+            <div>
+              {unplacedCount} componente{unplacedCount !== 1 ? "s" : ""} no
+              {unplacedCount !== 1 ? "" : ""} entra{unplacedCount !== 1 ? "n" : ""}{" "}
+              enteros en la plancha ({sheetConfig.widthM.toFixed(2)} &times;{" "}
+              {sheetConfig.heightM.toFixed(2)} m).{" "}
+              {nextScaleOption > scaleDenom ? (
+                <>
+                  Reduci la escala a <strong>1:{nextScaleOption}</strong> para que quepan.
+                  <button
+                    className="btn btn-xs btn-active ml-3"
+                    onClick={() => onScaleChange(nextScaleOption)}
+                  >
+                    Aplicar 1:{nextScaleOption}
+                  </button>
+                </>
+              ) : (
+                <>Usa una plancha mas grande o reduci la escala.</>
+              )}
+            </div>
           </div>
         )}
       </div>
 
-      <div className="nesting-bottom-bar">
-        <div className="nesting-stats">
-          <span className="nesting-stat">
+      <div className="mt-auto border-t border-base-300 p-4 bg-base-200/30 flex flex-col sm:flex-row items-center justify-between gap-4 shrink-0">
+        <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 text-xs font-medium">
+          <span className="text-base-content/70">
             {sheetConfig.widthM.toFixed(2)} &times; {sheetConfig.heightM.toFixed(2)} m
           </span>
-          <span className="stat-sep">&middot;</span>
-          <span className="nesting-stat">Escala 1:{displayScale}</span>
-          <span className="stat-sep">&middot;</span>
-          <span className="nesting-stat">3mm separacion</span>
-          <span className="stat-sep">&middot;</span>
-          <span className="nesting-stat">
+          <span className="text-base-content/30">&middot;</span>
+          <span className="text-base-content/70">Escala 1:{displayScale}</span>
+          <span className="text-base-content/30">&middot;</span>
+          <span className="text-base-content/70">3mm separación</span>
+          <span className="text-base-content/30">&middot;</span>
+          <span className="text-base-content/70">
             {totalSheets} plancha{totalSheets !== 1 ? "s" : ""} total
           </span>
           {wallPanels > 0 && (
             <>
-              <span className="stat-sep">&middot;</span>
-              <span className="nesting-stat" style={{ color: WALL_COLOR }}>
+              <span className="text-base-content/30">&middot;</span>
+              <span className="font-semibold" style={{ color: WALL_COLOR }}>
                 {wallPanels} pared{wallPanels !== 1 ? "es" : ""}
               </span>
             </>
           )}
           {floorPanels > 0 && (
             <>
-              <span className="stat-sep">&middot;</span>
-              <span className="nesting-stat" style={{ color: FLOOR_COLOR }}>
+              <span className="text-base-content/30">&middot;</span>
+              <span className="font-semibold" style={{ color: FLOOR_COLOR }}>
                 {floorPanels} piso{floorPanels !== 1 ? "s" : ""}
               </span>
             </>
           )}
         </div>
-        <div className="nesting-actions">
-          <button className="review-btn review-btn--cancel" onClick={onBack}>
+        <div className="flex gap-2 w-full sm:w-auto">
+          <button className="btn btn-outline flex-1 sm:flex-none" onClick={onBack}>
             Volver
           </button>
           <button
-            className="review-btn review-btn--confirm"
+            className="btn btn-primary flex-1 sm:flex-none"
             onClick={() => setShowConfirm(true)}
           >
             Generar y Descargar
@@ -345,50 +347,52 @@ export default function NestingPreview({
       </div>
 
       {showConfirm && (
-        <div className="confirm-modal-overlay" onClick={() => setShowConfirm(false)}>
-          <div className="confirm-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="confirm-modal-icon">
-              <svg
-                width="40"
-                height="40"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-                <line x1="12" y1="9" x2="12" y2="13" />
-                <line x1="12" y1="17" x2="12.01" y2="17" />
-              </svg>
-            </div>
-            <h3 className="confirm-modal-title">¿Revisaste todo bien?</h3>
-            <p className="confirm-modal-text">
-              Después de pagar no vas a poder modificar las planchas. Asegurate de
-              haber revisado:
-            </p>
-            <ul className="confirm-modal-list">
-              <li>La clasificación de cada componente (pisos, paredes, descartados)</li>
-              <li>La escala y el tamaño de la plancha</li>
-              <li>Que no haya componentes sin ubicar</li>
-            </ul>
-            <div className="confirm-modal-actions">
-              <button
-                className="review-btn review-btn--cancel"
-                onClick={() => setShowConfirm(false)}
-              >
-                Volver a revisar
-              </button>
-              <button
-                className="review-btn review-btn--confirm"
-                onClick={() => {
-                  setShowConfirm(false);
-                  onConfirm();
-                }}
-              >
-                Continuar al pago
-              </button>
+        <div className="fixed inset-0 z-[200] bg-neutral/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={() => setShowConfirm(false)}>
+          <div className="card bg-base-100 shadow-2xl max-w-md w-full border border-base-300 text-center" onClick={(e) => e.stopPropagation()}>
+            <div className="card-body">
+              <div className="text-warning flex justify-center mb-4">
+                <svg
+                  width="48"
+                  height="48"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                  <line x1="12" y1="9" x2="12" y2="13" />
+                  <line x1="12" y1="17" x2="12.01" y2="17" />
+                </svg>
+              </div>
+              <h3 className="text-xl font-bold mb-2">¿Revisaste todo bien?</h3>
+              <p className="text-sm text-base-content/70 mb-4">
+                Después de pagar no vas a poder modificar las planchas. Asegurate de
+                haber revisado:
+              </p>
+              <ul className="text-left text-sm text-base-content/70 list-disc list-inside mb-6 space-y-1">
+                <li>La clasificación de cada componente (pisos, paredes, descartados)</li>
+                <li>La escala y el tamaño de la plancha</li>
+                <li>Que no haya componentes sin ubicar</li>
+              </ul>
+              <div className="flex gap-2 w-full">
+                <button
+                  className="btn btn-outline flex-1"
+                  onClick={() => setShowConfirm(false)}
+                >
+                  Volver a revisar
+                </button>
+                <button
+                  className="btn btn-primary flex-1"
+                  onClick={() => {
+                    setShowConfirm(false);
+                    onConfirm();
+                  }}
+                >
+                  Continuar al pago
+                </button>
+              </div>
             </div>
           </div>
         </div>

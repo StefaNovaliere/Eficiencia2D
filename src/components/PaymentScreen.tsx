@@ -140,36 +140,36 @@ export default function PaymentScreen({
   }, []);
 
   return (
-    <div className="payment-overlay">
-      <div className="payment-card">
-        <h2 className="payment-title">Descargá tus planos</h2>
-        <p className="payment-description">
+    <div className="fixed inset-0 z-[100] bg-base-200/80 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="card bg-base-100 shadow-2xl border border-base-200 w-full max-w-md p-8">
+        <h2 className="text-2xl font-bold text-center mb-2">Descargá tus planos</h2>
+        <p className="text-base-content/70 text-center mb-6">
           Planos de corte láser en DXF + PDF, listos para enviar a la cortadora.
         </p>
 
-        <div className="payment-price-box">
-          <span className="payment-price">$30.000</span>
-          <span className="payment-currency">ARS</span>
+        <div className="flex items-baseline justify-center gap-2 bg-base-200 py-4 rounded-xl mb-8">
+          <span className="text-4xl font-extrabold">$30.000</span>
+          <span className="text-lg font-medium text-base-content/50">ARS</span>
         </div>
 
         {stage === "loading" && (
-          <div className="payment-loading">
-            <span className="spinner spinner--dark" />
+          <div className="flex flex-col items-center gap-3 py-6 text-base-content/70">
+            <span className="loading loading-spinner text-primary" />
             <p>Preparando pago...</p>
           </div>
         )}
 
         {stage === "verifying" && (
-          <div className="payment-loading">
-            <span className="spinner spinner--dark" />
+          <div className="flex flex-col items-center gap-3 py-6 text-base-content/70">
+            <span className="loading loading-spinner text-primary" />
             <p>Verificando pago...</p>
           </div>
         )}
 
         {stage === "error" && (
-          <div className="payment-error">
+          <div className="alert alert-error mb-4 flex-col gap-2 rounded-xl">
             <p>{errorMsg}</p>
-            <button className="payment-retry-btn" onClick={handleRetry}>
+            <button className="btn btn-sm w-full" onClick={handleRetry}>
               Reintentar
             </button>
           </div>
@@ -177,26 +177,26 @@ export default function PaymentScreen({
 
         <div
           id={WALLET_CONTAINER_ID}
-          className="payment-wallet-container"
+          className="mb-4 min-h-[48px]"
           style={{ display: stage === "loading" || stage === "verifying" ? "none" : "block" }}
         />
 
-        <div className="payment-footer">
-          <button className="payment-cancel-btn" onClick={onCancel}>
+        <div className="flex flex-wrap items-center justify-between gap-3 mt-2">
+          <button className="btn btn-ghost" onClick={onCancel}>
             Volver
           </button>
 
           {!showBypass ? (
             <button
-              className="payment-bypass-toggle"
+              className="text-xs font-medium text-base-content/60 underline underline-offset-2 hover:text-base-content"
               onClick={() => setShowBypass(true)}
             >
               ¿Tenés un código?
             </button>
           ) : (
-            <div className="payment-bypass-form">
+            <div className="flex items-center gap-2 flex-wrap">
               <input
-                className="payment-bypass-input"
+                className="input input-bordered input-sm w-32"
                 type="text"
                 placeholder="Código"
                 value={bypassCode}
@@ -207,14 +207,14 @@ export default function PaymentScreen({
                 autoFocus
               />
               <button
-                className="payment-bypass-submit"
+                className="btn btn-primary btn-sm"
                 onClick={handleBypassSubmit}
                 disabled={bypassLoading || !bypassCode.trim()}
               >
                 {bypassLoading ? "..." : "Aplicar"}
               </button>
               {bypassError && (
-                <span className="payment-bypass-error">{bypassError}</span>
+                <span className="text-error text-xs w-full mt-1">{bypassError}</span>
               )}
             </div>
           )}
