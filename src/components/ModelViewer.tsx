@@ -2,10 +2,19 @@
 
 import { useEffect, useMemo, useRef } from "react";
 import { Canvas, useThree, useFrame } from "@react-three/fiber";
-import { OrbitControls, GizmoHelper, GizmoViewport } from "@react-three/drei";
+import { OrbitControls, GizmoHelper, GizmoViewport, Line, Html } from "@react-three/drei";
 import * as THREE from "three";
 import type { Face3D, Vec3 } from "@/core/types";
 import type { FaceCategory, GeometryGroup } from "@/core/group-classifier";
+
+// A floating reference label (panel id) anchored to a component in 3D, drawn
+// when the user selects a wall-wall joint in the review list.
+export interface LeaderMarker {
+  groupId: number;
+  anchor: Vec3;     // component centroid, in pre-offset model space
+  label: string;    // panel id, e.g. "A2"
+  primary: boolean; // the selected wall (true) vs the joined "other" wall
+}
 
 // ---------------------------------------------------------------------------
 // Shared materials (created once at module load, reused across all renders)
@@ -350,6 +359,7 @@ interface SceneProps {
   onToggleGroup: (id: number) => void;
   appliedAxis?: "Y" | "Z";
   showCenterAxes?: boolean;
+  leaderMarkers?: LeaderMarker[];
 }
 
 function Scene({
@@ -362,6 +372,7 @@ function Scene({
   onToggleGroup,
   appliedAxis = "Y",
   showCenterAxes = true,
+  leaderMarkers = [],
 }: SceneProps) {
   const selectedGroups = groups.filter((g) => selectedGroupIds.has(g.id));
 
@@ -434,6 +445,27 @@ function Scene({
 
   const isZUp = appliedAxis === "Z";
 
+  // Vertical axis (building "up") for floating the reference label above the
+  // component, matching the axesHelper orientation.
+  const upVec = useMemo<[number, number, number]>(
+    () => (isZUp ? [0, 0, 1] : [0, 1, 0]),
+    [isZUp],
+  );
+
+  // Leader line endpoints: from the component centroid up to the floating tag.
+  const leaders = useMemo(() => {
+    const len = bounds.diag * 0.18;
+    return leaderMarkers.map((m) => {
+      const start: [number, number, number] = [m.anchor.x, m.anchor.y, m.anchor.z];
+      const end: [number, number, number] = [
+        m.anchor.x + upVec[0] * len,
+        m.anchor.y + upVec[1] * len,
+        m.anchor.z + upVec[2] * len,
+      ];
+      return { ...m, start, end };
+    });
+  }, [leaderMarkers, bounds.diag, upVec]);
+
   return (
     <>
       <CameraControls
@@ -475,6 +507,45 @@ function Scene({
           </>
         )}
 
+        {/* Leader lines + floating reference tags for the selected joint */}
+        {leaders.map((m) => (
+          <group key={m.groupId}>
+            <Line
+              points={[m.start, m.end]}
+              color={m.primary ? "#f59e0b" : "#3b82f6"}
+              lineWidth={2}
+              depthTest={false}
+              transparent
+              renderOrder={999}
+            />
+            <mesh position={m.start} renderOrder={999}>
+              <sphereGeometry args={[bounds.diag * 0.006, 12, 12]} />
+              <meshBasicMaterial
+                color={m.primary ? "#f59e0b" : "#3b82f6"}
+                depthTest={false}
+                transparent
+              />
+            </mesh>
+            <Html
+              position={m.end}
+              center
+              occlude={false}
+              zIndexRange={[100, 0]}
+              style={{ pointerEvents: "none" }}
+            >
+              <div
+                className={`badge badge-sm font-mono font-bold shadow-md border ${
+                  m.primary
+                    ? "bg-amber-500 text-white border-amber-600"
+                    : "bg-base-100 text-base-content border-base-300"
+                }`}
+              >
+                {m.label}
+              </div>
+            </Html>
+          </group>
+        ))}
+
       </group>
     </>
   );
@@ -494,6 +565,7 @@ export interface ModelViewerProps {
   onToggleGroup: (id: number) => void;
   appliedAxis?: "Y" | "Z";
   showCenterAxes?: boolean;
+  leaderMarkers?: LeaderMarker[];
 }
 
 export default function ModelViewer({
@@ -506,6 +578,7 @@ export default function ModelViewer({
   onToggleGroup,
   appliedAxis = "Y",
   showCenterAxes = true,
+  leaderMarkers = [],
 }: ModelViewerProps) {
   const camDist = useMemo(() => {
     let minX = Infinity, minY = Infinity, minZ = Infinity;
@@ -548,6 +621,7 @@ export default function ModelViewer({
         onToggleGroup={onToggleGroup}
         appliedAxis={appliedAxis}
         showCenterAxes={showCenterAxes}
+        leaderMarkers={leaderMarkers}
       />
       
       {/* Gizmo en la esquina para referencia de orientación constante */}
