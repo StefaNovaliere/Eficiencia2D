@@ -73,7 +73,7 @@ export default function GroupList({
   }, [selectedGroupIds]);
 
   return (
-    <div className="flex flex-col h-full bg-base-100/50 relative z-10" ref={listRef}>
+    <div className="flex flex-col flex-1 min-h-0 bg-base-100/50 relative z-10" ref={listRef}>
       <div className="flex items-center justify-between p-4 border-b border-base-200/50 bg-base-100/80 backdrop-blur-md sticky top-0 z-20 shadow-[0_4px_20px_rgba(0,0,0,0.02)]">
         <h3 className="font-bold text-base tracking-tight flex items-center gap-2">
           Capas
