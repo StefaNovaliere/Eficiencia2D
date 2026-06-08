@@ -34,22 +34,26 @@ export default function VisibilityFilters({
   };
 
   return (
-    <div className="visibility-filters">
-      <span className="visibility-label">Mostrar:</span>
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="text-[11px] uppercase tracking-wider font-bold text-base-content/50 mr-1">Mostrar:</span>
       {ORDER.map((cat) => {
         const visible = visibleCategories.has(cat);
         return (
           <button
             key={cat}
-            className={`visibility-chip ${visible ? "visibility-chip--on" : ""}`}
+            className={`btn btn-xs rounded-full border shadow-sm transition-all duration-200 ${
+              visible 
+                ? "bg-base-100 hover:bg-base-200" 
+                : "bg-base-200/40 text-base-content/40 border-transparent hover:bg-base-200"
+            }`}
             style={visible ? { borderColor: CATEGORY_COLORS[cat] } : undefined}
             onClick={() => onToggle(cat)}
           >
             <span
-              className="visibility-dot"
+              className={`w-2 h-2 rounded-full border transition-colors ${visible ? "border-transparent" : "border-base-content/30"}`}
               style={{ backgroundColor: visible ? CATEGORY_COLORS[cat] : "transparent" }}
             />
-            {CATEGORY_LABELS[cat]} ({counts[cat]})
+            {CATEGORY_LABELS[cat]} <span className="opacity-60 ml-0.5">({counts[cat]})</span>
           </button>
         );
       })}

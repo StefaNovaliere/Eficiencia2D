@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "@/styles/globals.css";
+import { ProjectProvider } from "@/context/ProjectContext";
 export const metadata: Metadata = {
   title: "Eficiencia2D — Planos Arquitectónicos al Instante",
   description:
@@ -13,8 +14,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="es">
-      <body>{children}</body>
+    <html lang="es" data-theme="light">
+      <body className="min-h-screen bg-base-200 text-base-content antialiased font-sans">
+        <ProjectProvider>
+          {children}
+        </ProjectProvider>
+      </body>
     </html>
   );
 }
