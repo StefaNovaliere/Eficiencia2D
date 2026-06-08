@@ -4,7 +4,7 @@ import type { TwinCandidate } from "@/core/wall-thickness";
 import { detectJoints } from "@/core/joint-detector";
 import { computeAdjustments } from "@/core/assembly-adjuster";
 import { clipPanelAtV, clipPanelAtU, mirrorEdgesHorizontal } from "@/core/cutting-sheet";
-import { classifyIntoGroups } from "@/core/group-classifier";
+import { classifyIntoGroups, peelBuriedWalls } from "@/core/group-classifier";
 import type { GeometryGroup, FaceCategory } from "@/core/group-classifier";
 import type { Face3D, Vec3 } from "@/core/types";
 import { splitWallGroupsAtFloors } from "@/core/mesh-splitter";
@@ -2018,5 +2018,123 @@ describe("wall-wall decision reaches DXF (end-to-end)", () => {
     const allX = panelB!.edges.flatMap(e => [e.a.x, e.b.x]);
     expect(Math.min(...allX)).toBeCloseTo(0, 3);
     expect(Math.max(...allX)).toBeCloseTo(4.90, 1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// peelBuriedWalls — extract real walls wrongly absorbed into floor groups
+// ---------------------------------------------------------------------------
+
+describe("peelBuriedWalls", () => {
+  // Vertical face (normal +Z) at column x0..x0+1, spanning y0..y1.
+  function vWall(x0: number, y0: number, y1: number, width = 1): Face3D {
+    return makeFace([
+      { x: x0, y: y0, z: 0 },
+      { x: x0 + width, y: y0, z: 0 },
+      { x: x0 + width, y: y1, z: 0 },
+      { x: x0, y: y1, z: 0 },
+    ], { x: 0, y: 0, z: 1 });
+  }
+  // Horizontal floor face (normal +Y) at height y.
+  function hFloor(y: number): Face3D {
+    return makeFace([
+      { x: 0, y, z: 0 },
+      { x: 1, y, z: 0 },
+      { x: 1, y, z: 1 },
+      { x: 0, y, z: 1 },
+    ], { x: 0, y: 1, z: 0 });
+  }
+  function floorGroup(faceIndices: number[]): GeometryGroup {
+    return makeGroup({
+      id: 1, category: "floor",
+      representativeNormal: { x: 0, y: 1, z: 0 },
+      label: "Piso Horizontal #1",
+      orientation: "Horizontal",
+      faceIndices,
+      thickness: 1.0,
+      originalCategory: "floor",
+    });
+  }
+
+  it("peels a tall wall buried in a floor group", () => {
+    const faces = [hFloor(0), vWall(0, 0, 3)];
+    const out = peelBuriedWalls(faces, [floorGroup([0, 1])]);
+
+    expect(out).toHaveLength(2);
+    const floor = out.find((g) => g.category === "floor")!;
+    const wall = out.find((g) => g.category === "wall")!;
+    expect(floor).toBeDefined();
+    expect(wall).toBeDefined();
+    expect(floor.faceIndices).toEqual([0]);
+    expect(wall.faceIndices).toEqual([1]);
+    expect(wall.orientation.startsWith("Vertical")).toBe(true);
+    expect(wall.originalCategory).toBe("wall");
+    expect(wall.label.startsWith("Pared")).toBe(true);
+  });
+
+  it("does NOT peel a short slab canto", () => {
+    const faces = [hFloor(0), vWall(0, 0, 0.2)];
+    const out = peelBuriedWalls(faces, [floorGroup([0, 1])]);
+
+    expect(out).toHaveLength(1);
+    expect(out[0].category).toBe("floor");
+    expect(out[0].faceIndices).toEqual([0, 1]);
+  });
+
+  it("keeps two slabs joined by a thin canto merged", () => {
+    const faces = [hFloor(0), hFloor(0.2), vWall(0, 0, 0.2)];
+    const out = peelBuriedWalls(faces, [floorGroup([0, 1, 2])]);
+
+    expect(out).toHaveLength(1);
+    expect(out[0].category).toBe("floor");
+    expect(out[0].faceIndices).toEqual([0, 1, 2]);
+  });
+
+  it("peels multiple disconnected walls into separate groups", () => {
+    // Two tall walls at different X so they don't share vertices.
+    const faces = [hFloor(0), vWall(0, 0, 3), vWall(10, 0, 3)];
+    const out = peelBuriedWalls(faces, [floorGroup([0, 1, 2])]);
+
+    const walls = out.filter((g) => g.category === "wall");
+    expect(walls).toHaveLength(2);
+    expect(out.filter((g) => g.category === "floor")).toHaveLength(1);
+  });
+
+  it("omits the floor group when nothing horizontal remains", () => {
+    const faces = [vWall(0, 0, 3)];
+    const out = peelBuriedWalls(faces, [floorGroup([0])]);
+
+    expect(out).toHaveLength(1);
+    expect(out[0].category).toBe("wall");
+  });
+
+  it("creates a small peeled wall that polishGroups then demotes", () => {
+    // Tall (dy=3) but narrow (width 0.1 => area 0.3 m²) wall.
+    const faces = [hFloor(0), vWall(0, 0, 3, 0.1)];
+    const out = peelBuriedWalls(faces, [floorGroup([0, 1])]);
+    const wall = out.find((g) => g.category === "wall")!;
+    expect(wall).toBeDefined();
+
+    polishGroups(out, 1.0);
+    expect(out.find((g) => g.faceIndices.includes(1))!.category).toBe("discard");
+  });
+
+  it("leaves non-floor groups untouched", () => {
+    const wall = makeGroup({
+      id: 5, category: "wall",
+      representativeNormal: { x: 0, y: 0, z: 1 },
+      orientation: "Vertical - Norte",
+      faceIndices: [],
+    });
+    const discard = makeGroup({
+      id: 6, category: "discard",
+      representativeNormal: { x: 0, y: 0, z: 1 },
+      orientation: "Vertical - Norte",
+      faceIndices: [],
+    });
+    const out = peelBuriedWalls([], [wall, discard]);
+    expect(out).toHaveLength(2);
+    expect(out).toContain(wall);
+    expect(out).toContain(discard);
   });
 });

@@ -12,7 +12,7 @@ import type { Panel, PanelCategory } from "./cutting-sheet";
 import { detectUpAxis, extractFacades } from "./facade-extractor";
 import { extractFloorPlans } from "./floor-plan-extractor";
 import { DEFAULT_ELEMENT_FILTER } from "./geometry-classifier";
-import { classifyIntoGroups, polishGroups, DEFAULT_MIN_REAL_AREA } from "./group-classifier";
+import { classifyIntoGroups, peelBuriedWalls, polishGroups, DEFAULT_MIN_REAL_AREA } from "./group-classifier";
 import type { GeometryGroup } from "./group-classifier";
 import { generatePdf, generateNestingPdf } from "./pdf-writer";
 import { nestPanels, DEFAULT_SHEET } from "./sheet-nester";
@@ -339,7 +339,7 @@ export function reclassifyWithAxis(
     faces = rotateZtoY(faces);
   }
   const warnings = [...phase1.warnings];
-  const groups = classifyIntoGroups(faces, minRealArea, warnings);
+  const groups = peelBuriedWalls(faces, classifyIntoGroups(faces, minRealArea, warnings));
 
   const preSplitFaceCount = faces.length;
   const split = splitWallGroupsAtFloors(faces, groups, new Map(), "Y", minRealArea ?? DEFAULT_MIN_REAL_AREA);
@@ -360,7 +360,7 @@ export function reclassifyWithMinArea(
   // Truncate back to pre-split faces to avoid re-classifying stale split data.
   const baseFaces = phase1.faces.slice(0, phase1.preSplitFaceCount);
 
-  const groups = classifyIntoGroups(baseFaces, minRealArea, warnings);
+  const groups = peelBuriedWalls(baseFaces, classifyIntoGroups(baseFaces, minRealArea, warnings));
 
   const preSplitFaceCount = baseFaces.length;
   const split = splitWallGroupsAtFloors(baseFaces, groups, new Map(), "Y", minRealArea);
@@ -429,8 +429,9 @@ export function parsePipeline(
     faces = rotateZtoY(faces);
   }
 
-  // Classify into reviewable groups.
-  const groups = classifyIntoGroups(faces, undefined, warnings);
+  // Classify into reviewable groups, then peel any real walls that were
+  // wrongly absorbed into floor groups (buried verticals).
+  const groups = peelBuriedWalls(faces, classifyIntoGroups(faces, undefined, warnings));
 
   // Split walls that extend through floor slabs into separate sub-groups.
   const preSplitFaceCount = faces.length;
