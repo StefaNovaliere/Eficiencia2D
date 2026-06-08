@@ -2,8 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { parsePipeline } from "@/core/pipeline";
-import type { Phase1Result } from "@/core/pipeline";
+import { uploadModelFile, uploadDemoObj } from "@/services/api";
 import DemoButton from "./DemoButton";
 import { useProjectContext } from "@/context/ProjectContext";
 
@@ -14,8 +13,9 @@ export default function UploadForm() {
     setFile, 
     scale, 
     setScale, 
+    setFileId,
+    setPreviewObj,
     setPhase1Result, 
-    persistSession 
   } = useProjectContext();
   
   const [isParsing, setIsParsing] = useState(false);
@@ -61,23 +61,19 @@ export default function UploadForm() {
           "El archivo de demo todavía no está disponible. Probá subir tu propio .obj.",
         );
       }
-      const buffer = await res.arrayBuffer();
-      const demoFile = new File([buffer], "demo.obj", { type: "model/obj" });
-      setFile(demoFile);
-
-      const p1 = parsePipeline("demo.obj", buffer);
-      if (p1.faces.length === 0) {
-        throw new Error("El archivo de demo no contiene geometría válida.");
-      }
-      setPhase1Result(p1);
+      const textContent = await res.text();
       
-      // We don't await persistSession here because we just parsed it.
-      // But we can persist if we want.
-      // router.push("/review") is handled in handleSubmit or here:
+      const backendRes = await uploadDemoObj(textContent, "demo.obj");
+      
+      setFile(new File([textContent], "demo.obj", { type: "text/plain" }));
+      setFileId(backendRes.file_id);
+      setPhase1Result(backendRes.topology);
+      setPreviewObj(backendRes.preview_obj);
+
       router.push("/review");
     } catch (err: unknown) {
       setError(
-        err instanceof Error ? err.message : "Error al cargar el demo.",
+        err instanceof Error ? err.message : "Error al procesar el demo en el servidor.",
       );
       setIsParsing(false);
     }
@@ -98,31 +94,20 @@ export default function UploadForm() {
     setError("");
 
     try {
-      const buffer = await file.arrayBuffer();
+      const backendRes = await uploadModelFile(file);
 
-      const p1 = await new Promise<Phase1Result>((resolve) => {
-        setTimeout(() => {
-          resolve(parsePipeline(file.name, buffer));
-        }, 50);
-      });
-
-      if (p1.faces.length === 0) {
-        const msg =
-          p1.warnings.length > 0
-            ? p1.warnings.join(" ")
-            : "No se encontraron caras en el archivo.";
-        throw new Error(msg);
+      if (backendRes.topology.faces.length === 0) {
+        throw new Error("El modelo fue procesado pero no contiene caras válidas.");
       }
 
-      setPhase1Result(p1);
-      
-      // Auto-save session state so refresh on /review works
-      await persistSession();
-      
+      setFileId(backendRes.file_id);
+      setPhase1Result(backendRes.topology);
+      setPreviewObj(backendRes.preview_obj);
+
       router.push("/review");
     } catch (err: unknown) {
       setError(
-        err instanceof Error ? err.message : "Error desconocido al procesar.",
+        err instanceof Error ? err.message : "Error desconocido al procesar en el servidor.",
       );
       setIsParsing(false);
     }

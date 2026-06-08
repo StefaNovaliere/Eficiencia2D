@@ -35,6 +35,7 @@ export interface ReviewScreenProps {
   initialOverrides?: ClassificationOverride[];
   initialWallWallDecisions?: WallWallDecisions;
   initialMerges?: number[][];
+  isGenerating?: boolean;
 }
 
 const MIN_AREA_OPTIONS = [0, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0];
@@ -53,6 +54,7 @@ export default function ReviewScreen({
   initialOverrides,
   initialWallWallDecisions,
   initialMerges,
+  isGenerating = false,
 }: ReviewScreenProps) {
   const [selectedGroupIds, setSelectedGroupIds] = useState<Set<number>>(
     () => new Set(),
@@ -546,11 +548,22 @@ export default function ReviewScreen({
             </p>
           )}
           <div className="flex gap-3">
-            <button className="btn flex-1 btn-ghost bg-base-200 hover:bg-base-300 rounded-xl" onClick={onCancel}>
+            <button className="btn flex-1 btn-ghost bg-base-200 hover:bg-base-300 rounded-xl" onClick={onCancel} disabled={isGenerating}>
               Volver
             </button>
-            <button className="btn flex-1 btn-primary shadow-lg shadow-primary/30 rounded-xl text-primary-content" onClick={handleConfirm}>
-              Confirmar y Generar
+            <button 
+              className="btn flex-1 btn-primary shadow-lg shadow-primary/30 rounded-xl text-primary-content" 
+              onClick={handleConfirm}
+              disabled={isGenerating}
+            >
+              {isGenerating ? (
+                <>
+                  <span className="loading loading-spinner loading-sm"></span>
+                  Generando...
+                </>
+              ) : (
+                "Confirmar y Generar"
+              )}
             </button>
           </div>
         </div>
