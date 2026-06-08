@@ -4,18 +4,18 @@ import { useState, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useProjectContext } from "@/context/ProjectContext";
 import PaymentScreen from "@/components/PaymentScreen";
-import { generateFromNesting } from "@/core/pipeline";
-import type { PipelineOptions } from "@/core/types";
+import { generateProjectFiles } from "@/services/api";
 
 export default function PaymentPage() {
   const router = useRouter();
   const { 
     file,
+    fileId,
+    savedOverrides,
+    savedWallWallDecisions,
     phase1Result, 
-    nestingData, 
     scale, 
     paper, 
-    sheetConfig, 
     minAreaM2,
     isLoadingSession,
     resetProject
@@ -25,65 +25,38 @@ export default function PaymentPage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    if (!isLoadingSession && (!phase1Result || !nestingData)) {
+    if (!isLoadingSession && !phase1Result) {
       router.replace("/");
     }
-  }, [isLoadingSession, phase1Result, nestingData, router]);
+  }, [isLoadingSession, phase1Result, router]);
 
   const proceedToGeneration = useCallback(async () => {
-    if (!phase1Result || !file || !nestingData) return;
+    if (!fileId || !file) return;
 
     setIsGenerating(true);
     setError("");
 
     try {
-      const opts: PipelineOptions = {
-        scaleDenom: scale,
+      const payload = {
+        file_id: fileId,
+        original_filename: file.name,
+        scale_denom: scale,
         paper,
-        includeCuttingSheet: true,
-        sheetConfig,
-        minAreaM2,
+        overrides: Object.fromEntries(savedOverrides.map(o => [o.groupId, o.newCategory])),
+        wall_wall_decisions: Object.fromEntries(savedWallWallDecisions.entries())
       };
 
-      const result = await new Promise<ReturnType<typeof generateFromNesting>>(
-        (resolve) => {
-          setTimeout(() => resolve(generateFromNesting(phase1Result, nestingData, opts)), 50);
-        },
-      );
-
-      if (result.files.length === 0) {
-        const msg =
-          result.warnings.length > 0
-            ? result.warnings.join(" ")
-            : "No se generaron archivos. Verificá que el modelo contenga geometría válida.";
-        throw new Error(msg);
-      }
-
-      const { default: JSZip } = await import("jszip");
-      const zip = new JSZip();
-
-      for (const f of result.files) {
-        zip.file(f.name, f.blob);
-      }
-
-      const zipBlob = await zip.generateAsync({ type: "blob" });
-      const stem = file.name.replace(/\.[^.]+$/, "");
-      const url = URL.createObjectURL(zipBlob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${stem}_planos.zip`;
-      a.click();
-      URL.revokeObjectURL(url);
+      const result = await generateProjectFiles(payload);
 
       resetProject();
-      alert("¡Planos generados y descargados exitosamente!");
+      alert(`¡${result.message} Los archivos generados pronto estarán disponibles para descarga directa.`);
       router.push("/");
     } catch (err: unknown) {
       console.error(err);
       setError(err instanceof Error ? err.message : "Error desconocido al procesar.");
       setIsGenerating(false);
     }
-  }, [phase1Result, file, nestingData, scale, paper, sheetConfig, minAreaM2, resetProject, router]);
+  }, [fileId, file, scale, paper, savedOverrides, savedWallWallDecisions, resetProject, router]);
 
   const handlePaymentApproved = useCallback(async (paymentId: string) => {
     try {
@@ -108,7 +81,7 @@ export default function PaymentPage() {
   }, []);
 
   const handlePaymentCancel = useCallback(() => {
-    router.push("/nesting");
+    router.push("/review");
   }, [router]);
 
   const handleBypassSuccess = useCallback(() => {
@@ -116,7 +89,7 @@ export default function PaymentPage() {
   }, [proceedToGeneration]);
 
   if (isLoadingSession) return null;
-  if (!phase1Result || !nestingData) return null;
+  if (!phase1Result) return null;
 
   if (isGenerating) {
     return (

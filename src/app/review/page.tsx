@@ -1,12 +1,11 @@
 "use client";
 
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useProjectContext } from "@/context/ProjectContext";
 import ReviewScreen from "@/components/ReviewScreen";
-import { decomposePanels, nestDecomposedPanels, applyMerges, reclassifyWithMinArea } from "@/core/pipeline";
+import { reclassifyWithMinArea } from "@/core/pipeline";
 import type { ClassificationOverride } from "@/core/pipeline";
-import type { PipelineOptions } from "@/core/types";
 
 export default function ReviewPage() {
   const router = useRouter();
@@ -21,13 +20,15 @@ export default function ReviewPage() {
     setSavedWallWallDecisions,
     savedMerges, 
     setSavedMerges,
-    setNestingData,
+    fileId,
     scale,
     paper,
     sheetConfig,
     isLoadingSession,
     resetProject
   } = useProjectContext();
+
+  const [isGenerating, setIsGenerating] = useState(false);
 
   useEffect(() => {
     if (!isLoadingSession && !phase1Result) {
@@ -40,36 +41,22 @@ export default function ReviewPage() {
     wallWallDecisions: Map<number, number>,
     merges: number[][]
   ) => {
-    if (!phase1Result) return;
+    if (!phase1Result || !fileId) return;
 
     setSavedOverrides(overrides);
     setSavedWallWallDecisions(wallWallDecisions);
     setSavedMerges(merges);
+    setIsGenerating(true);
 
     try {
-      const opts: PipelineOptions = {
-        scaleDenom: scale,
-        paper,
-        includeCuttingSheet: true,
-        sheetConfig,
-        minAreaM2,
-      };
-
-      const merged = merges.length > 0 ? applyMerges(phase1Result, merges) : phase1Result;
-      
-      const decomposed = await new Promise<ReturnType<typeof decomposePanels>>((resolve) => {
-        setTimeout(() => resolve(decomposePanels(merged, opts, overrides, wallWallDecisions)), 50);
-      });
-
-      const nesting = nestDecomposedPanels(decomposed, sheetConfig, scale);
-      setNestingData(nesting);
-      
-      router.push("/nesting");
+      // Just save state and move to payment. Generation happens after payment.
+      router.push("/payment");
     } catch (err: unknown) {
       console.error(err);
       alert(err instanceof Error ? err.message : "Error desconocido al procesar.");
+      setIsGenerating(false);
     }
-  }, [phase1Result, scale, paper, sheetConfig, minAreaM2, setSavedOverrides, setSavedWallWallDecisions, setSavedMerges, setNestingData, router]);
+  }, [phase1Result, fileId, setSavedOverrides, setSavedWallWallDecisions, setSavedMerges, router]);
 
   const handleReviewCancel = useCallback(() => {
     resetProject();
@@ -95,6 +82,7 @@ export default function ReviewPage() {
       initialOverrides={savedOverrides}
       initialWallWallDecisions={savedWallWallDecisions}
       initialMerges={savedMerges}
+      isGenerating={isGenerating}
     />
   );
 }
