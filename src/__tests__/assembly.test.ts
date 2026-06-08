@@ -2035,7 +2035,7 @@ describe("peelBuriedWalls", () => {
       { x: x0, y: y1, z: 0 },
     ], { x: 0, y: 0, z: 1 });
   }
-  // Horizontal floor face (normal +Y) at height y.
+  // Horizontal floor face (normal +Y, top skin) at height y.
   function hFloor(y: number): Face3D {
     return makeFace([
       { x: 0, y, z: 0 },
@@ -2043,6 +2043,15 @@ describe("peelBuriedWalls", () => {
       { x: 1, y, z: 1 },
       { x: 0, y, z: 1 },
     ], { x: 0, y: 1, z: 0 });
+  }
+  // Horizontal floor face (normal -Y, bottom skin) at height y.
+  function hFloorDown(y: number): Face3D {
+    return makeFace([
+      { x: 0, y, z: 0 },
+      { x: 1, y, z: 0 },
+      { x: 1, y, z: 1 },
+      { x: 0, y, z: 1 },
+    ], { x: 0, y: -1, z: 0 });
   }
   function floorGroup(faceIndices: number[]): GeometryGroup {
     return makeGroup({
@@ -2117,6 +2126,57 @@ describe("peelBuriedWalls", () => {
 
     polishGroups(out, 1.0);
     expect(out.find((g) => g.faceIndices.includes(1))!.category).toBe("discard");
+  });
+
+  it("peels a balcony railing shorter than 1m when slab skins reveal thin plate", () => {
+    // Slab with UP skin at y=0 and DOWN skin at y=0.2 → plate thickness = 0.2m.
+    // Adaptive threshold = max(0.2*2, 0.3) = 0.4m.
+    // Railing is 0.8m tall (> 0.4m) → gets peeled.
+    const faces = [hFloor(0.2), hFloorDown(0), vWall(0, 0, 0.8)];
+    const out = peelBuriedWalls(faces, [floorGroup([0, 1, 2])]);
+
+    expect(out).toHaveLength(2);
+    const wall = out.find((g) => g.category === "wall")!;
+    expect(wall).toBeDefined();
+    expect(wall.faceIndices).toEqual([2]);
+    expect(wall.orientation.startsWith("Vertical")).toBe(true);
+  });
+
+  it("keeps a canto proportional to a thick slab", () => {
+    // Thick slab: UP at y=0.5, DOWN at y=0 → plate thickness = 0.5m.
+    // Threshold = max(0.5*2, 0.3) = 1.0m.
+    // 0.6m vertical cluster ≤ 1.0m → stays in the floor.
+    const faces = [hFloor(0.5), hFloorDown(0), vWall(0, 0, 0.6)];
+    const out = peelBuriedWalls(faces, [floorGroup([0, 1, 2])]);
+
+    expect(out).toHaveLength(1);
+    expect(out[0].category).toBe("floor");
+    expect(out[0].faceIndices).toEqual([0, 1, 2]);
+  });
+
+  it("falls back to stored thickness when no DOWN skin exists", () => {
+    // Only UP-facing skin → plateThickness = undefined.
+    // g.thickness = 0.2 → fallback threshold = max(0.2*2, 0.3) = 0.4.
+    // 0.8m wall > 0.4m → peeled.
+    const faces = [hFloor(0), vWall(0, 0, 0.8)];
+    const g = floorGroup([0, 1]);
+    g.thickness = 0.2;
+    const out = peelBuriedWalls(faces, [g]);
+
+    expect(out).toHaveLength(2);
+    expect(out.find((gr) => gr.category === "wall")).toBeDefined();
+  });
+
+  it("falls back to 1.0m when no skins can be paired and no thickness", () => {
+    // Only UP-facing skin, thickness undefined → WALL_PEEL_MIN_HEIGHT = 1.0.
+    // 0.8m cluster ≤ 1.0m → stays.
+    const faces = [hFloor(0), vWall(0, 0, 0.8)];
+    const g = floorGroup([0, 1]);
+    g.thickness = undefined;
+    const out = peelBuriedWalls(faces, [g]);
+
+    expect(out).toHaveLength(1);
+    expect(out[0].category).toBe("floor");
   });
 
   it("leaves non-floor groups untouched", () => {

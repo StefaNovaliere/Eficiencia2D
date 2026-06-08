@@ -53,11 +53,12 @@ const MIN_AREA = 1e-6;
 const HEIGHT_BAND = 0.05;
 const THIN_WALL_THRESHOLD = 0.40;
 export const DEFAULT_MIN_REAL_AREA = 1.0; // default: subgroups smaller than 1 m² => "discard"
-// A vertical cluster buried inside a floor group is a real wall (not a slab
-// canto) when its vertical extent exceeds this height. Tied to slab-edge's
-// MAX_SLAB_THICKNESS = 1.0: any validated canto is <= 1.0m tall by construction,
-// so a taller vertical cluster can only be a wall that was wrongly absorbed.
+// Fallback peel threshold when the slab plate thickness can't be measured from
+// the horizontal skins. Tied to slab-edge's MAX_SLAB_THICKNESS = 1.0.
 const WALL_PEEL_MIN_HEIGHT = 1.0;
+// Absolute floor for the adaptive peel threshold — don't peel vertical clusters
+// shorter than this even if the measured slab thickness is tiny.
+const MIN_PEEL_HEIGHT = 0.3;
 
 function faceArea(f: Face3D): number {
   const verts = f.vertices;
@@ -680,6 +681,43 @@ export function polishGroups(groups: GeometryGroup[], minRealArea: number): void
  * elevations and polished exactly like native walls. Small peeled walls are
  * left for the subsequent polishGroups to demote (single responsibility).
  */
+/**
+ * Measure the slab plate thickness from a floor group's horizontal skins.
+ * Returns the smallest gap between an UP-facing skin level and a DOWN-facing
+ * skin level, which is the physical thickness of the thinnest slab in the group.
+ * Returns undefined if no valid UP+DOWN pair can be found.
+ */
+function measurePlateThickness(restInfos: FaceInfo[], faces: Face3D[]): number | undefined {
+  const upYs: number[] = [];
+  const downYs: number[] = [];
+  for (const fi of restInfos) {
+    const ny = faces[fi.index].normal.y;
+    if (ny >= HORIZONTAL_THRESHOLD) upYs.push(fi.centroid.y);
+    else if (ny <= -HORIZONTAL_THRESHOLD) downYs.push(fi.centroid.y);
+  }
+  if (upYs.length === 0 || downYs.length === 0) return undefined;
+
+  const dedup = (arr: number[]): number[] => {
+    arr.sort((a, b) => a - b);
+    const out = [arr[0]];
+    for (let i = 1; i < arr.length; i++) {
+      if (arr[i] - out[out.length - 1] > HEIGHT_BAND) out.push(arr[i]);
+    }
+    return out;
+  };
+  const ups = dedup(upYs);
+  const downs = dedup(downYs);
+
+  let minGap = Infinity;
+  for (const u of ups) {
+    for (const d of downs) {
+      const gap = u - d;
+      if (gap > 0.001 && gap < 1.0 && gap < minGap) minGap = gap;
+    }
+  }
+  return minGap === Infinity ? undefined : minGap;
+}
+
 export function peelBuriedWalls(
   faces: Face3D[],
   groups: GeometryGroup[],
@@ -720,6 +758,19 @@ export function peelBuriedWalls(
       continue;
     }
 
+    const restInfos = infos.filter((fi) => fi.orientation !== "vertical");
+
+    // Adaptive threshold: measure the real slab plate thickness from the
+    // horizontal skins (UP+DOWN pairs), then peel vertical clusters
+    // significantly taller than that. Falls back to the stored group
+    // thickness or the global constant when no skins can be paired.
+    const plateThickness = measurePlateThickness(restInfos, faces);
+    const peelThreshold = plateThickness != null
+      ? Math.max(plateThickness * 2, MIN_PEEL_HEIGHT)
+      : g.thickness != null
+        ? Math.max(g.thickness * 2, MIN_PEEL_HEIGHT)
+        : WALL_PEEL_MIN_HEIGHT;
+
     const clusters = splitConnected(verticalInfos, faces);
     const peelClusters: FaceInfo[][] = [];
     const keepVertical: FaceInfo[] = [];
@@ -731,7 +782,7 @@ export function peelBuriedWalls(
           if (v.y > maxY) maxY = v.y;
         }
       }
-      if (maxY - minY > WALL_PEEL_MIN_HEIGHT) peelClusters.push(cluster);
+      if (maxY - minY > peelThreshold) peelClusters.push(cluster);
       else keepVertical.push(...cluster);
     }
 
@@ -742,7 +793,6 @@ export function peelBuriedWalls(
 
     // Build the new wall groups. A cluster that buildSubgroup rejects (area too
     // small) is folded back into the floor group so no face is lost.
-    const restInfos = infos.filter((fi) => fi.orientation !== "vertical");
     const newWalls: GeometryGroup[] = [];
     const reabsorbed: FaceInfo[] = [];
     for (const cluster of peelClusters) {
