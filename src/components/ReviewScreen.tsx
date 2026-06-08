@@ -359,6 +359,158 @@ export default function ReviewScreen({
             </span>
           )}
         </div>
+
+        {selectedGroupIds.size === 1 && (() => {
+          const selId = Array.from(selectedGroupIds)[0];
+          const selGroup = effectivePhase1.groups.find((g) => g.id === selId);
+          if (!selGroup) return null;
+
+          const groupJoints = effectivePhase1.joints.filter(
+            (j) => j.groupA === selId || j.groupB === selId,
+          );
+          const groupAdjs = effectivePhase1.adjustments.filter(
+            (a) => a.groupId === selId,
+          );
+          const groupWWJoints = wallWallList.filter(
+            ({ ww }) => ww.groupA === selId || ww.groupB === selId,
+          );
+
+          if (groupJoints.length === 0 && !selGroup.thickness && groupWWJoints.length === 0) return null;
+
+          const groupById = new Map(effectivePhase1.groups.map((g) => [g.id, g]));
+
+          return (
+            <div className="absolute bottom-6 right-6 z-10 w-80 max-h-[45vh] overflow-y-auto bg-base-100/80 backdrop-blur-xl border border-base-200/50 rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] p-4 pointer-events-auto custom-scrollbar hidden md:block">
+              <div className="flex items-center gap-2 mb-3">
+                {panelIdByGroup.get(selId) && (
+                  <span className="font-mono text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded font-bold">{panelIdByGroup.get(selId)}</span>
+                )}
+                <span className="text-xs font-bold text-base-content/70 truncate">{selGroup.label}</span>
+              </div>
+              {selGroup.thickness != null && (
+                <div className="flex justify-between items-center mb-3 bg-base-200/50 p-2.5 rounded-xl border border-base-200">
+                  <span className="text-xs font-bold text-base-content/70">Grosor detectado</span>
+                  <span className="text-xs font-mono bg-base-100 shadow-sm border border-base-300/50 px-2 py-1 rounded-md text-primary">{(selGroup.thickness * 100).toFixed(1)} cm</span>
+                </div>
+              )}
+              {groupJoints.length > 0 && (
+                <div className="mt-3 flex flex-col gap-2">
+                  <span className="text-[11px] font-black uppercase tracking-wider text-base-content/50 ml-1">Juntas ({groupJoints.length})</span>
+                  <div className="bg-base-200/30 border border-base-200 rounded-xl divide-y divide-base-200/50">
+                    {groupJoints.map((j, i) => {
+                      const otherId = j.groupA === selId ? j.groupB : j.groupA;
+                      const other = groupById.get(otherId);
+                      return (
+                        <div key={i} className="flex justify-between items-center p-2.5 text-xs hover:bg-base-200/50 transition-colors">
+                          <span className="font-medium">{other?.label ?? `Grupo ${otherId}`}</span>
+                          <span className="text-base-content/60 font-mono bg-base-100 px-2 py-0.5 rounded shadow-sm border border-base-200/50">
+                            {j.totalLength.toFixed(2)}m <span className="opacity-50 mx-1">·</span> {j.dihedralAngle.toFixed(0)}°
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              {groupAdjs.length > 0 && (
+                <div className="mt-3 flex flex-col gap-2">
+                  <span className="text-[11px] font-black uppercase tracking-wider text-base-content/50 ml-1">Ajustes de ensamblaje</span>
+                  <div className="bg-base-200/30 border border-base-200 rounded-xl divide-y divide-base-200/50">
+                    {groupAdjs.map((a, i) => (
+                      <div key={i} className="flex justify-between items-center p-2.5 text-xs hover:bg-base-200/50 transition-colors">
+                        <span className="font-medium">{a.reason}</span>
+                        <span className="text-base-content/60 font-mono bg-base-100 px-2 py-0.5 rounded shadow-sm border border-base-200/50">
+                          {(a.delta * 100).toFixed(1)} cm
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {groupWWJoints.length > 0 && (
+                <div className="mt-3 flex flex-col gap-2">
+                  <span className="text-[11px] font-black uppercase tracking-wider text-base-content/50 ml-1">
+                    Uniones pared-pared ({groupWWJoints.length})
+                  </span>
+                  <span className="text-[10px] leading-tight text-base-content/50 italic mb-2 ml-1">
+                    La pared que se recorta se acorta el grosor de la otra para que encajen sin superponerse.
+                  </span>
+                  <div className="flex flex-col gap-2.5">
+                    {groupWWJoints.map(({ ww, labelA, labelB, pidA, pidB, hasThickness }) => {
+                      const otherId = ww.groupA === selId ? ww.groupB : ww.groupA;
+                      const otherLabel = ww.groupA === selId ? labelB : labelA;
+                      const otherPid = ww.groupA === selId ? pidB : pidA;
+                      const selPid = panelIdByGroup.get(selId);
+                      const effYielder = wallWallDecisions.get(ww.jointIndex) ?? ww.suggestedYieldGroupId;
+
+                      const selThick = groupById.get(selId)?.thickness ?? 0;
+                      const otherThick = groupById.get(otherId)?.thickness ?? 0;
+                      const trimIfSel = otherThick > 0.001 ? otherThick : selThick > 0.001 ? selThick : 0;
+                      const trimIfOther = selThick > 0.001 ? selThick : otherThick > 0.001 ? otherThick : 0;
+
+                      return (
+                        <div
+                          key={ww.jointIndex}
+                          onClick={() =>
+                            setSelectedJointIndex((cur) =>
+                              cur === ww.jointIndex ? null : ww.jointIndex,
+                            )
+                          }
+                          className={`bg-base-200/50 border rounded-xl p-2.5 flex flex-col gap-2.5 shadow-sm hover:shadow-md transition-shadow cursor-pointer ${
+                            selectedJointIndex === ww.jointIndex
+                              ? "border-primary ring-2 ring-primary/40 bg-primary/5"
+                              : "border-base-200"
+                          }`}
+                        >
+                          <div className="text-xs font-semibold flex items-center gap-1.5 text-base-content/80">
+                            Unión con{" "}
+                            {otherPid && <span className="font-mono bg-base-100 shadow-sm border border-base-300/50 px-1.5 rounded text-[10px]">{otherPid}</span>}{" "}
+                            <span className="truncate">{otherLabel}</span>
+                          </div>
+                          {!hasThickness ? (
+                            <span className="text-[10px] text-base-content/50 italic bg-base-100 p-2 rounded-lg border border-base-200/50">Sin grosor — no se puede recortar</span>
+                          ) : (
+                            <div className="flex items-center justify-between bg-base-100 p-2 rounded-lg border border-base-200/50">
+                              <span className="text-[10px] uppercase font-bold text-base-content/50 tracking-wide">Se recorta:</span>
+                              <div className="join shadow-sm">
+                                <button
+                                  className={`btn btn-xs join-item font-medium h-7 px-3 border-base-300/50 ${effYielder === selId ? "btn-active bg-primary hover:bg-primary border-primary text-primary-content" : "bg-base-100 hover:bg-base-200"}`}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleWallWallDecision(ww.jointIndex, selId, ww.groupA, ww.groupB);
+                                  }}
+                                >
+                                  {selPid && <span className="font-mono opacity-80 mr-1.5 text-[10px]">{selPid}</span>}
+                                  Esta
+                                  {effYielder === selId && trimIfSel > 0.001 && (
+                                    <span className="ml-1.5 bg-black/10 rounded px-1 text-[10px] font-mono">&minus;{(trimIfSel * 100).toFixed(1)}</span>
+                                  )}
+                                </button>
+                                <button
+                                  className={`btn btn-xs join-item font-medium h-7 px-3 border-base-300/50 ${effYielder === otherId ? "btn-active bg-primary hover:bg-primary border-primary text-primary-content" : "bg-base-100 hover:bg-base-200"}`}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleWallWallDecision(ww.jointIndex, otherId, ww.groupA, ww.groupB);
+                                  }}
+                                >
+                                  {otherPid && <span className="font-mono opacity-80 mr-1.5 text-[10px]">{otherPid}</span>}
+                                  Otra
+                                  {effYielder === otherId && trimIfOther > 0.001 && (
+                                    <span className="ml-1.5 bg-black/10 rounded px-1 text-[10px] font-mono">&minus;{(trimIfOther * 100).toFixed(1)}</span>
+                                  )}
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
       </div>
 
       <div className="w-full md:w-[22rem] lg:w-[26rem] flex flex-col border-t md:border-t-0 md:border-l border-base-200/60 bg-base-100/95 backdrop-blur-3xl shrink-0 h-[40vh] md:h-full shadow-[-20px_0_40px_-15px_rgba(0,0,0,0.05)] z-20">
@@ -415,152 +567,6 @@ export default function ReviewScreen({
             )}
           </div>
         )}
-
-        {selectedGroupIds.size === 1 && (() => {
-          const selId = Array.from(selectedGroupIds)[0];
-          const selGroup = effectivePhase1.groups.find((g) => g.id === selId);
-          if (!selGroup) return null;
-
-          const groupJoints = effectivePhase1.joints.filter(
-            (j) => j.groupA === selId || j.groupB === selId,
-          );
-          const groupAdjs = effectivePhase1.adjustments.filter(
-            (a) => a.groupId === selId,
-          );
-          const groupWWJoints = wallWallList.filter(
-            ({ ww }) => ww.groupA === selId || ww.groupB === selId,
-          );
-
-          if (groupJoints.length === 0 && !selGroup.thickness && groupWWJoints.length === 0) return null;
-
-          const groupById = new Map(effectivePhase1.groups.map((g) => [g.id, g]));
-
-          return (
-            <div className="p-5 border-b border-base-200/50 overflow-y-auto max-h-[30vh] bg-base-100 relative z-10 custom-scrollbar">
-              {selGroup.thickness != null && (
-                <div className="flex justify-between items-center mb-4 bg-base-200/50 p-3 rounded-xl border border-base-200">
-                  <span className="text-xs font-bold text-base-content/70">Grosor detectado</span>
-                  <span className="text-xs font-mono bg-base-100 shadow-sm border border-base-300/50 px-2 py-1 rounded-md text-primary">{(selGroup.thickness * 100).toFixed(1)} cm</span>
-                </div>
-              )}
-              {groupJoints.length > 0 && (
-                <div className="mt-5 flex flex-col gap-2">
-                  <span className="text-[11px] font-black uppercase tracking-wider text-base-content/50 ml-1">Juntas ({groupJoints.length})</span>
-                  <div className="bg-base-200/30 border border-base-200 rounded-xl divide-y divide-base-200/50">
-                    {groupJoints.map((j, i) => {
-                      const otherId = j.groupA === selId ? j.groupB : j.groupA;
-                      const other = groupById.get(otherId);
-                      return (
-                        <div key={i} className="flex justify-between items-center p-3 text-xs hover:bg-base-200/50 transition-colors">
-                          <span className="font-medium">{other?.label ?? `Grupo ${otherId}`}</span>
-                          <span className="text-base-content/60 font-mono bg-base-100 px-2 py-0.5 rounded shadow-sm border border-base-200/50">
-                            {j.totalLength.toFixed(2)}m <span className="opacity-50 mx-1">·</span> {j.dihedralAngle.toFixed(0)}°
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-              {groupAdjs.length > 0 && (
-                <div className="mt-5 flex flex-col gap-2">
-                  <span className="text-[11px] font-black uppercase tracking-wider text-base-content/50 ml-1">Ajustes de ensamblaje</span>
-                  <div className="bg-base-200/30 border border-base-200 rounded-xl divide-y divide-base-200/50">
-                    {groupAdjs.map((a, i) => (
-                      <div key={i} className="flex justify-between items-center p-3 text-xs hover:bg-base-200/50 transition-colors">
-                        <span className="font-medium">{a.reason}</span>
-                        <span className="text-base-content/60 font-mono bg-base-100 px-2 py-0.5 rounded shadow-sm border border-base-200/50">
-                          {(a.delta * 100).toFixed(1)} cm
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {groupWWJoints.length > 0 && (
-                <div className="mt-5 flex flex-col gap-2">
-                  <span className="text-[11px] font-black uppercase tracking-wider text-base-content/50 ml-1">
-                    Uniones pared-pared ({groupWWJoints.length})
-                  </span>
-                  <span className="text-[10px] leading-tight text-base-content/50 italic mb-2 ml-1">
-                    La pared que se recorta se acorta el grosor de la otra para que encajen sin superponerse.
-                  </span>
-                  <div className="flex flex-col gap-3">
-                    {groupWWJoints.map(({ ww, labelA, labelB, pidA, pidB, hasThickness }) => {
-                      const otherId = ww.groupA === selId ? ww.groupB : ww.groupA;
-                      const otherLabel = ww.groupA === selId ? labelB : labelA;
-                      const otherPid = ww.groupA === selId ? pidB : pidA;
-                      const selPid = panelIdByGroup.get(selId);
-                      const effYielder = wallWallDecisions.get(ww.jointIndex) ?? ww.suggestedYieldGroupId;
-
-                      const selThick = groupById.get(selId)?.thickness ?? 0;
-                      const otherThick = groupById.get(otherId)?.thickness ?? 0;
-                      const trimIfSel = otherThick > 0.001 ? otherThick : selThick > 0.001 ? selThick : 0;
-                      const trimIfOther = selThick > 0.001 ? selThick : otherThick > 0.001 ? otherThick : 0;
-
-                      return (
-                        <div
-                          key={ww.jointIndex}
-                          onClick={() =>
-                            setSelectedJointIndex((cur) =>
-                              cur === ww.jointIndex ? null : ww.jointIndex,
-                            )
-                          }
-                          className={`bg-base-200/50 border rounded-xl p-3 flex flex-col gap-3 shadow-sm hover:shadow-md transition-shadow cursor-pointer ${
-                            selectedJointIndex === ww.jointIndex
-                              ? "border-primary ring-2 ring-primary/40 bg-primary/5"
-                              : "border-base-200"
-                          }`}
-                        >
-                          <div className="text-xs font-semibold flex items-center gap-1.5 text-base-content/80">
-                            Unión con{" "}
-                            {otherPid && <span className="font-mono bg-base-100 shadow-sm border border-base-300/50 px-1.5 rounded text-[10px]">{otherPid}</span>}{" "}
-                            <span className="truncate">{otherLabel}</span>
-                          </div>
-                          {!hasThickness ? (
-                            <span className="text-[10px] text-base-content/50 italic bg-base-100 p-2 rounded-lg border border-base-200/50">Sin grosor — no se puede recortar</span>
-                          ) : (
-                            <div className="flex items-center justify-between bg-base-100 p-2 rounded-lg border border-base-200/50">
-                              <span className="text-[10px] uppercase font-bold text-base-content/50 tracking-wide">Se recorta:</span>
-                              <div className="join shadow-sm">
-                                <button
-                                  className={`btn btn-xs join-item font-medium h-7 px-3 border-base-300/50 ${effYielder === selId ? "btn-active bg-primary hover:bg-primary border-primary text-primary-content" : "bg-base-100 hover:bg-base-200"}`}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleWallWallDecision(ww.jointIndex, selId, ww.groupA, ww.groupB);
-                                  }}
-                                >
-                                  {selPid && <span className="font-mono opacity-80 mr-1.5 text-[10px]">{selPid}</span>}
-                                  Esta
-                                  {effYielder === selId && trimIfSel > 0.001 && (
-                                    <span className="ml-1.5 bg-black/10 rounded px-1 text-[10px] font-mono">&minus;{(trimIfSel * 100).toFixed(1)}</span>
-                                  )}
-                                </button>
-                                <button
-                                  className={`btn btn-xs join-item font-medium h-7 px-3 border-base-300/50 ${effYielder === otherId ? "btn-active bg-primary hover:bg-primary border-primary text-primary-content" : "bg-base-100 hover:bg-base-200"}`}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleWallWallDecision(ww.jointIndex, otherId, ww.groupA, ww.groupB);
-                                  }}
-                                >
-                                  {otherPid && <span className="font-mono opacity-80 mr-1.5 text-[10px]">{otherPid}</span>}
-                                  Otra
-                                  {effYielder === otherId && trimIfOther > 0.001 && (
-                                    <span className="ml-1.5 bg-black/10 rounded px-1 text-[10px] font-mono">&minus;{(trimIfOther * 100).toFixed(1)}</span>
-                                  )}
-                                </button>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        })()}
 
         <div className="mt-auto border-t border-base-200/50 p-5 bg-base-100 relative z-10 shadow-[0_-10px_30px_rgba(0,0,0,0.03)] shrink-0">
           <div className="flex flex-wrap items-center gap-2 mb-4 text-xs font-medium">
