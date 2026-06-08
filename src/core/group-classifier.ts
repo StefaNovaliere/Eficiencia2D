@@ -53,6 +53,11 @@ const MIN_AREA = 1e-6;
 const HEIGHT_BAND = 0.05;
 const THIN_WALL_THRESHOLD = 0.40;
 export const DEFAULT_MIN_REAL_AREA = 1.0; // default: subgroups smaller than 1 m² => "discard"
+// A vertical cluster buried inside a floor group is a real wall (not a slab
+// canto) when its vertical extent exceeds this height. Tied to slab-edge's
+// MAX_SLAB_THICKNESS = 1.0: any validated canto is <= 1.0m tall by construction,
+// so a taller vertical cluster can only be a wall that was wrongly absorbed.
+const WALL_PEEL_MIN_HEIGHT = 1.0;
 
 function faceArea(f: Face3D): number {
   const verts = f.vertices;
@@ -653,4 +658,163 @@ export function polishGroups(groups: GeometryGroup[], minRealArea: number): void
     if (catDiff !== 0) return catDiff;
     return b.totalArea - a.totalArea;
   });
+}
+
+/**
+ * Peel real walls that were wrongly absorbed into floor groups.
+ *
+ * A floor group's category/orientation is decided by its single biggest
+ * subgroup (the horizontal skin), so once a vertical wall is unioned into it
+ * (e.g. a wall face that falsely passed the slab-rim test, or got edge-
+ * connected), the merged group reads as "floor"/"Horizontal" and polishGroups
+ * never re-examines the vertical faces hidden inside.
+ *
+ * This pass works at face granularity: inside each floor group it clusters the
+ * genuinely-vertical faces (|n.y| <= VERTICAL_THRESHOLD) by connectivity and
+ * extracts any cluster whose vertical extent exceeds WALL_PEEL_MIN_HEIGHT into
+ * its own wall group. Short slab cantos (extent <= the slab thickness, capped at
+ * MAX_SLAB_THICKNESS = 1.0) stay in the floor group, so the legitimate
+ * floor×canto×floor slab merge is preserved.
+ *
+ * Runs BEFORE splitWallGroupsAtFloors so peeled walls are split at floor
+ * elevations and polished exactly like native walls. Small peeled walls are
+ * left for the subsequent polishGroups to demote (single responsibility).
+ */
+export function peelBuriedWalls(
+  faces: Face3D[],
+  groups: GeometryGroup[],
+): GeometryGroup[] {
+  let nextId = groups.reduce((m, g) => Math.max(m, g.id), 0) + 1;
+  // Continue the "Pared {orient} #n" numbering from whatever already exists.
+  const wallCounters: Record<string, number> = {};
+  for (const g of groups) {
+    const m = /^Pared (.+) #(\d+)$/.exec(g.label);
+    if (m) {
+      const key = m[1];
+      wallCounters[key] = Math.max(wallCounters[key] ?? 0, Number(m[2]));
+    }
+  }
+
+  const infoFor = (idx: number): FaceInfo => {
+    const f = faces[idx];
+    const absY = Math.abs(f.normal.y);
+    let orientation: FaceInfo["orientation"];
+    if (absY >= HORIZONTAL_THRESHOLD) orientation = "horizontal";
+    else if (absY <= VERTICAL_THRESHOLD) orientation = "vertical";
+    else orientation = "inclined";
+    return { index: idx, area: faceArea(f), centroid: faceCentroid(f), orientation, category: "floor" };
+  };
+
+  const out: GeometryGroup[] = [];
+
+  for (const g of groups) {
+    if (g.category !== "floor") {
+      out.push(g);
+      continue;
+    }
+
+    const infos = g.faceIndices.map(infoFor);
+    const verticalInfos = infos.filter((fi) => fi.orientation === "vertical");
+    if (verticalInfos.length === 0) {
+      out.push(g);
+      continue;
+    }
+
+    const clusters = splitConnected(verticalInfos, faces);
+    const peelClusters: FaceInfo[][] = [];
+    const keepVertical: FaceInfo[] = [];
+    for (const cluster of clusters) {
+      let minY = Infinity, maxY = -Infinity;
+      for (const fi of cluster) {
+        for (const v of faces[fi.index].vertices) {
+          if (v.y < minY) minY = v.y;
+          if (v.y > maxY) maxY = v.y;
+        }
+      }
+      if (maxY - minY > WALL_PEEL_MIN_HEIGHT) peelClusters.push(cluster);
+      else keepVertical.push(...cluster);
+    }
+
+    if (peelClusters.length === 0) {
+      out.push(g);
+      continue;
+    }
+
+    // Build the new wall groups. A cluster that buildSubgroup rejects (area too
+    // small) is folded back into the floor group so no face is lost.
+    const restInfos = infos.filter((fi) => fi.orientation !== "vertical");
+    const newWalls: GeometryGroup[] = [];
+    const reabsorbed: FaceInfo[] = [];
+    for (const cluster of peelClusters) {
+      let biggest = cluster[0];
+      for (const fi of cluster) if (fi.area > biggest.area) biggest = fi;
+      const normal = normalize(faces[biggest.index].normal);
+      const pseudoCluster: CoplanarCluster = { normal, d: 0, faceInfos: cluster };
+      const sg = buildSubgroup("wall", pseudoCluster, cluster, faces);
+      if (!sg) {
+        reabsorbed.push(...cluster);
+        continue;
+      }
+      let minY = Infinity, maxY = -Infinity;
+      for (const fi of cluster) {
+        for (const v of faces[fi.index].vertices) {
+          if (v.y < minY) minY = v.y;
+          if (v.y > maxY) maxY = v.y;
+        }
+      }
+      const orient = orientationLabel(normal, "vertical");
+      wallCounters[orient] = (wallCounters[orient] ?? 0) + 1;
+      newWalls.push({
+        id: nextId++,
+        label: `Pared ${orient} #${wallCounters[orient]}`,
+        category: "wall",
+        faceIndices: cluster.map((fi) => fi.index),
+        totalArea: sg.totalArea,
+        centroid: sg.centroid,
+        orientation: orient,
+        representativeNormal: normal,
+        thickness: undefined,
+        minY,
+        maxY,
+        originalCategory: "wall",
+      });
+    }
+
+    // Faces that stay in the floor group: horizontal/inclined + short cantos +
+    // any cluster that couldn't form a valid wall.
+    const remaining = [...restInfos, ...keepVertical, ...reabsorbed];
+    if (remaining.length > 0) {
+      let totalArea = 0, cx = 0, cy = 0, cz = 0;
+      let minY = Infinity, maxY = -Infinity;
+      for (const fi of remaining) {
+        totalArea += fi.area;
+        cx += fi.centroid.x * fi.area;
+        cy += fi.centroid.y * fi.area;
+        cz += fi.centroid.z * fi.area;
+        for (const v of faces[fi.index].vertices) {
+          if (v.y < minY) minY = v.y;
+          if (v.y > maxY) maxY = v.y;
+        }
+      }
+      if (totalArea > 0) { cx /= totalArea; cy /= totalArea; cz /= totalArea; }
+      out.push({
+        ...g,
+        faceIndices: remaining.map((fi) => fi.index),
+        totalArea,
+        centroid: { x: cx, y: cy, z: cz },
+        minY,
+        maxY,
+      });
+    }
+
+    out.push(...newWalls);
+  }
+
+  const ORDER: Record<FaceCategory, number> = { floor: 0, wall: 1, discard: 2 };
+  out.sort((a, b) => {
+    const catDiff = ORDER[a.category] - ORDER[b.category];
+    if (catDiff !== 0) return catDiff;
+    return b.totalArea - a.totalArea;
+  });
+  return out;
 }
