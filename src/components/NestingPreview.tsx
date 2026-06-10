@@ -15,8 +15,8 @@ export interface NestingPreviewProps {
   onScaleChange: (scale: number) => void;
 }
 
-const WALL_COLOR = "#3b82f6";
-const FLOOR_COLOR = "#22c55e";
+const WALL_COLOR = "#E5E5E5";
+const FLOOR_COLOR = "#7F8C8D";
 const SHEET_STROKE = "#a1a1aa";
 const PANEL_STROKE = "#a1a1aa";
 const UNPLACED_COLOR = "#ef4444";
