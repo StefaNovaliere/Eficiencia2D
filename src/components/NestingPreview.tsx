@@ -17,9 +17,9 @@ export interface NestingPreviewProps {
 
 const WALL_COLOR = "#E5E5E5";
 const FLOOR_COLOR = "#7F8C8D";
-const SHEET_STROKE = "#a1a1aa";
-const PANEL_STROKE = "#a1a1aa";
-const UNPLACED_COLOR = "#ef4444";
+const SHEET_STROKE = "#E5E5E5";
+const PANEL_STROKE = "#E5E5E5";
+const UNPLACED_COLOR = "#E5E5E5";
 
 function SheetCanvas({
   sheets,

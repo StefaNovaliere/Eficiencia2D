@@ -21,38 +21,48 @@ export interface LeaderMarker {
 // ---------------------------------------------------------------------------
 
 const CATEGORY_HEX: Record<FaceCategory, number> = {
-  floor: 0x22c55e,
-  wall: 0x3b82f6,
-  discard: 0x71717a,
+  floor: 0x7F8C8D,
+  wall:0xE0DCD1,
+  discard: 0x2C3E50,
 };
 
-function makeMaterial(hex: number, opacity: number): THREE.MeshBasicMaterial {
-  return new THREE.MeshBasicMaterial({
+function makeMaterial(hex: number, opacity: number): THREE.MeshStandardMaterial {
+  return new THREE.MeshStandardMaterial({
     color: hex,
     side: THREE.DoubleSide,
-    transparent: true,
+    transparent: opacity < 1.0,
     opacity,
     depthWrite: opacity > 0.9,
+    roughness: 0.8,
+    metalness: 0.1,
   });
 }
 
-const NORMAL_MATERIALS: Record<FaceCategory, THREE.MeshBasicMaterial> = {
+const NORMAL_MATERIALS: Record<FaceCategory, THREE.MeshStandardMaterial> = {
   floor: makeMaterial(CATEGORY_HEX.floor, 0.85),
   wall: makeMaterial(CATEGORY_HEX.wall, 0.85),
   discard: makeMaterial(CATEGORY_HEX.discard, 0.6),
 };
 
-const DIMMED_MATERIALS: Record<FaceCategory, THREE.MeshBasicMaterial> = {
+const SOLID_MATERIALS: Record<FaceCategory, THREE.MeshStandardMaterial> = {
+  floor: makeMaterial(CATEGORY_HEX.floor, 1.0),
+  wall: makeMaterial(CATEGORY_HEX.wall, 1.0),
+  discard: makeMaterial(CATEGORY_HEX.discard, 1.0),
+};
+
+const DIMMED_MATERIALS: Record<FaceCategory, THREE.MeshStandardMaterial> = {
   floor: makeMaterial(CATEGORY_HEX.floor, 0.08),
   wall: makeMaterial(CATEGORY_HEX.wall, 0.08),
   discard: makeMaterial(CATEGORY_HEX.discard, 0.05),
 };
 
-const HIGHLIGHT_MATERIAL = new THREE.MeshBasicMaterial({
+const HIGHLIGHT_MATERIAL = new THREE.MeshStandardMaterial({
   color: 0xf59e0b,
   side: THREE.DoubleSide,
   transparent: true,
   opacity: 0.45,
+  roughness: 0.5,
+  metalness: 0.2,
 });
 
 const HIGHLIGHT_WIREFRAME = new THREE.LineBasicMaterial({
@@ -273,13 +283,16 @@ function buildSelectedGeometry(
 interface CategoryMeshProps {
   mesh: MergedMeshData;
   isDimmed: boolean;
+  isSolid: boolean;
   onPick: (groupId: number) => void;
   onTogglePick: (groupId: number) => void;
 }
 
-function CategoryMesh({ mesh, isDimmed, onPick, onTogglePick }: CategoryMeshProps) {
+function CategoryMesh({ mesh, isDimmed, isSolid, onPick, onTogglePick }: CategoryMeshProps) {
   const material = isDimmed
     ? DIMMED_MATERIALS[mesh.category]
+    : isSolid
+    ? SOLID_MATERIALS[mesh.category]
     : NORMAL_MATERIALS[mesh.category];
 
   return (
@@ -360,6 +373,7 @@ interface SceneProps {
   appliedAxis?: "Y" | "Z";
   showCenterAxes?: boolean;
   leaderMarkers?: LeaderMarker[];
+  isSolid?: boolean;
 }
 
 function Scene({
@@ -373,6 +387,7 @@ function Scene({
   appliedAxis = "Y",
   showCenterAxes = true,
   leaderMarkers = [],
+  isSolid = false,
 }: SceneProps) {
   const selectedGroups = groups.filter((g) => selectedGroupIds.has(g.id));
 
@@ -491,6 +506,7 @@ function Scene({
               key={mm.category}
               mesh={mm}
               isDimmed={isDimmed}
+              isSolid={isSolid}
               onPick={onSelectGroup}
               onTogglePick={onToggleGroup}
             />
@@ -566,6 +582,7 @@ export interface ModelViewerProps {
   appliedAxis?: "Y" | "Z";
   showCenterAxes?: boolean;
   leaderMarkers?: LeaderMarker[];
+  isSolid?: boolean;
 }
 
 export default function ModelViewer({
@@ -579,6 +596,7 @@ export default function ModelViewer({
   appliedAxis = "Y",
   showCenterAxes = true,
   leaderMarkers = [],
+  isSolid = false,
 }: ModelViewerProps) {
   const camDist = useMemo(() => {
     let minX = Infinity, minY = Infinity, minZ = Infinity;
@@ -611,6 +629,11 @@ export default function ModelViewer({
       onPointerMissed={() => onSelectGroup(-1)}
       dpr={[1, 1.5]}
     >
+      {/* Añadimos luces para que los materiales Standard tengan sombreado y volumen */}
+      <ambientLight intensity={0.7} />
+      <directionalLight position={[100, 200, 100]} intensity={0.6} />
+      <directionalLight position={[-100, 50, -100]} intensity={0.3} />
+      
       <Scene
         faces={faces}
         groups={groups}
@@ -622,6 +645,7 @@ export default function ModelViewer({
         appliedAxis={appliedAxis}
         showCenterAxes={showCenterAxes}
         leaderMarkers={leaderMarkers}
+        isSolid={isSolid}
       />
       
       {/* Gizmo en la esquina para referencia de orientación constante */}
