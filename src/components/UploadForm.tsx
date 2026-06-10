@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { parsePipeline } from "@/core/pipeline";
 import type { Phase1Result } from "@/core/pipeline";
 import DemoButton from "./DemoButton";
 import { useProjectContext } from "@/context/ProjectContext";
+import { useGeometryWorker } from "@/hooks/useGeometryWorker";
 
 export default function UploadForm() {
   const router = useRouter();
@@ -22,6 +23,26 @@ export default function UploadForm() {
   const [error, setError] = useState("");
   const [dragActive, setDragActive] = useState(false);
   const dropRef = useRef<HTMLDivElement>(null);
+
+  // Motor geométrico en Pyodide (WebAssembly) corriendo en un Web Worker.
+  // Por ahora se ejecuta en paralelo al pipeline TS para validar la cadena WASM
+  // end-to-end; cuando motor.py implemente el pipeline completo, su `result`
+  // reemplazará a parsePipeline (ver TODO en handleSubmit).
+  const {
+    isReady: isWorkerReady,
+    stage: workerStage,
+    error: workerError,
+    result: workerResult,
+    processObj,
+  } = useGeometryWorker();
+
+  // Diagnóstico: confirmar que el motor WASM devuelve resultado end-to-end.
+  useEffect(() => {
+    if (workerResult) {
+      // eslint-disable-next-line no-console
+      console.log("[geometry.worker] resultado del motor (Pyodide):", workerResult);
+    }
+  }, [workerResult]);
 
   const accept = ".obj";
 
@@ -99,6 +120,15 @@ export default function UploadForm() {
 
     try {
       const buffer = await file.arrayBuffer();
+
+      // Procesamiento en el motor WASM (Pyodide) dentro del Web Worker.
+      // No bloquea el hilo principal. Por ahora su resultado es informativo
+      // (se loguea via useEffect sobre workerResult).
+      // TODO: cuando motor.py implemente el pipeline completo, esperar el
+      // `result` del worker, mapearlo a Phase1Result y usarlo en lugar de
+      // parsePipeline para navegar a /review.
+      const objString = new TextDecoder("utf-8").decode(buffer);
+      processObj(objString, { fileName: file.name, scale });
 
       const p1 = await new Promise<Phase1Result>((resolve) => {
         setTimeout(() => {
@@ -225,12 +255,27 @@ export default function UploadForm() {
             </div>
           </div>
 
-          {error && (
+          {(error || workerError) && (
             <div className="alert alert-error shadow-sm mt-6 rounded-xl">
               <svg xmlns="http://www.w3.org/2000/svg" className="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-              <span>{error}</span>
+              <span>{error || workerError}</span>
             </div>
           )}
+
+          {/* Estado del motor geométrico (Pyodide / WebAssembly en el Worker) */}
+          <div className="mt-4 flex items-center justify-center gap-2 text-xs text-base-content/60">
+            {isWorkerReady ? (
+              <>
+                <span className="inline-block h-2 w-2 rounded-full bg-success" />
+                <span>Motor geométrico listo</span>
+              </>
+            ) : (
+              <>
+                <span className="loading loading-spinner loading-xs" />
+                <span>{workerStage ?? "Inicializando motor geométrico…"}</span>
+              </>
+            )}
+          </div>
 
           <div className="mt-8 flex justify-center">
             <button
