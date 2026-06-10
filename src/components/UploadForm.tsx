@@ -2,49 +2,74 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { parsePipeline } from "@/core/pipeline";
 import type { Phase1Result } from "@/core/pipeline";
 import DemoButton from "./DemoButton";
 import { useProjectContext } from "@/context/ProjectContext";
 import { useGeometryWorker } from "@/hooks/useGeometryWorker";
 
+/** Resultado que devuelve motor.process_obj (Python/Pyodide) vía el Worker. */
+type MotorResult =
+  | { ok: true; phase1: Phase1Result }
+  | { ok: false; error: string; trace?: string };
+
 export default function UploadForm() {
   const router = useRouter();
-  const { 
-    file, 
-    setFile, 
-    scale, 
-    setScale, 
-    setPhase1Result, 
-    persistSession 
+  const {
+    file,
+    setFile,
+    scale,
+    setScale,
+    setPhase1Result,
+    persistSession,
   } = useProjectContext();
-  
+
   const [isParsing, setIsParsing] = useState(false);
   const [error, setError] = useState("");
   const [dragActive, setDragActive] = useState(false);
   const dropRef = useRef<HTMLDivElement>(null);
+  // Evita navegar dos veces si el resultado dispara el efecto más de una vez.
+  const navigatedRef = useRef(false);
 
-  // Motor geométrico en Pyodide (WebAssembly) corriendo en un Web Worker.
-  // Por ahora se ejecuta en paralelo al pipeline TS para validar la cadena WASM
-  // end-to-end; cuando motor.py implemente el pipeline completo, su `result`
-  // reemplazará a parsePipeline (ver TODO en handleSubmit).
+  // Motor geométrico portado a Python, ejecutándose en Pyodide (WebAssembly)
+  // dentro de un Web Worker. Reemplaza al antiguo parsePipeline en TS.
   const {
     isReady: isWorkerReady,
+    isProcessing,
     stage: workerStage,
     error: workerError,
     result: workerResult,
     processObj,
-  } = useGeometryWorker();
-
-  // Diagnóstico: confirmar que el motor WASM devuelve resultado end-to-end.
-  useEffect(() => {
-    if (workerResult) {
-      // eslint-disable-next-line no-console
-      console.log("[geometry.worker] resultado del motor (Pyodide):", workerResult);
-    }
-  }, [workerResult]);
+  } = useGeometryWorker<MotorResult>();
 
   const accept = ".obj";
+
+  // Cuando el motor de Python devuelve el Phase1Result, lo guardamos en el
+  // contexto y navegamos a la pantalla de revisión.
+  useEffect(() => {
+    if (!workerResult || navigatedRef.current) return;
+
+    if (!workerResult.ok) {
+      setError(workerResult.error || "El motor geométrico no pudo procesar el archivo.");
+      setIsParsing(false);
+      return;
+    }
+
+    const p1 = workerResult.phase1;
+    if (!p1 || p1.faces.length === 0) {
+      const msg =
+        p1 && p1.warnings.length > 0
+          ? p1.warnings.join(" ")
+          : "No se encontró geometría válida en el archivo.";
+      setError(msg);
+      setIsParsing(false);
+      return;
+    }
+
+    navigatedRef.current = true;
+    setPhase1Result(p1);
+    // Persistimos antes de navegar para que un refresh en /review funcione.
+    void persistSession().finally(() => router.push("/review"));
+  }, [workerResult, setPhase1Result, persistSession, router]);
 
   const handleDrag = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -72,8 +97,17 @@ export default function UploadForm() {
     [setFile]
   );
 
+  const runWorker = useCallback(
+    (objString: string, fileName: string) => {
+      navigatedRef.current = false;
+      setError("");
+      setIsParsing(true);
+      processObj(objString, { fileName, scale });
+    },
+    [processObj, scale],
+  );
+
   const handleLoadDemo = async () => {
-    setIsParsing(true);
     setError("");
     try {
       const res = await fetch("/demo/demo.obj");
@@ -82,25 +116,12 @@ export default function UploadForm() {
           "El archivo de demo todavía no está disponible. Probá subir tu propio .obj.",
         );
       }
-      const buffer = await res.arrayBuffer();
-      const demoFile = new File([buffer], "demo.obj", { type: "model/obj" });
-      setFile(demoFile);
-
-      const p1 = parsePipeline("demo.obj", buffer);
-      if (p1.faces.length === 0) {
-        throw new Error("El archivo de demo no contiene geometría válida.");
-      }
-      setPhase1Result(p1);
-      
-      // We don't await persistSession here because we just parsed it.
-      // But we can persist if we want.
-      // router.push("/review") is handled in handleSubmit or here:
-      router.push("/review");
+      const text = await res.text();
+      const buffer = new TextEncoder().encode(text).buffer;
+      setFile(new File([buffer], "demo.obj", { type: "model/obj" }));
+      runWorker(text, "demo.obj");
     } catch (err: unknown) {
-      setError(
-        err instanceof Error ? err.message : "Error al cargar el demo.",
-      );
-      setIsParsing(false);
+      setError(err instanceof Error ? err.message : "Error al cargar el demo.");
     }
   };
 
@@ -115,55 +136,25 @@ export default function UploadForm() {
       return;
     }
 
-    setIsParsing(true);
-    setError("");
-
     try {
-      const buffer = await file.arrayBuffer();
-
-      // Procesamiento en el motor WASM (Pyodide) dentro del Web Worker.
-      // No bloquea el hilo principal. Por ahora su resultado es informativo
-      // (se loguea via useEffect sobre workerResult).
-      // TODO: cuando motor.py implemente el pipeline completo, esperar el
-      // `result` del worker, mapearlo a Phase1Result y usarlo en lugar de
-      // parsePipeline para navegar a /review.
-      const objString = new TextDecoder("utf-8").decode(buffer);
-      processObj(objString, { fileName: file.name, scale });
-
-      const p1 = await new Promise<Phase1Result>((resolve) => {
-        setTimeout(() => {
-          resolve(parsePipeline(file.name, buffer));
-        }, 50);
-      });
-
-      if (p1.faces.length === 0) {
-        const msg =
-          p1.warnings.length > 0
-            ? p1.warnings.join(" ")
-            : "No se encontraron caras en el archivo.";
-        throw new Error(msg);
-      }
-
-      setPhase1Result(p1);
-      
-      // Auto-save session state so refresh on /review works
-      await persistSession();
-      
-      router.push("/review");
+      const text = await file.text();
+      runWorker(text, file.name);
     } catch (err: unknown) {
       setError(
-        err instanceof Error ? err.message : "Error desconocido al procesar.",
+        err instanceof Error ? err.message : "Error desconocido al leer el archivo.",
       );
-      setIsParsing(false);
     }
   };
 
-  if (isParsing) {
+  if (isParsing || isProcessing) {
     return (
       <div className="card bg-base-100 shadow-2xl border border-base-200 w-full">
         <div className="card-body items-center justify-center py-20 gap-4">
           <span className="loading loading-spinner loading-lg text-primary" />
-          <p className="font-medium text-base-content/80">Procesando geometría...</p>
+          <p className="font-medium text-base-content/80">
+            {workerStage ?? "Procesando geometría..."}
+          </p>
+          <p className="text-xs text-base-content/50">Cálculo en Python (WebAssembly), sin bloquear la interfaz.</p>
         </div>
       </div>
     );
@@ -267,7 +258,7 @@ export default function UploadForm() {
             {isWorkerReady ? (
               <>
                 <span className="inline-block h-2 w-2 rounded-full bg-success" />
-                <span>Motor geométrico listo</span>
+                <span>Motor geométrico (Python) listo</span>
               </>
             ) : (
               <>
@@ -280,12 +271,12 @@ export default function UploadForm() {
           <div className="mt-8 flex justify-center">
             <button
               className="btn btn-primary btn-wide shadow-lg shadow-primary/20"
-              disabled={!file || isParsing}
+              disabled={!file || isParsing || isProcessing || !isWorkerReady}
               onClick={handleSubmit}
             >
-              {isParsing ? (
+              {!isWorkerReady ? (
                 <>
-                  <span className="loading loading-spinner" /> Procesando...
+                  <span className="loading loading-spinner" /> Inicializando motor…
                 </>
               ) : (
                 "Continuar →"
