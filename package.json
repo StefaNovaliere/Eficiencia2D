@@ -37,6 +37,7 @@
     "daisyui": "^5.5.23",
     "jsdom": "^29.1.1",
     "postcss": "^8.5.15",
+    "pyodide": "^0.29.4",
     "tailwindcss": "^4.3.0",
     "typescript": "^5",
     "vitest": "^4.1.7"
