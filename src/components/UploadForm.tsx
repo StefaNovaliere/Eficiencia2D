@@ -1,16 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { Phase1Result } from "@/core/pipeline";
+import { uploadModelFile, uploadDemoObj } from "@/services/api";
 import DemoButton from "./DemoButton";
 import { useProjectContext } from "@/context/ProjectContext";
-import { useGeometryWorker } from "@/hooks/useGeometryWorker";
-
-/** Resultado que devuelve motor.process_obj (Python/Pyodide) vía el Worker. */
-type MotorResult =
-  | { ok: true; phase1: Phase1Result }
-  | { ok: false; error: string; trace?: string };
 
 export default function UploadForm() {
   const router = useRouter();
@@ -19,57 +13,17 @@ export default function UploadForm() {
     setFile,
     scale,
     setScale,
+    setFileId,
+    setPreviewObj,
     setPhase1Result,
-    persistSession,
   } = useProjectContext();
 
   const [isParsing, setIsParsing] = useState(false);
   const [error, setError] = useState("");
   const [dragActive, setDragActive] = useState(false);
   const dropRef = useRef<HTMLDivElement>(null);
-  // Evita navegar dos veces si el resultado dispara el efecto más de una vez.
-  const navigatedRef = useRef(false);
-
-  // Motor geométrico portado a Python, ejecutándose en Pyodide (WebAssembly)
-  // dentro de un Web Worker. Reemplaza al antiguo parsePipeline en TS.
-  const {
-    isReady: isWorkerReady,
-    isProcessing,
-    stage: workerStage,
-    error: workerError,
-    result: workerResult,
-    processObj,
-  } = useGeometryWorker<MotorResult>();
 
   const accept = ".obj";
-
-  // Cuando el motor de Python devuelve el Phase1Result, lo guardamos en el
-  // contexto y navegamos a la pantalla de revisión.
-  useEffect(() => {
-    if (!workerResult || navigatedRef.current) return;
-
-    if (!workerResult.ok) {
-      setError(workerResult.error || "El motor geométrico no pudo procesar el archivo.");
-      setIsParsing(false);
-      return;
-    }
-
-    const p1 = workerResult.phase1;
-    if (!p1 || p1.faces.length === 0) {
-      const msg =
-        p1 && p1.warnings.length > 0
-          ? p1.warnings.join(" ")
-          : "No se encontró geometría válida en el archivo.";
-      setError(msg);
-      setIsParsing(false);
-      return;
-    }
-
-    navigatedRef.current = true;
-    setPhase1Result(p1);
-    // Persistimos antes de navegar para que un refresh en /review funcione.
-    void persistSession().finally(() => router.push("/review"));
-  }, [workerResult, setPhase1Result, persistSession, router]);
 
   const handleDrag = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -97,18 +51,9 @@ export default function UploadForm() {
     [setFile]
   );
 
-  const runWorker = useCallback(
-    (objString: string, fileName: string) => {
-      navigatedRef.current = false;
-      setError("");
-      setIsParsing(true);
-      processObj(objString, { fileName, scale });
-    },
-    [processObj, scale],
-  );
-
   const handleLoadDemo = async () => {
     setError("");
+    setIsParsing(true);
     try {
       const res = await fetch("/demo/demo.obj");
       if (!res.ok) {
@@ -116,12 +61,22 @@ export default function UploadForm() {
           "El archivo de demo todavía no está disponible. Probá subir tu propio .obj.",
         );
       }
-      const text = await res.text();
-      const buffer = new TextEncoder().encode(text).buffer;
-      setFile(new File([buffer], "demo.obj", { type: "model/obj" }));
-      runWorker(text, "demo.obj");
+      const textContent = await res.text();
+      
+      const backendRes = await uploadDemoObj(textContent, "demo.obj");
+      
+      setFile(new File([textContent], "demo.obj", { type: "text/plain" }));
+      setFileId(backendRes.file_id);
+      setPhase1Result(backendRes.topology);
+      setPreviewObj(backendRes.preview_obj);
+
+      router.push("/review");
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Error al cargar el demo.");
+      setError(
+        err instanceof Error ? err.message : "Error al procesar el demo en el servidor.",
+      );
+    } finally {
+      setIsParsing(false);
     }
   };
 
@@ -136,25 +91,38 @@ export default function UploadForm() {
       return;
     }
 
+    setIsParsing(true);
+    setError("");
+
     try {
-      const text = await file.text();
-      runWorker(text, file.name);
+      const backendRes = await uploadModelFile(file);
+
+      if (!backendRes.topology || backendRes.topology.faces.length === 0) {
+        throw new Error("El modelo fue procesado pero no contiene caras válidas.");
+      }
+
+      setFileId(backendRes.file_id);
+      setPhase1Result(backendRes.topology);
+      setPreviewObj(backendRes.preview_obj);
+
+      router.push("/review");
     } catch (err: unknown) {
       setError(
-        err instanceof Error ? err.message : "Error desconocido al leer el archivo.",
+        err instanceof Error ? err.message : "Error desconocido al procesar en el servidor.",
       );
+    } finally {
+      setIsParsing(false);
     }
   };
 
-  if (isParsing || isProcessing) {
+  if (isParsing) {
     return (
       <div className="card bg-base-100 shadow-2xl border border-base-200 w-full">
         <div className="card-body items-center justify-center py-20 gap-4">
           <span className="loading loading-spinner loading-lg text-primary" />
           <p className="font-medium text-base-content/80">
-            {workerStage ?? "Procesando geometría..."}
+            Procesando geometría en el servidor...
           </p>
-          <p className="text-xs text-base-content/50">Cálculo en Python (WebAssembly), sin bloquear la interfaz.</p>
         </div>
       </div>
     );
@@ -237,7 +205,7 @@ export default function UploadForm() {
                   <option value={25}>1:25</option>
                   <option value={50}>1:50</option>
                   <option value={75}>1:75</option>
-                  <option value={100}>1:100 (Centimetros)</option>
+                  <option value={100}>1:100 (Centímetros)</option>
                 </select>
                 <p className="text-xs text-base-content/60 leading-relaxed mt-1">
                   Ej: Si tu modelo está dibujado en centímetros, elegí 1:100.
@@ -246,41 +214,20 @@ export default function UploadForm() {
             </div>
           </div>
 
-          {(error || workerError) && (
+          {error && (
             <div className="alert alert-error shadow-sm mt-6 rounded-xl">
               <svg xmlns="http://www.w3.org/2000/svg" className="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-              <span>{error || workerError}</span>
+              <span>{error}</span>
             </div>
           )}
-
-          {/* Estado del motor geométrico (Pyodide / WebAssembly en el Worker) */}
-          <div className="mt-4 flex items-center justify-center gap-2 text-xs text-base-content/60">
-            {isWorkerReady ? (
-              <>
-                <span className="inline-block h-2 w-2 rounded-full bg-success" />
-                <span>Motor geométrico (Python) listo</span>
-              </>
-            ) : (
-              <>
-                <span className="loading loading-spinner loading-xs" />
-                <span>{workerStage ?? "Inicializando motor geométrico…"}</span>
-              </>
-            )}
-          </div>
 
           <div className="mt-8 flex justify-center">
             <button
               className="btn btn-primary btn-wide shadow-lg shadow-primary/20"
-              disabled={!file || isParsing || isProcessing || !isWorkerReady}
+              disabled={!file || isParsing}
               onClick={handleSubmit}
             >
-              {!isWorkerReady ? (
-                <>
-                  <span className="loading loading-spinner" /> Inicializando motor…
-                </>
-              ) : (
-                "Continuar →"
-              )}
+              Continuar →
             </button>
           </div>
         </div>
