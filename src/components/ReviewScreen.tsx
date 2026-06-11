@@ -10,6 +10,7 @@ import type { Phase1Result, ClassificationOverride } from "@/core/pipeline";
 import type { Joint } from "@/core/joint-detector";
 import type { DimensionAdjustment } from "@/core/assembly-adjuster";
 import type { LeaderMarker } from "./ModelViewer";
+import { RefreshCw, Box, Maximize, Minimize, Crosshair } from "lucide-react";
 
 export type WallWallDecisions = Map<number, number>;
 
@@ -35,6 +36,7 @@ export interface ReviewScreenProps {
   initialOverrides?: ClassificationOverride[];
   initialWallWallDecisions?: WallWallDecisions;
   initialMerges?: number[][];
+  isGenerating?: boolean;
 }
 
 const MIN_AREA_OPTIONS = [0, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0];
@@ -53,6 +55,7 @@ export default function ReviewScreen({
   initialOverrides,
   initialWallWallDecisions,
   initialMerges,
+  isGenerating = false,
 }: ReviewScreenProps) {
   const [selectedGroupIds, setSelectedGroupIds] = useState<Set<number>>(
     () => new Set(),
@@ -69,6 +72,8 @@ export default function ReviewScreen({
     () => new Set(ALL_CATEGORIES),
   );
   const [showCenterAxes, setShowCenterAxes] = useState(true);
+  const [isSolid, setIsSolid] = useState(false);
+  const [hideSidebar, setHideSidebar] = useState(false);
   // Which wall-wall joint (by jointIndex) is highlighted with leader labels in
   // the 3D viewer. Null = none selected.
   const [selectedJointIndex, setSelectedJointIndex] = useState<number | null>(null);
@@ -309,6 +314,7 @@ export default function ReviewScreen({
           appliedAxis={phase1.appliedAxis}
           showCenterAxes={showCenterAxes}
           leaderMarkers={leaderMarkers}
+          isSolid={isSolid}
         />
         <div className="absolute top-6 left-6 right-6 z-10 flex flex-wrap items-center gap-3 pointer-events-auto">
           <div className="flex flex-wrap items-center gap-3 bg-base-100/70 backdrop-blur-xl border border-base-200/50 p-2 rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)]">
@@ -318,20 +324,38 @@ export default function ReviewScreen({
               onToggle={handleToggleVisibility}
             />
             <div className="w-[1px] h-8 bg-base-300/50 mx-1"></div>
-            <button
-              className="btn btn-sm btn-ghost hover:bg-base-200 rounded-xl"
-              onClick={handleRotateAxis}
-              title="Intercambiar eje vertical (Y/Z) si pisos y paredes están invertidos"
-            >
-              Rotar eje ({phase1.appliedAxis === "Y" ? "Y↑" : "Z↑"})
-            </button>
-            <button
-              className="btn btn-sm btn-ghost hover:bg-base-200 rounded-xl"
-              onClick={() => setShowCenterAxes((s) => !s)}
-              title="Mostrar u ocultar el eje en el centro de la pieza"
-            >
-              {showCenterAxes ? "Ocultar eje" : "Mostrar eje"}
-            </button>
+            <div className="tooltip tooltip-bottom" data-tip={`Rotar eje (${phase1.appliedAxis === "Y" ? "Y↑" : "Z↑"})`}>
+              <button
+                className="btn btn-sm btn-ghost hover:bg-base-200 rounded-xl"
+                onClick={handleRotateAxis}
+              >
+                <RefreshCw size={16} />
+              </button>
+            </div>
+            <div className="tooltip tooltip-bottom" data-tip={showCenterAxes ? "Ocultar eje" : "Mostrar eje"}>
+              <button
+                className="btn btn-sm btn-ghost hover:bg-base-200 rounded-xl"
+                onClick={() => setShowCenterAxes((s) => !s)}
+              >
+                <Crosshair size={16} className={showCenterAxes ? "text-primary" : "text-base-content/70"} />
+              </button>
+            </div>
+            <div className="tooltip tooltip-bottom" data-tip={isSolid ? "Vista Transparente" : "Vista Maciza"}>
+              <button
+                className={`btn btn-sm ${isSolid ? 'btn-primary text-primary-content' : 'btn-ghost hover:bg-base-200'} rounded-xl transition-colors`}
+                onClick={() => setIsSolid((s) => !s)}
+              >
+                <Box size={16} />
+              </button>
+            </div>
+            <div className="tooltip tooltip-bottom" data-tip={hideSidebar ? "Mostrar Panel" : "Pantalla Completa"}>
+              <button
+                className={`btn btn-sm ${hideSidebar ? 'btn-primary text-primary-content' : 'btn-ghost hover:bg-base-200'} rounded-xl transition-colors`}
+                onClick={() => setHideSidebar((s) => !s)}
+              >
+                {hideSidebar ? <Minimize size={16} /> : <Maximize size={16} />}
+              </button>
+            </div>
             <div className="w-[1px] h-8 bg-base-300/50 mx-1"></div>
             <div
               className="flex items-center bg-base-200/40 border border-base-200/80 rounded-lg overflow-hidden h-8 shadow-sm transition-colors hover:bg-base-200/60"
@@ -467,7 +491,8 @@ export default function ReviewScreen({
         })()}
       </div>
 
-      <div className="w-full md:w-[22rem] lg:w-[26rem] flex flex-col border-t md:border-t-0 md:border-l border-base-200/60 bg-base-100/95 backdrop-blur-3xl shrink-0 h-[40vh] md:h-full shadow-[-20px_0_40px_-15px_rgba(0,0,0,0.05)] z-20">
+      {!hideSidebar && (
+        <div className="w-full md:w-[22rem] lg:w-[26rem] flex flex-col border-t md:border-t-0 md:border-l border-base-200/60 bg-base-100/95 backdrop-blur-3xl shrink-0 h-[40vh] md:h-full shadow-[-20px_0_40px_-15px_rgba(0,0,0,0.05)] z-20">
         <GroupList
           groups={effectivePhase1.groups}
           selectedGroupIds={selectedGroupIds}
@@ -546,15 +571,27 @@ export default function ReviewScreen({
             </p>
           )}
           <div className="flex gap-3">
-            <button className="btn flex-1 btn-ghost bg-base-200 hover:bg-base-300 rounded-xl" onClick={onCancel}>
+            <button className="btn flex-1 btn-ghost bg-base-200 hover:bg-base-300 rounded-xl" onClick={onCancel} disabled={isGenerating}>
               Volver
             </button>
-            <button className="btn flex-1 btn-primary shadow-lg shadow-primary/30 rounded-xl text-primary-content" onClick={handleConfirm}>
-              Confirmar y Generar
+            <button 
+              className="btn flex-1 btn-primary shadow-lg shadow-primary/30 rounded-xl text-primary-content" 
+              onClick={handleConfirm}
+              disabled={isGenerating}
+            >
+              {isGenerating ? (
+                <>
+                  <span className="loading loading-spinner loading-sm"></span>
+                  Generando...
+                </>
+              ) : (
+                "Confirmar y Generar"
+              )}
             </button>
           </div>
         </div>
-      </div>
+        </div>
+      )}
     </div>
   );
 }

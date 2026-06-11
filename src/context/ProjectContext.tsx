@@ -1,14 +1,15 @@
 "use client";
 
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from "react";
-import { parsePipeline, decomposePanels, nestDecomposedPanels, applyMerges } from "@/core/pipeline";
 import type { Phase1Result, ClassificationOverride, NestingPreviewData } from "@/core/pipeline";
 import { DEFAULT_SHEET } from "@/core/sheet-nester";
 import type { PipelineOptions, SheetConfig } from "@/core/types";
 
 interface PersistedSession {
   fileName: string;
-  fileBase64: string;
+  fileId: string;
+  previewObj: string;
+  phase1Result: Phase1Result;
   scale: number;
   paper: string;
   minAreaM2: number;
@@ -20,26 +21,14 @@ interface PersistedSession {
 
 const SESSION_KEY = "e2d_pending_session";
 
-function bufferToBase64(buf: ArrayBuffer): string {
-  const bytes = new Uint8Array(buf);
-  let binary = "";
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
-  }
-  return btoa(binary);
-}
-
-function base64ToBuffer(b64: string): ArrayBuffer {
-  const binary = atob(b64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes.buffer;
-}
 
 interface ProjectContextType {
   file: File | null;
   setFile: (file: File | null) => void;
+  fileId: string | null;
+  setFileId: (id: string | null) => void;
+  previewObj: string | null;
+  setPreviewObj: (obj: string | null) => void;
   scale: number;
   setScale: (scale: number) => void;
   paper: string;
@@ -67,6 +56,8 @@ const ProjectContext = createContext<ProjectContextType | undefined>(undefined);
 
 export function ProjectProvider({ children }: { children: ReactNode }) {
   const [file, setFile] = useState<File | null>(null);
+  const [fileId, setFileId] = useState<string | null>(null);
+  const [previewObj, setPreviewObj] = useState<string | null>(null);
   const [scale, setScale] = useState(100);
   const [paper, setPaper] = useState("A4");
   const [minAreaM2, setMinAreaM2] = useState(1.0);
@@ -88,10 +79,10 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
 
     try {
       const parsed: PersistedSession = JSON.parse(raw);
-      const buffer = base64ToBuffer(parsed.fileBase64);
-      const restoredFile = new File([buffer], parsed.fileName);
       
-      setFile(restoredFile);
+      setFileId(parsed.fileId);
+      setPreviewObj(parsed.previewObj);
+      setPhase1Result(parsed.phase1Result);
       setScale(parsed.scale);
       setPaper(parsed.paper);
       setMinAreaM2(parsed.minAreaM2);
@@ -104,23 +95,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       const restoredMerges = parsed.merges ?? [];
       setSavedMerges(restoredMerges);
 
-      const p1 = parsePipeline(parsed.fileName, buffer);
-      if (p1.faces.length > 0) {
-        setPhase1Result(p1);
-        
-        // If we also had nesting configs, recalculate nesting
-        const merged = restoredMerges.length > 0 ? applyMerges(p1, restoredMerges) : p1;
-        const opts: PipelineOptions = {
-          scaleDenom: parsed.scale,
-          paper: parsed.paper,
-          includeCuttingSheet: true,
-          sheetConfig: parsed.sheetConfig,
-          minAreaM2: parsed.minAreaM2,
-        };
-        const decomposed = decomposePanels(merged, opts, parsed.overrides, restoredDecisions);
-        const nesting = nestDecomposedPanels(decomposed, parsed.sheetConfig, parsed.scale);
-        setNestingData(nesting);
-      } else {
+      if (!parsed.phase1Result) {
         sessionStorage.removeItem(SESSION_KEY);
       }
     } catch {
@@ -131,12 +106,13 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const persistSession = useCallback(async () => {
-    if (!file) return;
+    if (!fileId || !phase1Result || !previewObj) return;
     try {
-      const buffer = await file.arrayBuffer();
       const persisted: PersistedSession = {
-        fileName: file.name,
-        fileBase64: bufferToBase64(buffer),
+        fileName: file?.name || "model.obj",
+        fileId,
+        previewObj,
+        phase1Result,
         scale,
         paper,
         minAreaM2,
@@ -147,12 +123,14 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       };
       sessionStorage.setItem(SESSION_KEY, JSON.stringify(persisted));
     } catch {
-      // File too large for sessionStorage — silently skip persistence.
+      // Storage full
     }
-  }, [file, scale, paper, minAreaM2, sheetConfig, savedOverrides, savedWallWallDecisions, savedMerges]);
+  }, [file, fileId, previewObj, phase1Result, scale, paper, minAreaM2, sheetConfig, savedOverrides, savedWallWallDecisions, savedMerges]);
 
   const resetProject = useCallback(() => {
     setFile(null);
+    setFileId(null);
+    setPreviewObj(null);
     setScale(100);
     setPaper("A4");
     setMinAreaM2(1.0);
@@ -169,6 +147,8 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     <ProjectContext.Provider
       value={{
         file, setFile,
+        fileId, setFileId,
+        previewObj, setPreviewObj,
         scale, setScale,
         paper, setPaper,
         minAreaM2, setMinAreaM2,

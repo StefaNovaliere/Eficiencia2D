@@ -15,11 +15,11 @@ export interface NestingPreviewProps {
   onScaleChange: (scale: number) => void;
 }
 
-const WALL_COLOR = "#3b82f6";
-const FLOOR_COLOR = "#22c55e";
-const SHEET_STROKE = "#a1a1aa";
-const PANEL_STROKE = "#a1a1aa";
-const UNPLACED_COLOR = "#ef4444";
+const WALL_COLOR = "#E5E5E5";
+const FLOOR_COLOR = "#7F8C8D";
+const SHEET_STROKE = "#E5E5E5";
+const PANEL_STROKE = "#E5E5E5";
+const UNPLACED_COLOR = "#E5E5E5";
 
 function SheetCanvas({
   sheets,
