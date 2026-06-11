@@ -160,7 +160,27 @@ function pushThicknessSides(
     pushTri(a, b2, a2);
   }
 }
+function triangulateFace(face: Face3D): number[] {
+  const vs = face.vertices;
+  if (vs.length < 3) return [];
+  if (vs.length === 3) return [0, 1, 2];
 
+  const nx = Math.abs(face.normal.x);
+  const ny = Math.abs(face.normal.y);
+  const nz = Math.abs(face.normal.z);
+
+  // Proyectar al plano que descarta el eje dominante de la normal.
+  const flat: number[] = [];
+  if (nx >= ny && nx >= nz) {
+    for (const v of vs) flat.push(v.y, v.z);
+  } else if (ny >= nx && ny >= nz) {
+    for (const v of vs) flat.push(v.x, v.z);
+  } else {
+    for (const v of vs) flat.push(v.x, v.y);
+  }
+  // Índices de los triángulos dentro de vs (material DoubleSide -> el winding no importa).
+  return THREE.Earcut.triangulate(flat, undefined, 2);
+}
 function buildMergedGeometries(
   faces: Face3D[],
   groups: GeometryGroup[],
@@ -178,22 +198,18 @@ function buildMergedGeometries(
     const cat = overrides.get(group.id) ?? group.category;
     const bucket = byCategory.get(cat)!;
 
-    for (const fi of group.faceIndices) {
+        for (const fi of group.faceIndices) {
       const face = faces[fi];
       if (!face || face.vertices.length < 3) continue;
-      const v0 = face.vertices[0];
-      for (let i = 1; i < face.vertices.length - 1; i++) {
-        const v1 = face.vertices[i];
-        const v2 = face.vertices[i + 1];
-        bucket.positions.push(
-          v0.x, v0.y, v0.z,
-          v1.x, v1.y, v1.z,
-          v2.x, v2.y, v2.z,
-        );
+      const tris = triangulateFace(face);
+      for (let i = 0; i < tris.length; i += 3) {
+        const a = face.vertices[tris[i]];
+        const b = face.vertices[tris[i + 1]];
+        const c = face.vertices[tris[i + 2]];
+        bucket.positions.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
         bucket.groupIds.push(group.id);
       }
     }
-
     // Fill the side band so detected-thickness slabs render as solids.
     pushThicknessSides(faces, group, (p0, p1, p2) => {
       bucket.positions.push(p0.x, p0.y, p0.z, p1.x, p1.y, p1.z, p2.x, p2.y, p2.z);
@@ -261,14 +277,15 @@ function buildSelectedGeometry(
   faceIndices: number[],
 ): THREE.BufferGeometry {
   const positions: number[] = [];
-  for (const idx of faceIndices) {
+    for (const idx of faceIndices) {
     const face = faces[idx];
     if (!face || face.vertices.length < 3) continue;
-    const v0 = face.vertices[0];
-    for (let i = 1; i < face.vertices.length - 1; i++) {
-      const v1 = face.vertices[i];
-      const v2 = face.vertices[i + 1];
-      positions.push(v0.x, v0.y, v0.z, v1.x, v1.y, v1.z, v2.x, v2.y, v2.z);
+    const tris = triangulateFace(face);
+    for (let i = 0; i < tris.length; i += 3) {
+      const a = face.vertices[tris[i]];
+      const b = face.vertices[tris[i + 1]];
+      const c = face.vertices[tris[i + 2]];
+      positions.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
     }
   }
   const geo = new THREE.BufferGeometry();
