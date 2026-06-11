@@ -1,5 +1,7 @@
 "use client";
 
+import { Camera, Play } from "lucide-react";
+
 export interface DemoButtonProps {
   onClick: () => void;
 }
@@ -13,7 +15,9 @@ export default function DemoButton({ onClick }: DemoButtonProps) {
   return (
     <div className="fixed top-4 right-4 md:top-6 md:right-6 z-50 flex items-center gap-3">
       <div className="hidden sm:flex items-center gap-1.5 text-primary animate-[pulse_2.4s_ease-in-out_infinite]">
-        <span className="text-sm font-medium italic whitespace-nowrap">¿Querés ver cómo funciona?</span>
+        <span className="text-sm font-medium italic whitespace-nowrap">
+          ¿Querés ver cómo funciona?
+        </span>
         <svg
           className="flex-shrink-0"
           width="44"
@@ -29,16 +33,12 @@ export default function DemoButton({ onClick }: DemoButtonProps) {
           <polyline points="30 4 36 6 36 12" />
         </svg>
       </div>
-      <button className="btn btn-primary rounded-full shadow-lg shadow-primary/20 transition-transform hover:-translate-y-0.5" onClick={onClick} type="button">
-        <svg
-          width="16"
-          height="16"
-          viewBox="0 0 24 24"
-          fill="currentColor"
-          aria-hidden="true"
-        >
-          <polygon points="6 4 20 12 6 20" />
-        </svg>
+      <button
+        className="btn btn-primary rounded-full shadow-lg shadow-primary/20 transition-transform hover:-translate-y-0.5"
+        onClick={onClick}
+        type="button"
+      >
+        <Play className="w-4 h-4 mr-2" />
         Ver demo
       </button>
     </div>
