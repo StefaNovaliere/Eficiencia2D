@@ -95,6 +95,45 @@ function edgeKey(ax: number, ay: number, az: number, bx: number, by: number, bz:
 }
 
 /**
+ * Triangula una cara (posible n-gon CÓNCAVO) proyectándola a 2D según su normal,
+ * con ShapeUtils (earcut interno). Devuelve índices (de a 3) dentro de
+ * face.vertices. Reemplaza la triangulación "fan", que rellenaba las concavidades
+ * (p. ej. losas en U / huecos de escalera).
+ */
+function triangulateFace(face: Face3D): number[] {
+  const vs = face.vertices;
+  if (vs.length < 3) return [];
+  if (vs.length === 3) return [0, 1, 2];
+
+  const nx = Math.abs(face.normal.x);
+  const ny = Math.abs(face.normal.y);
+  const nz = Math.abs(face.normal.z);
+
+  // Proyectar al plano que descarta el eje dominante de la normal.
+  const contour: THREE.Vector2[] = [];
+  if (nx >= ny && nx >= nz) {
+    for (const v of vs) contour.push(new THREE.Vector2(v.y, v.z));
+  } else if (ny >= nx && ny >= nz) {
+    for (const v of vs) contour.push(new THREE.Vector2(v.x, v.z));
+  } else {
+    for (const v of vs) contour.push(new THREE.Vector2(v.x, v.y));
+  }
+
+  const tris = THREE.ShapeUtils.triangulateShape(contour, []);
+
+  // Fallback a fan si earcut no pudo (cara degenerada): mejor algo que nada.
+  if (tris.length === 0) {
+    const out: number[] = [];
+    for (let i = 1; i < vs.length - 1; i++) out.push(0, i, i + 1);
+    return out;
+  }
+
+  const out: number[] = [];
+  for (const t of tris) out.push(t[0], t[1], t[2]);
+  return out;
+}
+
+/**
  * For a group with detected thickness, fill the open perimeter band between
  * its two parallel skins so the slab renders as a solid volume instead of two
  * floating planes. Splits the group's faces into a near/far skin along the
@@ -160,27 +199,7 @@ function pushThicknessSides(
     pushTri(a, b2, a2);
   }
 }
-function triangulateFace(face: Face3D): number[] {
-  const vs = face.vertices;
-  if (vs.length < 3) return [];
-  if (vs.length === 3) return [0, 1, 2];
 
-  const nx = Math.abs(face.normal.x);
-  const ny = Math.abs(face.normal.y);
-  const nz = Math.abs(face.normal.z);
-
-  // Proyectar al plano que descarta el eje dominante de la normal.
-  const flat: number[] = [];
-  if (nx >= ny && nx >= nz) {
-    for (const v of vs) flat.push(v.y, v.z);
-  } else if (ny >= nx && ny >= nz) {
-    for (const v of vs) flat.push(v.x, v.z);
-  } else {
-    for (const v of vs) flat.push(v.x, v.y);
-  }
-  // Índices de los triángulos dentro de vs (material DoubleSide -> el winding no importa).
-  return THREE.Earcut.triangulate(flat, undefined, 2);
-}
 function buildMergedGeometries(
   faces: Face3D[],
   groups: GeometryGroup[],
@@ -198,7 +217,7 @@ function buildMergedGeometries(
     const cat = overrides.get(group.id) ?? group.category;
     const bucket = byCategory.get(cat)!;
 
-        for (const fi of group.faceIndices) {
+    for (const fi of group.faceIndices) {
       const face = faces[fi];
       if (!face || face.vertices.length < 3) continue;
       const tris = triangulateFace(face);
@@ -210,6 +229,7 @@ function buildMergedGeometries(
         bucket.groupIds.push(group.id);
       }
     }
+
     // Fill the side band so detected-thickness slabs render as solids.
     pushThicknessSides(faces, group, (p0, p1, p2) => {
       bucket.positions.push(p0.x, p0.y, p0.z, p1.x, p1.y, p1.z, p2.x, p2.y, p2.z);
@@ -277,7 +297,7 @@ function buildSelectedGeometry(
   faceIndices: number[],
 ): THREE.BufferGeometry {
   const positions: number[] = [];
-    for (const idx of faceIndices) {
+  for (const idx of faceIndices) {
     const face = faces[idx];
     if (!face || face.vertices.length < 3) continue;
     const tris = triangulateFace(face);
@@ -505,7 +525,7 @@ function Scene({
         maxDistance={maxDist}
         minDistance={minDist}
       />
-      
+
       {/* Ejes cartesianos en el centro del modelo */}
       {showCenterAxes && (
         <axesHelper
@@ -513,7 +533,7 @@ function Scene({
           rotation={isZUp ? [-Math.PI / 2, 0, 0] : [0, 0, 0]}
         />
       )}
-      
+
       <group position={[-bounds.center.x, -bounds.center.y, -bounds.center.z]}>
         {mergedMeshes.map((mm) => {
           if (!visibleCategories.has(mm.category)) return null;
@@ -650,7 +670,7 @@ export default function ModelViewer({
       <ambientLight intensity={0.7} />
       <directionalLight position={[100, 200, 100]} intensity={0.6} />
       <directionalLight position={[-100, 50, -100]} intensity={0.3} />
-      
+
       <Scene
         faces={faces}
         groups={groups}
@@ -664,17 +684,17 @@ export default function ModelViewer({
         leaderMarkers={leaderMarkers}
         isSolid={isSolid}
       />
-      
+
       {/* Gizmo en la esquina para referencia de orientación constante */}
       <GizmoHelper alignment="bottom-right" margin={[80, 80]}>
-        <GizmoViewport 
+        <GizmoViewport
           axisColors={
-            appliedAxis === "Z" 
+            appliedAxis === "Z"
               ? ["#ef4444", "#3b82f6", "#22c55e"] // X=Red, Y(Up)=Blue(Z), Z(Depth)=Green(Y)
               : ["#ef4444", "#22c55e", "#3b82f6"] // X=Red, Y=Green, Z=Blue
-          } 
+          }
           labels={appliedAxis === "Z" ? ["X", "Z", "Y"] : ["X", "Y", "Z"]}
-          labelColor="white" 
+          labelColor="white"
         />
       </GizmoHelper>
     </Canvas>
