@@ -8,16 +8,16 @@ import { useProjectContext } from "@/context/ProjectContext";
 
 export default function UploadForm() {
   const router = useRouter();
-  const { 
-    file, 
-    setFile, 
-    scale, 
-    setScale, 
+  const {
+    file,
+    setFile,
+    scale,
+    setScale,
     setFileId,
     setPreviewObj,
-    setPhase1Result, 
+    setPhase1Result,
   } = useProjectContext();
-  
+
   const [isParsing, setIsParsing] = useState(false);
   const [error, setError] = useState("");
   const [dragActive, setDragActive] = useState(false);
@@ -52,8 +52,8 @@ export default function UploadForm() {
   );
 
   const handleLoadDemo = async () => {
-    setIsParsing(true);
     setError("");
+    setIsParsing(true);
     try {
       const res = await fetch("/demo/demo.obj");
       if (!res.ok) {
@@ -75,6 +75,7 @@ export default function UploadForm() {
       setError(
         err instanceof Error ? err.message : "Error al procesar el demo en el servidor.",
       );
+    } finally {
       setIsParsing(false);
     }
   };
@@ -96,7 +97,7 @@ export default function UploadForm() {
     try {
       const backendRes = await uploadModelFile(file);
 
-      if (backendRes.topology.faces.length === 0) {
+      if (!backendRes.topology || backendRes.topology.faces.length === 0) {
         throw new Error("El modelo fue procesado pero no contiene caras válidas.");
       }
 
@@ -109,6 +110,7 @@ export default function UploadForm() {
       setError(
         err instanceof Error ? err.message : "Error desconocido al procesar en el servidor.",
       );
+    } finally {
       setIsParsing(false);
     }
   };
@@ -118,7 +120,9 @@ export default function UploadForm() {
       <div className="card bg-base-100 shadow-2xl border border-base-200 w-full">
         <div className="card-body items-center justify-center py-20 gap-4">
           <span className="loading loading-spinner loading-lg text-primary" />
-          <p className="font-medium text-base-content/80">Procesando geometría...</p>
+          <p className="font-medium text-base-content/80">
+            Procesando geometría en el servidor...
+          </p>
         </div>
       </div>
     );
@@ -201,7 +205,7 @@ export default function UploadForm() {
                   <option value={25}>1:25</option>
                   <option value={50}>1:50</option>
                   <option value={75}>1:75</option>
-                  <option value={100}>1:100 (Centimetros)</option>
+                  <option value={100}>1:100 (Centímetros)</option>
                 </select>
                 <p className="text-xs text-base-content/60 leading-relaxed mt-1">
                   Ej: Si tu modelo está dibujado en centímetros, elegí 1:100.
@@ -223,13 +227,7 @@ export default function UploadForm() {
               disabled={!file || isParsing}
               onClick={handleSubmit}
             >
-              {isParsing ? (
-                <>
-                  <span className="loading loading-spinner" /> Procesando...
-                </>
-              ) : (
-                "Continuar →"
-              )}
+              Continuar →
             </button>
           </div>
         </div>
