@@ -185,6 +185,7 @@ def parse_obj(text):
 
 OPPOSITE_NORMAL_DOT = -0.985
 LATERAL_OVERLAP_FACTOR = 0.5
+MIN_EXTENT_RATIO = 0.25
 
 
 def are_thin_twins(a, b, thickness_threshold):
@@ -202,7 +203,11 @@ def are_thin_twins(a, b, thickness_threshold):
     nc = dx * an[0] + dy * an[1] + dz * an[2]
     lx = dx - nc * an[0]; ly = dy - nc * an[1]; lz = dz - nc * an[2]
     lateral = math.sqrt(lx * lx + ly * ly + lz * lz)
-    budget = (a["extent"] + b["extent"]) * 0.5 * LATERAL_OVERLAP_FACTOR
+    min_extent = min(a["extent"], b["extent"])
+    max_extent = max(a["extent"], b["extent"])
+    if max_extent > 1e-6 and min_extent / max_extent < MIN_EXTENT_RATIO:
+        return None
+    budget = min_extent * LATERAL_OVERLAP_FACTOR
     return distance if lateral <= budget else None
 
 

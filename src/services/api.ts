@@ -2,6 +2,7 @@ import { decodePackedFaces } from "@/core/packed-faces";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8081";
+  
 export interface UploadResponse {
   message: string;
   file_id: string;
