@@ -6,7 +6,7 @@ import { OrbitControls, GizmoHelper, GizmoViewport, Line, Html } from "@react-th
 import * as THREE from "three";
 import type { Face3D, Vec3 } from "@/core/types";
 import type { FaceCategory, GeometryGroup } from "@/core/group-classifier";
-import { getViewerBackground, useTheme } from "@/context/ThemeContext";
+import { useViewerPalette, type ViewerPalette } from "@/context/ThemeContext";
 
 // A floating reference label (panel id) anchored to a component in 3D, drawn
 // when the user selects a wall-wall joint in the review list.
@@ -21,61 +21,83 @@ export interface LeaderMarker {
 // Shared materials (created once at module load, reused across all renders)
 // ---------------------------------------------------------------------------
 
-const CATEGORY_HEX: Record<FaceCategory, number> = {
-  floor: 0x7F8C8D,
-  wall:0xE0DCD1,
-  discard: 0x2C3E50,
-};
+function hexToNumber(hex: string): number {
+  return parseInt(hex.replace("#", ""), 16);
+}
 
-function makeMaterial(hex: number, opacity: number): THREE.MeshStandardMaterial {
+function makeMaterial(hex: string, opacity: number): THREE.MeshStandardMaterial {
   return new THREE.MeshStandardMaterial({
-    color: hex,
+    color: hexToNumber(hex),
     side: THREE.DoubleSide,
     transparent: opacity < 1.0,
     opacity,
     depthWrite: opacity > 0.9,
-    roughness: 0.8,
-    metalness: 0.1,
+    roughness: 0.55,
+    metalness: 0.12,
   });
 }
 
-const NORMAL_MATERIALS: Record<FaceCategory, THREE.MeshStandardMaterial> = {
-  floor: makeMaterial(CATEGORY_HEX.floor, 0.85),
-  wall: makeMaterial(CATEGORY_HEX.wall, 0.85),
-  discard: makeMaterial(CATEGORY_HEX.discard, 0.6),
-};
+export interface ViewerMaterials {
+  normal: Record<FaceCategory, THREE.MeshStandardMaterial>;
+  solid: Record<FaceCategory, THREE.MeshStandardMaterial>;
+  dimmed: Record<FaceCategory, THREE.MeshStandardMaterial>;
+  highlight: THREE.MeshStandardMaterial;
+  highlightWire: THREE.LineBasicMaterial;
+  edge: THREE.LineBasicMaterial;
+}
 
-const SOLID_MATERIALS: Record<FaceCategory, THREE.MeshStandardMaterial> = {
-  floor: makeMaterial(CATEGORY_HEX.floor, 1.0),
-  wall: makeMaterial(CATEGORY_HEX.wall, 1.0),
-  discard: makeMaterial(CATEGORY_HEX.discard, 1.0),
-};
+function createViewerMaterials(palette: ViewerPalette): ViewerMaterials {
+  const cats: FaceCategory[] = ["floor", "wall", "discard"];
+  const colorByCat: Record<FaceCategory, string> = {
+    floor: palette.floor,
+    wall: palette.wall,
+    discard: palette.discard,
+  };
 
-const DIMMED_MATERIALS: Record<FaceCategory, THREE.MeshStandardMaterial> = {
-  floor: makeMaterial(CATEGORY_HEX.floor, 0.08),
-  wall: makeMaterial(CATEGORY_HEX.wall, 0.08),
-  discard: makeMaterial(CATEGORY_HEX.discard, 0.05),
-};
+  const normal = {} as Record<FaceCategory, THREE.MeshStandardMaterial>;
+  const solid = {} as Record<FaceCategory, THREE.MeshStandardMaterial>;
+  const dimmed = {} as Record<FaceCategory, THREE.MeshStandardMaterial>;
 
-const HIGHLIGHT_MATERIAL = new THREE.MeshStandardMaterial({
-  color: 0xf59e0b,
-  side: THREE.DoubleSide,
-  transparent: true,
-  opacity: 0.45,
-  roughness: 0.5,
-  metalness: 0.2,
-});
+  for (const cat of cats) {
+    const hex = colorByCat[cat];
+    normal[cat] = makeMaterial(hex, cat === "discard" ? 0.82 : 1.0);
+    solid[cat] = makeMaterial(hex, 1.0);
+    dimmed[cat] = makeMaterial(hex, cat === "discard" ? 0.08 : 0.14);
+  }
 
-const HIGHLIGHT_WIREFRAME = new THREE.LineBasicMaterial({
-  color: 0xf59e0b,
-});
+  return {
+    normal,
+    solid,
+    dimmed,
+    highlight: new THREE.MeshStandardMaterial({
+      color: hexToNumber(palette.highlight),
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.48,
+      roughness: 0.45,
+      metalness: 0.15,
+    }),
+    highlightWire: new THREE.LineBasicMaterial({ color: hexToNumber(palette.highlight) }),
+    edge: new THREE.LineBasicMaterial({
+      color: hexToNumber(palette.edge),
+      transparent: true,
+      opacity: palette.edgeOpacity,
+      depthTest: true,
+    }),
+  };
+}
 
-const EDGE_LINE_MATERIAL = new THREE.LineBasicMaterial({
-  color: 0x18181b,
-  transparent: true,
-  opacity: 0.35,
-  depthTest: true,
-});
+function disposeViewerMaterials(materials: ViewerMaterials) {
+  const all = [
+    ...Object.values(materials.normal),
+    ...Object.values(materials.solid),
+    ...Object.values(materials.dimmed),
+    materials.highlight,
+    materials.highlightWire,
+    materials.edge,
+  ];
+  for (const m of all) m.dispose();
+}
 
 // ---------------------------------------------------------------------------
 // Merged geometry per (effective category)
@@ -325,6 +347,7 @@ interface CategoryMeshProps {
   isDimmed: boolean;
   isSolid: boolean;
   groupAreaById: Map<number, number>;
+  materials: ViewerMaterials;
   onPick: (groupId: number) => void;
   onTogglePick: (groupId: number) => void;
 }
@@ -357,12 +380,12 @@ function pickGroupFromIntersections(
   return bestId;
 }
 
-function CategoryMesh({ mesh, isDimmed, isSolid, groupAreaById, onPick, onTogglePick }: CategoryMeshProps) {
+function CategoryMesh({ mesh, isDimmed, isSolid, groupAreaById, materials, onPick, onTogglePick }: CategoryMeshProps) {
   const material = isDimmed
-    ? DIMMED_MATERIALS[mesh.category]
+    ? materials.dimmed[mesh.category]
     : isSolid
-    ? SOLID_MATERIALS[mesh.category]
-    : NORMAL_MATERIALS[mesh.category];
+    ? materials.solid[mesh.category]
+    : materials.normal[mesh.category];
 
   return (
     <>
@@ -383,7 +406,7 @@ function CategoryMesh({ mesh, isDimmed, isSolid, groupAreaById, onPick, onToggle
 
       />
       {mesh.edgeGeometry && !isDimmed && (
-        <lineSegments geometry={mesh.edgeGeometry} material={EDGE_LINE_MATERIAL} />
+        <lineSegments geometry={mesh.edgeGeometry} material={materials.edge} />
       )}
     </>
   );
@@ -444,6 +467,8 @@ interface SceneProps {
   showCenterAxes?: boolean;
   leaderMarkers?: LeaderMarker[];
   isSolid?: boolean;
+  palette: ViewerPalette;
+  materials: ViewerMaterials;
 }
 
 function Scene({
@@ -459,6 +484,8 @@ function Scene({
   showCenterAxes = true,
   leaderMarkers = [],
   isSolid = false,
+  palette,
+  materials,
 }: SceneProps) {
   const selectedGroups = groups.filter((g) => selectedGroupIds.has(g.id));
 
@@ -585,6 +612,7 @@ function Scene({
               isDimmed={isDimmed}
               isSolid={isSolid}
               groupAreaById={groupAreaById}
+              materials={materials}
               onPick={onSelectGroup}
               onTogglePick={onToggleGroup}
             />
@@ -593,10 +621,10 @@ function Scene({
 
         {selectedGeometry && selectedGroups.length > 0 && (
           <>
-            <mesh geometry={selectedGeometry} material={HIGHLIGHT_MATERIAL} />
+            <mesh geometry={selectedGeometry} material={materials.highlight} />
             <lineSegments>
               <wireframeGeometry args={[selectedGeometry]} />
-              <primitive object={HIGHLIGHT_WIREFRAME} attach="material" />
+              <primitive object={materials.highlightWire} attach="material" />
             </lineSegments>
           </>
         )}
@@ -606,7 +634,7 @@ function Scene({
           <group key={m.groupId}>
             <Line
               points={[m.start, m.end]}
-              color={m.primary ? "#f59e0b" : "#3b82f6"}
+              color={m.primary ? palette.leaderPrimary : palette.leaderSecondary}
               lineWidth={2}
               depthTest={false}
               transparent
@@ -615,7 +643,7 @@ function Scene({
             <mesh position={m.start} renderOrder={999}>
               <sphereGeometry args={[bounds.diag * 0.006, 12, 12]} />
               <meshBasicMaterial
-                color={m.primary ? "#f59e0b" : "#3b82f6"}
+                color={m.primary ? palette.leaderPrimary : palette.leaderSecondary}
                 depthTest={false}
                 transparent
               />
@@ -628,11 +656,20 @@ function Scene({
               style={{ pointerEvents: "none" }}
             >
               <div
-                className={`badge badge-sm font-mono font-bold shadow-md border ${
+                className="badge badge-sm font-mono font-bold shadow-md border"
+                style={
                   m.primary
-                    ? "bg-amber-500 text-white border-amber-600"
-                    : "bg-base-100 text-base-content border-base-300"
-                }`}
+                    ? {
+                        backgroundColor: palette.leaderPrimary,
+                        borderColor: palette.leaderPrimary,
+                        color: palette.isDark ? "#fff" : "#fff",
+                      }
+                    : {
+                        backgroundColor: palette.background,
+                        borderColor: palette.edge,
+                        color: palette.edge,
+                      }
+                }
               >
                 {m.label}
               </div>
@@ -678,8 +715,11 @@ export default function ModelViewer({
   leaderMarkers = [],
   isSolid = false,
 }: ModelViewerProps) {
-  const { theme } = useTheme();
-  const viewerBg = getViewerBackground(theme);
+  const palette = useViewerPalette();
+
+  const materials = useMemo(() => createViewerMaterials(palette), [palette]);
+
+  useEffect(() => () => disposeViewerMaterials(materials), [materials]);
 
   const camDist = useMemo(() => {
     let minX = Infinity, minY = Infinity, minZ = Infinity;
@@ -708,14 +748,13 @@ export default function ModelViewer({
         near: 0.01,
         far: camDist * 10,
       }}
-      style={{ background: viewerBg }}
+      style={{ background: palette.background }}
       onPointerMissed={() => onSelectGroup(-1)}
       dpr={[1, 1.5]}
     >
-      {/* Añadimos luces para que los materiales Standard tengan sombreado y volumen */}
-      <ambientLight intensity={0.7} />
-      <directionalLight position={[100, 200, 100]} intensity={0.6} />
-      <directionalLight position={[-100, 50, -100]} intensity={0.3} />
+      <ambientLight intensity={palette.ambientLight} />
+      <directionalLight position={[100, 200, 100]} intensity={palette.keyLight} />
+      <directionalLight position={[-100, 50, -100]} intensity={palette.fillLight} />
 
       <Scene
         faces={faces}
@@ -730,6 +769,8 @@ export default function ModelViewer({
         showCenterAxes={showCenterAxes}
         leaderMarkers={leaderMarkers}
         isSolid={isSolid}
+        palette={palette}
+        materials={materials}
       />
 
       {/* Gizmo en la esquina para referencia de orientación constante */}
@@ -737,11 +778,11 @@ export default function ModelViewer({
         <GizmoViewport
           axisColors={
             appliedAxis === "Z"
-              ? ["#ef4444", "#3b82f6", "#22c55e"] // X=Red, Y(Up)=Blue(Z), Z(Depth)=Green(Y)
-              : ["#ef4444", "#22c55e", "#3b82f6"] // X=Red, Y=Green, Z=Blue
+              ? ["#ef4444", "#3b82f6", "#22c55e"]
+              : ["#ef4444", "#22c55e", "#3b82f6"]
           }
           labels={appliedAxis === "Z" ? ["X", "Z", "Y"] : ["X", "Y", "Z"]}
-          labelColor="white"
+          labelColor={palette.gizmoLabel}
         />
       </GizmoHelper>
     </Canvas>
