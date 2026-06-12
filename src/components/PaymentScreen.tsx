@@ -56,7 +56,13 @@ export default function PaymentScreen({
     async function init() {
       try {
         const res = await fetch("/api/mp/preference", { method: "POST" });
-        if (!res.ok) throw new Error("Error al crear la preferencia de pago.");
+        if (!res.ok) {
+          // Surface the real server error (e.g. "Mercado Pago no está
+          // configurado." cuando falta MP_ACCESS_TOKEN, típico al correr en
+          // local sin .env.local) en vez de un mensaje genérico.
+          const data = await res.json().catch(() => null);
+          throw new Error(data?.error ?? "Error al crear la preferencia de pago.");
+        }
         const { preferenceId } = await res.json();
         if (cancelled) return;
 
@@ -123,6 +129,8 @@ export default function PaymentScreen({
       if (data.valid) {
         localStorage.setItem("e2d_bypass", bypassCode.trim());
         onBypassSuccess();
+      } else if (data.configured === false) {
+        setBypassError("El bypass no está configurado en este entorno (falta MP_BYPASS_KEY).");
       } else {
         setBypassError("Código inválido.");
       }
