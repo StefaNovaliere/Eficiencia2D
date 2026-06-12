@@ -71,6 +71,8 @@ export async function uploadModelFile(file: File): Promise<UploadResponse> {
     const camel = toCamelCase(topo);
     camel.faces = facesPacked ? decodePackedFaces(facesPacked) : [];
     camel.rawFaces = rawFacesPacked ? decodePackedFaces(rawFacesPacked) : [];
+    camel.appliedAxis ??= "Y";
+    camel.preSplitFaceCount ??= camel.rawFaces.length || camel.faces.length;
     camel.stem ??= data.original_filename?.replace(/\.[^.]+$/, "") ?? "";
     camel.warnings ??= [];
 

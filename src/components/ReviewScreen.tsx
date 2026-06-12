@@ -96,6 +96,7 @@ export default function ReviewScreen({
     () => initialMerges ?? phase1.suggestedMerges ?? [],
   );
   const [mergeCardOpen, setMergeCardOpen] = useState(true);
+  const [isRotating, setIsRotating] = useState(false);
 
   // Effective phase1 with merges applied.
   const effectivePhase1 = useMemo(
@@ -165,12 +166,23 @@ export default function ReviewScreen({
   }, [selectedGroupIds]);
 
   const handleRotateAxis = useCallback(() => {
+    if (isRotating || isGenerating) return;
     const newAxis = phase1.appliedAxis === "Y" ? "Z" : "Y";
-    const updated = reclassifyWithAxis(phase1, newAxis);
+    setIsRotating(true);
     setOverrides(new Map());
     setSelectedGroupIds(new Set());
-    onAxisChange(updated);
-  }, [phase1, onAxisChange]);
+    queueMicrotask(() => {
+      try {
+        const updated = reclassifyWithAxis(phase1, newAxis, minAreaM2);
+        onAxisChange(updated);
+      } catch (err: unknown) {
+        console.error(err);
+        alert(err instanceof Error ? err.message : "No se pudo rotar el eje.");
+      } finally {
+        setIsRotating(false);
+      }
+    });
+  }, [phase1, minAreaM2, onAxisChange, isRotating, isGenerating]);
 
   const handleMinAreaChangeWithReset = useCallback((newArea: number) => {
     setOverrides(new Map());
@@ -328,8 +340,14 @@ export default function ReviewScreen({
               <button
                 className="btn btn-sm btn-ghost hover:bg-base-200 rounded-xl"
                 onClick={handleRotateAxis}
+                disabled={isRotating || isGenerating}
+                aria-busy={isRotating}
               >
-                <RefreshCw size={16} />
+                {isRotating ? (
+                  <span className="loading loading-spinner loading-xs" />
+                ) : (
+                  <RefreshCw size={16} />
+                )}
               </button>
             </div>
             <div className="tooltip tooltip-bottom" data-tip={showCenterAxes ? "Ocultar eje" : "Mostrar eje"}>

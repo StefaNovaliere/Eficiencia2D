@@ -319,25 +319,36 @@ function rotateZtoY(faces: Face3D[]): Face3D[] {
     ...f,
     vertices: f.vertices.map((v) => ({ x: v.x, y: v.z, z: -v.y })),
     normal: { x: f.normal.x, y: f.normal.z, z: -f.normal.y },
-    innerLoops: f.innerLoops.map((loop) =>
+    innerLoops: (f.innerLoops ?? []).map((loop) =>
       loop.map((v) => ({ x: v.x, y: v.z, z: -v.y })),
     ),
   }));
 }
 
+/** Caras originales sin rotar, tal como vienen del backend (raw_faces_packed). */
+function axisBaseFaces(phase1: Phase1Result): Face3D[] {
+  if (phase1.rawFaces.length > 0) return phase1.rawFaces;
+  const n =
+    phase1.preSplitFaceCount > 0
+      ? phase1.preSplitFaceCount
+      : phase1.faces.length;
+  return phase1.faces.slice(0, n);
+}
+
 /**
  * Re-classify with a different up-axis assumption.
- * Reuses the stored rawFaces (post-unit-scale, pre-rotation).
+ * Runs entirely on the client — rawFaces are already in memory from /upload.
  */
 export function reclassifyWithAxis(
   phase1: Phase1Result,
   newAxis: "Y" | "Z",
   minRealArea?: number,
 ): Phase1Result {
-  let faces = phase1.rawFaces;
-  if (newAxis === "Z") {
-    faces = rotateZtoY(faces);
+  const base = axisBaseFaces(phase1);
+  if (base.length === 0) {
+    throw new Error("No hay geometría base para rotar el eje.");
   }
+  let faces = newAxis === "Z" ? rotateZtoY(base) : base;
   const warnings = [...phase1.warnings];
   const groups = peelBuriedWalls(faces, classifyIntoGroups(faces, minRealArea, warnings));
 
