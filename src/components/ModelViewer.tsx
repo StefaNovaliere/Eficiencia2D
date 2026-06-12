@@ -6,6 +6,7 @@ import { OrbitControls, GizmoHelper, GizmoViewport, Line, Html } from "@react-th
 import * as THREE from "three";
 import type { Face3D, Vec3 } from "@/core/types";
 import type { FaceCategory, GeometryGroup } from "@/core/group-classifier";
+import { getViewerBackground, useTheme } from "@/context/ThemeContext";
 
 // A floating reference label (panel id) anchored to a component in 3D, drawn
 // when the user selects a wall-wall joint in the review list.
@@ -323,11 +324,40 @@ interface CategoryMeshProps {
   mesh: MergedMeshData;
   isDimmed: boolean;
   isSolid: boolean;
+  groupAreaById: Map<number, number>;
   onPick: (groupId: number) => void;
   onTogglePick: (groupId: number) => void;
 }
 
-function CategoryMesh({ mesh, isDimmed, isSolid, onPick, onTogglePick }: CategoryMeshProps) {
+const PICK_DEPTH_EPS = 0.02;
+
+function pickGroupFromIntersections(
+  intersections: THREE.Intersection[],
+  groupAreaById: Map<number, number>,
+): number | null {
+  if (intersections.length === 0) return null;
+
+  const closestDist = intersections[0].distance;
+  let bestId: number | null = null;
+  let bestArea = Infinity;
+
+  for (const hit of intersections) {
+    if (hit.distance - closestDist > PICK_DEPTH_EPS) break;
+    const data = hit.object.userData.mergedMeshData as MergedMeshData | undefined;
+    if (!data || hit.faceIndex == null || hit.faceIndex < 0) continue;
+    if (hit.faceIndex >= data.groupIds.length) continue;
+    const groupId = data.groupIds[hit.faceIndex];
+    const area = groupAreaById.get(groupId) ?? Infinity;
+    if (area < bestArea) {
+      bestArea = area;
+      bestId = groupId;
+    }
+  }
+
+  return bestId;
+}
+
+function CategoryMesh({ mesh, isDimmed, isSolid, groupAreaById, onPick, onTogglePick }: CategoryMeshProps) {
   const material = isDimmed
     ? DIMMED_MATERIALS[mesh.category]
     : isSolid
@@ -339,16 +369,15 @@ function CategoryMesh({ mesh, isDimmed, isSolid, onPick, onTogglePick }: Categor
       <mesh
         geometry={mesh.geometry}
         material={material}
+        userData={{ mergedMeshData: mesh }}
         onPointerDown={(e) => {
           e.stopPropagation();
-          const triIdx = e.faceIndex;
-          if (typeof triIdx === "number" && triIdx >= 0 && triIdx < mesh.groupIds.length) {
-            const groupId = mesh.groupIds[triIdx];
-            if (e.nativeEvent.ctrlKey || e.nativeEvent.metaKey) {
-              onTogglePick(groupId);
-            } else {
-              onPick(groupId);
-            }
+          const groupId = pickGroupFromIntersections(e.intersections, groupAreaById);
+          if (groupId == null) return;
+          if (e.nativeEvent.ctrlKey || e.nativeEvent.metaKey) {
+            onTogglePick(groupId);
+          } else {
+            onPick(groupId);
           }
         }}
 
@@ -462,6 +491,12 @@ function Scene({
     [faces, groups, categoryOverrides, hiddenGroupIds],
   );
 
+  const groupAreaById = useMemo(() => {
+    const map = new Map<number, number>();
+    for (const g of groups) map.set(g.id, g.totalArea);
+    return map;
+  }, [groups]);
+
   // Cleanup old geometries when mergedMeshes changes.
   useEffect(() => {
     return () => {
@@ -549,6 +584,7 @@ function Scene({
               mesh={mm}
               isDimmed={isDimmed}
               isSolid={isSolid}
+              groupAreaById={groupAreaById}
               onPick={onSelectGroup}
               onTogglePick={onToggleGroup}
             />
@@ -642,6 +678,9 @@ export default function ModelViewer({
   leaderMarkers = [],
   isSolid = false,
 }: ModelViewerProps) {
+  const { theme } = useTheme();
+  const viewerBg = getViewerBackground(theme);
+
   const camDist = useMemo(() => {
     let minX = Infinity, minY = Infinity, minZ = Infinity;
     let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
@@ -669,7 +708,7 @@ export default function ModelViewer({
         near: 0.01,
         far: camDist * 10,
       }}
-      style={{ background: "#f5f5f7" }}
+      style={{ background: viewerBg }}
       onPointerMissed={() => onSelectGroup(-1)}
       dpr={[1, 1.5]}
     >

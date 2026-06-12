@@ -1,7 +1,28 @@
 @import "tailwindcss";
-@plugin "daisyui";
+@plugin "daisyui" {
+  themes: light --default, dark --prefersdark, aqua, valentine, sunset, halloween;
+}
 
 @keyframes bgDrift {
   from { transform: translate3d(0, 0, 0) rotate(var(--rot, 0deg)); }
   to   { transform: translate3d(var(--dx, 40px), var(--dy, -60px), 0) rotate(var(--rot, 0deg)); }
+}
+
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklch, var(--color-base-content) 20%, transparent) transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  border-radius: 9999px;
+  background: color-mix(in oklch, var(--color-base-content) 18%, transparent);
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in oklch, var(--color-base-content) 30%, transparent);
 }

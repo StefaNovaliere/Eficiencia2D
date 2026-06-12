@@ -2,6 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { ArrowRight, FileBox, RotateCcw, Trash2 } from "lucide-react";
 import { uploadModelFile, uploadDemoObj } from "@/services/api";
 import DemoButton from "./DemoButton";
 import { useProjectContext } from "@/context/ProjectContext";
@@ -11,19 +12,49 @@ export default function UploadForm() {
   const {
     file,
     setFile,
+    projectFileName,
+    setProjectFileName,
     scale,
     setScale,
     setFileId,
     setPreviewObj,
     setPhase1Result,
+    phase1Result,
+    fileId,
+    nestingData,
+    resetProject,
+    isLoadingSession,
   } = useProjectContext();
 
   const [isParsing, setIsParsing] = useState(false);
   const [error, setError] = useState("");
   const [dragActive, setDragActive] = useState(false);
   const dropRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const accept = ".obj";
+  const hasActiveProject = !isLoadingSession && Boolean(phase1Result && fileId);
+  const displayName =
+    file?.name ?? projectFileName ?? phase1Result?.stem ?? "Proyecto sin nombre";
+
+  const clearFileInput = useCallback(() => {
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }, []);
+
+  const handleStartNewProject = useCallback(() => {
+    resetProject();
+    setError("");
+    clearFileInput();
+  }, [resetProject, clearFileInput]);
+
+  const handleSelectFile = useCallback(
+    (f: File) => {
+      if (hasActiveProject) resetProject();
+      setError("");
+      setFile(f);
+    },
+    [hasActiveProject, resetProject, setFile],
+  );
 
   const handleDrag = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -40,16 +71,21 @@ export default function UploadForm() {
     e.stopPropagation();
     setDragActive(false);
     const f = e.dataTransfer.files[0];
-    if (f) setFile(f);
-  }, [setFile]);
+    if (f) handleSelectFile(f);
+  }, [handleSelectFile]);
 
   const handleFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const f = e.target.files?.[0];
-      if (f) setFile(f);
+      if (f) handleSelectFile(f);
     },
-    [setFile]
+    [handleSelectFile],
   );
+
+  const handleContinueProject = useCallback(() => {
+    if (nestingData) router.push("/nesting");
+    else router.push("/review");
+  }, [nestingData, router]);
 
   const handleLoadDemo = async () => {
     setError("");
@@ -66,6 +102,7 @@ export default function UploadForm() {
       const backendRes = await uploadDemoObj(textContent, "demo.obj");
       
       setFile(new File([textContent], "demo.obj", { type: "text/plain" }));
+      setProjectFileName("demo.obj");
       setFileId(backendRes.file_id);
       setPhase1Result(backendRes.topology);
       setPreviewObj(backendRes.preview_obj);
@@ -101,6 +138,7 @@ export default function UploadForm() {
         throw new Error("El modelo fue procesado pero no contiene caras válidas.");
       }
 
+      setProjectFileName(file.name);
       setFileId(backendRes.file_id);
       setPhase1Result(backendRes.topology);
       setPreviewObj(backendRes.preview_obj);
@@ -131,8 +169,55 @@ export default function UploadForm() {
   return (
     <>
       <DemoButton onClick={handleLoadDemo} />
+
+      {hasActiveProject && (
+        <div className="card bg-base-100 shadow-lg border border-primary/20 w-full mb-4">
+          <div className="card-body p-5 md:p-6 gap-4">
+            <div className="flex items-start gap-3">
+              <div className="flex items-center justify-center w-11 h-11 rounded-xl bg-primary/10 text-primary shrink-0">
+                <FileBox size={22} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-primary/80 mb-0.5">
+                  Proyecto en curso
+                </p>
+                <p className="font-semibold text-base-content truncate">{displayName}</p>
+                <p className="text-xs text-base-content/50 mt-1">
+                  {phase1Result?.groups.length ?? 0} capas detectadas
+                  {nestingData ? " · planchas configuradas" : " · pendiente de revisión"}
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <button
+                type="button"
+                className="btn btn-primary flex-1 rounded-xl gap-2"
+                onClick={handleContinueProject}
+              >
+                Continuar
+                <ArrowRight size={16} />
+              </button>
+              <button
+                type="button"
+                className="btn btn-outline flex-1 rounded-xl gap-2 border-base-300"
+                onClick={handleStartNewProject}
+              >
+                <Trash2 size={16} />
+                Nuevo proyecto
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="card bg-base-100 shadow-2xl border border-base-200 w-full relative">
         <div className="card-body p-6 md:p-8">
+          {hasActiveProject && (
+            <div className="flex items-center gap-2 mb-4 text-xs text-base-content/50">
+              <RotateCcw size={14} />
+              <span>Subí otro archivo para reemplazar el proyecto actual</span>
+            </div>
+          )}
           {/* Drop zone */}
           <div
             ref={dropRef}
@@ -151,6 +236,7 @@ export default function UploadForm() {
           >
             <input
               id="file-input"
+              ref={fileInputRef}
               type="file"
               accept={accept}
               hidden

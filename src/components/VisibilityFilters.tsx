@@ -34,26 +34,29 @@ export default function VisibilityFilters({
   };
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <span className="text-[11px] uppercase tracking-wider font-bold text-base-content/50 mr-1">Mostrar:</span>
+    <div className="inline-flex items-center gap-1 p-1 rounded-xl bg-base-200/60 border border-base-300/40">
       {ORDER.map((cat) => {
         const visible = visibleCategories.has(cat);
         return (
           <button
             key={cat}
-            className={`btn btn-xs rounded-full border shadow-sm transition-all duration-200 ${
-              visible 
-                ? "bg-base-100 hover:bg-base-200" 
-                : "bg-base-200/40 text-base-content/40 border-transparent hover:bg-base-200"
+            type="button"
+            className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 ${
+              visible
+                ? "bg-base-100 text-base-content shadow-sm"
+                : "text-base-content/40 hover:text-base-content/60 hover:bg-base-100/50"
             }`}
-            style={visible ? { borderColor: CATEGORY_COLORS[cat] } : undefined}
             onClick={() => onToggle(cat)}
           >
             <span
-              className={`w-2 h-2 rounded-full border transition-colors ${visible ? "border-transparent" : "border-base-content/30"}`}
-              style={{ backgroundColor: visible ? CATEGORY_COLORS[cat] : "transparent" }}
+              className="w-2 h-2 rounded-full shrink-0 ring-2 ring-offset-1 ring-offset-base-200"
+              style={{
+                backgroundColor: visible ? CATEGORY_COLORS[cat] : "transparent",
+                ringColor: visible ? `${CATEGORY_COLORS[cat]}55` : "transparent",
+              }}
             />
-            {CATEGORY_LABELS[cat]} <span className="opacity-60 ml-0.5">({counts[cat]})</span>
+            <span>{CATEGORY_LABELS[cat]}</span>
+            <span className="tabular-nums opacity-50">{counts[cat]}</span>
           </button>
         );
       })}

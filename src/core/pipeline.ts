@@ -24,6 +24,7 @@ import type { Joint } from "./joint-detector";
 import { computeAdjustments } from "./assembly-adjuster";
 import type { DimensionAdjustment, WallWallJoint } from "./assembly-adjuster";
 import { splitWallGroupsAtFloors } from "./mesh-splitter";
+import { splitWallGroupsAtPanelBridges, splitGroupAtPanelBridges } from "./group-splitter";
 
 export interface PipelineResult {
   facades: Facade[];
@@ -335,6 +336,64 @@ function axisBaseFaces(phase1: Phase1Result): Face3D[] {
   return phase1.faces.slice(0, n);
 }
 
+function finalizePhase1Groups(
+  faces: Face3D[],
+  groups: GeometryGroup[],
+  minRealArea: number,
+) {
+  polishGroups(groups, minRealArea);
+  const panelSplit = splitWallGroupsAtPanelBridges(faces, groups);
+  polishGroups(panelSplit, minRealArea);
+  const joints = detectJoints(faces, panelSplit);
+  const { adjustments, wallWallJoints } = computeAdjustments(joints, panelSplit, undefined, faces);
+  const suggestedMerges = suggestCoplanarMerges(panelSplit, joints);
+  return { faces, groups: panelSplit, joints, adjustments, wallWallJoints, suggestedMerges };
+}
+
+/** Recompute joints/adjustments after the group list changes (split/merge). */
+export function refreshPhase1Topology(
+  phase1: Phase1Result,
+  groups: GeometryGroup[],
+): Phase1Result {
+  const joints = detectJoints(phase1.faces, groups);
+  const { adjustments, wallWallJoints } = computeAdjustments(joints, groups, undefined, phase1.faces);
+  const suggestedMerges = suggestCoplanarMerges(groups, joints);
+  return { ...phase1, groups, joints, adjustments, wallWallJoints, suggestedMerges };
+}
+
+/** Split one group into separate panels when a bridge edge exists between them. */
+export function splitGroupInPhase1(
+  phase1: Phase1Result,
+  groupId: number,
+): Phase1Result {
+  const group = phase1.groups.find((g) => g.id === groupId);
+  if (!group) return phase1;
+
+  const nextId = Math.max(0, ...phase1.groups.map((g) => g.id)) + 1;
+  const { groups: pieces } = splitGroupAtPanelBridges(phase1.faces, group, nextId);
+  if (pieces.length <= 1) return phase1;
+
+  const newGroups = phase1.groups.flatMap((g) => (g.id === groupId ? pieces : [g]));
+  return refreshPhase1Topology(phase1, newGroups);
+}
+
+/**
+ * Apply panel-bridge splits to phase1 if the topology would change.
+ * Safe to call on every review load (no-op when already split).
+ */
+export function applyPanelBridgeSplits(phase1: Phase1Result): Phase1Result {
+  const splitGroups = splitWallGroupsAtPanelBridges(phase1.faces, phase1.groups);
+  if (splitGroups.length === phase1.groups.length) {
+    const unchanged = splitGroups.every(
+      (g, i) =>
+        phase1.groups[i]?.id === g.id &&
+        phase1.groups[i]?.faceIndices.length === g.faceIndices.length,
+    );
+    if (unchanged) return phase1;
+  }
+  return refreshPhase1Topology(phase1, splitGroups);
+}
+
 /**
  * Re-classify with a different up-axis assumption.
  * Runs entirely on the client — rawFaces are already in memory from /upload.
@@ -354,12 +413,19 @@ export function reclassifyWithAxis(
 
   const preSplitFaceCount = faces.length;
   const split = splitWallGroupsAtFloors(faces, groups, new Map(), "Y", minRealArea ?? DEFAULT_MIN_REAL_AREA);
-  polishGroups(split.groups, minRealArea ?? DEFAULT_MIN_REAL_AREA);
-
-  const joints = detectJoints(split.faces, split.groups);
-  const { adjustments, wallWallJoints } = computeAdjustments(joints, split.groups, undefined, split.faces);
-  const suggestedMerges = suggestCoplanarMerges(split.groups, joints);
-  return { ...phase1, faces: split.faces, appliedAxis: newAxis, groups: split.groups, joints, adjustments, wallWallJoints, warnings, preSplitFaceCount, suggestedMerges };
+  const finalized = finalizePhase1Groups(split.faces, split.groups, minRealArea ?? DEFAULT_MIN_REAL_AREA);
+  return {
+    ...phase1,
+    faces: finalized.faces,
+    appliedAxis: newAxis,
+    groups: finalized.groups,
+    joints: finalized.joints,
+    adjustments: finalized.adjustments,
+    wallWallJoints: finalized.wallWallJoints,
+    warnings,
+    preSplitFaceCount,
+    suggestedMerges: finalized.suggestedMerges,
+  };
 }
 
 /** Re-classify with a different minimum-real-area threshold, keeping the current axis. */
@@ -375,12 +441,18 @@ export function reclassifyWithMinArea(
 
   const preSplitFaceCount = baseFaces.length;
   const split = splitWallGroupsAtFloors(baseFaces, groups, new Map(), "Y", minRealArea);
-  polishGroups(split.groups, minRealArea);
-
-  const joints = detectJoints(split.faces, split.groups);
-  const { adjustments, wallWallJoints } = computeAdjustments(joints, split.groups, undefined, split.faces);
-  const suggestedMerges = suggestCoplanarMerges(split.groups, joints);
-  return { ...phase1, faces: split.faces, groups: split.groups, joints, adjustments, wallWallJoints, warnings, preSplitFaceCount, suggestedMerges };
+  const finalized = finalizePhase1Groups(split.faces, split.groups, minRealArea);
+  return {
+    ...phase1,
+    faces: finalized.faces,
+    groups: finalized.groups,
+    joints: finalized.joints,
+    adjustments: finalized.adjustments,
+    wallWallJoints: finalized.wallWallJoints,
+    warnings,
+    preSplitFaceCount,
+    suggestedMerges: finalized.suggestedMerges,
+  };
 }
 
 /**
@@ -447,14 +519,21 @@ export function parsePipeline(
   // Split walls that extend through floor slabs into separate sub-groups.
   const preSplitFaceCount = faces.length;
   const split = splitWallGroupsAtFloors(faces, groups, new Map(), "Y", DEFAULT_MIN_REAL_AREA);
-  polishGroups(split.groups, DEFAULT_MIN_REAL_AREA);
+  const finalized = finalizePhase1Groups(split.faces, split.groups, DEFAULT_MIN_REAL_AREA);
 
-  // Detect joints and compute assembly adjustments on the (possibly split) groups.
-  const joints = detectJoints(split.faces, split.groups);
-  const { adjustments, wallWallJoints } = computeAdjustments(joints, split.groups, undefined, split.faces);
-  const suggestedMerges = suggestCoplanarMerges(split.groups, joints);
-
-  return { faces: split.faces, rawFaces, appliedAxis: detectedUp, groups: split.groups, joints, adjustments, wallWallJoints, stem, warnings, preSplitFaceCount, suggestedMerges };
+  return {
+    faces: finalized.faces,
+    rawFaces,
+    appliedAxis: detectedUp,
+    groups: finalized.groups,
+    joints: finalized.joints,
+    adjustments: finalized.adjustments,
+    wallWallJoints: finalized.wallWallJoints,
+    stem,
+    warnings,
+    preSplitFaceCount,
+    suggestedMerges: finalized.suggestedMerges,
+  };
 }
 
 /**

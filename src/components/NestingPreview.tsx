@@ -4,6 +4,7 @@ import { useCallback, useMemo, useRef, useEffect, useState } from "react";
 import type { NestingPreviewData } from "@/core/pipeline";
 import type { NestingResult, NestingSheet, PlacedNestingPanel } from "@/core/sheet-nester";
 import type { SheetConfig } from "@/core/types";
+import { getNestingCanvasColors, useTheme } from "@/context/ThemeContext";
 
 export interface NestingPreviewProps {
   nesting: NestingPreviewData;
@@ -15,22 +16,22 @@ export interface NestingPreviewProps {
   onScaleChange: (scale: number) => void;
 }
 
-const WALL_COLOR = "#E5E5E5";
-const FLOOR_COLOR = "#7F8C8D";
-const SHEET_STROKE = "#E5E5E5";
-const PANEL_STROKE = "#E5E5E5";
-const UNPLACED_COLOR = "#E5E5E5";
-
 function SheetCanvas({
   sheets,
   config,
   color,
   label,
+  sheetBg,
+  sheetStroke,
+  labelText,
 }: {
   sheets: NestingSheet[];
   config: SheetConfig;
   color: string;
   label: string;
+  sheetBg: string;
+  sheetStroke: string;
+  labelText: string;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -84,18 +85,18 @@ function SheetCanvas({
       const sy = row * (config.heightM + spacing);
 
       // Sheet background
-      ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
+      ctx.fillStyle = sheetBg;
       ctx.fillRect(toX(sx), toY(sy), config.widthM * scale, config.heightM * scale);
 
       // Sheet outline
-      ctx.strokeStyle = SHEET_STROKE;
+      ctx.strokeStyle = sheetStroke;
       ctx.lineWidth = 1.5;
       ctx.setLineDash([6, 4]);
       ctx.strokeRect(toX(sx), toY(sy), config.widthM * scale, config.heightM * scale);
       ctx.setLineDash([]);
 
       // Sheet label
-      ctx.fillStyle = "#52525b";
+      ctx.fillStyle = labelText;
       ctx.font = "11px Inter, sans-serif";
       ctx.textAlign = "center";
       ctx.fillText(
@@ -137,7 +138,7 @@ function SheetCanvas({
         }
       }
     }
-  }, [sheets, config, color, dims]);
+  }, [sheets, config, color, dims, sheetBg, sheetStroke, labelText]);
 
   if (sheets.length === 0) return null;
 
@@ -174,6 +175,9 @@ export default function NestingPreview({
   scaleDenom,
   onScaleChange,
 }: NestingPreviewProps) {
+  const { theme } = useTheme();
+  const canvasColors = getNestingCanvasColors(theme);
+
   const [localWidth, setLocalWidth] = useState(String(sheetConfig.widthM));
   const [localHeight, setLocalHeight] = useState(String(sheetConfig.heightM));
   const [showConfirm, setShowConfirm] = useState(false);
@@ -267,14 +271,20 @@ export default function NestingPreview({
         <SheetCanvas
           sheets={nesting.wallNesting.sheets}
           config={nesting.config}
-          color={WALL_COLOR}
+          color={canvasColors.wall}
           label="Paredes"
+          sheetBg={canvasColors.sheetBg}
+          sheetStroke={canvasColors.sheetStroke}
+          labelText={canvasColors.labelText}
         />
         <SheetCanvas
           sheets={nesting.floorNesting.sheets}
           config={nesting.config}
-          color={FLOOR_COLOR}
+          color={canvasColors.floor}
           label="Pisos"
+          sheetBg={canvasColors.sheetBg}
+          sheetStroke={canvasColors.sheetStroke}
+          labelText={canvasColors.labelText}
         />
 
         {unplacedCount > 0 && (
@@ -319,7 +329,7 @@ export default function NestingPreview({
           {wallPanels > 0 && (
             <>
               <span className="text-base-content/30">&middot;</span>
-              <span className="font-semibold" style={{ color: WALL_COLOR }}>
+              <span className="font-semibold" style={{ color: canvasColors.wall }}>
                 {wallPanels} pared{wallPanels !== 1 ? "es" : ""}
               </span>
             </>
@@ -327,7 +337,7 @@ export default function NestingPreview({
           {floorPanels > 0 && (
             <>
               <span className="text-base-content/30">&middot;</span>
-              <span className="font-semibold" style={{ color: FLOOR_COLOR }}>
+              <span className="font-semibold" style={{ color: canvasColors.floor }}>
                 {floorPanels} piso{floorPanels !== 1 ? "s" : ""}
               </span>
             </>

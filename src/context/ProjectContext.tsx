@@ -25,6 +25,8 @@ const SESSION_KEY = "e2d_pending_session";
 interface ProjectContextType {
   file: File | null;
   setFile: (file: File | null) => void;
+  projectFileName: string | null;
+  setProjectFileName: (name: string | null) => void;
   fileId: string | null;
   setFileId: (id: string | null) => void;
   previewObj: string | null;
@@ -67,6 +69,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const [savedWallWallDecisions, setSavedWallWallDecisions] = useState<Map<number, number>>(new Map());
   const [savedMerges, setSavedMerges] = useState<number[][]>([]);
   const [sheetConfig, setSheetConfig] = useState<SheetConfig>({ ...DEFAULT_SHEET });
+  const [projectFileName, setProjectFileName] = useState<string | null>(null);
   const [isLoadingSession, setIsLoadingSession] = useState(true);
 
   // Restore session on mount
@@ -80,6 +83,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     try {
       const parsed: PersistedSession = JSON.parse(raw);
       
+      setProjectFileName(parsed.fileName ?? null);
       setFileId(parsed.fileId);
       setPreviewObj(parsed.previewObj);
       setPhase1Result(parsed.phase1Result);
@@ -108,8 +112,10 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const persistSession = useCallback(async () => {
     if (!fileId || !phase1Result || !previewObj) return;
     try {
+      const name = file?.name || projectFileName || phase1Result.stem || "model.obj";
+      setProjectFileName(name);
       const persisted: PersistedSession = {
-        fileName: file?.name || "model.obj",
+        fileName: name,
         fileId,
         previewObj,
         phase1Result,
@@ -125,10 +131,11 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     } catch {
       // Storage full
     }
-  }, [file, fileId, previewObj, phase1Result, scale, paper, minAreaM2, sheetConfig, savedOverrides, savedWallWallDecisions, savedMerges]);
+  }, [file, fileId, previewObj, phase1Result, projectFileName, scale, paper, minAreaM2, sheetConfig, savedOverrides, savedWallWallDecisions, savedMerges]);
 
   const resetProject = useCallback(() => {
     setFile(null);
+    setProjectFileName(null);
     setFileId(null);
     setPreviewObj(null);
     setScale(100);
@@ -147,6 +154,8 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     <ProjectContext.Provider
       value={{
         file, setFile,
+        projectFileName,
+        setProjectFileName,
         fileId, setFileId,
         previewObj, setPreviewObj,
         scale, setScale,
