@@ -3,7 +3,9 @@ import { NextResponse } from "next/server";
 export async function POST(request: Request) {
   const bypassKey = process.env.MP_BYPASS_KEY;
   if (!bypassKey) {
-    return NextResponse.json({ valid: false });
+    // `configured: false` lets the UI explain that the bypass isn't set up in
+    // this environment (e.g. local sin .env.local) en vez de "código inválido".
+    return NextResponse.json({ valid: false, configured: false });
   }
 
   let body: { key?: string };
