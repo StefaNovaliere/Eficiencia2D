@@ -4,8 +4,14 @@ import { useEffect, useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useProjectContext } from "@/context/ProjectContext";
 import ReviewScreen from "@/components/ReviewScreen";
-import { reclassifyWithMinArea } from "@/core/pipeline";
+import {
+  reclassifyWithMinArea,
+  applyMerges,
+  decomposePanels,
+  nestDecomposedPanels,
+} from "@/core/pipeline";
 import type { ClassificationOverride } from "@/core/pipeline";
+import type { PipelineOptions } from "@/core/types";
 
 export default function ReviewPage() {
   const router = useRouter();
@@ -24,6 +30,7 @@ export default function ReviewPage() {
     scale,
     paper,
     sheetConfig,
+    setNestingData,
     isLoadingSession,
     resetProject
   } = useProjectContext();
@@ -49,14 +56,36 @@ export default function ReviewPage() {
     setIsGenerating(true);
 
     try {
-      // Just save state and move to payment. Generation happens after payment.
-      router.push("/payment");
+      const merged = merges.length > 0 ? applyMerges(phase1Result, merges) : phase1Result;
+      const opts: PipelineOptions = {
+        scaleDenom: scale,
+        paper,
+        includeCuttingSheet: true,
+        sheetConfig,
+        minAreaM2,
+      };
+      const decomposed = decomposePanels(merged, opts, overrides, wallWallDecisions);
+      const nesting = nestDecomposedPanels(decomposed, sheetConfig, scale);
+      setNestingData(nesting);
+      router.push("/nesting");
     } catch (err: unknown) {
       console.error(err);
       alert(err instanceof Error ? err.message : "Error desconocido al procesar.");
       setIsGenerating(false);
     }
-  }, [phase1Result, fileId, setSavedOverrides, setSavedWallWallDecisions, setSavedMerges, router]);
+  }, [
+    phase1Result,
+    fileId,
+    scale,
+    paper,
+    sheetConfig,
+    minAreaM2,
+    setSavedOverrides,
+    setSavedWallWallDecisions,
+    setSavedMerges,
+    setNestingData,
+    router,
+  ]);
 
   const handleReviewCancel = useCallback(() => {
     resetProject();

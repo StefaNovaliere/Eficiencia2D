@@ -28,9 +28,9 @@ export default function NestingPage() {
 
   useEffect(() => {
     if (!isLoadingSession && !nestingData) {
-      router.replace("/");
+      router.replace(phase1Result ? "/review" : "/");
     }
-  }, [isLoadingSession, nestingData, router]);
+  }, [isLoadingSession, nestingData, phase1Result, router]);
 
   const handleNestingConfirm = useCallback(async () => {
     await persistSession();

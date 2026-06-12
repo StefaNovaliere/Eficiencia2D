@@ -1,6 +1,7 @@
-
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL
 import { decodePackedFaces } from "@/core/packed-faces";
+
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8081";
 export interface UploadResponse {
   message: string;
   file_id: string;
@@ -61,16 +62,17 @@ export async function uploadModelFile(file: File): Promise<UploadResponse> {
   if (data.topology) {
     const topo = data.topology;
 
-    // Extraer la geometría empaquetada ANTES de camelizar: si la dejamos,
-    // toCamelCase renombra coords_b64 → coordsB64 y el decode no la encuentra.
+    // Extraer geometría empaquetada antes de camelizar (evita renombrar coords_b64).
     const facesPacked = topo.faces_packed;
     const rawFacesPacked = topo.raw_faces_packed;
     delete topo.faces_packed;
     delete topo.raw_faces_packed;
 
-    const camel = toCamelCase(topo);                       // groups, joints, etc.
+    const camel = toCamelCase(topo);
     camel.faces = facesPacked ? decodePackedFaces(facesPacked) : [];
     camel.rawFaces = rawFacesPacked ? decodePackedFaces(rawFacesPacked) : [];
+    camel.stem ??= data.original_filename?.replace(/\.[^.]+$/, "") ?? "";
+    camel.warnings ??= [];
 
     data.topology = camel;
   }
