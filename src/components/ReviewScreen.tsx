@@ -10,7 +10,7 @@ import type { Phase1Result, ClassificationOverride } from "@/core/pipeline";
 import type { Joint } from "@/core/joint-detector";
 import type { DimensionAdjustment } from "@/core/assembly-adjuster";
 import type { LeaderMarker } from "./ModelViewer";
-import { RefreshCw, Box, Maximize, Minimize, Crosshair } from "lucide-react";
+import { RefreshCw, Box, Maximize, Minimize, Crosshair, EyeOff, Eye } from "lucide-react";
 
 export type WallWallDecisions = Map<number, number>;
 
@@ -97,12 +97,24 @@ export default function ReviewScreen({
   );
   const [mergeCardOpen, setMergeCardOpen] = useState(true);
   const [isRotating, setIsRotating] = useState(false);
+  const [hiddenGroupIds, setHiddenGroupIds] = useState<Set<number>>(() => new Set());
 
   // Effective phase1 with merges applied.
   const effectivePhase1 = useMemo(
     () => merges.length > 0 ? applyMerges(phase1, merges) : phase1,
     [phase1, merges],
   );
+
+  const handleHideGroup = useCallback((id: number) => {
+    setHiddenGroupIds((prev) => new Set(prev).add(id));
+    setSelectedGroupIds((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+    setSelectedJointIndex(null);
+  }, []);
 
   const handleSelectGroup = useCallback((id: number) => {
     setSelectedGroupIds((prev) => {
@@ -122,6 +134,18 @@ export default function ReviewScreen({
       }
       return next;
     });
+  }, []);
+
+  const handleShowGroup = useCallback((id: number) => {
+    setHiddenGroupIds((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  }, []);
+
+  const handleShowAllHidden = useCallback(() => {
+    setHiddenGroupIds(new Set());
   }, []);
 
   const handleChangeCategory = useCallback(
@@ -171,6 +195,7 @@ export default function ReviewScreen({
     setIsRotating(true);
     setOverrides(new Map());
     setSelectedGroupIds(new Set());
+    setHiddenGroupIds(new Set());
     queueMicrotask(() => {
       try {
         const updated = reclassifyWithAxis(phase1, newAxis, minAreaM2);
@@ -187,6 +212,7 @@ export default function ReviewScreen({
   const handleMinAreaChangeWithReset = useCallback((newArea: number) => {
     setOverrides(new Map());
     setSelectedGroupIds(new Set());
+    setHiddenGroupIds(new Set());
     onMinAreaChange(newArea);
   }, [onMinAreaChange]);
 
@@ -321,6 +347,7 @@ export default function ReviewScreen({
           selectedGroupIds={selectedGroupIds}
           categoryOverrides={overrides}
           visibleCategories={visibleCategories}
+          hiddenGroupIds={hiddenGroupIds}
           onSelectGroup={handleSelectGroup}
           onToggleGroup={handleToggleGroup}
           appliedAxis={phase1.appliedAxis}
@@ -336,6 +363,29 @@ export default function ReviewScreen({
               onToggle={handleToggleVisibility}
             />
             <div className="w-[1px] h-8 bg-base-300/50 mx-1"></div>
+            {selectedGroupIds.size === 1 && (
+              <div className="tooltip tooltip-bottom" data-tip="Ocultar componente seleccionado">
+                <button
+                  type="button"
+                  className="btn btn-sm btn-ghost hover:bg-base-200 rounded-xl"
+                  onClick={() => handleHideGroup(Array.from(selectedGroupIds)[0])}
+                >
+                  <EyeOff size={16} />
+                </button>
+              </div>
+            )}
+            {hiddenGroupIds.size > 0 && (
+              <div className="tooltip tooltip-bottom" data-tip="Mostrar todos los componentes ocultos">
+                <button
+                  type="button"
+                  className="btn btn-sm btn-ghost hover:bg-base-200 rounded-xl gap-1 px-2"
+                  onClick={handleShowAllHidden}
+                >
+                  <Eye size={14} />
+                  <span className="text-xs font-semibold">{hiddenGroupIds.size}</span>
+                </button>
+              </div>
+            )}
             <div className="tooltip tooltip-bottom" data-tip={`Rotar eje (${phase1.appliedAxis === "Y" ? "Y↑" : "Z↑"})`}>
               <button
                 className="btn btn-sm btn-ghost hover:bg-base-200 rounded-xl"
@@ -514,10 +564,14 @@ export default function ReviewScreen({
         <GroupList
           groups={effectivePhase1.groups}
           selectedGroupIds={selectedGroupIds}
+          hiddenGroupIds={hiddenGroupIds}
           categoryOverrides={overrides}
           visibleCategories={visibleCategories}
           onSelectGroup={handleSelectGroup}
           onToggleGroup={handleToggleGroup}
+          onHideGroup={handleHideGroup}
+          onShowGroup={handleShowGroup}
+          onShowAllHidden={handleShowAllHidden}
           onChangeCategory={handleChangeCategory}
         />
 

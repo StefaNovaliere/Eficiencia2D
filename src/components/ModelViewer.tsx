@@ -204,6 +204,7 @@ function buildMergedGeometries(
   faces: Face3D[],
   groups: GeometryGroup[],
   overrides: Map<number, FaceCategory>,
+  hiddenGroupIds: Set<number>,
 ): MergedMeshData[] {
   const byCategory = new Map<
     FaceCategory,
@@ -214,6 +215,7 @@ function buildMergedGeometries(
   }
 
   for (const group of groups) {
+    if (hiddenGroupIds.has(group.id)) continue;
     const cat = overrides.get(group.id) ?? group.category;
     const bucket = byCategory.get(cat)!;
 
@@ -349,6 +351,7 @@ function CategoryMesh({ mesh, isDimmed, isSolid, onPick, onTogglePick }: Categor
             }
           }
         }}
+
       />
       {mesh.edgeGeometry && !isDimmed && (
         <lineSegments geometry={mesh.edgeGeometry} material={EDGE_LINE_MATERIAL} />
@@ -405,6 +408,7 @@ interface SceneProps {
   selectedGroupIds: Set<number>;
   categoryOverrides: Map<number, FaceCategory>;
   visibleCategories: Set<FaceCategory>;
+  hiddenGroupIds: Set<number>;
   onSelectGroup: (id: number) => void;
   onToggleGroup: (id: number) => void;
   appliedAxis?: "Y" | "Z";
@@ -419,6 +423,7 @@ function Scene({
   selectedGroupIds,
   categoryOverrides,
   visibleCategories,
+  hiddenGroupIds,
   onSelectGroup,
   onToggleGroup,
   appliedAxis = "Y",
@@ -453,8 +458,8 @@ function Scene({
 
   // Merged geometries — rebuilt when categories or overrides change.
   const mergedMeshes = useMemo(
-    () => buildMergedGeometries(faces, groups, categoryOverrides),
-    [faces, groups, categoryOverrides],
+    () => buildMergedGeometries(faces, groups, categoryOverrides, hiddenGroupIds),
+    [faces, groups, categoryOverrides, hiddenGroupIds],
   );
 
   // Cleanup old geometries when mergedMeshes changes.
@@ -614,6 +619,7 @@ export interface ModelViewerProps {
   selectedGroupIds: Set<number>;
   categoryOverrides: Map<number, FaceCategory>;
   visibleCategories: Set<FaceCategory>;
+  hiddenGroupIds: Set<number>;
   onSelectGroup: (id: number) => void;
   onToggleGroup: (id: number) => void;
   appliedAxis?: "Y" | "Z";
@@ -628,6 +634,7 @@ export default function ModelViewer({
   selectedGroupIds,
   categoryOverrides,
   visibleCategories,
+  hiddenGroupIds,
   onSelectGroup,
   onToggleGroup,
   appliedAxis = "Y",
@@ -677,6 +684,7 @@ export default function ModelViewer({
         selectedGroupIds={selectedGroupIds}
         categoryOverrides={categoryOverrides}
         visibleCategories={visibleCategories}
+        hiddenGroupIds={hiddenGroupIds}
         onSelectGroup={onSelectGroup}
         onToggleGroup={onToggleGroup}
         appliedAxis={appliedAxis}
