@@ -3,6 +3,15 @@
   themes: light --default, dark --prefersdark, aqua, valentine, sunset, halloween;
 }
 
+:root {
+  --viewer-bg: #eef0f4;
+  --viewer-floor: #2d4f3e;
+  --viewer-wall: #556068;
+  --viewer-discard: #434c57;
+  --viewer-edge: #0f1419;
+  --viewer-highlight: #d97706;
+}
+
 @keyframes bgDrift {
   from { transform: translate3d(0, 0, 0) rotate(var(--rot, 0deg)); }
   to   { transform: translate3d(var(--dx, 40px), var(--dy, -60px), 0) rotate(var(--rot, 0deg)); }

@@ -10,7 +10,7 @@ import {
   decomposePanels,
   nestDecomposedPanels,
 } from "@/core/pipeline";
-import type { ClassificationOverride } from "@/core/pipeline";
+import type { ClassificationOverride, Phase1Result } from "@/core/pipeline";
 import type { PipelineOptions } from "@/core/types";
 
 export default function ReviewPage() {

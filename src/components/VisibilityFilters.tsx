@@ -9,9 +9,9 @@ const CATEGORY_LABELS: Record<FaceCategory, string> = {
 };
 
 const CATEGORY_COLORS: Record<FaceCategory, string> = {
-  floor: "#22c55e",
-  wall: "#3b82f6",
-  discard: "#71717a",
+  floor: "var(--viewer-floor, #2d4f3e)",
+  wall: "var(--viewer-wall, #556068)",
+  discard: "var(--viewer-discard, #434c57)",
 };
 
 const ORDER: FaceCategory[] = ["floor", "wall", "discard"];
