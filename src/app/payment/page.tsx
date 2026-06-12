@@ -4,23 +4,28 @@ import { useState, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useProjectContext } from "@/context/ProjectContext";
 import PaymentScreen from "@/components/PaymentScreen";
-import { generateProjectFiles } from "@/services/api";
+import {
+  decomposePanels,
+  nestDecomposedPanels,
+  generateFromNesting,
+} from "@/core/pipeline";
+import type { PipelineOptions } from "@/core/types";
 
 export default function PaymentPage() {
   const router = useRouter();
-  const { 
+  const {
     file,
-    fileId,
+    phase1Result,
     savedOverrides,
     savedWallWallDecisions,
-    phase1Result, 
-    scale, 
-    paper, 
+    scale,
+    paper,
     minAreaM2,
+    sheetConfig,
     isLoadingSession,
-    resetProject
+    resetProject,
   } = useProjectContext();
-  
+
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState("");
 
@@ -31,32 +36,72 @@ export default function PaymentPage() {
   }, [isLoadingSession, phase1Result, router]);
 
   const proceedToGeneration = useCallback(async () => {
-    if (!fileId || !file) return;
+    if (!phase1Result || !file) return;
 
     setIsGenerating(true);
     setError("");
 
     try {
-      const payload = {
-        file_id: fileId,
-        original_filename: file.name,
-        scale_denom: scale,
+      const opts: PipelineOptions = {
+        scaleDenom: scale,
         paper,
-        overrides: Object.fromEntries(savedOverrides.map(o => [o.groupId, o.newCategory])),
-        wall_wall_decisions: Object.fromEntries(savedWallWallDecisions.entries())
+        includeCuttingSheet: true,
+        sheetConfig,
+        minAreaM2,
       };
 
-      const result = await generateProjectFiles(payload);
+      // Todo en el cliente: el trabajo pesado (parseo/clasificación) ya está en
+      // phase1Result; acá solo se decompone, se nesteа y se serializa a DXF/PDF.
+      const decomposed = decomposePanels(
+        phase1Result,
+        opts,
+        savedOverrides,
+        savedWallWallDecisions,
+      );
+      const nesting = nestDecomposedPanels(decomposed, sheetConfig, scale);
+      const result = generateFromNesting(phase1Result, nesting, opts);
+
+      if (result.files.length === 0) {
+        throw new Error(
+          result.warnings.length > 0
+            ? result.warnings.join(" ")
+            : "No se generaron archivos. Verificá que el modelo tenga geometría válida.",
+        );
+      }
+
+      const { default: JSZip } = await import("jszip");
+      const zip = new JSZip();
+      for (const f of result.files) zip.file(f.name, f.blob);
+
+      const zipBlob = await zip.generateAsync({ type: "blob" });
+      const stem = file.name.replace(/\.[^.]+$/, "");
+      const url = URL.createObjectURL(zipBlob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${stem}_planos.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
 
       resetProject();
-      alert(`¡${result.message} Los archivos generados pronto estarán disponibles para descarga directa.`);
+      alert("¡Planos generados y descargados exitosamente!");
       router.push("/");
     } catch (err: unknown) {
       console.error(err);
       setError(err instanceof Error ? err.message : "Error desconocido al procesar.");
       setIsGenerating(false);
     }
-  }, [fileId, file, scale, paper, savedOverrides, savedWallWallDecisions, resetProject, router]);
+  }, [
+    phase1Result,
+    file,
+    scale,
+    paper,
+    minAreaM2,
+    sheetConfig,
+    savedOverrides,
+    savedWallWallDecisions,
+    resetProject,
+    router,
+  ]);
 
   const handlePaymentApproved = useCallback(async (paymentId: string) => {
     try {
@@ -76,17 +121,9 @@ export default function PaymentPage() {
     }
   }, [proceedToGeneration]);
 
-  const handlePaymentError = useCallback((msg: string) => {
-    setError(msg);
-  }, []);
-
-  const handlePaymentCancel = useCallback(() => {
-    router.push("/review");
-  }, [router]);
-
-  const handleBypassSuccess = useCallback(() => {
-    proceedToGeneration();
-  }, [proceedToGeneration]);
+  const handlePaymentError = useCallback((msg: string) => setError(msg), []);
+  const handlePaymentCancel = useCallback(() => router.push("/review"), [router]);
+  const handleBypassSuccess = useCallback(() => proceedToGeneration(), [proceedToGeneration]);
 
   if (isLoadingSession) return null;
   if (!phase1Result) return null;
