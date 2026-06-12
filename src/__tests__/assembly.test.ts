@@ -91,6 +91,40 @@ describe("areThinTwins — returns thickness", () => {
     };
     expect(areThinTwins(a, b, 0.5)).toBeNull();
   });
+
+  it("returns null when a full wall pairs with a small glass pane", () => {
+    const wall: TwinCandidate = {
+      normal: { x: 1, y: 0, z: 0 },
+      d: -0.2,
+      centroid: { x: -0.2, y: 2, z: 1 },
+      extent: 4,
+    };
+    const glassInterior: TwinCandidate = {
+      normal: { x: -1, y: 0, z: 0 },
+      d: 0.008,
+      centroid: { x: 0.008, y: 2, z: 1 },
+      extent: 0.75,
+    };
+    expect(areThinTwins(wall, glassInterior, 0.4)).toBeNull();
+  });
+
+  it("still pairs opposing skins of a thin glass pane", () => {
+    const exterior: TwinCandidate = {
+      normal: { x: 1, y: 0, z: 0 },
+      d: 0,
+      centroid: { x: 0, y: 1, z: 0.5 },
+      extent: 0.75,
+    };
+    const interior: TwinCandidate = {
+      normal: { x: -1, y: 0, z: 0 },
+      d: -0.008,
+      centroid: { x: 0.008, y: 1, z: 0.5 },
+      extent: 0.75,
+    };
+    const result = areThinTwins(exterior, interior, 0.4);
+    expect(result).not.toBeNull();
+    expect(result).toBeCloseTo(0.008, 3);
+  });
 });
 
 // ---------------------------------------------------------------------------

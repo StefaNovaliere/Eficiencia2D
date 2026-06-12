@@ -17,6 +17,8 @@ const COPLANAR_D_TOLERANCE = 0.05;     // 5cm in plane offset
 const OPPOSITE_NORMAL_DOT = -0.985;    // dot product < this => opposite normals
 const MAX_WALL_THICKNESS = 1.0;        // search range for twin (1m)
 const LATERAL_OVERLAP_FACTOR = 0.5;    // how much lateral offset is tolerated
+/** Reject pairing very different-sized patches (e.g. full wall + glass pane). */
+const MIN_EXTENT_RATIO = 0.25;
 
 /** A parametrised, planar region (used to check thin-twin pairing). */
 export interface TwinCandidate {
@@ -60,7 +62,11 @@ export function areThinTwins(
   const lz = dz - nc * a.normal.z;
   const lateralDist = Math.sqrt(lx * lx + ly * ly + lz * lz);
 
-  const budget = (a.extent + b.extent) * 0.5 * LATERAL_OVERLAP_FACTOR;
+  const minExtent = Math.min(a.extent, b.extent);
+  const maxExtent = Math.max(a.extent, b.extent);
+  if (maxExtent > 1e-6 && minExtent / maxExtent < MIN_EXTENT_RATIO) return null;
+
+  const budget = minExtent * LATERAL_OVERLAP_FACTOR;
   return lateralDist <= budget ? distance : null;
 }
 
@@ -152,8 +158,11 @@ function findTwinThickness(
     const lz = dz - normalComp * cluster.normal.z;
     const lateralDist = Math.sqrt(lx * lx + ly * ly + lz * lz);
 
-    const budget =
-      (cluster.extent + other.extent) * 0.5 * LATERAL_OVERLAP_FACTOR;
+    const minExtent = Math.min(cluster.extent, other.extent);
+    const maxExtent = Math.max(cluster.extent, other.extent);
+    if (maxExtent > 1e-6 && minExtent / maxExtent < MIN_EXTENT_RATIO) continue;
+
+    const budget = minExtent * LATERAL_OVERLAP_FACTOR;
     if (lateralDist > budget) continue;
 
     if (best === null || distance < best) best = distance;
