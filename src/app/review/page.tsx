@@ -46,17 +46,19 @@ export default function ReviewPage() {
   const handleReviewConfirm = useCallback(async (
     overrides: ClassificationOverride[],
     wallWallDecisions: Map<number, number>,
-    merges: number[][]
+    merges: number[][],
+    topologyPhase1: Phase1Result,
   ) => {
-    if (!phase1Result || !fileId) return;
+    if (!topologyPhase1 || !fileId) return;
 
     setSavedOverrides(overrides);
     setSavedWallWallDecisions(wallWallDecisions);
     setSavedMerges(merges);
+    setPhase1Result(topologyPhase1);
     setIsGenerating(true);
 
     try {
-      const merged = merges.length > 0 ? applyMerges(phase1Result, merges) : phase1Result;
+      const merged = merges.length > 0 ? applyMerges(topologyPhase1, merges) : topologyPhase1;
       const opts: PipelineOptions = {
         scaleDenom: scale,
         paper,
@@ -74,7 +76,6 @@ export default function ReviewPage() {
       setIsGenerating(false);
     }
   }, [
-    phase1Result,
     fileId,
     scale,
     paper,
@@ -83,6 +84,7 @@ export default function ReviewPage() {
     setSavedOverrides,
     setSavedWallWallDecisions,
     setSavedMerges,
+    setPhase1Result,
     setNestingData,
     router,
   ]);

@@ -1,8 +1,27 @@
 import { decodePackedFaces } from "@/core/packed-faces";
+import {
+  invalidateApiBaseUrl,
+  resolveApiBaseUrl,
+} from "@/services/api-base";
 
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8081";
-  
+async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
+  let baseUrl = await resolveApiBaseUrl();
+
+  try {
+    const res = await fetch(`${baseUrl}${path}`, init);
+    return res;
+  } catch (error) {
+    invalidateApiBaseUrl();
+    baseUrl = await resolveApiBaseUrl(true);
+
+    try {
+      return await fetch(`${baseUrl}${path}`, init);
+    } catch (retryError) {
+      throw retryError ?? error;
+    }
+  }
+}
+
 export interface UploadResponse {
   message: string;
   file_id: string;
@@ -36,20 +55,36 @@ export interface GenerateRequestPayload {
   original_filename: string;
   scale_denom?: number;
   paper?: string;
+  min_area_m2?: number;
+  sheet_config?: {
+    width_m: number;
+    height_m: number;
+    gap_m: number;
+  };
   overrides?: Record<number, string>;
   wall_wall_decisions?: Record<number, number>;
+  merges?: number[][];
 }
 
 export interface GenerateResponse {
   message: string;
   generated_files: string[];
+  zip_base64?: string;
+  zip_filename?: string;
+}
+
+export function base64ToBlob(base64: string, mime = "application/zip"): Blob {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: mime });
 }
 
 export async function uploadModelFile(file: File): Promise<UploadResponse> {
   const formData = new FormData();
   formData.append("file", file);
 
-  const res = await fetch(`${API_BASE_URL}/api/upload`, {
+  const res = await apiFetch("/api/upload", {
     method: "POST",
     body: formData,
   });
@@ -90,7 +125,7 @@ export async function uploadDemoObj(textContent: string, filename: string = "dem
 }
 
 export async function generateProjectFiles(payload: GenerateRequestPayload): Promise<GenerateResponse> {
-  const res = await fetch(`${API_BASE_URL}/api/generate`, {
+  const res = await apiFetch("/api/generate", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

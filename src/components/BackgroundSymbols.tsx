@@ -96,7 +96,7 @@ export default function BackgroundSymbols() {
       {placements.map((p, i) => (
         <span
           key={i}
-          className="absolute font-mono whitespace-nowrap select-none opacity-0 animate-[bgDrift_linear_infinite]"
+          className="absolute font-mono whitespace-nowrap select-none text-base-content animate-[bgDrift_linear_infinite]"
           style={{
             left: `${p.left}%`,
             top: `${p.top}%`,

@@ -8,16 +8,77 @@ import {
   decomposePanels,
   nestDecomposedPanels,
   generateFromNesting,
+  applyMerges,
 } from "@/core/pipeline";
 import type { PipelineOptions } from "@/core/types";
+import type { Phase1Result, ClassificationOverride } from "@/core/pipeline";
+import {
+  base64ToBlob,
+  generateProjectFiles,
+} from "@/services/api";
+
+function overridesToRecord(
+  overrides: { groupId: number; newCategory: string }[],
+): Record<number, string> {
+  const out: Record<number, string> = {};
+  for (const o of overrides) out[o.groupId] = o.newCategory;
+  return out;
+}
+
+function decisionsToRecord(decisions: Map<number, number>): Record<number, number> {
+  const out: Record<number, number> = {};
+  for (const [k, v] of decisions) out[k] = v;
+  return out;
+}
+
+async function generateClientSideZip(
+  phase1Result: Phase1Result,
+  opts: PipelineOptions,
+  savedOverrides: ClassificationOverride[],
+  savedWallWallDecisions: Map<number, number>,
+  savedMerges: number[][],
+): Promise<Blob> {
+  const merged =
+    savedMerges.length > 0
+      ? applyMerges(phase1Result, savedMerges)
+      : phase1Result;
+  const decomposed = decomposePanels(
+    merged,
+    opts,
+    savedOverrides,
+    savedWallWallDecisions,
+  );
+  const nesting = nestDecomposedPanels(
+    decomposed,
+    opts.sheetConfig!,
+    opts.scaleDenom,
+  );
+  const result = generateFromNesting(merged, nesting, opts);
+
+  if (result.files.length === 0) {
+    throw new Error(
+      result.warnings.length > 0
+        ? result.warnings.join(" ")
+        : "No se generaron archivos. Verificá que el modelo tenga geometría válida.",
+    );
+  }
+
+  const { default: JSZip } = await import("jszip");
+  const zip = new JSZip();
+  for (const f of result.files) zip.file(f.name, f.blob);
+  return zip.generateAsync({ type: "blob" });
+}
 
 export default function PaymentPage() {
   const router = useRouter();
   const {
     file,
+    fileId,
+    projectFileName,
     phase1Result,
     savedOverrides,
     savedWallWallDecisions,
+    savedMerges,
     scale,
     paper,
     minAreaM2,
@@ -36,69 +97,100 @@ export default function PaymentPage() {
   }, [isLoadingSession, phase1Result, router]);
 
   const proceedToGeneration = useCallback(async () => {
-    if (!phase1Result || !file) return;
+    if (!phase1Result || !fileId) return;
 
     setIsGenerating(true);
     setError("");
 
+    const opts: PipelineOptions = {
+      scaleDenom: scale,
+      paper,
+      includeCuttingSheet: true,
+      sheetConfig,
+      minAreaM2,
+    };
+
+    const stem =
+      file?.name.replace(/\.[^.]+$/, "") ??
+      projectFileName?.replace(/\.[^.]+$/, "") ??
+      phase1Result.stem;
+
     try {
-      const opts: PipelineOptions = {
-        scaleDenom: scale,
+      const backendRes = await generateProjectFiles({
+        file_id: fileId,
+        original_filename: file?.name ?? projectFileName ?? "model.obj",
+        scale_denom: scale,
         paper,
-        includeCuttingSheet: true,
-        sheetConfig,
-        minAreaM2,
-      };
+        min_area_m2: minAreaM2,
+        sheet_config: {
+          width_m: sheetConfig.widthM,
+          height_m: sheetConfig.heightM,
+          gap_m: sheetConfig.gapM,
+        },
+        overrides: overridesToRecord(savedOverrides),
+        wall_wall_decisions: decisionsToRecord(savedWallWallDecisions),
+        merges: savedMerges,
+      });
 
-      // Todo en el cliente: el trabajo pesado (parseo/clasificación) ya está en
-      // phase1Result; acá solo se decompone, se nesteа y se serializa a DXF/PDF.
-      const decomposed = decomposePanels(
-        phase1Result,
-        opts,
-        savedOverrides,
-        savedWallWallDecisions,
-      );
-      const nesting = nestDecomposedPanels(decomposed, sheetConfig, scale);
-      const result = generateFromNesting(phase1Result, nesting, opts);
-
-      if (result.files.length === 0) {
-        throw new Error(
-          result.warnings.length > 0
-            ? result.warnings.join(" ")
-            : "No se generaron archivos. Verificá que el modelo tenga geometría válida.",
-        );
+      let zipBlob: Blob;
+      if (backendRes.zip_base64) {
+        zipBlob = base64ToBlob(backendRes.zip_base64);
+      } else {
+        throw new Error("El backend no devolvió el archivo ZIP.");
       }
 
-      const { default: JSZip } = await import("jszip");
-      const zip = new JSZip();
-      for (const f of result.files) zip.file(f.name, f.blob);
-
-      const zipBlob = await zip.generateAsync({ type: "blob" });
-      const stem = file.name.replace(/\.[^.]+$/, "");
       const url = URL.createObjectURL(zipBlob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `${stem}_planos.zip`;
+      a.download = backendRes.zip_filename ?? `${stem}_planos.zip`;
       a.click();
       URL.revokeObjectURL(url);
 
       resetProject();
       alert("¡Planos generados y descargados exitosamente!");
       router.push("/");
-    } catch (err: unknown) {
-      console.error(err);
-      setError(err instanceof Error ? err.message : "Error desconocido al procesar.");
-      setIsGenerating(false);
+    } catch (backendErr) {
+      console.warn("Generación en backend falló, usando cliente:", backendErr);
+      try {
+        const zipBlob = await generateClientSideZip(
+          phase1Result,
+          opts,
+          savedOverrides,
+          savedWallWallDecisions,
+          savedMerges,
+        );
+        const url = URL.createObjectURL(zipBlob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${stem}_planos.zip`;
+        a.click();
+        URL.revokeObjectURL(url);
+
+        resetProject();
+        alert("¡Planos generados (modo local) y descargados!");
+        router.push("/");
+      } catch (clientErr: unknown) {
+        console.error(clientErr);
+        setError(
+          clientErr instanceof Error
+            ? clientErr.message
+            : "Error desconocido al procesar.",
+        );
+        setIsGenerating(false);
+      }
     }
   }, [
     phase1Result,
     file,
+    fileId,
+    projectFileName,
     scale,
     paper,
     minAreaM2,
     sheetConfig,
     savedOverrides,
     savedWallWallDecisions,
+    savedMerges,
     resetProject,
     router,
   ]);
@@ -134,7 +226,7 @@ export default function PaymentPage() {
         <div className="card bg-base-100 shadow-2xl border border-base-200 w-full max-w-md">
           <div className="card-body items-center justify-center py-20 gap-4">
             <span className="loading loading-spinner loading-lg text-primary" />
-            <p className="font-medium text-base-content/80">Generando planos...</p>
+            <p className="font-medium text-base-content/80">Generando planos en el servidor...</p>
           </div>
         </div>
       </div>

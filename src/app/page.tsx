@@ -1,15 +1,21 @@
 import UploadForm from "@/components/UploadForm";
 import BackgroundSymbols from "@/components/BackgroundSymbols";
+import { ThemePicker } from "@/context/ThemeContext";
 
 export default function Home() {
   return (
     <main className="flex flex-col min-h-screen items-center py-12 px-4 md:px-8 relative">
+      <ThemePicker />
       <BackgroundSymbols />
       
       <div className="text-center mb-12 mt-8 md:mt-12 z-10">
-        <div className="inline-flex items-center justify-center w-16 h-16 bg-primary text-primary-content text-2xl font-black rounded-2xl mb-6 shadow-xl shadow-primary/20">
-          2D
-        </div>
+        <img
+          src="/images/logoFaviconE2d.svg"
+          alt="Eficiencia2D"
+          width={128}
+          height={128}
+          className="mx-auto mb-6 w-24 h-24 md:w-32 md:h-32 drop-shadow-md"
+        />
         <h1 className="text-4xl md:text-6xl font-extrabold tracking-tight mb-4 text-base-content">
           Eficiencia2D
         </h1>
