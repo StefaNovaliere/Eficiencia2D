@@ -147,6 +147,8 @@ export default function ReviewScreen({
   const [isRotating, setIsRotating] = useState(false);
   const [hiddenGroupIds, setHiddenGroupIds] = useState<Set<number>>(() => new Set());
   const [bulkActionNotice, setBulkActionNotice] = useState<string | null>(null);
+  // Pestaña activa del panel derecho: lista de capas vs acciones de la selección.
+  const [sidebarTab, setSidebarTab] = useState<"capas" | "seleccion">("capas");
   const [bulkSimilarModal, setBulkSimilarModal] = useState<{
     reference: GeometryGroup;
     matches: GeometryGroup[];
@@ -199,6 +201,16 @@ export default function ReviewScreen({
   useEffect(() => {
     setManualPhase1(null);
   }, [phase1]);
+
+  // Auto-cambiar a "Selección" al elegir una sola capa; volver a "Capas" al
+  // deseleccionar. Con varias seleccionadas (Ctrl+clic para fusionar) no cambia.
+  useEffect(() => {
+    setSidebarTab((prev) => {
+      if (selectedGroupIds.size === 1) return "seleccion";
+      if (selectedGroupIds.size === 0) return "capas";
+      return prev;
+    });
+  }, [selectedGroupIds]);
 
   useEffect(() => {
     if (!contextMenu) return;
@@ -774,42 +786,6 @@ export default function ReviewScreen({
             <div className="hidden sm:block w-px h-7 bg-base-300/50" />
 
             <div className="inline-flex items-center gap-0.5 p-0.5 rounded-xl bg-base-200/50">
-              {selectedGroupIds.size >= 2 && canMergeSelected && (
-                <div className="tooltip tooltip-bottom" data-tip="Fusionar capas seleccionadas">
-                  <button
-                    type="button"
-                    className={`${viewToolBtn} w-auto px-2 gap-1 text-primary`}
-                    onClick={handleMergeSelected}
-                  >
-                    <Link2 size={15} />
-                    <span className="text-xs font-semibold">Fusionar</span>
-                  </button>
-                </div>
-              )}
-              {splitPreview && splitPreview.components > 1 && (
-                <div className="tooltip tooltip-bottom" data-tip="Separar islas de malla desconectadas">
-                  <button
-                    type="button"
-                    className={`${viewToolBtn} w-auto px-2 gap-1`}
-                    onClick={handleSplitComponents}
-                  >
-                    <SquareSplitHorizontal size={15} />
-                    <span className="text-xs font-semibold">{splitPreview.components} comp.</span>
-                  </button>
-                </div>
-              )}
-              {splitPreview && splitPreview.panels > 1 && (
-                <div className="tooltip tooltip-bottom" data-tip="Separar paneles coplanares unidos (L, escalones)">
-                  <button
-                    type="button"
-                    className={`${viewToolBtn} w-auto px-2 gap-1`}
-                    onClick={handleSplitPanels}
-                  >
-                    <SquareSplitHorizontal size={15} />
-                    <span className="text-xs font-semibold">{splitPreview.panels} piezas</span>
-                  </button>
-                </div>
-              )}
               {selectedGroupIds.size === 1 && (
                 <div className="tooltip tooltip-bottom" data-tip="Ocultar seleccionado">
                   <button
@@ -1060,20 +1036,57 @@ export default function ReviewScreen({
           </div>
         )}
 
-        <GroupList
-          groups={effectivePhase1.groups}
-          selectedGroupIds={selectedGroupIds}
-          hiddenGroupIds={hiddenGroupIds}
-          categoryOverrides={overrides}
-          visibleCategories={visibleCategories}
-          onSelectGroup={handleSelectGroup}
-          onToggleGroup={handleToggleGroup}
-          onHideGroup={handleHideGroup}
-          onShowGroup={handleShowGroup}
-          onShowAllHidden={handleShowAllHidden}
-          onChangeCategory={handleChangeCategory}
-          onOpenContextMenu={openViewerContextMenu}
-        />
+        {/* Pestañas: lista de capas vs acciones de la selección */}
+        <div role="tablist" className="tabs tabs-bordered px-2 shrink-0 bg-base-100">
+          <button
+            type="button"
+            role="tab"
+            className={`tab gap-1.5 ${sidebarTab === "capas" ? "tab-active" : ""}`}
+            onClick={() => setSidebarTab("capas")}
+          >
+            Capas
+            <span className="badge badge-xs badge-neutral font-mono">{effectivePhase1.groups.length}</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            className={`tab gap-1.5 ${sidebarTab === "seleccion" ? "tab-active" : ""}`}
+            onClick={() => setSidebarTab("seleccion")}
+          >
+            Selección
+            {selectedGroupIds.size > 0 && (
+              <span className="badge badge-xs badge-primary font-mono">{selectedGroupIds.size}</span>
+            )}
+          </button>
+        </div>
+
+        {/* Pestaña: Capas */}
+        <div className={`flex-1 min-h-0 flex flex-col ${sidebarTab === "capas" ? "" : "hidden"}`}>
+          <GroupList
+            groups={effectivePhase1.groups}
+            selectedGroupIds={selectedGroupIds}
+            hiddenGroupIds={hiddenGroupIds}
+            categoryOverrides={overrides}
+            visibleCategories={visibleCategories}
+            onSelectGroup={handleSelectGroup}
+            onToggleGroup={handleToggleGroup}
+            onHideGroup={handleHideGroup}
+            onShowGroup={handleShowGroup}
+            onShowAllHidden={handleShowAllHidden}
+            onChangeCategory={handleChangeCategory}
+            onOpenContextMenu={openViewerContextMenu}
+          />
+        </div>
+
+        {/* Pestaña: Selección */}
+        <div className={`flex-1 min-h-0 overflow-y-auto custom-scrollbar ${sidebarTab === "seleccion" ? "" : "hidden"}`}>
+          {selectedGroupIds.size === 0 && (
+            <div className="flex flex-col items-center justify-center h-full text-center px-6 gap-2 text-base-content/50">
+              <ScanSearch size={26} className="text-base-content/25" />
+              <p className="text-sm">Seleccioná una capa para ver sus acciones</p>
+              <p className="text-xs text-base-content/35">Tipo, fusión/división y opciones por tamaño.</p>
+            </div>
+          )}
 
         {selectedGroupIds.size === 1 && sameAreaMatches.length > 0 && (
           <div className="px-4 py-2 border-b border-base-300/30 bg-base-100/60">
@@ -1196,6 +1209,8 @@ export default function ReviewScreen({
             </p>
           </div>
         )}
+        </div>
+        {/* /Pestaña: Selección */}
 
         {merges.length > 0 && (
           <div className="border-b border-base-300/30 bg-base-100/60">
@@ -1244,21 +1259,6 @@ export default function ReviewScreen({
         )}
 
         <div className="mt-auto border-t border-base-300/40 p-4 bg-base-100 shrink-0">
-          <div className="grid grid-cols-3 gap-1.5 mb-3">
-            <div className="text-center px-2 py-2 rounded-lg bg-success/8 border border-success/15">
-              <p className="text-lg font-bold tabular-nums text-success leading-none">{stats.floors}</p>
-              <p className="text-[9px] uppercase tracking-wider text-base-content/45 mt-1">Pisos</p>
-            </div>
-            <div className="text-center px-2 py-2 rounded-lg bg-info/8 border border-info/15">
-              <p className="text-lg font-bold tabular-nums text-info leading-none">{stats.walls}</p>
-              <p className="text-[9px] uppercase tracking-wider text-base-content/45 mt-1">Paredes</p>
-            </div>
-            <div className="text-center px-2 py-2 rounded-lg bg-base-200/80 border border-base-300/30">
-              <p className="text-lg font-bold tabular-nums text-base-content/60 leading-none">{stats.discarded}</p>
-              <p className="text-[9px] uppercase tracking-wider text-base-content/45 mt-1">Descart.</p>
-            </div>
-          </div>
-
           {overrides.size > 0 && (
             <p className="text-[10px] text-warning mb-3 px-2 py-1.5 rounded-lg bg-warning/8 border border-warning/15 text-center font-medium">
               {overrides.size} clasificación{overrides.size !== 1 ? "es" : ""} modificada{overrides.size !== 1 ? "s" : ""}
