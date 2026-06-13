@@ -30,7 +30,6 @@ import {
   RefreshCw,
   Box,
   Maximize,
-  Minimize,
   Crosshair,
   EyeOff,
   Eye,
@@ -786,95 +785,111 @@ export default function ReviewScreen({
 
             <div className="hidden sm:block w-px h-7 bg-base-300/50" />
 
-            <div className="inline-flex items-center gap-0.5 p-0.5 rounded-xl bg-base-200/50">
-              {selectedGroupIds.size === 1 && (
-                <div className="tooltip tooltip-bottom" data-tip="Ocultar seleccionado">
-                  <button
-                    type="button"
-                    className={viewToolBtn}
-                    onClick={() => handleHideGroup(Array.from(selectedGroupIds)[0])}
-                  >
-                    <EyeOff size={15} />
-                  </button>
-                </div>
-              )}
-              {hiddenGroupIds.size > 0 && (
-                <div className="tooltip tooltip-bottom" data-tip="Mostrar ocultos">
-                  <button
-                    type="button"
-                    className={`${viewToolBtn} w-auto px-2 gap-1`}
-                    onClick={handleShowAllHidden}
-                  >
-                    <Eye size={14} />
-                    <span className="text-xs font-semibold tabular-nums">{hiddenGroupIds.size}</span>
-                  </button>
-                </div>
-              )}
-              <div className="tooltip tooltip-bottom" data-tip={`Rotar eje (${phase1.appliedAxis === "Y" ? "Y↑" : "Z↑"})`}>
-                <button
-                  type="button"
-                  className={viewToolBtn}
-                  onClick={handleRotateAxis}
-                  disabled={isRotating || isGenerating}
-                  aria-busy={isRotating}
-                >
-                  {isRotating ? (
-                    <span className="loading loading-spinner loading-xs" />
-                  ) : (
-                    <RefreshCw size={15} />
+            {/* Acciones contextuales sobre la selección (sólo cuando aplican) */}
+            {(selectedGroupIds.size === 1 || hiddenGroupIds.size > 0) && (
+              <>
+                <div className="inline-flex items-center gap-0.5 p-0.5 rounded-xl bg-base-200/50">
+                  {selectedGroupIds.size === 1 && (
+                    <div className="tooltip tooltip-bottom" data-tip="Ocultar seleccionado">
+                      <button
+                        type="button"
+                        className={viewToolBtn}
+                        onClick={() => handleHideGroup(Array.from(selectedGroupIds)[0])}
+                      >
+                        <EyeOff size={15} />
+                      </button>
+                    </div>
                   )}
-                </button>
-              </div>
-              <div className="tooltip tooltip-bottom" data-tip={showCenterAxes ? "Ocultar ejes" : "Mostrar ejes"}>
-                <button
-                  type="button"
-                  className={viewToolBtn}
-                  onClick={() => setShowCenterAxes((s) => !s)}
-                >
-                  <Crosshair size={15} className={showCenterAxes ? "text-primary" : "text-base-content/50"} />
-                </button>
-              </div>
-              <div className="tooltip tooltip-bottom" data-tip={isSolid ? "Vista transparente" : "Vista maciza"}>
-                <button
-                  type="button"
-                  className={`${viewToolBtn} ${isSolid ? "bg-primary/15 text-primary hover:bg-primary/20" : ""}`}
-                  onClick={() => setIsSolid((s) => !s)}
-                >
-                  <Box size={15} />
-                </button>
-              </div>
-              <div className="tooltip tooltip-bottom" data-tip={hideSidebar ? "Mostrar panel" : "Pantalla completa"}>
-                <button
-                  type="button"
-                  className={`${viewToolBtn} ${hideSidebar ? "bg-primary/15 text-primary hover:bg-primary/20" : ""}`}
-                  onClick={() => setHideSidebar((s) => !s)}
-                >
-                  {hideSidebar ? <Minimize size={15} /> : <Maximize size={15} />}
-                </button>
-              </div>
-            </div>
+                  {hiddenGroupIds.size > 0 && (
+                    <div className="tooltip tooltip-bottom" data-tip="Mostrar ocultos">
+                      <button
+                        type="button"
+                        className={`${viewToolBtn} w-auto px-2 gap-1`}
+                        onClick={handleShowAllHidden}
+                      >
+                        <Eye size={14} />
+                        <span className="text-xs font-semibold tabular-nums">{hiddenGroupIds.size}</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <div className="hidden sm:block w-px h-7 bg-base-300/50" />
+              </>
+            )}
 
-            <div className="hidden sm:block w-px h-7 bg-base-300/50" />
-
-            <div
-              className="inline-flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-base-200/50 border border-base-300/30"
-              title="Componentes más chicos que este umbral se descartan al generar"
-            >
-              <SlidersHorizontal size={13} className="text-base-content/40 shrink-0" />
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-base-content/50 hidden lg:inline">
-                Mín. área
-              </span>
-              <select
-                className="select select-ghost select-xs h-7 min-h-0 rounded-lg font-mono font-semibold px-1"
-                value={minAreaM2}
-                onChange={(e) => handleMinAreaChangeWithReset(Number(e.target.value))}
-              >
-                {MIN_AREA_OPTIONS.map((a) => (
-                  <option key={a} value={a}>
-                    {a === 0 ? "Ninguno" : `${a} m²`}
-                  </option>
-                ))}
-              </select>
+            {/* Vista y opciones — divulgación progresiva en un solo menú */}
+            <div className="dropdown dropdown-end">
+              <div tabIndex={0} role="button" className="btn btn-sm btn-ghost gap-1.5 rounded-lg">
+                <SlidersHorizontal size={15} />
+                <span className="text-sm font-medium hidden sm:inline">Vista</span>
+                <ChevronDown size={14} className="opacity-60" />
+              </div>
+              <ul tabIndex={0} className="dropdown-content menu bg-base-100 rounded-2xl shadow-xl border border-base-300/40 w-64 p-2 mt-2 z-30">
+                <li>
+                  <button
+                    type="button"
+                    onClick={handleRotateAxis}
+                    disabled={isRotating || isGenerating}
+                    className="justify-between"
+                  >
+                    <span className="flex items-center gap-2">
+                      {isRotating ? <span className="loading loading-spinner loading-xs" /> : <RefreshCw size={15} />}
+                      Rotar eje vertical
+                    </span>
+                    <span className="badge badge-sm badge-ghost font-mono">{phase1.appliedAxis === "Y" ? "Y↑" : "Z↑"}</span>
+                  </button>
+                </li>
+                <li>
+                  <label className="justify-between cursor-pointer">
+                    <span className="flex items-center gap-2"><Crosshair size={15} /> Mostrar ejes</span>
+                    <input
+                      type="checkbox"
+                      className="toggle toggle-sm toggle-primary"
+                      checked={showCenterAxes}
+                      onChange={() => setShowCenterAxes((s) => !s)}
+                    />
+                  </label>
+                </li>
+                <li>
+                  <label className="justify-between cursor-pointer">
+                    <span className="flex items-center gap-2"><Box size={15} /> Vista maciza</span>
+                    <input
+                      type="checkbox"
+                      className="toggle toggle-sm toggle-primary"
+                      checked={isSolid}
+                      onChange={() => setIsSolid((s) => !s)}
+                    />
+                  </label>
+                </li>
+                <li>
+                  <label className="justify-between cursor-pointer">
+                    <span className="flex items-center gap-2"><Maximize size={15} /> Pantalla completa</span>
+                    <input
+                      type="checkbox"
+                      className="toggle toggle-sm toggle-primary"
+                      checked={hideSidebar}
+                      onChange={() => setHideSidebar((s) => !s)}
+                    />
+                  </label>
+                </li>
+                <div className="divider my-1" />
+                <li>
+                  <div className="flex items-center justify-between gap-2 py-1" title="Componentes más chicos que este umbral se descartan al generar">
+                    <span className="flex items-center gap-2"><SlidersHorizontal size={15} /> Descartar &lt; (mín. área)</span>
+                    <select
+                      className="select select-bordered select-xs h-7 min-h-0 rounded-lg font-mono"
+                      value={minAreaM2}
+                      onChange={(e) => handleMinAreaChangeWithReset(Number(e.target.value))}
+                    >
+                      {MIN_AREA_OPTIONS.map((a) => (
+                        <option key={a} value={a}>
+                          {a === 0 ? "Ninguno" : `${a} m²`}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </li>
+              </ul>
             </div>
           </div>
         </div>
