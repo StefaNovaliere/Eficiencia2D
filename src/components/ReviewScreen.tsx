@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import GroupList from "./GroupList";
 import VisibilityFilters from "./VisibilityFilters";
+import StepIndicator from "./StepIndicator";
 import type { FaceCategory, GeometryGroup } from "@/core/group-classifier";
 import { reclassifyWithAxis, computePanelIdByGroup, applyMerges, areGroupsCoplanar } from "@/core/pipeline";
 import type { Phase1Result, ClassificationOverride } from "@/core/pipeline";
@@ -13,7 +14,15 @@ import type { LeaderMarker } from "./ModelViewer";
 
 export type WallWallDecisions = Map<number, number>;
 
-const ModelViewer = dynamic(() => import("./ModelViewer"), { ssr: false });
+const ModelViewer = dynamic(() => import("./ModelViewer"), {
+  ssr: false,
+  loading: () => (
+    <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-base-content/60">
+      <span className="loading loading-spinner loading-lg text-primary" />
+      <p className="text-sm font-medium">Cargando vista 3D…</p>
+    </div>
+  ),
+});
 
 const ALL_CATEGORIES: FaceCategory[] = [
   "floor",
@@ -35,6 +44,10 @@ export interface ReviewScreenProps {
   initialOverrides?: ClassificationOverride[];
   initialWallWallDecisions?: WallWallDecisions;
   initialMerges?: number[][];
+  /** True mientras el padre decompone/nestea tras "Confirmar y continuar". */
+  isProcessing?: boolean;
+  /** Mensaje de error a mostrar inline (reemplaza el window.alert previo). */
+  errorMessage?: string;
 }
 
 const MIN_AREA_OPTIONS = [0, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0];
@@ -53,6 +66,8 @@ export default function ReviewScreen({
   initialOverrides,
   initialWallWallDecisions,
   initialMerges,
+  isProcessing = false,
+  errorMessage,
 }: ReviewScreenProps) {
   const [selectedGroupIds, setSelectedGroupIds] = useState<Set<number>>(
     () => new Set(),
@@ -468,6 +483,9 @@ export default function ReviewScreen({
       </div>
 
       <div className="w-full md:w-[22rem] lg:w-[26rem] flex flex-col border-t md:border-t-0 md:border-l border-base-200/60 bg-base-100/95 backdrop-blur-3xl shrink-0 h-[40vh] md:h-full shadow-[-20px_0_40px_-15px_rgba(0,0,0,0.05)] z-20">
+        <div className="px-4 pt-4 pb-3 border-b border-base-200/50 shrink-0">
+          <StepIndicator current="review" />
+        </div>
         <GroupList
           groups={effectivePhase1.groups}
           selectedGroupIds={selectedGroupIds}
@@ -545,12 +563,31 @@ export default function ReviewScreen({
               Seleccioná una pared para revisar qué pared se recorta en cada unión.
             </p>
           )}
+          {errorMessage && (
+            <div className="alert alert-error rounded-xl mb-4 text-sm py-2">
+              <span>{errorMessage}</span>
+            </div>
+          )}
           <div className="flex gap-3">
-            <button className="btn flex-1 btn-ghost bg-base-200 hover:bg-base-300 rounded-xl" onClick={onCancel}>
+            <button
+              className="btn flex-1 btn-ghost bg-base-200 hover:bg-base-300 rounded-xl"
+              onClick={onCancel}
+              disabled={isProcessing}
+            >
               Volver
             </button>
-            <button className="btn flex-1 btn-primary shadow-lg shadow-primary/30 rounded-xl text-primary-content" onClick={handleConfirm}>
-              Confirmar y Generar
+            <button
+              className="btn flex-1 btn-primary shadow-lg shadow-primary/30 rounded-xl text-primary-content"
+              onClick={handleConfirm}
+              disabled={isProcessing}
+            >
+              {isProcessing ? (
+                <>
+                  <span className="loading loading-spinner loading-sm" /> Procesando…
+                </>
+              ) : (
+                "Confirmar y continuar →"
+              )}
             </button>
           </div>
         </div>

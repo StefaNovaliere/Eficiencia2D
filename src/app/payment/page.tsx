@@ -23,6 +23,15 @@ export default function PaymentPage() {
   
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState("");
+  // ZIP generado y listo para (re)descargar. Reemplaza el window.alert de éxito.
+  const [download, setDownload] = useState<{ url: string; name: string } | null>(null);
+
+  // Liberar el blob al desmontar para no filtrar memoria.
+  useEffect(() => {
+    return () => {
+      if (download) URL.revokeObjectURL(download.url);
+    };
+  }, [download]);
 
   useEffect(() => {
     if (!isLoadingSession && (!phase1Result || !nestingData)) {
@@ -68,22 +77,29 @@ export default function PaymentPage() {
 
       const zipBlob = await zip.generateAsync({ type: "blob" });
       const stem = file.name.replace(/\.[^.]+$/, "");
+      const name = `${stem}_planos.zip`;
       const url = URL.createObjectURL(zipBlob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `${stem}_planos.zip`;
+      a.download = name;
       a.click();
-      URL.revokeObjectURL(url);
 
-      resetProject();
-      alert("¡Planos generados y descargados exitosamente!");
-      router.push("/");
+      // Mostramos un estado de éxito en pantalla (en vez de window.alert),
+      // conservando el blob para permitir "Descargar de nuevo".
+      setDownload({ url, name });
+      setIsGenerating(false);
     } catch (err: unknown) {
       console.error(err);
       setError(err instanceof Error ? err.message : "Error desconocido al procesar.");
       setIsGenerating(false);
     }
-  }, [phase1Result, file, nestingData, scale, paper, sheetConfig, minAreaM2, resetProject, router]);
+  }, [phase1Result, file, nestingData, scale, paper, sheetConfig, minAreaM2]);
+
+  const handleFinish = useCallback(() => {
+    if (download) URL.revokeObjectURL(download.url);
+    resetProject();
+    router.push("/");
+  }, [download, resetProject, router]);
 
   const handlePaymentApproved = useCallback(async (paymentId: string) => {
     try {
@@ -117,6 +133,34 @@ export default function PaymentPage() {
 
   if (isLoadingSession) return null;
   if (!phase1Result || !nestingData) return null;
+
+  if (download) {
+    return (
+      <div className="flex flex-col min-h-screen items-center justify-center p-4">
+        <div className="card bg-base-100 shadow-2xl border border-base-200 w-full max-w-md">
+          <div className="card-body items-center text-center gap-3 py-12">
+            <div className="text-success text-5xl">✓</div>
+            <h2 className="text-2xl font-bold">¡Listo! Tus planos se descargaron</h2>
+            <p className="text-base-content/70">
+              Si la descarga no comenzó, podés volver a bajarla.
+            </p>
+            <div className="flex flex-col sm:flex-row gap-2 w-full mt-2">
+              <a
+                href={download.url}
+                download={download.name}
+                className="btn btn-outline flex-1"
+              >
+                Descargar de nuevo
+              </a>
+              <button className="btn btn-primary flex-1" onClick={handleFinish}>
+                Volver al inicio
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (isGenerating) {
     return (

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useProjectContext } from "@/context/ProjectContext";
 import ReviewScreen from "@/components/ReviewScreen";
@@ -29,6 +29,9 @@ export default function ReviewPage() {
     resetProject
   } = useProjectContext();
 
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [error, setError] = useState("");
+
   useEffect(() => {
     if (!isLoadingSession && !phase1Result) {
       router.replace("/");
@@ -45,6 +48,8 @@ export default function ReviewPage() {
     setSavedOverrides(overrides);
     setSavedWallWallDecisions(wallWallDecisions);
     setSavedMerges(merges);
+    setIsProcessing(true);
+    setError("");
 
     try {
       const opts: PipelineOptions = {
@@ -67,7 +72,8 @@ export default function ReviewPage() {
       router.push("/nesting");
     } catch (err: unknown) {
       console.error(err);
-      alert(err instanceof Error ? err.message : "Error desconocido al procesar.");
+      setError(err instanceof Error ? err.message : "Error desconocido al procesar.");
+      setIsProcessing(false);
     }
   }, [phase1Result, scale, paper, sheetConfig, minAreaM2, setSavedOverrides, setSavedWallWallDecisions, setSavedMerges, setNestingData, router]);
 
@@ -95,6 +101,8 @@ export default function ReviewPage() {
       initialOverrides={savedOverrides}
       initialWallWallDecisions={savedWallWallDecisions}
       initialMerges={savedMerges}
+      isProcessing={isProcessing}
+      errorMessage={error}
     />
   );
 }

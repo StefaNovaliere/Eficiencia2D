@@ -103,6 +103,13 @@ export default function GroupList({
       </div>
 
       <div className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar">
+        {visibleGroups.length === 0 && (
+          <div className="flex flex-col items-center justify-center text-center gap-1 py-10 px-4 text-base-content/50">
+            <span className="text-2xl">🔍</span>
+            <p className="text-sm font-medium">No hay capas que coincidan con los filtros.</p>
+            <p className="text-xs">Activá una categoría en “Mostrar” para verlas.</p>
+          </div>
+        )}
         {visibleGroups.map((group) => {
           const effectiveCat = categoryOverrides.get(group.id) ?? group.category;
           const isSelected = selectedGroupIds.has(group.id);

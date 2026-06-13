@@ -216,7 +216,7 @@ export default function UploadForm() {
                   <option value={25}>1:25</option>
                   <option value={50}>1:50</option>
                   <option value={75}>1:75</option>
-                  <option value={100}>1:100 (Centimetros)</option>
+                  <option value={100}>1:100</option>
                 </select>
                 <p className="text-xs text-base-content/60 leading-relaxed mt-1">
                   Ej: Si tu modelo está dibujado en centímetros, elegí 1:100.

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useProjectContext } from "@/context/ProjectContext";
 import NestingPreview from "@/components/NestingPreview";
@@ -26,6 +26,8 @@ export default function NestingPage() {
     isLoadingSession
   } = useProjectContext();
 
+  const [isRecomputing, setIsRecomputing] = useState(false);
+
   useEffect(() => {
     if (!isLoadingSession && !nestingData) {
       router.replace("/");
@@ -42,39 +44,39 @@ export default function NestingPage() {
     router.push("/review");
   }, [setNestingData, router]);
 
+  // Recalcula el nesting fuera del frame actual para que el overlay
+  // "Recalculando planchas…" alcance a pintarse antes del cálculo pesado.
+  const recompute = useCallback(
+    (newScale: number, newConfig: SheetConfig) => {
+      if (!phase1Result) return;
+      setIsRecomputing(true);
+      setTimeout(() => {
+        const merged = savedMerges.length > 0 ? applyMerges(phase1Result, savedMerges) : phase1Result;
+        const opts: PipelineOptions = {
+          scaleDenom: newScale,
+          paper,
+          includeCuttingSheet: true,
+          sheetConfig: newConfig,
+          minAreaM2,
+        };
+        const decomposed = decomposePanels(merged, opts, savedOverrides, savedWallWallDecisions);
+        const nesting = nestDecomposedPanels(decomposed, newConfig, newScale);
+        setNestingData(nesting);
+        setIsRecomputing(false);
+      }, 30);
+    },
+    [phase1Result, savedOverrides, savedWallWallDecisions, savedMerges, paper, minAreaM2, setNestingData],
+  );
+
   const handleSheetConfigChange = useCallback((newConfig: SheetConfig) => {
     setSheetConfig(newConfig);
-    if (!phase1Result) return;
-
-    const merged = savedMerges.length > 0 ? applyMerges(phase1Result, savedMerges) : phase1Result;
-    const opts: PipelineOptions = {
-      scaleDenom: scale,
-      paper,
-      includeCuttingSheet: true,
-      sheetConfig: newConfig,
-      minAreaM2,
-    };
-    const decomposed = decomposePanels(merged, opts, savedOverrides, savedWallWallDecisions);
-    const nesting = nestDecomposedPanels(decomposed, newConfig, scale);
-    setNestingData(nesting);
-  }, [phase1Result, savedOverrides, savedWallWallDecisions, savedMerges, scale, paper, minAreaM2, setSheetConfig, setNestingData]);
+    recompute(scale, newConfig);
+  }, [recompute, scale, setSheetConfig]);
 
   const handleScaleChange = useCallback((newScale: number) => {
     setScale(newScale);
-    if (!phase1Result) return;
-
-    const merged = savedMerges.length > 0 ? applyMerges(phase1Result, savedMerges) : phase1Result;
-    const opts: PipelineOptions = {
-      scaleDenom: newScale,
-      paper,
-      includeCuttingSheet: true,
-      sheetConfig,
-      minAreaM2,
-    };
-    const decomposed = decomposePanels(merged, opts, savedOverrides, savedWallWallDecisions);
-    const nesting = nestDecomposedPanels(decomposed, sheetConfig, newScale);
-    setNestingData(nesting);
-  }, [phase1Result, savedOverrides, savedWallWallDecisions, savedMerges, paper, sheetConfig, minAreaM2, setScale, setNestingData]);
+    recompute(newScale, sheetConfig);
+  }, [recompute, sheetConfig, setScale]);
 
   if (isLoadingSession) return null;
   if (!nestingData) return null;
@@ -88,6 +90,7 @@ export default function NestingPage() {
       onSheetConfigChange={handleSheetConfigChange}
       scaleDenom={scale}
       onScaleChange={handleScaleChange}
+      isRecomputing={isRecomputing}
     />
   );
 }
