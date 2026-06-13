@@ -249,13 +249,10 @@ export function ThemePicker() {
                 onClick={() => setTheme(item.id)}
               >
                 <span
-                  className="w-10 h-4 rounded-md border border-base-content/15 shrink-0 overflow-hidden flex"
-                  title={`Fondo · pared · piso — ${item.label}`}
-                >
-                  <span className="flex-1 h-full" style={{ backgroundColor: item.preview.bg }} />
-                  <span className="flex-1 h-full" style={{ backgroundColor: item.preview.wall }} />
-                  <span className="flex-1 h-full" style={{ backgroundColor: item.preview.floor }} />
-                </span>
+                  className="w-4 h-4 rounded-full border border-base-content/15 shrink-0"
+                  style={{ backgroundColor: item.swatch }}
+                  title={item.label}
+                />
                 <span className="flex-1 text-left">{item.label}</span>
                 {active && <Check className="h-4 w-4 text-primary shrink-0" />}
               </button>

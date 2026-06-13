@@ -4,7 +4,7 @@ import {
   resolveApiBaseUrl,
 } from "@/services/api-base";
 
-async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
+export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
   let baseUrl = await resolveApiBaseUrl();
 
   try {

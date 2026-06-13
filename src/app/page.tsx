@@ -1,4 +1,5 @@
 import UploadForm from "@/components/UploadForm";
+import AuthNav from "@/components/AuthNav";
 import BackgroundSymbols from "@/components/BackgroundSymbols";
 import { ThemePicker } from "@/context/ThemeContext";
 
@@ -6,6 +7,7 @@ export default function Home() {
   return (
     <main className="flex flex-col min-h-screen items-center py-12 px-4 md:px-8 relative">
       <ThemePicker />
+      <AuthNav />
       <BackgroundSymbols />
       
       <div className="text-center mb-12 mt-8 md:mt-12 z-10">
