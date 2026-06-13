@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   areaMatchKey,
   areasMatch,
+  collectSimilarGroups,
   findGroupsWithSameArea,
+  getEffectiveCategory,
 } from "@/core/discard-by-area";
 import type { GeometryGroup } from "@/core/group-classifier";
 
@@ -44,5 +46,23 @@ describe("discard-by-area", () => {
 
   it("usa claves de área estables", () => {
     expect(areaMatchKey(1.204)).toBe(areaMatchKey(1.203));
+  });
+
+  it("encuentra descartes iguales para reclasificación masiva", () => {
+    const groups = [
+      mockGroup(1, 0.45, { category: "discard" }),
+      mockGroup(2, 0.45, { category: "discard" }),
+      mockGroup(3, 0.45, { category: "wall" }),
+      mockGroup(4, 0.45, { category: "discard", orientation: "horizontal" }),
+    ];
+    const matches = findGroupsWithSameArea(groups, groups[0]);
+    expect(matches.map((g) => g.id)).toEqual([2]);
+    expect(collectSimilarGroups(groups, groups[0]).map((g) => g.id)).toEqual([1, 2]);
+  });
+
+  it("getEffectiveCategory respeta overrides", () => {
+    const g = mockGroup(1, 1, { category: "discard" });
+    const overrides = new Map([[1, "wall" as const]]);
+    expect(getEffectiveCategory(g, overrides)).toBe("wall");
   });
 });

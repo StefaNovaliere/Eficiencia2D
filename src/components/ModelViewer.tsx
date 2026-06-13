@@ -350,6 +350,7 @@ interface CategoryMeshProps {
   materials: ViewerMaterials;
   onPick: (groupId: number) => void;
   onTogglePick: (groupId: number) => void;
+  onContextMenu?: (detail: { clientX: number; clientY: number; groupId: number | null }) => void;
 }
 
 const PICK_DEPTH_EPS = 0.02;
@@ -380,7 +381,7 @@ function pickGroupFromIntersections(
   return bestId;
 }
 
-function CategoryMesh({ mesh, isDimmed, isSolid, groupAreaById, materials, onPick, onTogglePick }: CategoryMeshProps) {
+function CategoryMesh({ mesh, isDimmed, isSolid, groupAreaById, materials, onPick, onTogglePick, onContextMenu }: CategoryMeshProps) {
   const material = isDimmed
     ? materials.dimmed[mesh.category]
     : isSolid
@@ -394,16 +395,26 @@ function CategoryMesh({ mesh, isDimmed, isSolid, groupAreaById, materials, onPic
         material={material}
         userData={{ mergedMeshData: mesh }}
         onPointerDown={(e) => {
+          if (e.nativeEvent.button !== 0) return;
           e.stopPropagation();
           const groupId = pickGroupFromIntersections(e.intersections, groupAreaById);
           if (groupId == null) return;
-          if (e.nativeEvent.ctrlKey || e.nativeEvent.metaKey) {
+          if (e.nativeEvent.ctrlKey || e.nativeEvent.metaKey || e.nativeEvent.shiftKey) {
             onTogglePick(groupId);
           } else {
             onPick(groupId);
           }
         }}
-
+        onContextMenu={(e) => {
+          e.stopPropagation();
+          e.nativeEvent.preventDefault();
+          const groupId = pickGroupFromIntersections(e.intersections, groupAreaById);
+          onContextMenu?.({
+            clientX: e.nativeEvent.clientX,
+            clientY: e.nativeEvent.clientY,
+            groupId,
+          });
+        }}
       />
       {mesh.edgeGeometry && !isDimmed && (
         <lineSegments geometry={mesh.edgeGeometry} material={materials.edge} />
@@ -463,6 +474,7 @@ interface SceneProps {
   hiddenGroupIds: Set<number>;
   onSelectGroup: (id: number) => void;
   onToggleGroup: (id: number) => void;
+  onContextMenu?: (detail: { clientX: number; clientY: number; groupId: number | null }) => void;
   appliedAxis?: "Y" | "Z";
   showCenterAxes?: boolean;
   leaderMarkers?: LeaderMarker[];
@@ -480,6 +492,7 @@ function Scene({
   hiddenGroupIds,
   onSelectGroup,
   onToggleGroup,
+  onContextMenu,
   appliedAxis = "Y",
   showCenterAxes = true,
   leaderMarkers = [],
@@ -615,6 +628,7 @@ function Scene({
               materials={materials}
               onPick={onSelectGroup}
               onTogglePick={onToggleGroup}
+              onContextMenu={onContextMenu}
             />
           );
         })}
@@ -695,6 +709,7 @@ export interface ModelViewerProps {
   hiddenGroupIds: Set<number>;
   onSelectGroup: (id: number) => void;
   onToggleGroup: (id: number) => void;
+  onContextMenu?: (detail: { clientX: number; clientY: number; groupId: number | null }) => void;
   appliedAxis?: "Y" | "Z";
   showCenterAxes?: boolean;
   leaderMarkers?: LeaderMarker[];
@@ -710,6 +725,7 @@ export default function ModelViewer({
   hiddenGroupIds,
   onSelectGroup,
   onToggleGroup,
+  onContextMenu,
   appliedAxis = "Y",
   showCenterAxes = true,
   leaderMarkers = [],
@@ -750,6 +766,14 @@ export default function ModelViewer({
       }}
       style={{ background: palette.background }}
       onPointerMissed={() => onSelectGroup(-1)}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        onContextMenu?.({
+          clientX: e.clientX,
+          clientY: e.clientY,
+          groupId: null,
+        });
+      }}
       dpr={[1, 1.5]}
     >
       <ambientLight intensity={palette.ambientLight} />
@@ -765,6 +789,7 @@ export default function ModelViewer({
         hiddenGroupIds={hiddenGroupIds}
         onSelectGroup={onSelectGroup}
         onToggleGroup={onToggleGroup}
+        onContextMenu={onContextMenu}
         appliedAxis={appliedAxis}
         showCenterAxes={showCenterAxes}
         leaderMarkers={leaderMarkers}

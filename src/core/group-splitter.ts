@@ -9,6 +9,7 @@
 
 import type { Face3D, Vec3 } from "./types";
 import type { GeometryGroup } from "./group-classifier";
+import { unionFormsSinglePanel } from "./cutting-sheet";
 
 const SNAP = 100;
 
@@ -338,6 +339,86 @@ function tryVerticalSpanSplit(
   return { groups: result, nextId: id };
 }
 
+export interface SplitGroupOptions {
+  /** Skip the single-panel guard (manual split in review). */
+  force?: boolean;
+}
+
+/** Split by edge-connected mesh islands (position-snapped, OBJ-safe). */
+function splitIntoConnectedComponents(
+  faceIndices: number[],
+  faces: Face3D[],
+): number[][] {
+  if (faceIndices.length <= 1) return [faceIndices];
+
+  const vertToIdx = new Map<string, number[]>();
+  for (let i = 0; i < faceIndices.length; i++) {
+    const face = faces[faceIndices[i]];
+    if (!face) continue;
+    for (const v of face.vertices) {
+      const key = `${snap3(v.x)},${snap3(v.y)},${snap3(v.z)}`;
+      const arr = vertToIdx.get(key);
+      if (arr) arr.push(i);
+      else vertToIdx.set(key, [i]);
+    }
+  }
+
+  const parent = faceIndices.map((_, i) => i);
+  function find(x: number): number {
+    while (parent[x] !== x) {
+      parent[x] = parent[parent[x]];
+      x = parent[x];
+    }
+    return x;
+  }
+  function union(a: number, b: number) {
+    const ra = find(a);
+    const rb = find(b);
+    if (ra !== rb) parent[ra] = rb;
+  }
+
+  for (const indices of vertToIdx.values()) {
+    for (let i = 1; i < indices.length; i++) union(indices[0], indices[i]);
+  }
+
+  const compMap = new Map<number, number[]>();
+  for (let i = 0; i < faceIndices.length; i++) {
+    const root = find(i);
+    const arr = compMap.get(root);
+    if (arr) arr.push(faceIndices[i]);
+    else compMap.set(root, [faceIndices[i]]);
+  }
+
+  return Array.from(compMap.values());
+}
+
+export function splitGroupIntoConnectedComponents(
+  faces: Face3D[],
+  group: GeometryGroup,
+  nextId: number,
+): { groups: GeometryGroup[]; nextId: number } {
+  const components = splitIntoConnectedComponents(group.faceIndices, faces);
+  if (components.length <= 1) return { groups: [group], nextId };
+
+  const result: GeometryGroup[] = [];
+  let id = nextId;
+
+  components.forEach((faceIndices, idx) => {
+    const partLabel = `${group.label} · comp. ${idx + 1}/${components.length}`;
+    const gid = idx === 0 ? group.id : id++;
+    result.push(buildGroupFromFaces(group, faceIndices, faces, gid, partLabel));
+  });
+
+  return { groups: result, nextId: id };
+}
+
+export function countConnectedComponents(
+  faces: Face3D[],
+  group: GeometryGroup,
+): number {
+  return splitIntoConnectedComponents(group.faceIndices, faces).length;
+}
+
 /**
  * Split a group into separate pieces when panel-level bridge edges exist,
  * or when vertical wall faces have different height spans (partial edge contact).
@@ -346,7 +427,21 @@ export function splitGroupAtPanelBridges(
   faces: Face3D[],
   group: GeometryGroup,
   nextId: number,
+  options?: SplitGroupOptions,
 ): { groups: GeometryGroup[]; nextId: number } {
+  const groupFaces = group.faceIndices
+    .map((fi) => faces[fi])
+    .filter((f): f is Face3D => !!f);
+
+  // Una sola pieza de corte: pared lisa, malla triangulada o pared con ventana.
+  if (
+    !options?.force &&
+    groupFaces.length > 1 &&
+    unionFormsSinglePanel(groupFaces, group.representativeNormal)
+  ) {
+    return { groups: [group], nextId };
+  }
+
   const patches = buildPatches(group.faceIndices, faces);
 
   const bridgeSplit = tryBridgeSplit(faces, group, patches, nextId);

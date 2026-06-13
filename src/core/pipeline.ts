@@ -7,7 +7,7 @@
 // ============================================================================
 
 import { parseObj } from "./obj-parser";
-import { generateCuttingSheets, decomposeIntoPanels, nestedSheetsToDxf, projectFacesTo2D, clipPanelAtV, clipPanelAtU, mirrorEdgesHorizontal } from "./cutting-sheet";
+import { generateCuttingSheets, decomposeIntoPanels, nestedSheetsToDxf, projectFacesTo2D, clipPanelAtV, clipPanelAtU, mirrorEdgesHorizontal, unionFormsSinglePanel } from "./cutting-sheet";
 import type { Panel, PanelCategory } from "./cutting-sheet";
 import { detectUpAxis, extractFacades } from "./facade-extractor";
 import { extractFloorPlans } from "./floor-plan-extractor";
@@ -24,7 +24,11 @@ import type { Joint } from "./joint-detector";
 import { computeAdjustments } from "./assembly-adjuster";
 import type { DimensionAdjustment, WallWallJoint } from "./assembly-adjuster";
 import { splitWallGroupsAtFloors } from "./mesh-splitter";
-import { splitWallGroupsAtPanelBridges, splitGroupAtPanelBridges } from "./group-splitter";
+import {
+  splitWallGroupsAtPanelBridges,
+  splitGroupAtPanelBridges,
+  splitGroupIntoConnectedComponents,
+} from "./group-splitter";
 
 export interface PipelineResult {
   facades: Facade[];
@@ -159,44 +163,139 @@ export function suggestCoplanarMerges(
 }
 
 /**
- * Check whether a set of groups are coplanar (parallel normals, close plane
- * offsets). Used by the UI to validate manual merge requests.
+ * Check whether a set of groups are coplanar (parallel normals, same plane).
+ * When `faces` is provided, every vertex is checked against the reference plane.
  */
-export function areGroupsCoplanar(groups: GeometryGroup[]): boolean {
+export function areGroupsCoplanar(
+  groups: GeometryGroup[],
+  faces?: Face3D[],
+): boolean {
   if (groups.length < 2) return false;
-  const ref = groups[0].representativeNormal;
+
+  const refN = groups[0].representativeNormal;
+  const len = Math.hypot(refN.x, refN.y, refN.z) || 1;
+  const nx = refN.x / len;
+  const ny = refN.y / len;
+  const nz = refN.z / len;
+
   for (let i = 1; i < groups.length; i++) {
     const n = groups[i].representativeNormal;
-    const d = Math.abs(
-      ref.x * n.x + ref.y * n.y + ref.z * n.z,
-    );
-    if (d < 0.985) return false;
+    const d = Math.abs(nx * n.x + ny * n.y + nz * n.z);
+    if (d < 0.95) return false;
   }
-  // Check plane offsets are close.
-  const offsets = groups.map((g) => {
-    const n = g.representativeNormal;
-    return n.x * g.centroid.x + n.y * g.centroid.y + n.z * g.centroid.z;
-  });
-  const refOff = offsets[0];
-  for (let i = 1; i < offsets.length; i++) {
-    if (Math.abs(offsets[i] - refOff) > 0.15) return false;
+
+  const PLANE_TOL = 0.2;
+
+  if (faces && faces.length > 0) {
+    let planeD: number | null = null;
+    for (const fi of groups[0].faceIndices) {
+      const face = faces[fi];
+      if (!face?.vertices.length) continue;
+      const v = face.vertices[0];
+      planeD = nx * v.x + ny * v.y + nz * v.z;
+      break;
+    }
+    if (planeD == null) return false;
+
+    for (const g of groups) {
+      for (const fi of g.faceIndices) {
+        const face = faces[fi];
+        if (!face) continue;
+        for (const v of face.vertices) {
+          const dist = Math.abs(nx * v.x + ny * v.y + nz * v.z - planeD);
+          if (dist > PLANE_TOL) return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  const refOff =
+    nx * groups[0].centroid.x +
+    ny * groups[0].centroid.y +
+    nz * groups[0].centroid.z;
+  for (let i = 1; i < groups.length; i++) {
+    const c = groups[i].centroid;
+    const off = nx * c.x + ny * c.y + nz * c.z;
+    if (Math.abs(off - refOff) > PLANE_TOL) return false;
   }
   return true;
 }
 
 /**
- * Check whether groups can be merged: coplanar AND no floor slab between any pair.
+ * Check whether groups can be merged: same plane (manual merge in review).
+ * Does not block fragments at different heights on the same wall.
  */
-export function canMergeGroups(selected: GeometryGroup[], allGroups: GeometryGroup[]): boolean {
-  if (!areGroupsCoplanar(selected)) return false;
-  const floorElevs = floorElevationsFromGroups(allGroups);
-  if (floorElevs.length === 0) return true;
+export function canMergeGroups(
+  selected: GeometryGroup[],
+  _allGroups: GeometryGroup[],
+  faces?: Face3D[],
+): boolean {
+  if (selected.length < 2) return false;
+  if (areGroupsCoplanar(selected, faces)) return true;
+
+  if (!faces?.length) return false;
+
+  const combinedFaces = selected.flatMap((g) =>
+    g.faceIndices.map((fi) => faces[fi]).filter((f): f is Face3D => !!f),
+  );
+  if (combinedFaces.length < 2) return false;
+
+  let nx = 0;
+  let ny = 0;
+  let nz = 0;
+  for (const g of selected) {
+    const n = g.representativeNormal;
+    const w = g.totalArea || 1;
+    nx += n.x * w;
+    ny += n.y * w;
+    nz += n.z * w;
+  }
+  const len = Math.hypot(nx, ny, nz) || 1;
+  const avgNormal = { x: nx / len, y: ny / len, z: nz / len };
+
+  return unionFormsSinglePanel(combinedFaces, avgNormal);
+}
+
+/** Cluster selected groups that share the same plane and can be merged. */
+export function findCoplanarMergeClusters(
+  selected: GeometryGroup[],
+  allGroups: GeometryGroup[],
+  faces?: Face3D[],
+): number[][] {
+  if (selected.length < 2) return [];
+
+  const parent = selected.map((_, i) => i);
+  function find(x: number): number {
+    while (parent[x] !== x) {
+      parent[x] = parent[parent[x]];
+      x = parent[x];
+    }
+    return x;
+  }
+  function union(a: number, b: number) {
+    const ra = find(a);
+    const rb = find(b);
+    if (ra !== rb) parent[ra] = rb;
+  }
+
   for (let i = 0; i < selected.length; i++) {
     for (let j = i + 1; j < selected.length; j++) {
-      if (isFloorBetween(selected[i], selected[j], floorElevs)) return false;
+      if (canMergeGroups([selected[i], selected[j]], allGroups, faces)) {
+        union(i, j);
+      }
     }
   }
-  return true;
+
+  const buckets = new Map<number, number[]>();
+  for (let i = 0; i < selected.length; i++) {
+    const root = find(i);
+    const arr = buckets.get(root);
+    if (arr) arr.push(selected[i].id);
+    else buckets.set(root, [selected[i].id]);
+  }
+
+  return Array.from(buckets.values()).filter((ids) => ids.length >= 2);
 }
 
 /**
@@ -342,12 +441,10 @@ function finalizePhase1Groups(
   minRealArea: number,
 ) {
   polishGroups(groups, minRealArea);
-  const panelSplit = splitWallGroupsAtPanelBridges(faces, groups);
-  polishGroups(panelSplit, minRealArea);
-  const joints = detectJoints(faces, panelSplit);
-  const { adjustments, wallWallJoints } = computeAdjustments(joints, panelSplit, undefined, faces);
-  const suggestedMerges = suggestCoplanarMerges(panelSplit, joints);
-  return { faces, groups: panelSplit, joints, adjustments, wallWallJoints, suggestedMerges };
+  const joints = detectJoints(faces, groups);
+  const { adjustments, wallWallJoints } = computeAdjustments(joints, groups, undefined, faces);
+  const suggestedMerges = suggestCoplanarMerges(groups, joints);
+  return { faces, groups, joints, adjustments, wallWallJoints, suggestedMerges };
 }
 
 /** Recompute joints/adjustments after the group list changes (split/merge). */
@@ -361,19 +458,25 @@ export function refreshPhase1Topology(
   return { ...phase1, groups, joints, adjustments, wallWallJoints, suggestedMerges };
 }
 
-/** Split one group into separate panels when a bridge edge exists between them. */
+export type SplitGroupMode = "components" | "panels";
+
+/** Split one group into disconnected components or separate coplanar panels. */
 export function splitGroupInPhase1(
   phase1: Phase1Result,
   groupId: number,
+  mode: SplitGroupMode = "panels",
 ): Phase1Result {
   const group = phase1.groups.find((g) => g.id === groupId);
   if (!group) return phase1;
 
   const nextId = Math.max(0, ...phase1.groups.map((g) => g.id)) + 1;
-  const { groups: pieces } = splitGroupAtPanelBridges(phase1.faces, group, nextId);
-  if (pieces.length <= 1) return phase1;
+  const split =
+    mode === "components"
+      ? splitGroupIntoConnectedComponents(phase1.faces, group, nextId)
+      : splitGroupAtPanelBridges(phase1.faces, group, nextId, { force: true });
+  if (split.groups.length <= 1) return phase1;
 
-  const newGroups = phase1.groups.flatMap((g) => (g.id === groupId ? pieces : [g]));
+  const newGroups = phase1.groups.flatMap((g) => (g.id === groupId ? split.groups : [g]));
   return refreshPhase1Topology(phase1, newGroups);
 }
 

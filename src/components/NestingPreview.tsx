@@ -3,6 +3,7 @@
 import { useCallback, useMemo, useRef, useEffect, useState } from "react";
 import type { NestingPreviewData } from "@/core/pipeline";
 import type { NestingResult, NestingSheet, PlacedNestingPanel } from "@/core/sheet-nester";
+import { rotateEdges } from "@/core/sheet-nester";
 import type { SheetConfig } from "@/core/types";
 import { getNestingCanvasColors, useTheme } from "@/context/ThemeContext";
 
@@ -105,19 +106,30 @@ function SheetCanvas({
         toY(sy) - 6,
       );
 
-      // Panels
+      // Panels — draw real cut contours (outer + holes), not just bounding boxes.
       for (const placed of sheets[si].panels) {
         const px = sx + placed.x;
         const py = sy + placed.y;
         const pw = placed.effectiveW;
         const ph = placed.effectiveH;
+        const edges = placed.rotated
+          ? rotateEdges(placed.panel.edges, placed.panel.widthM)
+          : placed.panel.edges;
 
-        ctx.fillStyle = color + "30";
-        ctx.fillRect(toX(px), toY(py), pw * scale, ph * scale);
+        ctx.fillStyle = color + "18";
+        ctx.beginPath();
+        ctx.rect(toX(px), toY(py), pw * scale, ph * scale);
+        ctx.fill();
 
         ctx.strokeStyle = color;
-        ctx.lineWidth = 1;
-        ctx.strokeRect(toX(px), toY(py), pw * scale, ph * scale);
+        ctx.lineWidth = 1.25;
+        ctx.lineJoin = "round";
+        for (const e of edges) {
+          ctx.beginPath();
+          ctx.moveTo(toX(px + e.a.x), toY(py + e.a.y));
+          ctx.lineTo(toX(px + e.b.x), toY(py + e.b.y));
+          ctx.stroke();
+        }
 
         // Panel ID — fixed size in sheet space (8mm) so labels don't scale
         // with panel size and overlap edges.

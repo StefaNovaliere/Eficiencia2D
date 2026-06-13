@@ -11,7 +11,7 @@ export function areasMatch(a: number, b: number): boolean {
   return areaMatchKey(a) === areaMatchKey(b);
 }
 
-function effectiveCategory(
+export function getEffectiveCategory(
   group: GeometryGroup,
   overrides?: Map<number, FaceCategory>,
 ): FaceCategory {
@@ -19,22 +19,31 @@ function effectiveCategory(
 }
 
 /**
- * Candidatos para descarte masivo por tamaño.
- * Exige misma área, orientación y categoría — evita mezclar ventanas con tramos de muro distintos.
+ * Capas con la misma área, orientación y categoría efectiva que la referencia.
+ * Sirve para descarte masivo o para reclasificar en bloque (p. ej. ventanas descartadas → pared).
  */
 export function findGroupsWithSameArea(
   groups: GeometryGroup[],
   reference: GeometryGroup,
   overrides?: Map<number, FaceCategory>,
 ): GeometryGroup[] {
-  const refCat = effectiveCategory(reference, overrides);
+  const refCat = getEffectiveCategory(reference, overrides);
   const key = areaMatchKey(reference.totalArea);
 
   return groups.filter((g) => {
     if (g.id === reference.id) return false;
     if (areaMatchKey(g.totalArea) !== key) return false;
     if (g.orientation !== reference.orientation) return false;
-    if (effectiveCategory(g, overrides) !== refCat) return false;
+    if (getEffectiveCategory(g, overrides) !== refCat) return false;
     return true;
   });
+}
+
+/** Referencia + todas las capas similares (incluye la referencia). */
+export function collectSimilarGroups(
+  groups: GeometryGroup[],
+  reference: GeometryGroup,
+  overrides?: Map<number, FaceCategory>,
+): GeometryGroup[] {
+  return [reference, ...findGroupsWithSameArea(groups, reference, overrides)];
 }
