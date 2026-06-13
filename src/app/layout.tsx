@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "@/styles/globals.css";
+import { AuthProvider } from "@/context/AuthContext";
 import { ProjectProvider } from "@/context/ProjectContext";
 import { ThemeProvider } from "@/context/ThemeContext";
 
@@ -42,7 +43,9 @@ export default function RootLayout({
       </head>
       <body className="min-h-screen bg-base-200 text-base-content antialiased font-sans">
         <ThemeProvider>
-          <ProjectProvider>{children}</ProjectProvider>
+          <AuthProvider>
+            <ProjectProvider>{children}</ProjectProvider>
+          </AuthProvider>
         </ThemeProvider>
       </body>
     </html>

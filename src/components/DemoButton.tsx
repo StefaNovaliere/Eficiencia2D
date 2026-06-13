@@ -4,16 +4,21 @@ import { Camera, Play } from "lucide-react";
 
 export interface DemoButtonProps {
   onClick: () => void;
+  /** Si true, flota fijo arriba a la derecha (evitar si hay AuthNav). */
+  floating?: boolean;
 }
 
 /**
- * Floating "Ver demo" call-to-action shown in the top-right corner of the
- * home page. Includes an arrow + hint text pointing at the button so new
- * users can discover the demo flow without uploading their own file.
+ * Call-to-action "Ver demo". Por defecto va inline (p. ej. arriba del formulario)
+ * para no superponerse con Ingresar / Registrarse.
  */
-export default function DemoButton({ onClick }: DemoButtonProps) {
+export default function DemoButton({ onClick, floating = false }: DemoButtonProps) {
+  const wrapperClass = floating
+    ? "fixed top-4 right-4 md:top-6 md:right-6 z-50 flex items-center justify-end gap-3"
+    : "flex items-center justify-end gap-3 w-full mb-4";
+
   return (
-    <div className="fixed top-4 right-4 md:top-6 md:right-6 z-50 flex items-center gap-3">
+    <div className={wrapperClass}>
       <div className="hidden sm:flex items-center gap-1.5 text-primary animate-[pulse_2.4s_ease-in-out_infinite]">
         <span className="text-sm font-medium italic whitespace-nowrap">
           ¿Querés ver cómo funciona?
