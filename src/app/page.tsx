@@ -1,6 +1,7 @@
 import UploadForm from "@/components/UploadForm";
 import AuthNav from "@/components/AuthNav";
 import BackgroundSymbols from "@/components/BackgroundSymbols";
+import StepIndicator from "@/components/StepIndicator";
 
 export default function Home() {
   return (
@@ -8,7 +9,7 @@ export default function Home() {
       <AuthNav />
       <BackgroundSymbols />
       
-      <div className="text-center mb-12 mt-8 md:mt-12 z-10">
+      <div className="text-center mb-8 mt-4 md:mt-8 z-10">
         <img
           src="/images/logoFaviconE2d.svg"
           alt="Eficiencia2D"
@@ -25,6 +26,9 @@ export default function Home() {
       </div>
 
       <div className="w-full max-w-3xl z-10">
+        <div className="mb-6 px-2 max-w-md mx-auto">
+          <StepIndicator current="upload" />
+        </div>
         <UploadForm />
       </div>
 
