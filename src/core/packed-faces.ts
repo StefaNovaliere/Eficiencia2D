@@ -1,4 +1,4 @@
-import type { Face3D } from "./types";
+import type { IndexedFace3D } from "./types";
 
 // Estructura que envía el backend (encode_faces_compact, formato "packed-le-v1").
 export interface PackedFaces {
@@ -19,14 +19,14 @@ function b64ToBytes(b64: string): Uint8Array {
 }
 
 /** Decodifica los buffers compactos del backend a Face3D[]. */
-export function decodePackedFaces(p: PackedFaces): Face3D[] {
+export function decodePackedFaces(p: PackedFaces): IndexedFace3D[] {
   const counts    = new Uint32Array(b64ToBytes(p.vertex_counts_b64).buffer);
   const coords    = new Float32Array(b64ToBytes(p.coords_b64).buffer);
   const normals   = new Float32Array(b64ToBytes(p.normals_b64).buffer);
   const idxCounts = new Uint32Array(b64ToBytes(p.idx_counts_b64).buffer);
   const indices   = new Uint32Array(b64ToBytes(p.indices_b64).buffer);
 
-  const faces: Face3D[] = new Array(p.count);
+  const faces: IndexedFace3D[] = new Array(p.count);
   let ci = 0; // cursor de coords
   let ii = 0; // cursor de indices
   for (let f = 0; f < p.count; f++) {
@@ -41,7 +41,7 @@ export function decodePackedFaces(p: PackedFaces): Face3D[] {
     const vertexIndices: number[] = new Array(ic);
     for (let k = 0; k < ic; k++) vertexIndices[k] = indices[ii + k];
     ii += ic;
-    faces[f] = { vertices, normal, innerLoops: [], panelId: null, vertexIndices };
+    faces[f] = { vertices, normal, innerLoops: [], panelId: undefined, vertexIndices };
   }
   return faces;
 }
