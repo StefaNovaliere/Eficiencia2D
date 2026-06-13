@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import StepIndicator from "./StepIndicator";
 
 export interface PaymentScreenProps {
   onPaymentApproved: (paymentId: string) => void;
@@ -128,6 +129,7 @@ export default function PaymentScreen({
       const data = await res.json();
       if (data.valid) {
         localStorage.setItem("e2d_bypass", bypassCode.trim());
+        setBypassCode("");
         onBypassSuccess();
       } else if (data.configured === false) {
         setBypassError("El bypass no está configurado en este entorno (falta MP_BYPASS_KEY).");
@@ -150,6 +152,9 @@ export default function PaymentScreen({
   return (
     <div className="fixed inset-0 z-[100] bg-base-200/80 backdrop-blur-sm flex items-center justify-center p-4">
       <div className="card bg-base-100 shadow-2xl border border-base-200 w-full max-w-md p-8">
+        <div className="mb-6">
+          <StepIndicator current="payment" />
+        </div>
         <h2 className="text-2xl font-bold text-center mb-2">Descargá tus planos</h2>
         <p className="text-base-content/70 text-center mb-6">
           Planos de corte láser en DXF + PDF, listos para enviar a la cortadora.
@@ -219,7 +224,7 @@ export default function PaymentScreen({
                 onClick={handleBypassSubmit}
                 disabled={bypassLoading || !bypassCode.trim()}
               >
-                {bypassLoading ? "..." : "Aplicar"}
+                {bypassLoading ? <span className="loading loading-spinner loading-xs" /> : "Aplicar"}
               </button>
               {bypassError && (
                 <span className="text-error text-xs w-full mt-1">{bypassError}</span>
