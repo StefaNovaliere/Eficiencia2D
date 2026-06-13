@@ -5,16 +5,23 @@ import dynamic from "next/dynamic";
 import GroupList from "./GroupList";
 import VisibilityFilters from "./VisibilityFilters";
 import type { FaceCategory, GeometryGroup } from "@/core/group-classifier";
-import { findGroupsWithSameArea } from "@/core/discard-by-area";
+import {
+  collectSimilarGroups,
+  findGroupsWithSameArea,
+  getEffectiveCategory,
+} from "@/core/discard-by-area";
 import {
   reclassifyWithAxis,
   computePanelIdByGroup,
   applyMerges,
-  areGroupsCoplanar,
-  applyPanelBridgeSplits,
+  canMergeGroups,
+  findCoplanarMergeClusters,
   splitGroupInPhase1,
 } from "@/core/pipeline";
-import { splitGroupAtPanelBridges } from "@/core/group-splitter";
+import {
+  splitGroupAtPanelBridges,
+  countConnectedComponents,
+} from "@/core/group-splitter";
 import type { Phase1Result, ClassificationOverride } from "@/core/pipeline";
 import type { Joint } from "@/core/joint-detector";
 import type { DimensionAdjustment } from "@/core/assembly-adjuster";
@@ -129,21 +136,37 @@ export default function ReviewScreen({
   const [mergeCardOpen, setMergeCardOpen] = useState(true);
   const [isRotating, setIsRotating] = useState(false);
   const [hiddenGroupIds, setHiddenGroupIds] = useState<Set<number>>(() => new Set());
-  const [bulkDiscardNotice, setBulkDiscardNotice] = useState<string | null>(null);
-  const [bulkDiscardModal, setBulkDiscardModal] = useState<{
+  const [bulkActionNotice, setBulkActionNotice] = useState<string | null>(null);
+  const [bulkSimilarModal, setBulkSimilarModal] = useState<{
     reference: GeometryGroup;
     matches: GeometryGroup[];
+    mode: "discard" | "promote";
+    promoteTarget?: "wall" | "floor";
   } | null>(null);
-  const [bulkDiscardChecked, setBulkDiscardChecked] = useState<Set<number>>(() => new Set());
+  const [bulkSimilarChecked, setBulkSimilarChecked] = useState<Set<number>>(() => new Set());
   const [manualPhase1, setManualPhase1] = useState<Phase1Result | null>(null);
-
-  const phase1Base = useMemo(() => applyPanelBridgeSplits(phase1), [phase1]);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const viewerAreaRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setManualPhase1(null);
   }, [phase1]);
 
-  const workingPhase1 = manualPhase1 ?? phase1Base;
+  useEffect(() => {
+    if (!contextMenu) return;
+    const close = () => setContextMenu(null);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+    };
+    window.addEventListener("click", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [contextMenu]);
+
+  const workingPhase1 = manualPhase1 ?? phase1;
 
   // Effective phase1 with merges applied.
   const effectivePhase1 = useMemo(
@@ -165,10 +188,37 @@ export default function ReviewScreen({
   const handleSelectGroup = useCallback((id: number) => {
     setSelectedGroupIds((prev) => {
       if (id === -1) return new Set();
-      if (prev.size === 1 && prev.has(id)) return new Set();
+
+      const group = effectivePhase1.groups.find((g) => g.id === id);
+      if (!group) return prev;
+
+      if (prev.has(id)) {
+        if (prev.size === 1) return new Set();
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      }
+
+      if (prev.size >= 1) {
+        const existing = Array.from(prev)
+          .map((gid) => effectivePhase1.groups.find((g) => g.id === gid))
+          .filter((g): g is GeometryGroup => g != null);
+        const candidate = [...existing, group];
+        const allWalls = candidate.every(
+          (g) => getEffectiveCategory(g, overrides) === "wall",
+        );
+        if (
+          allWalls &&
+          canMergeGroups(candidate, effectivePhase1.groups, effectivePhase1.faces)
+        ) {
+          return new Set(prev).add(id);
+        }
+      }
+
       return new Set([id]);
     });
-  }, []);
+    setSelectedJointIndex(null);
+  }, [effectivePhase1, overrides]);
 
   const handleToggleGroup = useCallback((id: number) => {
     setSelectedGroupIds((prev) => {
@@ -224,48 +274,71 @@ export default function ReviewScreen({
     [selectedGroupIds, applyCategoryOverride],
   );
 
+  const selectedGroup = useMemo(() => {
+    if (selectedGroupIds.size !== 1) return null;
+    const selId = Array.from(selectedGroupIds)[0];
+    return effectivePhase1.groups.find((g) => g.id === selId) ?? null;
+  }, [selectedGroupIds, effectivePhase1.groups]);
+
   const sameAreaMatches = useMemo(() => {
-    if (selectedGroupIds.size !== 1) return [];
-    const selId = Array.from(selectedGroupIds)[0];
-    const ref = effectivePhase1.groups.find((g) => g.id === selId);
-    if (!ref) return [];
-    return findGroupsWithSameArea(effectivePhase1.groups, ref, overrides).filter((g) => {
-      const eff = overrides.get(g.id) ?? g.category;
-      return eff !== "discard";
-    });
-  }, [selectedGroupIds, effectivePhase1.groups, overrides]);
+    if (!selectedGroup) return [];
+    if (getEffectiveCategory(selectedGroup, overrides) === "discard") return [];
+    return findGroupsWithSameArea(effectivePhase1.groups, selectedGroup, overrides);
+  }, [selectedGroup, effectivePhase1.groups, overrides]);
 
-  const openBulkDiscardModal = useCallback(() => {
-    const selId = Array.from(selectedGroupIds)[0];
-    const ref = effectivePhase1.groups.find((g) => g.id === selId);
-    if (!ref) return;
-    const matches = findGroupsWithSameArea(effectivePhase1.groups, ref, overrides).filter((g) => {
-      const eff = overrides.get(g.id) ?? g.category;
-      return eff !== "discard";
-    });
-    setBulkDiscardChecked(new Set([ref.id, ...matches.map((g) => g.id)]));
-    setBulkDiscardModal({ reference: ref, matches });
-  }, [selectedGroupIds, effectivePhase1.groups, overrides]);
+  const sameAreaDiscardMatches = useMemo(() => {
+    if (!selectedGroup) return [];
+    if (getEffectiveCategory(selectedGroup, overrides) !== "discard") return [];
+    return findGroupsWithSameArea(effectivePhase1.groups, selectedGroup, overrides);
+  }, [selectedGroup, effectivePhase1.groups, overrides]);
 
-  const confirmBulkDiscard = useCallback(() => {
-    if (!bulkDiscardModal) return;
-    const ids = Array.from(bulkDiscardChecked);
+  const openBulkSimilarModal = useCallback(
+    (mode: "discard" | "promote", promoteTarget?: "wall" | "floor") => {
+      if (!selectedGroup) return;
+      const similar = collectSimilarGroups(
+        effectivePhase1.groups,
+        selectedGroup,
+        overrides,
+      );
+      setBulkSimilarChecked(new Set(similar.map((g) => g.id)));
+      setBulkSimilarModal({
+        reference: selectedGroup,
+        matches: similar.slice(1),
+        mode,
+        promoteTarget,
+      });
+    },
+    [selectedGroup, effectivePhase1.groups, overrides],
+  );
+
+  const confirmBulkSimilar = useCallback(() => {
+    if (!bulkSimilarModal) return;
+    const ids = Array.from(bulkSimilarChecked);
+    const target: FaceCategory =
+      bulkSimilarModal.mode === "discard"
+        ? "discard"
+        : bulkSimilarModal.promoteTarget ?? "wall";
+
     setOverrides((prev) => {
       const next = new Map(prev);
       for (const gid of ids) {
-        applyCategoryOverride(next, gid, "discard");
+        applyCategoryOverride(next, gid, target);
       }
       return next;
     });
-    const extra = ids.length - 1;
-    if (extra > 0) {
-      setBulkDiscardNotice(
-        `Se descartaron ${ids.length} capa${ids.length !== 1 ? "s" : ""} del mismo tamaño`,
-      );
-      window.setTimeout(() => setBulkDiscardNotice(null), 4000);
+
+    if (ids.length > 1) {
+      const label =
+        bulkSimilarModal.mode === "discard"
+          ? `Se descartaron ${ids.length} capas del mismo tamaño`
+          : `Se marcaron ${ids.length} capas como ${
+              target === "wall" ? "pared" : "piso"
+            }`;
+      setBulkActionNotice(label);
+      window.setTimeout(() => setBulkActionNotice(null), 4000);
     }
-    setBulkDiscardModal(null);
-  }, [bulkDiscardModal, bulkDiscardChecked, applyCategoryOverride]);
+    setBulkSimilarModal(null);
+  }, [bulkSimilarModal, bulkSimilarChecked, applyCategoryOverride]);
 
   // Re-seed wall-wall decisions whenever the effective topology changes (axis
   // rotation, min-area, or merge changes recompute joints and their indices).
@@ -315,45 +388,112 @@ export default function ReviewScreen({
   }, [onMinAreaChange]);
 
   // Merge selected coplanar groups into one panel.
-  const canMergeSelected = useMemo(() => {
-    if (selectedGroupIds.size < 2) return false;
-    const selected = Array.from(selectedGroupIds)
+  const selectedGroups = useMemo(() => {
+    return Array.from(selectedGroupIds)
       .map((id) => effectivePhase1.groups.find((g) => g.id === id))
       .filter((g): g is GeometryGroup => g != null);
-    if (selected.length < 2) return false;
-    return areGroupsCoplanar(selected);
   }, [selectedGroupIds, effectivePhase1.groups]);
 
+  const selectedWallGroups = useMemo(
+    () => selectedGroups.filter((g) => getEffectiveCategory(g, overrides) === "wall"),
+    [selectedGroups, overrides],
+  );
+
+  const mergeClusters = useMemo(
+    () =>
+      findCoplanarMergeClusters(
+        selectedWallGroups,
+        effectivePhase1.groups,
+        effectivePhase1.faces,
+      ),
+    [selectedWallGroups, effectivePhase1.groups, effectivePhase1.faces],
+  );
+
+  const primaryMergeCluster = useMemo(
+    () => mergeClusters.sort((a, b) => b.length - a.length)[0] ?? null,
+    [mergeClusters],
+  );
+
+  const canMergeSelected = primaryMergeCluster != null && primaryMergeCluster.length >= 2;
+
+  const mergeBlockedReason = useMemo(() => {
+    if (selectedGroups.length < 2) return null;
+    if (canMergeSelected) return null;
+    if (selectedWallGroups.length < 2) return "Solo se pueden fusionar paredes.";
+    return "No hay paredes coplanares en la selección.";
+  }, [selectedGroups.length, selectedWallGroups.length, canMergeSelected]);
+
   const handleMergeSelected = useCallback(() => {
-    const ids = Array.from(selectedGroupIds);
-    if (ids.length < 2) return;
-    setMerges((prev) => [...prev, ids]);
+    if (!primaryMergeCluster || primaryMergeCluster.length < 2) return;
+    setMerges((prev) => [...prev, primaryMergeCluster]);
     setSelectedGroupIds(new Set());
+    setContextMenu(null);
+  }, [primaryMergeCluster]);
+
+  const handleHideSelected = useCallback(() => {
+    if (selectedGroupIds.size === 0) return;
+    setHiddenGroupIds((prev) => {
+      const next = new Set(prev);
+      for (const id of selectedGroupIds) next.add(id);
+      return next;
+    });
+    setSelectedGroupIds(new Set());
+    setContextMenu(null);
   }, [selectedGroupIds]);
 
-  const splittablePieceCount = useMemo(() => {
-    if (selectedGroupIds.size !== 1) return 0;
+  const openViewerContextMenu = useCallback(
+    (detail: { clientX: number; clientY: number; groupId: number | null }) => {
+      if (detail.groupId != null && selectedGroupIds.size === 0) {
+        setSelectedGroupIds(new Set([detail.groupId]));
+      }
+      const hasSelection = selectedGroupIds.size > 0 || detail.groupId != null;
+      if (!hasSelection) return;
+      setContextMenu({ x: detail.clientX, y: detail.clientY });
+    },
+    [selectedGroupIds.size],
+  );
+
+  const splitPreview = useMemo(() => {
+    if (selectedGroupIds.size !== 1) return null;
     const gid = Array.from(selectedGroupIds)[0];
     const group = effectivePhase1.groups.find((g) => g.id === gid);
-    if (!group) return 0;
-    const { groups: pieces } = splitGroupAtPanelBridges(
+    if (!group) return null;
+
+    const components = countConnectedComponents(effectivePhase1.faces, group);
+    const { groups: panelPieces } = splitGroupAtPanelBridges(
       effectivePhase1.faces,
       group,
       group.id + 1,
+      { force: true },
     );
-    return pieces.length;
+
+    return {
+      components,
+      panels: panelPieces.length,
+    };
   }, [selectedGroupIds, effectivePhase1]);
 
-  const handleSplitSelected = useCallback(() => {
+  const handleSplitComponents = useCallback(() => {
     if (selectedGroupIds.size !== 1) return;
     const gid = Array.from(selectedGroupIds)[0];
-    const current = manualPhase1 ?? phase1Base;
-    const updated = splitGroupInPhase1(current, gid);
+    const current = manualPhase1 ?? phase1;
+    const updated = splitGroupInPhase1(current, gid, "components");
     if (updated === current) return;
     setManualPhase1(updated);
     setSelectedGroupIds(new Set());
     setSelectedJointIndex(null);
-  }, [selectedGroupIds, manualPhase1, phase1Base]);
+  }, [selectedGroupIds, manualPhase1, phase1]);
+
+  const handleSplitPanels = useCallback(() => {
+    if (selectedGroupIds.size !== 1) return;
+    const gid = Array.from(selectedGroupIds)[0];
+    const current = manualPhase1 ?? phase1;
+    const updated = splitGroupInPhase1(current, gid, "panels");
+    if (updated === current) return;
+    setManualPhase1(updated);
+    setSelectedGroupIds(new Set());
+    setSelectedJointIndex(null);
+  }, [selectedGroupIds, manualPhase1, phase1]);
 
   const handleUnmerge = useCallback((mergeIndex: number) => {
     setMerges((prev) => prev.filter((_, i) => i !== mergeIndex));
@@ -465,7 +605,7 @@ export default function ReviewScreen({
 
   return (
     <div className="fixed inset-0 z-50 bg-base-200/40 flex flex-col md:flex-row overflow-hidden">
-      <div className="flex-1 relative overflow-hidden">
+      <div className="flex-1 relative overflow-hidden" ref={viewerAreaRef}>
         <ModelViewer
           faces={effectivePhase1.faces}
           groups={effectivePhase1.groups}
@@ -475,11 +615,47 @@ export default function ReviewScreen({
           hiddenGroupIds={hiddenGroupIds}
           onSelectGroup={handleSelectGroup}
           onToggleGroup={handleToggleGroup}
+          onContextMenu={openViewerContextMenu}
           appliedAxis={phase1.appliedAxis}
           showCenterAxes={showCenterAxes}
           leaderMarkers={leaderMarkers}
           isSolid={isSolid}
         />
+
+        {contextMenu && (
+          <div
+            className="fixed z-[60] min-w-[11rem] rounded-xl border border-base-300/60 bg-base-100/95 backdrop-blur-md shadow-xl shadow-base-content/10 py-1"
+            style={{ left: contextMenu.x, top: contextMenu.y }}
+            onClick={(e) => e.stopPropagation()}
+            onContextMenu={(e) => e.preventDefault()}
+          >
+            {canMergeSelected && primaryMergeCluster && (
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 px-3 py-2 text-sm text-left hover:bg-primary/10 transition-colors"
+                onClick={handleMergeSelected}
+              >
+                <Link2 size={15} className="text-primary shrink-0" />
+                Fusionar {primaryMergeCluster.length} paredes
+              </button>
+            )}
+            {selectedGroupIds.size >= 2 && !canMergeSelected && mergeBlockedReason && (
+              <p className="px-3 py-2 text-[11px] text-base-content/45 leading-relaxed border-b border-base-300/30">
+                {mergeBlockedReason}
+              </p>
+            )}
+            {selectedGroupIds.size > 0 && (
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 px-3 py-2 text-sm text-left hover:bg-base-200/80 transition-colors"
+                onClick={handleHideSelected}
+              >
+                <EyeOff size={15} className="text-base-content/60 shrink-0" />
+                Ocultar {selectedGroupIds.size === 1 ? "capa" : `${selectedGroupIds.size} capas`}
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Toolbar */}
         <div className="absolute top-4 left-4 right-4 z-10 flex flex-col gap-2 pointer-events-none">
@@ -500,6 +676,42 @@ export default function ReviewScreen({
             <div className="hidden sm:block w-px h-7 bg-base-300/50" />
 
             <div className="inline-flex items-center gap-0.5 p-0.5 rounded-xl bg-base-200/50">
+              {selectedGroupIds.size >= 2 && canMergeSelected && (
+                <div className="tooltip tooltip-bottom" data-tip="Fusionar capas seleccionadas">
+                  <button
+                    type="button"
+                    className={`${viewToolBtn} w-auto px-2 gap-1 text-primary`}
+                    onClick={handleMergeSelected}
+                  >
+                    <Link2 size={15} />
+                    <span className="text-xs font-semibold">Fusionar</span>
+                  </button>
+                </div>
+              )}
+              {splitPreview && splitPreview.components > 1 && (
+                <div className="tooltip tooltip-bottom" data-tip="Separar islas de malla desconectadas">
+                  <button
+                    type="button"
+                    className={`${viewToolBtn} w-auto px-2 gap-1`}
+                    onClick={handleSplitComponents}
+                  >
+                    <SquareSplitHorizontal size={15} />
+                    <span className="text-xs font-semibold">{splitPreview.components} comp.</span>
+                  </button>
+                </div>
+              )}
+              {splitPreview && splitPreview.panels > 1 && (
+                <div className="tooltip tooltip-bottom" data-tip="Separar paneles coplanares unidos (L, escalones)">
+                  <button
+                    type="button"
+                    className={`${viewToolBtn} w-auto px-2 gap-1`}
+                    onClick={handleSplitPanels}
+                  >
+                    <SquareSplitHorizontal size={15} />
+                    <span className="text-xs font-semibold">{splitPreview.panels} piezas</span>
+                  </button>
+                </div>
+              )}
               {selectedGroupIds.size === 1 && (
                 <div className="tooltip tooltip-bottom" data-tip="Ocultar seleccionado">
                   <button
@@ -739,10 +951,10 @@ export default function ReviewScreen({
           </p>
         </div>
 
-        {bulkDiscardNotice && (
+        {bulkActionNotice && (
           <div className="px-4 py-2 border-b border-base-300/30 bg-success/5">
             <p className="text-[10px] text-success font-medium px-2 py-1.5 rounded-lg bg-success/10 border border-success/20">
-              {bulkDiscardNotice}
+              {bulkActionNotice}
             </p>
           </div>
         )}
@@ -759,6 +971,7 @@ export default function ReviewScreen({
           onShowGroup={handleShowGroup}
           onShowAllHidden={handleShowAllHidden}
           onChangeCategory={handleChangeCategory}
+          onOpenContextMenu={openViewerContextMenu}
         />
 
         {selectedGroupIds.size === 1 && sameAreaMatches.length > 0 && (
@@ -766,17 +979,14 @@ export default function ReviewScreen({
             <p className="text-[10px] text-base-content/45 mb-2">
               {sameAreaMatches.length} capa{sameAreaMatches.length !== 1 ? "s" : ""} más con{" "}
               <span className="font-mono font-semibold text-base-content/70">
-                {effectivePhase1.groups
-                  .find((g) => g.id === Array.from(selectedGroupIds)[0])
-                  ?.totalArea.toFixed(2)}{" "}
-                m²
+                {selectedGroup?.totalArea.toFixed(2)} m²
               </span>
               {" "}· misma orientación y tipo
             </p>
             <button
               type="button"
               className="btn btn-outline btn-sm w-full rounded-xl gap-2 border-base-300 text-base-content/70"
-              onClick={openBulkDiscardModal}
+              onClick={() => openBulkSimilarModal("discard")}
             >
               <Copy size={14} />
               Descartar del mismo tamaño…
@@ -784,32 +994,105 @@ export default function ReviewScreen({
           </div>
         )}
 
-        {selectedGroupIds.size === 1 && splittablePieceCount > 1 && (
-          <div className="px-4 py-2 border-b border-base-300/30 bg-warning/5">
+        {selectedGroupIds.size === 1 && sameAreaDiscardMatches.length > 0 && (
+          <div className="px-4 py-2 border-b border-base-300/30 bg-info/5">
             <p className="text-[10px] text-base-content/45 mb-2 leading-relaxed">
-              Esta capa tiene {splittablePieceCount} piezas separadas pegadas entre sí.
-              Dividila para tratarlas de forma independiente.
+              {sameAreaDiscardMatches.length} descarte{sameAreaDiscardMatches.length !== 1 ? "s" : ""} más
+              iguales ({selectedGroup?.totalArea.toFixed(2)} m² · {selectedGroup?.orientation}).
+              Marcá todas como pared o piso para incluirlas en los planos (p. ej. ventanas).
             </p>
-            <button
-              type="button"
-              className="btn btn-outline btn-sm w-full rounded-xl gap-2 border-warning/40 text-base-content/80 hover:border-warning"
-              onClick={handleSplitSelected}
-            >
-              <SquareSplitHorizontal size={14} />
-              Dividir en {splittablePieceCount} piezas
-            </button>
+            <div className="flex flex-col gap-1.5">
+              <button
+                type="button"
+                className="btn btn-outline btn-sm w-full rounded-xl gap-2 border-info/40 text-base-content/80"
+                onClick={() => openBulkSimilarModal("promote", "wall")}
+              >
+                <Copy size={14} />
+                Marcar iguales como Pared…
+              </button>
+              <button
+                type="button"
+                className="btn btn-outline btn-sm w-full rounded-xl gap-2 border-info/40 text-base-content/80"
+                onClick={() => openBulkSimilarModal("promote", "floor")}
+              >
+                <Copy size={14} />
+                Marcar iguales como Piso…
+              </button>
+            </div>
           </div>
         )}
 
-        {selectedGroupIds.size >= 2 && canMergeSelected && (
-          <div className="px-4 py-3 border-b border-base-300/30 bg-primary/5">
-            <button
-              type="button"
-              className="btn btn-primary btn-sm w-full rounded-xl gap-2"
-              onClick={handleMergeSelected}
-            >
-              Fusionar {selectedGroupIds.size} capas seleccionadas
-            </button>
+        {selectedGroup && getEffectiveCategory(selectedGroup, overrides) === "wall" && (
+          <div className="px-4 py-2 border-b border-base-300/30 bg-primary/5">
+            <p className="text-[10px] text-base-content/50 leading-relaxed">
+              Seleccioná más piezas del mismo plano y clic derecho → Fusionar, o usá los checkboxes.
+            </p>
+          </div>
+        )}
+
+        {(canMergeSelected || mergeBlockedReason || (splitPreview && (splitPreview.components > 1 || splitPreview.panels > 1))) && (
+          <div className="px-4 py-3 border-b border-base-300/30 bg-base-100/60 space-y-2">
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-base-content/40">
+              Capas · fusión / división
+            </p>
+
+            {canMergeSelected && primaryMergeCluster && (
+              <button
+                type="button"
+                className="btn btn-primary btn-sm w-full rounded-xl gap-2"
+                onClick={handleMergeSelected}
+              >
+                <Link2 size={14} />
+                Fusionar {primaryMergeCluster.length} paredes del mismo plano
+              </button>
+            )}
+
+            {mergeBlockedReason && (
+              <p className="text-[10px] text-base-content/45 leading-relaxed px-1">
+                {mergeBlockedReason}
+              </p>
+            )}
+
+            {splitPreview && splitPreview.components > 1 && (
+              <button
+                type="button"
+                className="btn btn-outline btn-sm w-full rounded-xl gap-2 border-warning/40 text-base-content/80 hover:border-warning"
+                onClick={handleSplitComponents}
+              >
+                <SquareSplitHorizontal size={14} />
+                Dividir en {splitPreview.components} componentes
+              </button>
+            )}
+
+            {splitPreview && splitPreview.panels > 1 && (
+              <>
+                <button
+                  type="button"
+                  className="btn btn-outline btn-sm w-full rounded-xl gap-2 border-warning/40 text-base-content/80 hover:border-warning"
+                  onClick={handleSplitPanels}
+                >
+                  <SquareSplitHorizontal size={14} />
+                  Dividir en {splitPreview.panels} piezas
+                </button>
+                <p className="text-[10px] text-base-content/40 leading-relaxed px-1">
+                  Para paneles en L o escalones. Una pared lisa no necesita dividirse.
+                </p>
+              </>
+            )}
+
+            {selectedGroupIds.size >= 2 && !canMergeSelected && !mergeBlockedReason && (
+              <p className="text-[10px] text-base-content/45 leading-relaxed px-1">
+                Seleccioná varias capas con Ctrl+clic o los checkboxes de la lista.
+              </p>
+            )}
+          </div>
+        )}
+
+        {selectedGroupIds.size >= 2 && !canMergeSelected && !mergeBlockedReason && (
+          <div className="px-4 py-2 border-b border-base-300/30 bg-base-100/40">
+            <p className="text-[10px] text-base-content/45 leading-relaxed">
+              Ctrl+clic en la lista para seleccionar varias capas y fusionarlas.
+            </p>
           </div>
         )}
 
@@ -919,20 +1202,50 @@ export default function ReviewScreen({
         </aside>
       )}
 
-      {bulkDiscardModal && (
+      {bulkSimilarModal && (
         <dialog className="modal modal-open">
           <div className="modal-box max-w-md rounded-2xl">
-            <h3 className="font-semibold text-base">Descartar capas del mismo tamaño</h3>
+            <h3 className="font-semibold text-base">
+              {bulkSimilarModal.mode === "discard"
+                ? "Descartar capas del mismo tamaño"
+                : "Reclasificar capas del mismo tamaño"}
+            </h3>
             <p className="text-xs text-base-content/55 mt-2 leading-relaxed">
               Estas capas tienen{" "}
               <span className="font-mono font-semibold">
-                {bulkDiscardModal.reference.totalArea.toFixed(2)} m²
+                {bulkSimilarModal.reference.totalArea.toFixed(2)} m²
               </span>
-              , la misma orientación y tipo. Desmarcá las que quieras conservar.
+              , la misma orientación y tipo. Desmarcá las que no quieras incluir.
             </p>
+            {bulkSimilarModal.mode === "promote" && (
+              <div className="mt-3 flex gap-2">
+                <button
+                  type="button"
+                  className={`btn btn-sm flex-1 rounded-xl ${
+                    bulkSimilarModal.promoteTarget === "wall" ? "btn-primary" : "btn-outline"
+                  }`}
+                  onClick={() =>
+                    setBulkSimilarModal((m) => m && { ...m, promoteTarget: "wall" })
+                  }
+                >
+                  Pared
+                </button>
+                <button
+                  type="button"
+                  className={`btn btn-sm flex-1 rounded-xl ${
+                    bulkSimilarModal.promoteTarget === "floor" ? "btn-primary" : "btn-outline"
+                  }`}
+                  onClick={() =>
+                    setBulkSimilarModal((m) => m && { ...m, promoteTarget: "floor" })
+                  }
+                >
+                  Piso
+                </button>
+              </div>
+            )}
             <div className="mt-4 max-h-56 overflow-y-auto space-y-1.5 custom-scrollbar">
-              {[bulkDiscardModal.reference, ...bulkDiscardModal.matches].map((g) => {
-                const eff = overrides.get(g.id) ?? g.category;
+              {[bulkSimilarModal.reference, ...bulkSimilarModal.matches].map((g) => {
+                const eff = getEffectiveCategory(g, overrides);
                 return (
                   <label
                     key={g.id}
@@ -941,9 +1254,9 @@ export default function ReviewScreen({
                     <input
                       type="checkbox"
                       className="checkbox checkbox-xs checkbox-primary rounded mt-0.5"
-                      checked={bulkDiscardChecked.has(g.id)}
+                      checked={bulkSimilarChecked.has(g.id)}
                       onChange={(e) => {
-                        setBulkDiscardChecked((prev) => {
+                        setBulkSimilarChecked((prev) => {
                           const next = new Set(prev);
                           if (e.target.checked) next.add(g.id);
                           else next.delete(g.id);
@@ -954,7 +1267,8 @@ export default function ReviewScreen({
                     <div className="min-w-0">
                       <span className="text-sm font-medium truncate block">{g.label}</span>
                       <span className="text-[10px] text-base-content/45">
-                        {g.totalArea.toFixed(2)} m² · {eff === "wall" ? "Pared" : eff === "floor" ? "Piso" : "Descartar"}
+                        {g.totalArea.toFixed(2)} m² ·{" "}
+                        {eff === "wall" ? "Pared" : eff === "floor" ? "Piso" : "Descartar"}
                       </span>
                     </div>
                   </label>
@@ -965,22 +1279,26 @@ export default function ReviewScreen({
               <button
                 type="button"
                 className="btn btn-ghost rounded-xl"
-                onClick={() => setBulkDiscardModal(null)}
+                onClick={() => setBulkSimilarModal(null)}
               >
                 Cancelar
               </button>
               <button
                 type="button"
                 className="btn btn-primary rounded-xl"
-                disabled={bulkDiscardChecked.size === 0}
-                onClick={confirmBulkDiscard}
+                disabled={bulkSimilarChecked.size === 0}
+                onClick={confirmBulkSimilar}
               >
-                Descartar {bulkDiscardChecked.size} capa{bulkDiscardChecked.size !== 1 ? "s" : ""}
+                {bulkSimilarModal.mode === "discard"
+                  ? `Descartar ${bulkSimilarChecked.size} capa${bulkSimilarChecked.size !== 1 ? "s" : ""}`
+                  : `Marcar ${bulkSimilarChecked.size} como ${
+                      bulkSimilarModal.promoteTarget === "floor" ? "piso" : "pared"
+                    }`}
               </button>
             </div>
           </div>
           <form method="dialog" className="modal-backdrop">
-            <button type="button" onClick={() => setBulkDiscardModal(null)}>
+            <button type="button" onClick={() => setBulkSimilarModal(null)}>
               cerrar
             </button>
           </form>

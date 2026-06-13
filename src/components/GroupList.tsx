@@ -30,6 +30,7 @@ export interface GroupListProps {
   onShowGroup: (id: number) => void;
   onShowAllHidden: () => void;
   onChangeCategory: (id: number, category: FaceCategory) => void;
+  onOpenContextMenu?: (detail: { clientX: number; clientY: number; groupId: number }) => void;
 }
 
 export default function GroupList({
@@ -44,6 +45,7 @@ export default function GroupList({
   onShowGroup,
   onShowAllHidden,
   onChangeCategory,
+  onOpenContextMenu,
 }: GroupListProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const selectedRef = useRef<HTMLDivElement>(null);
@@ -78,6 +80,7 @@ export default function GroupList({
             <p className="text-[10px] text-base-content/50 truncate">
               {shownGroups.length} visible{shownGroups.length !== 1 ? "s" : ""}
               {hiddenGroups.length > 0 && ` · ${hiddenGroups.length} oculta${hiddenGroups.length !== 1 ? "s" : ""}`}
+              {" · clic varias paredes del mismo plano para fusionar"}
             </p>
           </div>
         </div>
@@ -131,6 +134,14 @@ export default function GroupList({
               onClick={(e) => {
                 if (e.ctrlKey || e.metaKey) onToggleGroup(group.id);
                 else onSelectGroup(group.id);
+              }}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                onOpenContextMenu?.({
+                  clientX: e.clientX,
+                  clientY: e.clientY,
+                  groupId: group.id,
+                });
               }}
             >
               <input

@@ -511,6 +511,100 @@ function legacyBoundary(faces: Face3D[], uAxis: Vec3, vAxis: Vec3): RawEdge[] {
   return traceContours(boundaryEdges);
 }
 
+function buildPanelProjectionAxes(
+  groupNormal: Vec3,
+  up: UpAxis,
+): { uAxis: Vec3; vAxis: Vec3 } {
+  const worldUp = getUpVec(up);
+  let uAxis: Vec3 = normalize(cross(worldUp, groupNormal));
+  let vAxis: Vec3;
+
+  if (vlength(uAxis) < NEAR_PARALLEL_EPS) {
+    uAxis = { x: 1, y: 0, z: 0 };
+    vAxis = normalize(cross(groupNormal, uAxis));
+    if (vlength(vAxis) < NEAR_PARALLEL_EPS) {
+      vAxis = up === "Y" ? { x: 0, y: 0, z: 1 } : { x: 0, y: 1, z: 0 };
+    }
+  } else {
+    vAxis = normalize(cross(groupNormal, uAxis));
+  }
+
+  return { uAxis, vAxis };
+}
+
+/**
+ * Count interior holes (windows/doors) when all faces of a group are unioned
+ * in 2D. Used to avoid splitting a wall into rectangles around an opening.
+ */
+export function countUnionHoles(
+  faces: Face3D[],
+  groupNormal: Vec3,
+  up: UpAxis = "Y",
+): number {
+  if (faces.length <= 1) return 0;
+
+  const { uAxis, vAxis } = buildPanelProjectionAxes(groupNormal, up);
+  const polys: Array<Array<[number, number]>[]> = [];
+  for (const face of faces) {
+    const ring: Array<[number, number]> = face.vertices.map(
+      (v) => [snapUnion(dot(v, uAxis)), snapUnion(dot(v, vAxis))],
+    );
+    if (ring.length < 3) continue;
+    if (Math.abs(ring2DArea(ring)) < 1e-7) continue;
+    polys.push([ring]);
+  }
+  if (polys.length === 0) return 0;
+
+  let merged;
+  try {
+    merged = union(polys[0], ...polys.slice(1));
+  } catch {
+    return 0;
+  }
+
+  let holes = 0;
+  for (const poly of merged) {
+    for (let ri = 1; ri < poly.length; ri++) {
+      if (Math.abs(ring2DArea(poly[ri])) >= MIN_HOLE_AREA) holes++;
+    }
+  }
+  return holes;
+}
+
+/** True when all faces union to a single outer silhouette (holes allowed). */
+export function unionFormsSinglePanel(
+  faces: Face3D[],
+  groupNormal: Vec3,
+  up: UpAxis = "Y",
+): boolean {
+  if (faces.length <= 1) return true;
+
+  const { uAxis, vAxis } = buildPanelProjectionAxes(groupNormal, up);
+  const polys: Array<Array<[number, number]>[]> = [];
+  for (const face of faces) {
+    const ring: Array<[number, number]> = face.vertices.map(
+      (v) => [snapUnion(dot(v, uAxis)), snapUnion(dot(v, vAxis))],
+    );
+    if (ring.length < 3) continue;
+    if (Math.abs(ring2DArea(ring)) < 1e-7) continue;
+    polys.push([ring]);
+  }
+  if (polys.length === 0) return true;
+
+  let merged;
+  try {
+    merged = union(polys[0], ...polys.slice(1));
+  } catch {
+    return true;
+  }
+
+  let outerCount = 0;
+  for (const poly of merged) {
+    if (poly.length > 0 && Math.abs(ring2DArea(poly[0])) >= 1e-6) outerCount++;
+  }
+  return outerCount === 1;
+}
+
 export function projectFacesTo2D(
   faces: Face3D[],
   groupNormal: Vec3,
@@ -532,21 +626,8 @@ export function projectFacesTo2D(
   // Universal tangent-plane projection: always project onto the surface's own
   // plane so the true cutting shape is preserved for any orientation —
   // horizontal floors, vertical walls, and inclined roofs alike.
+  const { uAxis, vAxis } = buildPanelProjectionAxes(groupNormal, up);
   const worldUp = getUpVec(up);
-  let uAxis: Vec3 = normalize(cross(worldUp, groupNormal));
-  let vAxis: Vec3;
-
-  if (vlength(uAxis) < NEAR_PARALLEL_EPS) {
-    // Normal is nearly parallel to worldUp (pure floor/ceiling) — pick
-    // an arbitrary horizontal axis as u.
-    uAxis = { x: 1, y: 0, z: 0 };
-    vAxis = normalize(cross(groupNormal, uAxis));
-    if (vlength(vAxis) < NEAR_PARALLEL_EPS) {
-      vAxis = up === "Y" ? { x: 0, y: 0, z: 1 } : { x: 0, y: 1, z: 0 };
-    }
-  } else {
-    vAxis = normalize(cross(groupNormal, uAxis));
-  }
 
   // Compute the true 2D outline as the boolean UNION of all face polygons.
   // This yields exactly the outer silhouette + holes (windows/doors) with no
