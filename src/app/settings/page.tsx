@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { ArrowLeft, Settings } from "lucide-react";
-import AuthNav from "@/components/AuthNav";
 import BackgroundSymbols from "@/components/BackgroundSymbols";
 import UserSettingsForm from "@/components/UserSettingsForm";
 import { useAuth } from "@/context/AuthContext";
@@ -12,7 +11,6 @@ export default function SettingsPage() {
 
   return (
     <main className="flex flex-col min-h-screen items-center py-12 px-4 md:px-8 relative">
-      <AuthNav />
       <BackgroundSymbols />
 
       <div className="w-full max-w-lg z-10 mt-8 md:mt-12">
