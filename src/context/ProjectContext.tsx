@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from "react";
 import type { Phase1Result, ClassificationOverride, NestingPreviewData } from "@/core/pipeline";
+import { applyPanelBridgeSplits } from "@/core/pipeline";
 import { DEFAULT_SHEET } from "@/core/sheet-nester";
 import type { PipelineOptions, SheetConfig } from "@/core/types";
 
@@ -86,7 +87,11 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       setProjectFileName(parsed.fileName ?? null);
       setFileId(parsed.fileId);
       setPreviewObj(parsed.previewObj);
-      setPhase1Result(parsed.phase1Result);
+      setPhase1Result(
+        parsed.phase1Result
+          ? applyPanelBridgeSplits(parsed.phase1Result)
+          : null,
+      );
       setScale(parsed.scale);
       setPaper(parsed.paper);
       setMinAreaM2(parsed.minAreaM2);

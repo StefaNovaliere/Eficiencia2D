@@ -457,6 +457,7 @@ export function splitGroupAtPanelBridges(
 export function splitWallGroupsAtPanelBridges(
   faces: Face3D[],
   groups: GeometryGroup[],
+  options?: SplitGroupOptions,
 ): GeometryGroup[] {
   let nextId = Math.max(0, ...groups.map((g) => g.id)) + 1;
   const result: GeometryGroup[] = [];
@@ -466,7 +467,7 @@ export function splitWallGroupsAtPanelBridges(
       result.push(group);
       continue;
     }
-    const split = splitGroupAtPanelBridges(faces, group, nextId);
+    const split = splitGroupAtPanelBridges(faces, group, nextId, options);
     nextId = split.nextId;
     result.push(...split.groups);
   }

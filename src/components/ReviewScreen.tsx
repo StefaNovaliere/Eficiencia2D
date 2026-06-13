@@ -15,7 +15,6 @@ import {
   reclassifyWithAxis,
   computePanelIdByGroup,
   applyMerges,
-  canMergeGroups,
   findCoplanarMergeClusters,
   splitGroupInPhase1,
 } from "@/core/pipeline";
@@ -44,7 +43,9 @@ import {
   X,
   Copy,
   SquareSplitHorizontal,
+  ArrowLeft as ArrowBackIcon,
 } from "lucide-react";
+import { useReviewHistory } from "@/hooks/useReviewHistory";
 
 export type WallWallDecisions = Map<number, number>;
 
@@ -156,6 +157,44 @@ export default function ReviewScreen({
   const [manualPhase1, setManualPhase1] = useState<Phase1Result | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const viewerAreaRef = useRef<HTMLDivElement>(null);
+  const skipWallWallReseedRef = useRef(false);
+
+  const historyState = useMemo(
+    () => ({
+      overrides,
+      merges,
+      hiddenGroupIds,
+      wallWallDecisions,
+      manualPhase1,
+    }),
+    [overrides, merges, hiddenGroupIds, wallWallDecisions, manualPhase1],
+  );
+
+  const { canUndo, canRedo, pushHistory, undo, redo } = useReviewHistory(historyState);
+
+  const restoreHistorySnapshot = useCallback(
+    (snap: ReturnType<typeof undo>) => {
+      if (!snap) return;
+      skipWallWallReseedRef.current = true;
+      setOverrides(snap.overrides);
+      setMerges(snap.merges);
+      setHiddenGroupIds(snap.hiddenGroupIds);
+      setWallWallDecisions(snap.wallWallDecisions);
+      setManualPhase1(snap.manualPhase1);
+      setSelectedGroupIds(new Set());
+      setSelectedJointIndex(null);
+      setContextMenu(null);
+    },
+    [],
+  );
+
+  const handleUndo = useCallback(() => {
+    restoreHistorySnapshot(undo());
+  }, [undo, restoreHistorySnapshot]);
+
+  const handleRedo = useCallback(() => {
+    restoreHistorySnapshot(redo());
+  }, [redo, restoreHistorySnapshot]);
 
   useEffect(() => {
     setManualPhase1(null);
@@ -164,16 +203,47 @@ export default function ReviewScreen({
   useEffect(() => {
     if (!contextMenu) return;
     const close = () => setContextMenu(null);
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
-    };
     window.addEventListener("click", close);
-    window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("click", close);
-      window.removeEventListener("keydown", onKey);
     };
   }, [contextMenu]);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const typing =
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT" ||
+          target.isContentEditable);
+
+      if (e.key === "Escape") {
+        if (typing) return;
+        setSelectedGroupIds(new Set());
+        setSelectedJointIndex(null);
+        setContextMenu(null);
+        return;
+      }
+
+      if (typing) return;
+
+      const mod = e.ctrlKey || e.metaKey;
+      if (!mod) return;
+
+      if (e.key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        handleUndo();
+      } else if (e.key === "y" || (e.key === "z" && e.shiftKey)) {
+        e.preventDefault();
+        handleRedo();
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [handleUndo, handleRedo]);
 
   const workingPhase1 = manualPhase1 ?? phase1;
 
@@ -184,6 +254,7 @@ export default function ReviewScreen({
   );
 
   const handleHideGroup = useCallback((id: number) => {
+    pushHistory();
     setHiddenGroupIds((prev) => new Set(prev).add(id));
     setSelectedGroupIds((prev) => {
       if (!prev.has(id)) return prev;
@@ -192,42 +263,16 @@ export default function ReviewScreen({
       return next;
     });
     setSelectedJointIndex(null);
-  }, []);
+  }, [pushHistory]);
 
   const handleSelectGroup = useCallback((id: number) => {
     setSelectedGroupIds((prev) => {
       if (id === -1) return new Set();
-
-      const group = effectivePhase1.groups.find((g) => g.id === id);
-      if (!group) return prev;
-
-      if (prev.has(id)) {
-        if (prev.size === 1) return new Set();
-        const next = new Set(prev);
-        next.delete(id);
-        return next;
-      }
-
-      if (prev.size >= 1) {
-        const existing = Array.from(prev)
-          .map((gid) => effectivePhase1.groups.find((g) => g.id === gid))
-          .filter((g): g is GeometryGroup => g != null);
-        const candidate = [...existing, group];
-        const allWalls = candidate.every(
-          (g) => getEffectiveCategory(g, overrides) === "wall",
-        );
-        if (
-          allWalls &&
-          canMergeGroups(candidate, effectivePhase1.groups, effectivePhase1.faces)
-        ) {
-          return new Set(prev).add(id);
-        }
-      }
-
+      if (prev.size === 1 && prev.has(id)) return new Set();
       return new Set([id]);
     });
     setSelectedJointIndex(null);
-  }, [effectivePhase1, overrides]);
+  }, []);
 
   const handleToggleGroup = useCallback((id: number) => {
     setSelectedGroupIds((prev) => {
@@ -239,19 +284,23 @@ export default function ReviewScreen({
       }
       return next;
     });
+    setSelectedJointIndex(null);
   }, []);
 
   const handleShowGroup = useCallback((id: number) => {
+    pushHistory();
     setHiddenGroupIds((prev) => {
       const next = new Set(prev);
       next.delete(id);
       return next;
     });
-  }, []);
+  }, [pushHistory]);
 
   const handleShowAllHidden = useCallback(() => {
+    if (hiddenGroupIds.size === 0) return;
+    pushHistory();
     setHiddenGroupIds(new Set());
-  }, []);
+  }, [hiddenGroupIds.size, pushHistory]);
 
   const applyCategoryOverride = useCallback(
     (
@@ -272,6 +321,7 @@ export default function ReviewScreen({
         ? Array.from(selectedGroupIds)
         : [id];
 
+      pushHistory();
       setOverrides((prev) => {
         const next = new Map(prev);
         for (const gid of idsToUpdate) {
@@ -280,7 +330,7 @@ export default function ReviewScreen({
         return next;
       });
     },
-    [selectedGroupIds, applyCategoryOverride],
+    [selectedGroupIds, applyCategoryOverride, pushHistory],
   );
 
   const selectedGroup = useMemo(() => {
@@ -328,6 +378,7 @@ export default function ReviewScreen({
         ? "discard"
         : bulkSimilarModal.promoteTarget ?? "wall";
 
+    pushHistory();
     setOverrides((prev) => {
       const next = new Map(prev);
       for (const gid of ids) {
@@ -347,13 +398,18 @@ export default function ReviewScreen({
       window.setTimeout(() => setBulkActionNotice(null), 4000);
     }
     setBulkSimilarModal(null);
-  }, [bulkSimilarModal, bulkSimilarChecked, applyCategoryOverride]);
+  }, [bulkSimilarModal, bulkSimilarChecked, applyCategoryOverride, pushHistory]);
 
   // Re-seed wall-wall decisions whenever the effective topology changes (axis
   // rotation, min-area, or merge changes recompute joints and their indices).
   // The ref guard skips the initial mount so restored / initial decisions survive.
   const effectiveRef = useRef(effectivePhase1);
   useEffect(() => {
+    if (skipWallWallReseedRef.current) {
+      skipWallWallReseedRef.current = false;
+      effectiveRef.current = effectivePhase1;
+      return;
+    }
     if (effectiveRef.current === effectivePhase1) return;
     effectiveRef.current = effectivePhase1;
     const m = new Map<number, number>();
@@ -434,13 +490,15 @@ export default function ReviewScreen({
 
   const handleMergeSelected = useCallback(() => {
     if (!primaryMergeCluster || primaryMergeCluster.length < 2) return;
+    pushHistory();
     setMerges((prev) => [...prev, primaryMergeCluster]);
     setSelectedGroupIds(new Set());
     setContextMenu(null);
-  }, [primaryMergeCluster]);
+  }, [primaryMergeCluster, pushHistory]);
 
   const handleHideSelected = useCallback(() => {
     if (selectedGroupIds.size === 0) return;
+    pushHistory();
     setHiddenGroupIds((prev) => {
       const next = new Set(prev);
       for (const id of selectedGroupIds) next.add(id);
@@ -448,7 +506,7 @@ export default function ReviewScreen({
     });
     setSelectedGroupIds(new Set());
     setContextMenu(null);
-  }, [selectedGroupIds]);
+  }, [selectedGroupIds, pushHistory]);
 
   const openViewerContextMenu = useCallback(
     (detail: { clientX: number; clientY: number; groupId: number | null }) => {
@@ -488,10 +546,11 @@ export default function ReviewScreen({
     const current = manualPhase1 ?? phase1;
     const updated = splitGroupInPhase1(current, gid, "components");
     if (updated === current) return;
+    pushHistory();
     setManualPhase1(updated);
     setSelectedGroupIds(new Set());
     setSelectedJointIndex(null);
-  }, [selectedGroupIds, manualPhase1, phase1]);
+  }, [selectedGroupIds, manualPhase1, phase1, pushHistory]);
 
   const handleSplitPanels = useCallback(() => {
     if (selectedGroupIds.size !== 1) return;
@@ -499,17 +558,20 @@ export default function ReviewScreen({
     const current = manualPhase1 ?? phase1;
     const updated = splitGroupInPhase1(current, gid, "panels");
     if (updated === current) return;
+    pushHistory();
     setManualPhase1(updated);
     setSelectedGroupIds(new Set());
     setSelectedJointIndex(null);
-  }, [selectedGroupIds, manualPhase1, phase1]);
+  }, [selectedGroupIds, manualPhase1, phase1, pushHistory]);
 
   const handleUnmerge = useCallback((mergeIndex: number) => {
+    pushHistory();
     setMerges((prev) => prev.filter((_, i) => i !== mergeIndex));
-  }, []);
+  }, [pushHistory]);
 
   const handleWallWallDecision = useCallback(
     (jointIndex: number, yieldGroupId: number, groupA: number, groupB: number) => {
+      pushHistory();
       setWallWallDecisions((prev) => {
         const next = new Map(prev);
         next.set(jointIndex, yieldGroupId);
@@ -518,7 +580,7 @@ export default function ReviewScreen({
       // Highlight both walls of the joint in the 3D viewer.
       setSelectedGroupIds(new Set([groupA, groupB]));
     },
-    [],
+    [pushHistory],
   );
 
   const handleToggleVisibility = useCallback((cat: FaceCategory) => {
@@ -681,6 +743,33 @@ export default function ReviewScreen({
               visibleCategories={visibleCategories}
               onToggle={handleToggleVisibility}
             />
+
+            <div className="hidden sm:block w-px h-7 bg-base-300/50" />
+
+            <div className="inline-flex items-center gap-0.5 p-0.5 rounded-xl bg-base-200/50">
+              <div className="tooltip tooltip-bottom" data-tip="Deshacer (Ctrl+Z)">
+                <button
+                  type="button"
+                  className={viewToolBtn}
+                  onClick={handleUndo}
+                  disabled={!canUndo}
+                  aria-label="Deshacer"
+                >
+                  <ArrowBackIcon size={15} />
+                </button>
+              </div>
+              <div className="tooltip tooltip-bottom" data-tip="Rehacer (Ctrl+Y)">
+                <button
+                  type="button"
+                  className={viewToolBtn}
+                  onClick={handleRedo}
+                  disabled={!canRedo}
+                  aria-label="Rehacer"
+                >
+                  <ArrowRight size={15} />
+                </button>
+              </div>
+            </div>
 
             <div className="hidden sm:block w-px h-7 bg-base-300/50" />
 

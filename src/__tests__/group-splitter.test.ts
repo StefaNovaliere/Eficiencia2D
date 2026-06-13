@@ -56,6 +56,16 @@ describe("group-splitter", () => {
     expect(groups[0].faceIndices).toEqual([0, 1]);
   });
 
+  it("separa paneles adyacentes en revisión cuando force=true", () => {
+    const left = wallQuad(0, 0, 0, 2, 0.3);
+    const right = wallQuad(0, 0, 0.3, 2, 1.5);
+    const group = mockGroup([0, 1]);
+    const { groups } = splitGroupAtPanelBridges([left, right], group, 2, { force: true });
+    expect(groups).toHaveLength(2);
+    expect(groups[0].faceIndices).toEqual([0]);
+    expect(groups[1].faceIndices).toEqual([1]);
+  });
+
   it("no divide paneles con alturas distintas que forman una sola pieza", () => {
     const tall = wallQuad(0, 0, 0, 3, 0.25);
     const short = wallQuad(0, 0, 0.25, 1.5, 0.8);
