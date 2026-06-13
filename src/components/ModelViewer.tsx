@@ -399,7 +399,7 @@ function CategoryMesh({ mesh, isDimmed, isSolid, groupAreaById, materials, onPic
           e.stopPropagation();
           const groupId = pickGroupFromIntersections(e.intersections, groupAreaById);
           if (groupId == null) return;
-          if (e.nativeEvent.ctrlKey || e.nativeEvent.metaKey || e.nativeEvent.shiftKey) {
+          if (e.nativeEvent.ctrlKey || e.nativeEvent.metaKey) {
             onTogglePick(groupId);
           } else {
             onPick(groupId);

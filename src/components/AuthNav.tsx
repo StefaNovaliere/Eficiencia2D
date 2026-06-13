@@ -1,44 +1,56 @@
 "use client";
 
 import Link from "next/link";
+import { Settings } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 
-export default function AuthNav() {
-  const { user, isLoadingAuth, logout, isAuthenticated } = useAuth();
+interface AuthNavProps {
+  /** En login/registro: solo el acceso a configuración a la izquierda. */
+  hideAuthActions?: boolean;
+}
 
-  if (isLoadingAuth) {
-    return (
-      <div className="fixed top-4 right-4 z-20">
-        <span className="loading loading-spinner loading-sm text-primary" />
-      </div>
-    );
-  }
+export function SettingsNavLink() {
+  return (
+    <Link
+      href="/settings"
+      className="btn btn-ghost btn-sm btn-circle rounded-xl border border-base-300 bg-base-100/80 backdrop-blur shadow-md"
+      title="Configuración"
+      aria-label="Configuración"
+    >
+      <Settings size={16} />
+    </Link>
+  );
+}
 
-  if (isAuthenticated && user) {
-    return (
-      <div className="fixed top-4 right-4 z-20 flex items-center gap-2">
-        <span className="hidden sm:inline text-sm text-base-content/70 bg-base-100/80 backdrop-blur px-3 py-2 rounded-xl border border-base-300">
-          {user.nombre || user.email}
-        </span>
-        <button
-          type="button"
-          onClick={logout}
-          className="btn btn-outline btn-sm rounded-xl border-base-300"
-        >
-          Salir
-        </button>
-      </div>
-    );
-  }
+export default function AuthNav({ hideAuthActions = false }: AuthNavProps) {
+  const { user, isLoadingAuth, isAuthenticated } = useAuth();
 
   return (
-    <div className="fixed top-4 right-4 z-20 flex items-center gap-2">
-      <Link href="/login" className="btn btn-ghost btn-sm rounded-xl">
-        Ingresar
-      </Link>
-      <Link href="/register" className="btn btn-primary btn-sm rounded-xl shadow-primary/20">
-        Registrarse
-      </Link>
-    </div>
+    <>
+      <div className="fixed top-4 left-4 md:top-6 md:left-6 z-20">
+        <SettingsNavLink />
+      </div>
+
+      {!hideAuthActions && (
+        <div className="fixed top-4 right-4 z-20 flex items-center gap-2">
+          {isLoadingAuth ? (
+            <span className="loading loading-spinner loading-sm text-primary" />
+          ) : isAuthenticated && user ? (
+            <span className="hidden sm:inline text-sm text-base-content/70 bg-base-100/80 backdrop-blur px-3 py-2 rounded-xl border border-base-300">
+              {user.nombre || user.email}
+            </span>
+          ) : (
+            <>
+              <Link href="/login" className="btn btn-ghost btn-sm rounded-xl">
+                Ingresar
+              </Link>
+              <Link href="/register" className="btn btn-primary btn-sm rounded-xl shadow-primary/20">
+                Registrarse
+              </Link>
+            </>
+          )}
+        </div>
+      )}
+    </>
   );
 }

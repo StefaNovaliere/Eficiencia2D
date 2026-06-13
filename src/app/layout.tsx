@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "@/styles/globals.css";
 import { AuthProvider } from "@/context/AuthContext";
 import { ProjectProvider } from "@/context/ProjectContext";
+import { SettingsProvider, SettingsThemeSync } from "@/context/SettingsContext";
 import { ThemeProvider } from "@/context/ThemeContext";
 
 export const metadata: Metadata = {
@@ -44,7 +45,10 @@ export default function RootLayout({
       <body className="min-h-screen bg-base-200 text-base-content antialiased font-sans">
         <ThemeProvider>
           <AuthProvider>
-            <ProjectProvider>{children}</ProjectProvider>
+            <SettingsProvider>
+              <SettingsThemeSync />
+              <ProjectProvider>{children}</ProjectProvider>
+            </SettingsProvider>
           </AuthProvider>
         </ThemeProvider>
       </body>

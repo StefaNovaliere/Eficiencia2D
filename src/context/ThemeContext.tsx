@@ -1,7 +1,6 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { Check, Palette } from "lucide-react";
 
 export type ThemeId =
   | "light"
@@ -160,14 +159,7 @@ export const THEMES: {
 
 const VALID_THEMES = new Set<string>(THEMES.map((t) => t.id));
 
-interface ThemeContextValue {
-  theme: ThemeId;
-  setTheme: (theme: ThemeId) => void;
-}
-
-const ThemeContext = createContext<ThemeContextValue | null>(null);
-
-function resolveInitialTheme(): ThemeId {
+export function getStoredThemeId(): ThemeId {
   if (typeof window === "undefined") return "light";
   try {
     const saved = localStorage.getItem("theme");
@@ -176,6 +168,17 @@ function resolveInitialTheme(): ThemeId {
     /* ignore */
   }
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+interface ThemeContextValue {
+  theme: ThemeId;
+  setTheme: (theme: ThemeId) => void;
+}
+
+const ThemeContext = createContext<ThemeContextValue | null>(null);
+
+function resolveInitialTheme(): ThemeId {
+  return getStoredThemeId();
 }
 
 function applyTheme(theme: ThemeId) {
@@ -213,61 +216,6 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     <ThemeContext.Provider value={{ theme, setTheme }}>
       {children}
     </ThemeContext.Provider>
-  );
-}
-
-export function ThemePicker() {
-  const ctx = useContext(ThemeContext);
-  if (!ctx) return null;
-
-  const { theme, setTheme } = ctx;
-  const current = THEMES.find((t) => t.id === theme);
-
-  return (
-    <div className="dropdown dropdown-right dropdown-bottom fixed top-4 left-4 md:top-6 md:left-6 z-[110]">
-      <button
-        type="button"
-        tabIndex={0}
-        className="btn btn-ghost btn-circle shadow-md bg-base-100/90 backdrop-blur border border-base-300"
-        title="Elegir tema"
-        aria-label="Elegir tema"
-      >
-        <Palette className="h-5 w-5" />
-      </button>
-      <ul
-        tabIndex={0}
-        className="dropdown-content menu bg-base-100 rounded-box z-[111] w-56 p-2 shadow-lg border border-base-300 mt-2 right-0"
-      >
-        <li className="menu-title px-3 py-1 text-xs">Tema</li>
-        {THEMES.map((item) => {
-          const active = item.id === theme;
-          return (
-            <li key={item.id}>
-              <button
-                type="button"
-                className={`flex items-center gap-3 rounded-lg ${active ? "active font-semibold" : ""}`}
-                onClick={() => setTheme(item.id)}
-              >
-                <span
-                  className="w-4 h-4 rounded-full border border-base-content/15 shrink-0"
-                  style={{ backgroundColor: item.swatch }}
-                  title={item.label}
-                />
-                <span className="flex-1 text-left">{item.label}</span>
-                {active && <Check className="h-4 w-4 text-primary shrink-0" />}
-              </button>
-            </li>
-          );
-        })}
-        {current && (
-          <li className="pointer-events-none mt-1 border-t border-base-300 pt-2">
-            <span className="px-3 text-[10px] uppercase tracking-wider text-base-content/50">
-              Activo: {current.label}
-            </span>
-          </li>
-        )}
-      </ul>
-    </div>
   );
 }
 

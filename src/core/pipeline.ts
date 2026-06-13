@@ -440,11 +440,12 @@ function finalizePhase1Groups(
   groups: GeometryGroup[],
   minRealArea: number,
 ) {
-  polishGroups(groups, minRealArea);
-  const joints = detectJoints(faces, groups);
-  const { adjustments, wallWallJoints } = computeAdjustments(joints, groups, undefined, faces);
-  const suggestedMerges = suggestCoplanarMerges(groups, joints);
-  return { faces, groups, joints, adjustments, wallWallJoints, suggestedMerges };
+  const splitGroups = splitWallGroupsAtPanelBridges(faces, groups, { force: true });
+  polishGroups(splitGroups, minRealArea);
+  const joints = detectJoints(faces, splitGroups);
+  const { adjustments, wallWallJoints } = computeAdjustments(joints, splitGroups, undefined, faces);
+  const suggestedMerges = suggestCoplanarMerges(splitGroups, joints);
+  return { faces, groups: splitGroups, joints, adjustments, wallWallJoints, suggestedMerges };
 }
 
 /** Recompute joints/adjustments after the group list changes (split/merge). */
@@ -485,7 +486,9 @@ export function splitGroupInPhase1(
  * Safe to call on every review load (no-op when already split).
  */
 export function applyPanelBridgeSplits(phase1: Phase1Result): Phase1Result {
-  const splitGroups = splitWallGroupsAtPanelBridges(phase1.faces, phase1.groups);
+  const splitGroups = splitWallGroupsAtPanelBridges(phase1.faces, phase1.groups, {
+    force: true,
+  });
   if (splitGroups.length === phase1.groups.length) {
     const unchanged = splitGroups.every(
       (g, i) =>
