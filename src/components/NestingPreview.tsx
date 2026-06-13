@@ -297,6 +297,25 @@ export default function NestingPreview({
         </div>
       </div>
 
+      {unplacedCount > 0 && (
+        <div className="alert alert-warning rounded-none border-x-0 shrink-0 flex-wrap gap-x-3 py-3">
+          <svg xmlns="http://www.w3.org/2000/svg" className="stroke-current shrink-0 h-5 w-5" fill="none" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+          <span className="text-sm">
+            <strong>{unplacedCount} componente{unplacedCount !== 1 ? "s" : ""}</strong> no
+            {unplacedCount === 1 ? " entra" : " entran"} entero{unplacedCount !== 1 ? "s" : ""} en la
+            plancha ({sheetConfig.widthM.toFixed(2)} &times; {sheetConfig.heightM.toFixed(2)} m).{" "}
+            {nextScaleOption > scaleDenom
+              ? <>Reducí la escala a <strong>1:{nextScaleOption}</strong> para que quepan.</>
+              : <>Usá una plancha más grande o reducí la escala.</>}
+          </span>
+          {nextScaleOption > scaleDenom && (
+            <button className="btn btn-sm btn-neutral ml-auto" onClick={() => onScaleChange(nextScaleOption)}>
+              Aplicar 1:{nextScaleOption}
+            </button>
+          )}
+        </div>
+      )}
+
       <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-base-100 relative">
         {isRecomputing && (
           <div className="absolute inset-0 z-10 flex items-center justify-center gap-3 bg-base-100/60 backdrop-blur-[1px] text-base-content/70">
@@ -322,61 +341,28 @@ export default function NestingPreview({
           sheetStroke={canvasColors.sheetStroke}
           labelText={canvasColors.labelText}
         />
-
-        {unplacedCount > 0 && (
-          <div className="alert alert-warning shadow-sm mt-4 rounded-xl">
-            <svg xmlns="http://www.w3.org/2000/svg" className="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
-            <div>
-              {unplacedCount} componente{unplacedCount !== 1 ? "s" : ""} no
-              {unplacedCount !== 1 ? "" : ""} entra{unplacedCount !== 1 ? "n" : ""}{" "}
-              enteros en la plancha ({sheetConfig.widthM.toFixed(2)} &times;{" "}
-              {sheetConfig.heightM.toFixed(2)} m).{" "}
-              {nextScaleOption > scaleDenom ? (
-                <>
-                  Reduci la escala a <strong>1:{nextScaleOption}</strong> para que quepan.
-                  <button
-                    className="btn btn-xs btn-active ml-3"
-                    onClick={() => onScaleChange(nextScaleOption)}
-                  >
-                    Aplicar 1:{nextScaleOption}
-                  </button>
-                </>
-              ) : (
-                <>Usa una plancha mas grande o reduci la escala.</>
-              )}
-            </div>
-          </div>
-        )}
       </div>
 
       <div className="mt-auto border-t border-base-300 p-4 bg-base-200/30 flex flex-col sm:flex-row items-center justify-between gap-4 shrink-0">
-        <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 text-xs font-medium">
-          <span className="text-base-content/70">
-            {sheetConfig.widthM.toFixed(2)} &times; {sheetConfig.heightM.toFixed(2)} m
+        <div className="flex flex-wrap items-center justify-center sm:justify-start gap-x-5 gap-y-1 text-xs">
+          <span className="text-base-content/55">
+            Plancha <b className="text-base-content/80 font-semibold tabular-nums">{sheetConfig.widthM.toFixed(2)}×{sheetConfig.heightM.toFixed(2)} m</b>
           </span>
-          <span className="text-base-content/30">&middot;</span>
-          <span className="text-base-content/70">Escala 1:{displayScale}</span>
-          <span className="text-base-content/30">&middot;</span>
-          <span className="text-base-content/70">3mm separación</span>
-          <span className="text-base-content/30">&middot;</span>
-          <span className="text-base-content/70">
-            {totalSheets} plancha{totalSheets !== 1 ? "s" : ""} total
+          <span className="text-base-content/55">
+            Escala <b className="text-base-content/80 font-semibold tabular-nums">1:{displayScale}</b>
+          </span>
+          <span className="text-base-content/55">
+            <b className="text-base-content/80 font-semibold tabular-nums">{totalSheets}</b> plancha{totalSheets !== 1 ? "s" : ""}
           </span>
           {wallPanels > 0 && (
-            <>
-              <span className="text-base-content/30">&middot;</span>
-              <span className="font-semibold" style={{ color: canvasColors.wall }}>
-                {wallPanels} pared{wallPanels !== 1 ? "es" : ""}
-              </span>
-            </>
+            <span className="font-semibold tabular-nums" style={{ color: canvasColors.wall }}>
+              {wallPanels} pared{wallPanels !== 1 ? "es" : ""}
+            </span>
           )}
           {floorPanels > 0 && (
-            <>
-              <span className="text-base-content/30">&middot;</span>
-              <span className="font-semibold" style={{ color: canvasColors.floor }}>
-                {floorPanels} piso{floorPanels !== 1 ? "s" : ""}
-              </span>
-            </>
+            <span className="font-semibold tabular-nums" style={{ color: canvasColors.floor }}>
+              {floorPanels} piso{floorPanels !== 1 ? "s" : ""}
+            </span>
           )}
         </div>
         <div className="flex gap-2 w-full sm:w-auto">
