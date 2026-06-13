@@ -169,8 +169,6 @@ export default function UploadForm() {
 
   return (
     <>
-      <DemoButton onClick={handleLoadDemo} />
-
       {hasActiveProject && (
         <div className="card bg-base-100 shadow-lg border border-primary/20 w-full mb-4">
           <div className="card-body p-5 md:p-6 gap-4">
@@ -278,27 +276,23 @@ export default function UploadForm() {
             )}
           </div>
 
-          {/* Settings */}
-          <div className="mt-6 bg-base-200/50 rounded-xl p-5 md:p-6">
-            <div className="grid grid-cols-1 gap-5">
-              <div className="flex flex-col gap-2">
-                <label className="text-sm font-semibold text-base-content/80">Escala de importación</label>
-                <select
-                  className="select select-bordered select-sm w-full bg-base-100"
-                  value={scale}
-                  onChange={(e) => setScale(Number(e.target.value))}
-                >
-                  <option value={20}>1:20</option>
-                  <option value={25}>1:25</option>
-                  <option value={50}>1:50</option>
-                  <option value={75}>1:75</option>
-                  <option value={100}>1:100</option>
-                </select>
-                <p className="text-xs text-base-content/60 leading-relaxed mt-1">
-                  Ej: Si tu modelo está dibujado en centímetros, elegí 1:100.
-                </p>
-              </div>
-            </div>
+          {/* Escala — campo compacto, parte del mismo paso de subida */}
+          <div className="mt-5 flex flex-wrap items-center gap-x-3 gap-y-1">
+            <label className="text-sm font-semibold text-base-content/80">Escala de importación</label>
+            <select
+              className="select select-bordered select-sm w-28 bg-base-100"
+              value={scale}
+              onChange={(e) => setScale(Number(e.target.value))}
+            >
+              <option value={20}>1:20</option>
+              <option value={25}>1:25</option>
+              <option value={50}>1:50</option>
+              <option value={75}>1:75</option>
+              <option value={100}>1:100</option>
+            </select>
+            <p className="text-xs text-base-content/55 leading-relaxed w-full">
+              Ej: si tu modelo está dibujado en centímetros, elegí 1:100.
+            </p>
           </div>
 
           {error && (
@@ -319,6 +313,8 @@ export default function UploadForm() {
           </div>
         </div>
       </div>
+
+      <DemoButton onClick={handleLoadDemo} />
     </>
   );
 }
