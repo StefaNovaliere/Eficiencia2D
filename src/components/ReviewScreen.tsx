@@ -44,6 +44,7 @@ import {
   SquareSplitHorizontal,
   ArrowLeft as ArrowBackIcon,
   MousePointerClick,
+  MousePointer2,
   Lasso,
   Trash2,
 } from "lucide-react";
@@ -217,7 +218,7 @@ export default function ReviewScreen({
   // deseleccionar. Con varias seleccionadas (Ctrl+clic para fusionar) no cambia.
   useEffect(() => {
     setSidebarTab((prev) => {
-      if (selectedGroupIds.size === 1) return "seleccion";
+      if (selectedGroupIds.size >= 1) return "seleccion";
       if (selectedGroupIds.size === 0) return "capas";
       return prev;
     });
@@ -277,6 +278,13 @@ export default function ReviewScreen({
     () => merges.length > 0 ? applyMerges(workingPhase1, merges) : workingPhase1,
     [workingPhase1, merges],
   );
+
+  // When a single merged group is selected, find which original groups were fused into it.
+  const selectedMergeCluster = useMemo(() => {
+    if (selectedGroupIds.size !== 1 || merges.length === 0) return null;
+    const selId = Array.from(selectedGroupIds)[0];
+    return merges.find((cluster) => cluster.includes(selId)) ?? null;
+  }, [selectedGroupIds, merges]);
 
   const handleHideGroup = useCallback((id: number) => {
     pushHistory();
@@ -944,7 +952,18 @@ export default function ReviewScreen({
             <div className="hidden sm:block w-px h-7 bg-base-300/50" />
 
             <div className="inline-flex items-center gap-0.5 p-0.5 rounded-xl bg-base-200/50">
-              <div className="tooltip tooltip-bottom" data-tip="Selección por área (S · Esc o V para volver al cursor)">
+              <div className="tooltip tooltip-bottom" data-tip="Cursor (V)">
+                <button
+                  type="button"
+                  className={`${viewToolBtn} ${!boxSelectMode ? "bg-primary/15 text-primary hover:bg-primary/20" : ""}`}
+                  onClick={() => setBoxSelectMode(false)}
+                  aria-label="Cursor"
+                  aria-pressed={!boxSelectMode}
+                >
+                  <MousePointer2 size={15} />
+                </button>
+              </div>
+              <div className="tooltip tooltip-bottom" data-tip="Selección por área (S)">
                 <button
                   type="button"
                   className={`${viewToolBtn} ${boxSelectMode ? "bg-primary/15 text-primary hover:bg-primary/20" : ""}`}
@@ -1279,6 +1298,116 @@ export default function ReviewScreen({
               <p className="text-xs text-base-content/35">Tipo, fusión/división y opciones por tamaño.</p>
             </div>
           )}
+
+          {/* Lista de capas cuando hay 2 o más seleccionadas */}
+          {selectedGroupIds.size >= 2 && (() => {
+            const selectedGroups = Array.from(selectedGroupIds).map((id) => ({
+              id,
+              group: effectivePhase1.groups.find((g) => g.id === id),
+              pid: panelIdByGroup.get(id),
+              cat: overrides.get(id) ?? effectivePhase1.groups.find((g) => g.id === id)?.category ?? "discard",
+            }));
+            return (
+              <div className="px-4 py-3 border-b border-base-300/30">
+                <p className="text-[11px] font-semibold uppercase tracking-widest text-base-content/40 mb-2">
+                  {selectedGroupIds.size} capas seleccionadas
+                </p>
+                <div className="flex flex-col gap-1">
+                  {selectedGroups.map(({ id, group, pid, cat }) => (
+                    <div key={id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-base-200/40 text-sm">
+                      <span
+                        className={`w-2 h-2 rounded-full shrink-0 ${
+                          cat === "wall" ? "bg-primary" : cat === "floor" ? "bg-success" : "bg-base-content/25"
+                        }`}
+                      />
+                      <span className="flex-1 truncate text-base-content/80 text-xs">
+                        {group?.label ?? `Grupo ${id}`}
+                      </span>
+                      {pid && (
+                        <span className="font-mono text-[10px] text-base-content/40 bg-base-100 border border-base-300/50 px-1 rounded">
+                          {pid}
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-xs btn-circle opacity-50 hover:opacity-100"
+                        onClick={() => handleToggleGroup(id)}
+                        aria-label="Quitar de selección"
+                      >
+                        <X size={10} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Botón de fusión prominente cuando hay selección múltiple */}
+          {canMergeSelected && primaryMergeCluster && selectedGroupIds.size >= 2 && (
+            <div className="px-4 py-3 border-b border-base-300/30">
+              <button
+                type="button"
+                className="btn btn-primary btn-sm w-full rounded-xl gap-2"
+                onClick={handleMergeSelected}
+              >
+                <Link2 size={14} />
+                Fusionar {primaryMergeCluster.length} paredes · F
+              </button>
+              {mergeBlockedReason && (
+                <p className="text-[11px] text-base-content/45 leading-relaxed px-1 mt-2">
+                  {mergeBlockedReason}
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Info del grupo fusionado cuando hay 1 seleccionado */}
+          {selectedGroupIds.size === 1 && selectedMergeCluster && (() => {
+            const selId = Array.from(selectedGroupIds)[0];
+            const mergeIdx = merges.findIndex((c) => c.includes(selId));
+            return (
+              <div className="px-4 py-3 border-b border-base-300/30 bg-primary/5">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-widest text-primary/60">
+                    Fusionada · {selectedMergeCluster.length} paredes
+                  </p>
+                  {mergeIdx >= 0 && (
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-xs gap-1 text-base-content/50 hover:text-error"
+                      onClick={() => handleUnmerge(mergeIdx)}
+                    >
+                      <X size={11} />
+                      Desfusionar
+                    </button>
+                  )}
+                </div>
+                <div className="flex flex-col gap-1">
+                  {selectedMergeCluster.map((id) => {
+                    const g = workingPhase1.groups.find((gr) => gr.id === id);
+                    const isSurvivor = id === selId;
+                    return (
+                      <div
+                        key={id}
+                        className={`flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs ${
+                          isSurvivor
+                            ? "bg-primary/10 border border-primary/20 text-primary font-medium"
+                            : "bg-base-200/50 text-base-content/70"
+                        }`}
+                      >
+                        <Link2 size={10} className="shrink-0 opacity-60" />
+                        <span className="flex-1 truncate">{g?.label ?? `Grupo ${id}`}</span>
+                        {isSurvivor && (
+                          <span className="text-[10px] opacity-60">fusión</span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
 
         {selectedGroupIds.size === 1 && sameAreaMatches.length > 0 && (
           <div className="px-4 py-2 border-b border-base-300/30 bg-base-100/60">
