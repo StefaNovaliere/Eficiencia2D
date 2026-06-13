@@ -4,6 +4,7 @@ import { AuthProvider } from "@/context/AuthContext";
 import { ProjectProvider } from "@/context/ProjectContext";
 import { SettingsProvider, SettingsThemeSync } from "@/context/SettingsContext";
 import { ThemeProvider } from "@/context/ThemeContext";
+import AppShell from "@/components/AppShell";
 
 export const metadata: Metadata = {
   title: "Eficiencia2D — Planos Arquitectónicos al Instante",
@@ -47,7 +48,9 @@ export default function RootLayout({
           <AuthProvider>
             <SettingsProvider>
               <SettingsThemeSync />
-              <ProjectProvider>{children}</ProjectProvider>
+              <ProjectProvider>
+                <AppShell>{children}</AppShell>
+              </ProjectProvider>
             </SettingsProvider>
           </AuthProvider>
         </ThemeProvider>
