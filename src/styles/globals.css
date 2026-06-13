@@ -3,6 +3,20 @@
   themes: light --default, dark --prefersdark, aqua, valentine, sunset, halloween;
 }
 
+/*
+ * Convenciones de diseño (mantener consistencia — usar la escala de Tailwind/DaisyUI):
+ *  · Espaciado: usar pasos de la escala (2/3/4/6/8 = 8/12/16/24/32px). Evitar
+ *    valores arbitrarios (no `p-[18px]`). Padding de cards: p-6 (móvil) / p-8 (md).
+ *  · Radios: `rounded-xl` (controles/inputs/botones) · `rounded-2xl` (cards/paneles).
+ *  · Sombras (jerarquía): `shadow-2xl` SOLO para la card/superficie principal de la
+ *    vista · `shadow-lg`/`shadow-md` para paneles secundarios/overlays · sin sombra
+ *    para loaders y contenedores internos.
+ *  · Tipografía (piso legible): texto/datos ≥ `text-xs` (12px); micro-labels ≥
+ *    `text-[11px]`. NO usar `text-[10px]`/`text-[9px]`. Jerarquía: títulos de vista
+ *    `text-2xl`+ · secciones `text-base/sm` semibold · captions `text-xs`.
+ *  · Íconos lucide: 14–16px inline / 22–28px en encabezados.
+ */
+
 :root {
   --viewer-bg: #eef0f4;
   --viewer-floor: #2d4f3e;
