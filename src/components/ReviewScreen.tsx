@@ -785,33 +785,21 @@ export default function ReviewScreen({
 
             <div className="hidden sm:block w-px h-7 bg-base-300/50" />
 
-            {/* Acciones contextuales sobre la selección (sólo cuando aplican) */}
-            {(selectedGroupIds.size === 1 || hiddenGroupIds.size > 0) && (
+            {/* "Mostrar ocultos" — única acción contextual en la barra. Ocultar
+                vive en el eye-off de cada fila y en el menú contextual. */}
+            {hiddenGroupIds.size > 0 && (
               <>
                 <div className="inline-flex items-center gap-0.5 p-0.5 rounded-xl bg-base-200/50">
-                  {selectedGroupIds.size === 1 && (
-                    <div className="tooltip tooltip-bottom" data-tip="Ocultar seleccionado">
-                      <button
-                        type="button"
-                        className={viewToolBtn}
-                        onClick={() => handleHideGroup(Array.from(selectedGroupIds)[0])}
-                      >
-                        <EyeOff size={15} />
-                      </button>
-                    </div>
-                  )}
-                  {hiddenGroupIds.size > 0 && (
-                    <div className="tooltip tooltip-bottom" data-tip="Mostrar ocultos">
-                      <button
-                        type="button"
-                        className={`${viewToolBtn} w-auto px-2 gap-1`}
-                        onClick={handleShowAllHidden}
-                      >
-                        <Eye size={14} />
-                        <span className="text-xs font-semibold tabular-nums">{hiddenGroupIds.size}</span>
-                      </button>
-                    </div>
-                  )}
+                  <div className="tooltip tooltip-bottom" data-tip="Mostrar ocultos">
+                    <button
+                      type="button"
+                      className={`${viewToolBtn} w-auto px-2 gap-1`}
+                      onClick={handleShowAllHidden}
+                    >
+                      <Eye size={14} />
+                      <span className="text-xs font-semibold tabular-nums">{hiddenGroupIds.size}</span>
+                    </button>
+                  </div>
                 </div>
                 <div className="hidden sm:block w-px h-7 bg-base-300/50" />
               </>
@@ -1049,7 +1037,7 @@ export default function ReviewScreen({
           <StepIndicator current="review" />
         </div>
         <div className="px-4 py-3.5 border-b border-base-300/30 bg-base-100/80">
-          <p className="text-[10px] font-semibold uppercase tracking-widest text-primary/80 mb-0.5">
+          <p className="text-[11px] font-semibold uppercase tracking-widest text-primary/80 mb-0.5">
             Revisión
           </p>
           <h2 className="text-base font-semibold tracking-tight">Clasificación del modelo</h2>
@@ -1060,7 +1048,7 @@ export default function ReviewScreen({
 
         {bulkActionNotice && (
           <div className="px-4 py-2 border-b border-base-300/30 bg-success/5">
-            <p className="text-[10px] text-success font-medium px-2 py-1.5 rounded-lg bg-success/10 border border-success/20">
+            <p className="text-[11px] text-success font-medium px-2 py-1.5 rounded-lg bg-success/10 border border-success/20">
               {bulkActionNotice}
             </p>
           </div>
@@ -1120,7 +1108,7 @@ export default function ReviewScreen({
 
         {selectedGroupIds.size === 1 && sameAreaMatches.length > 0 && (
           <div className="px-4 py-2 border-b border-base-300/30 bg-base-100/60">
-            <p className="text-[10px] text-base-content/45 mb-2">
+            <p className="text-[11px] text-base-content/45 mb-2">
               {sameAreaMatches.length} capa{sameAreaMatches.length !== 1 ? "s" : ""} más con{" "}
               <span className="font-mono font-semibold text-base-content/70">
                 {selectedGroup?.totalArea.toFixed(2)} m²
@@ -1140,7 +1128,7 @@ export default function ReviewScreen({
 
         {selectedGroupIds.size === 1 && sameAreaDiscardMatches.length > 0 && (
           <div className="px-4 py-2 border-b border-base-300/30 bg-info/5">
-            <p className="text-[10px] text-base-content/45 mb-2 leading-relaxed">
+            <p className="text-[11px] text-base-content/45 mb-2 leading-relaxed">
               {sameAreaDiscardMatches.length} descarte{sameAreaDiscardMatches.length !== 1 ? "s" : ""} más
               iguales ({selectedGroup?.totalArea.toFixed(2)} m² · {selectedGroup?.orientation}).
               Marcá todas como pared o piso para incluirlas en los planos (p. ej. ventanas).
@@ -1168,7 +1156,7 @@ export default function ReviewScreen({
 
         {selectedGroup && getEffectiveCategory(selectedGroup, overrides) === "wall" && (
           <div className="px-4 py-2 border-b border-base-300/30 bg-primary/5">
-            <p className="text-[10px] text-base-content/50 leading-relaxed">
+            <p className="text-[11px] text-base-content/50 leading-relaxed">
               Seleccioná más piezas del mismo plano y clic derecho → Fusionar, o usá los checkboxes.
             </p>
           </div>
@@ -1176,7 +1164,7 @@ export default function ReviewScreen({
 
         {(canMergeSelected || mergeBlockedReason || (splitPreview && (splitPreview.components > 1 || splitPreview.panels > 1))) && (
           <div className="px-4 py-3 border-b border-base-300/30 bg-base-100/60 space-y-2">
-            <p className="text-[10px] font-semibold uppercase tracking-widest text-base-content/40">
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-base-content/40">
               Capas · fusión / división
             </p>
 
@@ -1192,7 +1180,7 @@ export default function ReviewScreen({
             )}
 
             {mergeBlockedReason && (
-              <p className="text-[10px] text-base-content/45 leading-relaxed px-1">
+              <p className="text-[11px] text-base-content/45 leading-relaxed px-1">
                 {mergeBlockedReason}
               </p>
             )}
@@ -1218,14 +1206,14 @@ export default function ReviewScreen({
                   <SquareSplitHorizontal size={14} />
                   Dividir en {splitPreview.panels} piezas
                 </button>
-                <p className="text-[10px] text-base-content/40 leading-relaxed px-1">
+                <p className="text-[11px] text-base-content/40 leading-relaxed px-1">
                   Para paneles en L o escalones. Una pared lisa no necesita dividirse.
                 </p>
               </>
             )}
 
             {selectedGroupIds.size >= 2 && !canMergeSelected && !mergeBlockedReason && (
-              <p className="text-[10px] text-base-content/45 leading-relaxed px-1">
+              <p className="text-[11px] text-base-content/45 leading-relaxed px-1">
                 Seleccioná varias capas con Ctrl+clic o los checkboxes de la lista.
               </p>
             )}
@@ -1234,7 +1222,7 @@ export default function ReviewScreen({
 
         {selectedGroupIds.size >= 2 && !canMergeSelected && !mergeBlockedReason && (
           <div className="px-4 py-2 border-b border-base-300/30 bg-base-100/40">
-            <p className="text-[10px] text-base-content/45 leading-relaxed">
+            <p className="text-[11px] text-base-content/45 leading-relaxed">
               Ctrl+clic en la lista para seleccionar varias capas y fusionarlas.
             </p>
           </div>
@@ -1290,13 +1278,13 @@ export default function ReviewScreen({
 
         <div className="mt-auto border-t border-base-300/40 p-4 bg-base-100 shrink-0">
           {overrides.size > 0 && (
-            <p className="text-[10px] text-warning mb-3 px-2 py-1.5 rounded-lg bg-warning/8 border border-warning/15 text-center font-medium">
+            <p className="text-[11px] text-warning mb-3 px-2 py-1.5 rounded-lg bg-warning/8 border border-warning/15 text-center font-medium">
               {overrides.size} clasificación{overrides.size !== 1 ? "es" : ""} modificada{overrides.size !== 1 ? "s" : ""}
             </p>
           )}
 
           {wallWallList.length > 0 && (
-            <p className="text-[10px] leading-relaxed text-base-content/45 mb-3 px-2.5 py-2 rounded-lg bg-base-200/50 border border-base-300/25">
+            <p className="text-[11px] leading-relaxed text-base-content/45 mb-3 px-2.5 py-2 rounded-lg bg-base-200/50 border border-base-300/25">
               Las uniones entre paredes se resolvieron automáticamente. Revisá cada pared en el visor 3D.
             </p>
           )}
@@ -1397,7 +1385,7 @@ export default function ReviewScreen({
                     />
                     <div className="min-w-0">
                       <span className="text-sm font-medium truncate block">{g.label}</span>
-                      <span className="text-[10px] text-base-content/45">
+                      <span className="text-[11px] text-base-content/45">
                         {g.totalArea.toFixed(2)} m² ·{" "}
                         {eff === "wall" ? "Pared" : eff === "floor" ? "Piso" : "Descartar"}
                       </span>
