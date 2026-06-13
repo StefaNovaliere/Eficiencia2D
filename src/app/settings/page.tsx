@@ -29,7 +29,7 @@ export default function SettingsPage() {
                 <Settings size={22} />
               </div>
               <div>
-                <p className="text-[10px] font-semibold uppercase tracking-widest text-primary/80 mb-0.5">
+                <p className="text-[11px] font-semibold uppercase tracking-widest text-primary/80 mb-0.5">
                   {isAuthenticated ? "Cuenta" : "Aplicación"}
                 </p>
                 <h1 className="text-2xl font-bold tracking-tight">Configuración</h1>
