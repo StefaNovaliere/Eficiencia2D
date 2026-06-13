@@ -44,8 +44,11 @@ import {
   SquareSplitHorizontal,
   ArrowLeft as ArrowBackIcon,
   MousePointerClick,
+  Lasso,
+  Trash2,
 } from "lucide-react";
 import { useReviewHistory } from "@/hooks/useReviewHistory";
+import type { ModelViewerHandle } from "@/components/ModelViewer";
 
 export type WallWallDecisions = Map<number, number>;
 
@@ -161,6 +164,14 @@ export default function ReviewScreen({
   const viewerAreaRef = useRef<HTMLDivElement>(null);
   const skipWallWallReseedRef = useRef(false);
 
+  // Box selection
+  const [boxSelectMode, setBoxSelectMode] = useState(false);
+  const [dragRect, setDragRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  const viewerRef = useRef<ModelViewerHandle | null>(null);
+  const boxDragRef = useRef<{ startX: number; startY: number; active: boolean }>({
+    startX: 0, startY: 0, active: false,
+  });
+
   const historyState = useMemo(
     () => ({
       overrides,
@@ -233,6 +244,8 @@ export default function ReviewScreen({
 
       if (e.key === "Escape") {
         if (typing) return;
+        setBoxSelectMode(false);
+        setDragRect(null);
         setSelectedGroupIds(new Set());
         setSelectedJointIndex(null);
         setContextMenu(null);
@@ -686,6 +699,79 @@ export default function ReviewScreen({
   const viewToolBtn =
     "btn btn-sm btn-ghost h-9 min-h-9 w-9 px-0 rounded-lg hover:bg-base-200/80";
 
+  // Box selection pointer handlers — placed after effectivePhase1 & hiddenGroupIds
+  const handleBoxPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    boxDragRef.current = { startX: e.clientX, startY: e.clientY, active: true };
+    setDragRect(null);
+  }, []);
+
+  const handleBoxPointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (!boxDragRef.current.active) return;
+    const { startX, startY } = boxDragRef.current;
+    setDragRect({
+      x: Math.min(startX, e.clientX),
+      y: Math.min(startY, e.clientY),
+      w: Math.abs(e.clientX - startX),
+      h: Math.abs(e.clientY - startY),
+    });
+  }, []);
+
+  const handleBoxPointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (!boxDragRef.current.active) return;
+    boxDragRef.current.active = false;
+    const rect = dragRect;
+    setDragRect(null);
+
+    if (!rect || rect.w < 6 || rect.h < 6) return;
+
+    const selected = viewerRef.current?.selectGroupsInRect(
+      rect.x, rect.y, rect.w, rect.h,
+      hiddenGroupIds,
+    );
+
+    if (selected && selected.size > 0) {
+      setSelectedGroupIds(selected);
+      setSelectedJointIndex(null);
+    }
+  }, [dragRect, hiddenGroupIds]);
+
+  // Keyboard shortcut: F to merge selected groups
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT" ||
+          target.isContentEditable)
+      ) return;
+
+      if ((e.key === "s" || e.key === "S")) {
+        e.preventDefault();
+        setBoxSelectMode((prev) => !prev);
+        return;
+      }
+
+      if ((e.key === "v" || e.key === "V")) {
+        e.preventDefault();
+        setBoxSelectMode(false);
+        return;
+      }
+
+      if ((e.key === "f" || e.key === "F") && canMergeSelected) {
+        e.preventDefault();
+        handleMergeSelected();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [canMergeSelected, handleMergeSelected]);
+
   return (
     <div className="fixed inset-0 z-50 bg-base-200/40 flex flex-col md:flex-row overflow-hidden">
       <div className="flex-1 relative overflow-hidden" ref={viewerAreaRef}>
@@ -703,7 +789,28 @@ export default function ReviewScreen({
           showCenterAxes={showCenterAxes}
           leaderMarkers={leaderMarkers}
           isSolid={isSolid}
+          boxSelectActive={boxSelectMode}
+          viewerRef={viewerRef}
         />
+
+        {/* Box-select overlay — captures pointer events when active */}
+        {boxSelectMode && (
+          <div
+            className="absolute inset-0 z-20"
+            style={{ cursor: "crosshair" }}
+            onPointerDown={handleBoxPointerDown}
+            onPointerMove={handleBoxPointerMove}
+            onPointerUp={handleBoxPointerUp}
+          />
+        )}
+
+        {/* Drag rectangle */}
+        {dragRect && (
+          <div
+            className="fixed z-30 pointer-events-none border-2 border-primary bg-primary/10 rounded-sm"
+            style={{ left: dragRect.x, top: dragRect.y, width: dragRect.w, height: dragRect.h }}
+          />
+        )}
 
         {contextMenu && (
           <div
@@ -726,6 +833,26 @@ export default function ReviewScreen({
               <p className="px-3 py-2 text-[11px] text-base-content/45 leading-relaxed border-b border-base-300/30">
                 {mergeBlockedReason}
               </p>
+            )}
+            {selectedGroupIds.size > 0 && (
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 px-3 py-2 text-sm text-left hover:bg-error/10 text-error transition-colors"
+                onClick={() => {
+                  const ids = Array.from(selectedGroupIds);
+                  pushHistory();
+                  setOverrides((prev) => {
+                    const next = new Map(prev);
+                    for (const gid of ids) applyCategoryOverride(next, gid, "discard");
+                    return next;
+                  });
+                  setSelectedGroupIds(new Set());
+                  setContextMenu(null);
+                }}
+              >
+                <Trash2 size={15} className="shrink-0" />
+                Descartar {selectedGroupIds.size === 1 ? "capa" : `${selectedGroupIds.size} capas`}
+              </button>
             )}
             {selectedGroupIds.size > 0 && (
               <button
@@ -779,6 +906,22 @@ export default function ReviewScreen({
                   aria-label="Rehacer"
                 >
                   <ArrowRight size={15} />
+                </button>
+              </div>
+            </div>
+
+            <div className="hidden sm:block w-px h-7 bg-base-300/50" />
+
+            <div className="inline-flex items-center gap-0.5 p-0.5 rounded-xl bg-base-200/50">
+              <div className="tooltip tooltip-bottom" data-tip="Selección por área (S · Esc o V para volver al cursor)">
+                <button
+                  type="button"
+                  className={`${viewToolBtn} ${boxSelectMode ? "bg-primary/15 text-primary hover:bg-primary/20" : ""}`}
+                  onClick={() => setBoxSelectMode((s) => !s)}
+                  aria-label="Selección por área"
+                  aria-pressed={boxSelectMode}
+                >
+                  <Lasso size={15} />
                 </button>
               </div>
             </div>
