@@ -763,6 +763,17 @@ export default function ReviewScreen({
         return;
       }
 
+      if ((e.key === "d" || e.key === "D")) {
+        if (splitPreview?.components && splitPreview.components > 1) {
+          e.preventDefault();
+          handleSplitComponents();
+        } else if (splitPreview?.panels && splitPreview.panels > 1) {
+          e.preventDefault();
+          handleSplitPanels();
+        }
+        return;
+      }
+
       if ((e.key === "f" || e.key === "F") && canMergeSelected) {
         e.preventDefault();
         handleMergeSelected();
@@ -770,7 +781,7 @@ export default function ReviewScreen({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [canMergeSelected, handleMergeSelected]);
+  }, [canMergeSelected, handleMergeSelected, splitPreview, handleSplitComponents, handleSplitPanels]);
 
   return (
     <div className="fixed inset-0 z-50 bg-base-200/40 flex flex-col md:flex-row overflow-hidden">
@@ -833,6 +844,26 @@ export default function ReviewScreen({
               <p className="px-3 py-2 text-[11px] text-base-content/45 leading-relaxed border-b border-base-300/30">
                 {mergeBlockedReason}
               </p>
+            )}
+            {splitPreview && splitPreview.components > 1 && (
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 px-3 py-2 text-sm text-left hover:bg-base-200/80 transition-colors"
+                onClick={() => { handleSplitComponents(); setContextMenu(null); }}
+              >
+                <SquareSplitHorizontal size={15} className="text-base-content/70 shrink-0" />
+                Dividir en {splitPreview.components} componentes
+              </button>
+            )}
+            {splitPreview && splitPreview.panels > 1 && (
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 px-3 py-2 text-sm text-left hover:bg-base-200/80 transition-colors"
+                onClick={() => { handleSplitPanels(); setContextMenu(null); }}
+              >
+                <SquareSplitHorizontal size={15} className="text-base-content/70 shrink-0" />
+                Dividir en {splitPreview.panels} piezas
+              </button>
             )}
             {selectedGroupIds.size > 0 && (
               <button
