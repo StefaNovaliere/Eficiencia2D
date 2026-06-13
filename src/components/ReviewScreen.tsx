@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import GroupList from "./GroupList";
 import VisibilityFilters from "./VisibilityFilters";
+import StepIndicator from "./StepIndicator";
 import type { FaceCategory, GeometryGroup } from "@/core/group-classifier";
 import {
   collectSimilarGroups,
@@ -47,7 +48,15 @@ import {
 
 export type WallWallDecisions = Map<number, number>;
 
-const ModelViewer = dynamic(() => import("./ModelViewer"), { ssr: false });
+const ModelViewer = dynamic(() => import("./ModelViewer"), {
+  ssr: false,
+  loading: () => (
+    <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-base-content/60">
+      <span className="loading loading-spinner loading-lg text-primary" />
+      <p className="text-sm font-medium">Cargando vista 3D…</p>
+    </div>
+  ),
+});
 
 const ALL_CATEGORIES: FaceCategory[] = [
   "floor",
@@ -941,6 +950,9 @@ export default function ReviewScreen({
 
       {!hideSidebar && (
         <aside className="w-full md:w-[21rem] lg:w-[24rem] flex flex-col border-t md:border-t-0 md:border-l border-base-300/40 bg-base-100 shrink-0 h-[42vh] md:h-full z-20 shadow-2xl shadow-base-content/5">
+        <div className="px-4 pt-4 pb-3 border-b border-base-300/30 shrink-0">
+          <StepIndicator current="review" />
+        </div>
         <div className="px-4 py-3.5 border-b border-base-300/30 bg-base-100/80">
           <p className="text-[10px] font-semibold uppercase tracking-widest text-primary/80 mb-0.5">
             Revisión

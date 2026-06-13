@@ -6,6 +6,7 @@ import type { NestingResult, NestingSheet, PlacedNestingPanel } from "@/core/she
 import { rotateEdges } from "@/core/sheet-nester";
 import type { SheetConfig } from "@/core/types";
 import { getNestingCanvasColors, useTheme } from "@/context/ThemeContext";
+import StepIndicator from "./StepIndicator";
 
 export interface NestingPreviewProps {
   nesting: NestingPreviewData;
@@ -15,6 +16,8 @@ export interface NestingPreviewProps {
   onSheetConfigChange: (config: SheetConfig) => void;
   scaleDenom: number;
   onScaleChange: (scale: number) => void;
+  /** True mientras se recalcula el nesting (cambio de escala/plancha). */
+  isRecomputing?: boolean;
 }
 
 function SheetCanvas({
@@ -186,6 +189,7 @@ export default function NestingPreview({
   onSheetConfigChange,
   scaleDenom,
   onScaleChange,
+  isRecomputing = false,
 }: NestingPreviewProps) {
   const { theme } = useTheme();
   const canvasColors = getNestingCanvasColors(theme);
@@ -193,6 +197,9 @@ export default function NestingPreview({
   const [localWidth, setLocalWidth] = useState(String(sheetConfig.widthM));
   const [localHeight, setLocalHeight] = useState(String(sheetConfig.heightM));
   const [showConfirm, setShowConfirm] = useState(false);
+
+  // Validación visible del tamaño de plancha (en vez de ignorar en silencio).
+  const sizeInvalid = !(parseFloat(localWidth) > 0.1 && parseFloat(localHeight) > 0.1);
 
   const handleApplySize = useCallback(() => {
     const w = parseFloat(localWidth);
@@ -239,7 +246,9 @@ export default function NestingPreview({
         <button className="btn btn-ghost btn-sm" onClick={onBack}>
           &larr; Volver a revisión
         </button>
-        <h2 className="text-lg font-bold hidden sm:block">Vista previa de planchas</h2>
+        <div className="hidden md:block w-64">
+          <StepIndicator current="nesting" />
+        </div>
         <div className="flex items-center gap-2 flex-wrap text-sm">
           <label className="font-medium text-base-content/70">Escala:</label>
           <select
@@ -254,7 +263,7 @@ export default function NestingPreview({
           <span className="text-base-content/40 mx-2">&middot;</span>
           <label className="font-medium text-base-content/70">Plancha:</label>
           <input
-            className="input input-bordered input-sm w-20 bg-base-100"
+            className={`input input-bordered input-sm w-20 bg-base-100 ${sizeInvalid ? "input-error" : ""}`}
             type="number"
             step="0.01"
             min="0.1"
@@ -264,7 +273,7 @@ export default function NestingPreview({
           />
           <span className="text-base-content/40">&times;</span>
           <input
-            className="input input-bordered input-sm w-20 bg-base-100"
+            className={`input input-bordered input-sm w-20 bg-base-100 ${sizeInvalid ? "input-error" : ""}`}
             type="number"
             step="0.01"
             min="0.1"
@@ -273,13 +282,28 @@ export default function NestingPreview({
             onBlur={handleApplySize}
           />
           <span className="text-base-content/60 font-medium">m</span>
-          <button className="btn btn-primary btn-sm ml-2" onClick={handleApplySize}>
+          <button
+            className="btn btn-primary btn-sm ml-2"
+            onClick={handleApplySize}
+            disabled={sizeInvalid}
+          >
             Aplicar
           </button>
+          {sizeInvalid && (
+            <span className="text-error text-xs w-full sm:w-auto sm:ml-2">
+              El alto y ancho deben ser mayores a 0,1 m.
+            </span>
+          )}
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-base-100">
+      <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-base-100 relative">
+        {isRecomputing && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center gap-3 bg-base-100/60 backdrop-blur-[1px] text-base-content/70">
+            <span className="loading loading-spinner text-primary" />
+            <span className="text-sm font-medium">Recalculando planchas…</span>
+          </div>
+        )}
         <SheetCanvas
           sheets={nesting.wallNesting.sheets}
           config={nesting.config}

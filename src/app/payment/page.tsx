@@ -89,12 +89,39 @@ export default function PaymentPage() {
 
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState("");
+  // ZIP generado y listo para (re)descargar. Reemplaza el window.alert de éxito.
+  const [download, setDownload] = useState<{ url: string; name: string } | null>(null);
 
   useEffect(() => {
     if (!isLoadingSession && !phase1Result) {
       router.replace("/");
     }
   }, [isLoadingSession, phase1Result, router]);
+
+  // Liberar el blob al desmontar para no filtrar memoria.
+  useEffect(() => {
+    return () => {
+      if (download) URL.revokeObjectURL(download.url);
+    };
+  }, [download]);
+
+  // Dispara la descarga y muestra el estado de éxito en pantalla (sin
+  // window.alert), conservando el blob para permitir "Descargar de nuevo".
+  const triggerDownload = useCallback((blob: Blob, name: string) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    a.click();
+    setDownload({ url, name });
+    setIsGenerating(false);
+  }, []);
+
+  const handleFinish = useCallback(() => {
+    if (download) URL.revokeObjectURL(download.url);
+    resetProject();
+    router.push("/");
+  }, [download, resetProject, router]);
 
   const proceedToGeneration = useCallback(async () => {
     if (!phase1Result || !fileId) return;
@@ -139,16 +166,7 @@ export default function PaymentPage() {
         throw new Error("El backend no devolvió el archivo ZIP.");
       }
 
-      const url = URL.createObjectURL(zipBlob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = backendRes.zip_filename ?? `${stem}_planos.zip`;
-      a.click();
-      URL.revokeObjectURL(url);
-
-      resetProject();
-      alert("¡Planos generados y descargados exitosamente!");
-      router.push("/");
+      triggerDownload(zipBlob, backendRes.zip_filename ?? `${stem}_planos.zip`);
     } catch (backendErr) {
       console.warn("Generación en backend falló, usando cliente:", backendErr);
       try {
@@ -159,16 +177,7 @@ export default function PaymentPage() {
           savedWallWallDecisions,
           savedMerges,
         );
-        const url = URL.createObjectURL(zipBlob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `${stem}_planos.zip`;
-        a.click();
-        URL.revokeObjectURL(url);
-
-        resetProject();
-        alert("¡Planos generados (modo local) y descargados!");
-        router.push("/");
+        triggerDownload(zipBlob, `${stem}_planos.zip`);
       } catch (clientErr: unknown) {
         console.error(clientErr);
         setError(
@@ -191,8 +200,7 @@ export default function PaymentPage() {
     savedOverrides,
     savedWallWallDecisions,
     savedMerges,
-    resetProject,
-    router,
+    triggerDownload,
   ]);
 
   const handlePaymentApproved = useCallback(async (paymentId: string) => {
@@ -219,6 +227,34 @@ export default function PaymentPage() {
 
   if (isLoadingSession) return null;
   if (!phase1Result) return null;
+
+  if (download) {
+    return (
+      <div className="flex flex-col min-h-screen items-center justify-center p-4">
+        <div className="card bg-base-100 shadow-2xl border border-base-200 w-full max-w-md">
+          <div className="card-body items-center text-center gap-3 py-12">
+            <div className="text-success text-5xl">✓</div>
+            <h2 className="text-2xl font-bold">¡Listo! Tus planos se descargaron</h2>
+            <p className="text-base-content/70">
+              Si la descarga no comenzó, podés volver a bajarla.
+            </p>
+            <div className="flex flex-col sm:flex-row gap-2 w-full mt-2">
+              <a
+                href={download.url}
+                download={download.name}
+                className="btn btn-outline flex-1"
+              >
+                Descargar de nuevo
+              </a>
+              <button className="btn btn-primary flex-1" onClick={handleFinish}>
+                Volver al inicio
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (isGenerating) {
     return (
