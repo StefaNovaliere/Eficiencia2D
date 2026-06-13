@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import { Canvas, useThree, useFrame } from "@react-three/fiber";
 import { OrbitControls, GizmoHelper, GizmoViewport, Line, Html } from "@react-three/drei";
+import type React from "react";
 import * as THREE from "three";
 import type { Face3D, Vec3 } from "@/core/types";
 import type { FaceCategory, GeometryGroup } from "@/core/group-classifier";
@@ -431,9 +432,10 @@ interface CameraControlsProps {
   target: Vec3 | null;
   maxDistance: number;
   minDistance: number;
+  enabled?: boolean;
 }
 
-function CameraControls({ target, maxDistance, minDistance }: CameraControlsProps) {
+function CameraControls({ target, maxDistance, minDistance, enabled = true }: CameraControlsProps) {
   const controlsRef = useRef<any>(null);
   const targetVec = useMemo(
     () => (target ? new THREE.Vector3(target.x, target.y, target.z) : null),
@@ -450,6 +452,7 @@ function CameraControls({ target, maxDistance, minDistance }: CameraControlsProp
     <OrbitControls
       ref={controlsRef}
       makeDefault
+      enabled={enabled}
       enableDamping
       dampingFactor={0.1}
       minPolarAngle={0.05}
@@ -479,6 +482,7 @@ interface SceneProps {
   showCenterAxes?: boolean;
   leaderMarkers?: LeaderMarker[];
   isSolid?: boolean;
+  boxSelectActive?: boolean;
   palette: ViewerPalette;
   materials: ViewerMaterials;
 }
@@ -497,6 +501,7 @@ function Scene({
   showCenterAxes = true,
   leaderMarkers = [],
   isSolid = false,
+  boxSelectActive = false,
   palette,
   materials,
 }: SceneProps) {
@@ -604,6 +609,7 @@ function Scene({
         target={focusTarget}
         maxDistance={maxDist}
         minDistance={minDist}
+        enabled={!boxSelectActive}
       />
 
       {/* Ejes cartesianos en el centro del modelo */}
@@ -697,6 +703,109 @@ function Scene({
 }
 
 // ---------------------------------------------------------------------------
+// Public interface — lets ReviewScreen project world coords to screen pixels
+// for box selection without importing THREE.
+// ---------------------------------------------------------------------------
+
+export interface ModelViewerHandle {
+  /** Projects a world-space point (in model coords, before center-offset) to
+   *  viewport pixels.  Returns null when the canvas isn't mounted yet. */
+  projectToScreen(worldX: number, worldY: number, worldZ: number): { x: number; y: number } | null;
+  /**
+   * Raycasts a grid of points inside the screen-space rect and returns the
+   * groupIds of every surface that is actually visible (frontmost hit per
+   * ray sample) within that area.
+   */
+  selectGroupsInRect(
+    rectX: number,
+    rectY: number,
+    rectW: number,
+    rectH: number,
+    hiddenGroupIds: Set<number>,
+  ): Set<number>;
+}
+
+function SceneBridge({
+  handleRef,
+  modelCenter,
+}: {
+  handleRef: React.MutableRefObject<ModelViewerHandle | null>;
+  modelCenter: { x: number; y: number; z: number };
+}) {
+  const { camera, gl, scene } = useThree();
+
+  useEffect(() => {
+    handleRef.current = {
+      projectToScreen(worldX, worldY, worldZ) {
+        const canvas = gl.domElement;
+        const rect = canvas.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) return null;
+
+        const vec = new THREE.Vector3(
+          worldX - modelCenter.x,
+          worldY - modelCenter.y,
+          worldZ - modelCenter.z,
+        ).project(camera);
+
+        return {
+          x: ((vec.x + 1) / 2) * rect.width + rect.left,
+          y: ((-vec.y + 1) / 2) * rect.height + rect.top,
+        };
+      },
+
+      selectGroupsInRect(rectX, rectY, rectW, rectH, hiddenGroupIds) {
+        const canvas = gl.domElement;
+        const canvasRect = canvas.getBoundingClientRect();
+        if (canvasRect.width === 0 || canvasRect.height === 0) return new Set();
+
+        const raycaster = new THREE.Raycaster();
+        const hitGroupIds = new Set<number>();
+
+        // Sample a grid — roughly one ray every 8 px, capped to 20×20 = 400 rays
+        const stepsX = Math.min(Math.max(Math.ceil(rectW / 8), 3), 20);
+        const stepsY = Math.min(Math.max(Math.ceil(rectH / 8), 3), 20);
+
+        for (let si = 0; si <= stepsX; si++) {
+          for (let sj = 0; sj <= stepsY; sj++) {
+            const clientX = rectX + (rectW / stepsX) * si;
+            const clientY = rectY + (rectH / stepsY) * sj;
+
+            const ndcX = ((clientX - canvasRect.left) / canvasRect.width) * 2 - 1;
+            const ndcY = -((clientY - canvasRect.top) / canvasRect.height) * 2 + 1;
+
+            raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
+            const hits = raycaster.intersectObjects(scene.children, true);
+            if (hits.length === 0) continue;
+
+            // Accept hits within a small depth band of the closest one so
+            // coplanar faces (e.g. two walls flush with each other) are both
+            // captured, while walls behind the building are excluded.
+            const closestDist = hits[0].distance;
+            for (const hit of hits) {
+              if (hit.distance - closestDist > 0.05) break;
+              const data = hit.object.userData?.mergedMeshData as
+                | { groupIds: number[] }
+                | undefined;
+              if (!data || hit.faceIndex == null || hit.faceIndex < 0) continue;
+              if (hit.faceIndex >= data.groupIds.length) continue;
+              const groupId = data.groupIds[hit.faceIndex];
+              if (!hiddenGroupIds.has(groupId)) hitGroupIds.add(groupId);
+            }
+          }
+        }
+
+        return hitGroupIds;
+      },
+    };
+    return () => {
+      handleRef.current = null;
+    };
+  }); // intentionally no deps — keeps camera/gl/scene always fresh
+
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // Public component
 // ---------------------------------------------------------------------------
 
@@ -714,6 +823,8 @@ export interface ModelViewerProps {
   showCenterAxes?: boolean;
   leaderMarkers?: LeaderMarker[];
   isSolid?: boolean;
+  boxSelectActive?: boolean;
+  viewerRef?: React.MutableRefObject<ModelViewerHandle | null>;
 }
 
 export default function ModelViewer({
@@ -730,14 +841,14 @@ export default function ModelViewer({
   showCenterAxes = true,
   leaderMarkers = [],
   isSolid = false,
+  boxSelectActive = false,
+  viewerRef,
 }: ModelViewerProps) {
   const palette = useViewerPalette();
-
   const materials = useMemo(() => createViewerMaterials(palette), [palette]);
-
   useEffect(() => () => disposeViewerMaterials(materials), [materials]);
 
-  const camDist = useMemo(() => {
+  const { camDist, modelCenter } = useMemo(() => {
     let minX = Infinity, minY = Infinity, minZ = Infinity;
     let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
     for (const face of faces) {
@@ -753,7 +864,14 @@ export default function ModelViewer({
     const diag = Math.sqrt(
       (maxX - minX) ** 2 + (maxY - minY) ** 2 + (maxZ - minZ) ** 2,
     );
-    return Math.max(diag, 1);
+    return {
+      camDist: Math.max(diag, 1),
+      modelCenter: {
+        x: (minX + maxX) / 2,
+        y: (minY + maxY) / 2,
+        z: (minZ + maxZ) / 2,
+      },
+    };
   }, [faces]);
 
   return (
@@ -794,9 +912,14 @@ export default function ModelViewer({
         showCenterAxes={showCenterAxes}
         leaderMarkers={leaderMarkers}
         isSolid={isSolid}
+        boxSelectActive={boxSelectActive}
         palette={palette}
         materials={materials}
       />
+
+      {viewerRef && (
+        <SceneBridge handleRef={viewerRef} modelCenter={modelCenter} />
+      )}
 
       {/* Gizmo en la esquina para referencia de orientación constante */}
       <GizmoHelper alignment="bottom-right" margin={[80, 80]}>
