@@ -77,7 +77,7 @@ export default function GroupList({
           <Layers size={15} className="text-primary shrink-0" />
           <div className="min-w-0">
             <h3 className="font-semibold text-sm tracking-tight">Capas</h3>
-            <p className="text-[10px] text-base-content/50 truncate">
+            <p className="text-[11px] text-base-content/50 truncate">
               {shownGroups.length} visible{shownGroups.length !== 1 ? "s" : ""}
               {hiddenGroups.length > 0 && ` · ${hiddenGroups.length} oculta${hiddenGroups.length !== 1 ? "s" : ""}`}
               {" · clic varias paredes del mismo plano para fusionar"}
@@ -164,7 +164,7 @@ export default function GroupList({
                   />
                   <span className="text-sm font-medium truncate">{group.label}</span>
                 </div>
-                <p className="text-[10px] text-base-content/45 mt-0.5 pl-4 tabular-nums">
+                <p className="text-[11px] text-base-content/45 mt-0.5 pl-4 tabular-nums">
                   {group.totalArea.toFixed(1)} m² · {group.faceIndices.length} caras
                   {group.thickness != null && ` · ${(group.thickness * 100).toFixed(1)} cm`}
                 </p>
@@ -205,7 +205,7 @@ export default function GroupList({
         {hiddenGroups.length > 0 && (
           <div className="pt-4 mt-2 border-t border-base-300/30">
             <div className="flex items-center justify-between px-1 mb-2">
-              <span className="text-[10px] font-semibold uppercase tracking-widest text-base-content/40">
+              <span className="text-[11px] font-semibold uppercase tracking-widest text-base-content/40">
                 Ocultos
               </span>
               <button

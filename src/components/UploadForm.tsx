@@ -177,7 +177,7 @@ export default function UploadForm() {
                 <FileBox size={22} />
               </div>
               <div className="min-w-0 flex-1">
-                <p className="text-[10px] font-semibold uppercase tracking-widest text-primary/80 mb-0.5">
+                <p className="text-[11px] font-semibold uppercase tracking-widest text-primary/80 mb-0.5">
                   Proyecto en curso
                 </p>
                 <p className="font-semibold text-base-content truncate">{displayName}</p>
