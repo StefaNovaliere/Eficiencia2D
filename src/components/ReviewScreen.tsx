@@ -44,6 +44,7 @@ import {
   Copy,
   SquareSplitHorizontal,
   ArrowLeft as ArrowBackIcon,
+  MousePointerClick,
 } from "lucide-react";
 import { useReviewHistory } from "@/hooks/useReviewHistory";
 
@@ -743,9 +744,9 @@ export default function ReviewScreen({
         {/* Toolbar */}
         <div className="absolute top-4 left-4 right-4 z-10 flex flex-col gap-2 pointer-events-none">
           {wallWallList.length > 0 && (
-            <div className="pointer-events-auto self-start hidden md:flex items-center gap-2 px-3 py-2 rounded-xl bg-info/10 border border-info/20 text-info text-xs font-medium backdrop-blur-md">
+            <div className="pointer-events-auto self-start flex items-center gap-2 px-3 py-2 rounded-xl bg-info/10 border border-info/20 text-info text-xs font-medium backdrop-blur-md">
               <ScanSearch size={14} className="shrink-0" />
-              Seleccioná una pared para revisar sus uniones
+              Hacé clic en una pared para resolver sus encuentros con otras paredes
             </div>
           )}
 
@@ -878,6 +879,16 @@ export default function ReviewScreen({
           </div>
         </div>
 
+        {/* Guía de primera carga: visible al entrar, hasta que se selecciona algo */}
+        {selectedGroupIds.size === 0 && (
+          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 pointer-events-none px-3 w-full flex justify-center">
+            <div className="flex items-center gap-2 px-3.5 py-2 rounded-full bg-base-100/90 backdrop-blur-md border border-base-300/50 shadow-md text-sm text-base-content/70 max-w-full">
+              <MousePointerClick size={15} className="text-primary shrink-0" />
+              <span className="truncate">Hacé clic en una capa para clasificarla: piso, pared o descartar.</span>
+            </div>
+          </div>
+        )}
+
         {selectedGroupIds.size === 1 && (() => {
           const selId = Array.from(selectedGroupIds)[0];
           const selGroup = effectivePhase1.groups.find((g) => g.id === selId);
@@ -890,123 +901,127 @@ export default function ReviewScreen({
           if (groupWWJoints.length === 0) return null;
 
           const groupById = new Map(effectivePhase1.groups.map((g) => [g.id, g]));
+          const selPid = panelIdByGroup.get(selId);
+          const cm = (m: number) => `${(m * 100).toFixed(1).replace(".", ",")} cm`;
 
           return (
-            <div className="absolute bottom-5 right-5 z-10 w-[19rem] max-h-[42vh] overflow-y-auto bg-base-100/90 backdrop-blur-xl border border-base-300/40 rounded-2xl shadow-xl shadow-base-content/8 pointer-events-auto custom-scrollbar hidden md:block">
-              <div className="sticky top-0 z-10 px-4 pt-4 pb-3 bg-base-100/95 backdrop-blur-md border-b border-base-300/30">
-                <div className="flex items-center gap-2">
+            <div className="absolute bottom-4 right-4 z-10 w-[min(25rem,calc(100%-2rem))] max-h-[52vh] overflow-y-auto bg-base-100/95 backdrop-blur-xl border border-base-300/50 rounded-2xl shadow-xl shadow-base-content/10 pointer-events-auto custom-scrollbar">
+              {/* Encabezado: qué es y por qué */}
+              <div className="sticky top-0 z-10 px-4 pt-4 pb-3 bg-base-100/95 backdrop-blur-md border-b border-base-300/40">
+                <div className="flex items-start gap-2.5">
                   <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary/10 text-primary shrink-0">
-                    <Link2 size={15} />
+                    <Link2 size={16} />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      {panelIdByGroup.get(selId) && (
-                        <span className="font-mono text-[10px] bg-primary/10 text-primary px-1.5 py-0.5 rounded font-bold">
-                          {panelIdByGroup.get(selId)}
-                        </span>
+                    <h3 className="text-sm font-semibold leading-tight flex items-center gap-1.5">
+                      Encuentros de esta pared
+                      {selPid && (
+                        <span className="font-mono text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded">{selPid}</span>
                       )}
-                      <span className="text-sm font-semibold truncate">{selGroup.label}</span>
-                    </div>
-                    <p className="text-[10px] text-base-content/45 mt-0.5">
-                      {groupWWJoints.length} unión{groupWWJoints.length !== 1 ? "es" : ""} pared-pared
+                    </h3>
+                    <p className="text-xs text-base-content/60 mt-1 leading-snug">
+                      Donde dos paredes se cruzan, al armar la maqueta se pisarían por el espesor del
+                      material. Una se acorta para que encajen. Elegí cuál se acorta
+                      <span className="text-base-content/45"> (ya sugerimos una).</span>
                     </p>
                   </div>
                 </div>
               </div>
 
-              <div className="p-4 pt-3 flex flex-col gap-3">
-                <p className="text-[10px] leading-relaxed text-base-content/45">
-                  Elegí qué pared cede grosor para que encajen sin superponerse.
-                </p>
-                <div className="flex flex-col gap-2">
-                    {groupWWJoints.map(({ ww, labelA, labelB, pidA, pidB, hasThickness }) => {
-                      const otherId = ww.groupA === selId ? ww.groupB : ww.groupA;
-                      const otherLabel = ww.groupA === selId ? labelB : labelA;
-                      const otherPid = ww.groupA === selId ? pidB : pidA;
-                      const selPid = panelIdByGroup.get(selId);
-                      const effYielder = wallWallDecisions.get(ww.jointIndex) ?? ww.suggestedYieldGroupId;
+              {/* Lista de encuentros */}
+              <div className="p-3 flex flex-col gap-2.5">
+                {groupWWJoints.map(({ ww, labelA, labelB, pidA, pidB, hasThickness }) => {
+                  const otherId = ww.groupA === selId ? ww.groupB : ww.groupA;
+                  const otherLabel = ww.groupA === selId ? labelB : labelA;
+                  const otherPid = ww.groupA === selId ? pidB : pidA;
+                  const effYielder = wallWallDecisions.get(ww.jointIndex) ?? ww.suggestedYieldGroupId;
+                  const suggested = ww.suggestedYieldGroupId;
+                  const isOpen = selectedJointIndex === ww.jointIndex;
 
-                      const selThick = groupById.get(selId)?.thickness ?? 0;
-                      const otherThick = groupById.get(otherId)?.thickness ?? 0;
-                      const trimIfSel = otherThick > 0.001 ? otherThick : selThick > 0.001 ? selThick : 0;
-                      const trimIfOther = selThick > 0.001 ? selThick : otherThick > 0.001 ? otherThick : 0;
+                  const selThick = groupById.get(selId)?.thickness ?? 0;
+                  const otherThick = groupById.get(otherId)?.thickness ?? 0;
+                  const trimIfSel = otherThick > 0.001 ? otherThick : selThick > 0.001 ? selThick : 0;
+                  const trimIfOther = selThick > 0.001 ? selThick : otherThick > 0.001 ? otherThick : 0;
 
-                      return (
-                        <div
-                          key={ww.jointIndex}
-                          onClick={() =>
-                            setSelectedJointIndex((cur) =>
-                              cur === ww.jointIndex ? null : ww.jointIndex,
-                            )
-                          }
-                          className={`rounded-xl p-3 flex flex-col gap-2.5 border transition-all cursor-pointer ${
-                            selectedJointIndex === ww.jointIndex
-                              ? "border-primary/40 bg-primary/5 shadow-sm ring-1 ring-primary/20"
-                              : "border-base-300/40 bg-base-200/30 hover:bg-base-200/50 hover:border-base-300/60"
-                          }`}
-                        >
-                          <div className="text-xs font-medium flex items-center gap-1.5 text-base-content/75">
-                            <span className="text-base-content/40">con</span>
-                            {otherPid && (
-                              <span className="font-mono bg-base-100 border border-base-300/40 px-1.5 py-0.5 rounded text-[10px]">
-                                {otherPid}
-                              </span>
-                            )}
-                            <span className="truncate">{otherLabel}</span>
-                          </div>
-                          {!hasThickness ? (
-                            <span className="text-[10px] text-base-content/45 italic px-2 py-1.5 rounded-lg bg-base-100/80 border border-base-300/30">
-                              Sin grosor — no se puede recortar
+                  return (
+                    <div
+                      key={ww.jointIndex}
+                      onClick={() =>
+                        setSelectedJointIndex((cur) => (cur === ww.jointIndex ? null : ww.jointIndex))
+                      }
+                      className={`rounded-xl border p-3 cursor-pointer transition-all ${
+                        isOpen
+                          ? "border-primary/50 bg-primary/5 ring-1 ring-primary/20"
+                          : "border-base-300/50 bg-base-200/30 hover:bg-base-200/50 hover:border-base-300/70"
+                      }`}
+                    >
+                      {/* Con qué pared se cruza */}
+                      <div className="flex items-center gap-1.5 text-sm font-medium">
+                        <span className="text-base-content/50">Cruce con</span>
+                        {otherPid && (
+                          <span className="font-mono text-xs bg-base-100 border border-base-300/50 px-1.5 py-0.5 rounded">{otherPid}</span>
+                        )}
+                        <span className="truncate text-base-content/80">{otherLabel}</span>
+                      </div>
+
+                      {!hasThickness ? (
+                        <p className="mt-2 text-xs text-base-content/55 px-2.5 py-2 rounded-lg bg-base-100/80 border border-base-300/40">
+                          Sin ajuste necesario — no se detectó espesor en ninguna de las dos.
+                        </p>
+                      ) : (
+                        <div className="mt-2.5 flex flex-col gap-1.5">
+                          <p className="text-xs font-medium text-base-content/55">¿Cuál se acorta?</p>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleWallWallDecision(ww.jointIndex, selId, ww.groupA, ww.groupB);
+                            }}
+                            className={`flex items-center gap-2 w-full text-left rounded-lg border px-3 py-2 transition-colors ${
+                              effYielder === selId
+                                ? "border-primary bg-primary/10"
+                                : "border-base-300/50 bg-base-100 hover:bg-base-200/60"
+                            }`}
+                          >
+                            <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: "#f59e0b" }} />
+                            <span className="flex-1 text-sm">
+                              Esta pared{" "}
+                              {selPid && <span className="font-mono text-xs text-base-content/60">({selPid})</span>}
                             </span>
-                          ) : (
-                            <div className="space-y-1.5">
-                              <span className="text-[9px] uppercase font-semibold tracking-widest text-base-content/40">
-                                Se recorta
-                              </span>
-                              <div className="grid grid-cols-2 gap-1.5">
-                                <button
-                                  type="button"
-                                  className={`btn btn-xs h-8 min-h-8 rounded-lg font-medium border ${
-                                    effYielder === selId
-                                      ? "btn-primary text-primary-content border-primary"
-                                      : "btn-ghost bg-base-100 border-base-300/40"
-                                  }`}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleWallWallDecision(ww.jointIndex, selId, ww.groupA, ww.groupB);
-                                  }}
-                                >
-                                  {selPid && <span className="font-mono opacity-70 mr-1 text-[10px]">{selPid}</span>}
-                                  Esta
-                                  {effYielder === selId && trimIfSel > 0.001 && (
-                                    <span className="ml-1 opacity-70 text-[10px] font-mono">−{(trimIfSel * 100).toFixed(1)}</span>
-                                  )}
-                                </button>
-                                <button
-                                  type="button"
-                                  className={`btn btn-xs h-8 min-h-8 rounded-lg font-medium border ${
-                                    effYielder === otherId
-                                      ? "btn-primary text-primary-content border-primary"
-                                      : "btn-ghost bg-base-100 border-base-300/40"
-                                  }`}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleWallWallDecision(ww.jointIndex, otherId, ww.groupA, ww.groupB);
-                                  }}
-                                >
-                                  {otherPid && <span className="font-mono opacity-70 mr-1 text-[10px]">{otherPid}</span>}
-                                  Otra
-                                  {effYielder === otherId && trimIfOther > 0.001 && (
-                                    <span className="ml-1 opacity-70 text-[10px] font-mono">−{(trimIfOther * 100).toFixed(1)}</span>
-                                  )}
-                                </button>
-                              </div>
-                            </div>
-                          )}
+                            {effYielder === selId ? (
+                              <span className="text-xs font-semibold text-primary tabular-nums">−{cm(trimIfSel)}</span>
+                            ) : (
+                              suggested === selId && <span className="text-[11px] font-medium text-base-content/45">Sugerida</span>
+                            )}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleWallWallDecision(ww.jointIndex, otherId, ww.groupA, ww.groupB);
+                            }}
+                            className={`flex items-center gap-2 w-full text-left rounded-lg border px-3 py-2 transition-colors ${
+                              effYielder === otherId
+                                ? "border-primary bg-primary/10"
+                                : "border-base-300/50 bg-base-100 hover:bg-base-200/60"
+                            }`}
+                          >
+                            <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: "#3b82f6" }} />
+                            <span className="flex-1 text-sm">
+                              La otra{" "}
+                              {otherPid && <span className="font-mono text-xs text-base-content/60">({otherPid})</span>}
+                            </span>
+                            {effYielder === otherId ? (
+                              <span className="text-xs font-semibold text-primary tabular-nums">−{cm(trimIfOther)}</span>
+                            ) : (
+                              suggested === otherId && <span className="text-[11px] font-medium text-base-content/45">Sugerida</span>
+                            )}
+                          </button>
                         </div>
-                      );
-                    })}
-                </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           );
