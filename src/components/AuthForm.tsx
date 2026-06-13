@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 import BackgroundSymbols from "@/components/BackgroundSymbols";
-import AuthNav from "@/components/AuthNav";
 import { useAuth } from "@/context/AuthContext";
 
 type AuthMode = "login" | "register";
@@ -46,14 +45,6 @@ export default function AuthForm({ mode }: AuthFormProps) {
 
   return (
     <main className="flex flex-col min-h-screen items-center py-12 px-4 md:px-8 relative">
-      <AuthNav hideAuthActions />
-
-      <div className="fixed top-4 right-4 z-20">
-        <Link href="/" className="btn btn-ghost btn-sm rounded-xl">
-          Volver al inicio
-        </Link>
-      </div>
-
       <BackgroundSymbols />
 
       <div className="text-center mb-8 mt-8 md:mt-12 z-10">
