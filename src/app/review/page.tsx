@@ -24,8 +24,10 @@ export default function ReviewPage() {
     setSavedOverrides,
     savedWallWallDecisions, 
     setSavedWallWallDecisions,
-    savedMerges, 
+    savedMerges,
     setSavedMerges,
+    savedMarks,
+    setSavedMarks,
     fileId,
     scale,
     paper,
@@ -47,6 +49,7 @@ export default function ReviewPage() {
     overrides: ClassificationOverride[],
     wallWallDecisions: Map<number, number>,
     merges: number[][],
+    marks: number[],
     topologyPhase1: Phase1Result,
   ) => {
     if (!topologyPhase1 || !fileId) return;
@@ -54,6 +57,7 @@ export default function ReviewPage() {
     setSavedOverrides(overrides);
     setSavedWallWallDecisions(wallWallDecisions);
     setSavedMerges(merges);
+    setSavedMarks(marks);
     setPhase1Result(topologyPhase1);
     setIsGenerating(true);
 
@@ -66,7 +70,7 @@ export default function ReviewPage() {
         sheetConfig,
         minAreaM2,
       };
-      const decomposed = decomposePanels(merged, opts, overrides, wallWallDecisions);
+      const decomposed = decomposePanels(merged, opts, overrides, wallWallDecisions, new Set(marks));
       const nesting = nestDecomposedPanels(decomposed, sheetConfig, scale);
       setNestingData(nesting);
       router.push("/nesting");
@@ -84,6 +88,7 @@ export default function ReviewPage() {
     setSavedOverrides,
     setSavedWallWallDecisions,
     setSavedMerges,
+    setSavedMarks,
     setPhase1Result,
     setNestingData,
     router,
@@ -113,6 +118,7 @@ export default function ReviewPage() {
       initialOverrides={savedOverrides}
       initialWallWallDecisions={savedWallWallDecisions}
       initialMerges={savedMerges}
+      initialMarks={savedMarks}
       isGenerating={isGenerating}
     />
   );
