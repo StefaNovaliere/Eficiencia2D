@@ -63,7 +63,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   if (isFlow) return <>{children}</>;
 
-  const isAuthPage = pathname === "/login" || pathname === "/register";
+  const isAuthPage =
+    pathname === "/login" ||
+    pathname === "/register" ||
+    pathname.startsWith("/verify-email");
   return (
     <>
       <TopBar isAuthPage={isAuthPage} />

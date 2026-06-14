@@ -19,16 +19,15 @@ function VerifyEmailContent() {
   const [errorMsg, setErrorMsg] = useState("");
 
   useEffect(() => {
-    if (!token) {
+    if (!token?.trim()) {
       setStatus("error");
       setErrorMsg("No se encontró el token de verificación en el link.");
       return;
     }
 
-    verifyEmail(token)
+    verifyEmail(token.trim())
       .then(() => {
         setStatus("success");
-        // Redirigir al home después de 2 s, ya con sesión iniciada
         setTimeout(() => router.push("/"), 2000);
       })
       .catch((err: unknown) => {
@@ -39,9 +38,7 @@ function VerifyEmailContent() {
             : "El link de verificación es inválido o ya expiró.",
         );
       });
-    // Solo correr al montar
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [token, verifyEmail, router]);
 
   return (
     <main className="flex flex-col min-h-screen items-center justify-center py-12 px-4 relative">
