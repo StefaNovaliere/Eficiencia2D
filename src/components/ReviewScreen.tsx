@@ -507,12 +507,20 @@ export default function ReviewScreen({
     [selectedWallGroups, effectivePhase1.groups, effectivePhase1.faces],
   );
 
-  const primaryMergeCluster = useMemo(
-    () => mergeClusters.sort((a, b) => b.length - a.length)[0] ?? null,
-    [mergeClusters],
-  );
+  // Fusiona TODAS las direcciones coplanares de la selección a la vez: cada
+  // cluster coplanar (misma dirección + mismo plano) se unifica por separado.
+  // Los componentes sueltos (sin otro coplanar) no se fusionan.
+  const canMergeSelected = mergeClusters.length >= 1;
 
-  const canMergeSelected = primaryMergeCluster != null && primaryMergeCluster.length >= 2;
+  // Etiqueta del botón según el resultado de la fusión.
+  const mergeLabel = useMemo(() => {
+    if (mergeClusters.length === 0) return "Fusionar";
+    if (mergeClusters.length === 1) {
+      const n = mergeClusters[0].length;
+      return `Fusionar ${n} pared${n !== 1 ? "es" : ""}`;
+    }
+    return `Fusionar por dirección · ${mergeClusters.length} grupos`;
+  }, [mergeClusters]);
 
   const mergeBlockedReason = useMemo(() => {
     if (selectedGroups.length < 2) return null;
@@ -522,12 +530,12 @@ export default function ReviewScreen({
   }, [selectedGroups.length, selectedWallGroups.length, canMergeSelected]);
 
   const handleMergeSelected = useCallback(() => {
-    if (!primaryMergeCluster || primaryMergeCluster.length < 2) return;
+    if (mergeClusters.length < 1) return;
     pushHistory();
-    setMerges((prev) => [...prev, primaryMergeCluster]);
+    setMerges((prev) => [...prev, ...mergeClusters]);
     setSelectedGroupIds(new Set());
     setContextMenu(null);
-  }, [primaryMergeCluster, pushHistory]);
+  }, [mergeClusters, pushHistory]);
 
   const handleHideSelected = useCallback(() => {
     if (selectedGroupIds.size === 0) return;
@@ -838,14 +846,14 @@ export default function ReviewScreen({
             onClick={(e) => e.stopPropagation()}
             onContextMenu={(e) => e.preventDefault()}
           >
-            {canMergeSelected && primaryMergeCluster && (
+            {canMergeSelected && (
               <button
                 type="button"
                 className="flex w-full items-center gap-2 px-3 py-2 text-sm text-left hover:bg-primary/10 transition-colors"
                 onClick={handleMergeSelected}
               >
                 <Link2 size={15} className="text-primary shrink-0" />
-                Fusionar {primaryMergeCluster.length} paredes
+                {mergeLabel}
               </button>
             )}
             {selectedGroupIds.size >= 2 && !canMergeSelected && mergeBlockedReason && (
@@ -1344,7 +1352,7 @@ export default function ReviewScreen({
           })()}
 
           {/* Botón de fusión prominente cuando hay selección múltiple */}
-          {canMergeSelected && primaryMergeCluster && selectedGroupIds.size >= 2 && (
+          {canMergeSelected && selectedGroupIds.size >= 2 && (
             <div className="px-4 py-3 border-b border-base-300/30">
               <button
                 type="button"
@@ -1352,7 +1360,7 @@ export default function ReviewScreen({
                 onClick={handleMergeSelected}
               >
                 <Link2 size={14} />
-                Fusionar {primaryMergeCluster.length} paredes · F
+                {mergeLabel} · F
               </button>
               {mergeBlockedReason && (
                 <p className="text-[11px] text-base-content/45 leading-relaxed px-1 mt-2">
@@ -1471,14 +1479,14 @@ export default function ReviewScreen({
               Capas · fusión / división
             </p>
 
-            {canMergeSelected && primaryMergeCluster && (
+            {canMergeSelected && (
               <button
                 type="button"
                 className="btn btn-primary btn-sm w-full rounded-xl gap-2"
                 onClick={handleMergeSelected}
               >
                 <Link2 size={14} />
-                Fusionar {primaryMergeCluster.length} paredes del mismo plano
+                {mergeLabel}
               </button>
             )}
 
