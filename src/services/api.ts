@@ -64,6 +64,9 @@ export interface GenerateRequestPayload {
   overrides?: Record<number, string>;
   wall_wall_decisions?: Record<number, number>;
   merges?: number[][];
+  /** GeometryGroup ids whose openings (inner-ring holes) must be engraved
+   *  (red, MARK_VECTOR / ACI 1) instead of cut. */
+  marks?: number[];
 }
 
 export interface GenerateResponse {

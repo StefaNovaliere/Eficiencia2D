@@ -18,6 +18,7 @@ interface PersistedSession {
   overrides: ClassificationOverride[];
   wallWallDecisions: [number, number][];
   merges?: number[][];
+  marks?: number[];
 }
 
 const SESSION_KEY = "e2d_pending_session";
@@ -50,6 +51,8 @@ interface ProjectContextType {
   setSavedWallWallDecisions: (decisions: Map<number, number>) => void;
   savedMerges: number[][];
   setSavedMerges: (merges: number[][]) => void;
+  savedMarks: number[];
+  setSavedMarks: (marks: number[]) => void;
   resetProject: () => void;
   persistSession: () => Promise<void>;
   isLoadingSession: boolean;
@@ -69,6 +72,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const [savedOverrides, setSavedOverrides] = useState<ClassificationOverride[]>([]);
   const [savedWallWallDecisions, setSavedWallWallDecisions] = useState<Map<number, number>>(new Map());
   const [savedMerges, setSavedMerges] = useState<number[][]>([]);
+  const [savedMarks, setSavedMarks] = useState<number[]>([]);
   const [sheetConfig, setSheetConfig] = useState<SheetConfig>({ ...DEFAULT_SHEET });
   const [projectFileName, setProjectFileName] = useState<string | null>(null);
   const [isLoadingSession, setIsLoadingSession] = useState(true);
@@ -104,6 +108,8 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       const restoredMerges = parsed.merges ?? [];
       setSavedMerges(restoredMerges);
 
+      setSavedMarks(parsed.marks ?? []);
+
       if (!parsed.phase1Result) {
         sessionStorage.removeItem(SESSION_KEY);
       }
@@ -131,12 +137,13 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         overrides: savedOverrides,
         wallWallDecisions: Array.from(savedWallWallDecisions.entries()),
         merges: savedMerges,
+        marks: savedMarks,
       };
       sessionStorage.setItem(SESSION_KEY, JSON.stringify(persisted));
     } catch {
       // Storage full
     }
-  }, [file, fileId, previewObj, phase1Result, projectFileName, scale, paper, minAreaM2, sheetConfig, savedOverrides, savedWallWallDecisions, savedMerges]);
+  }, [file, fileId, previewObj, phase1Result, projectFileName, scale, paper, minAreaM2, sheetConfig, savedOverrides, savedWallWallDecisions, savedMerges, savedMarks]);
 
   const resetProject = useCallback(() => {
     setFile(null);
@@ -151,6 +158,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     setSavedOverrides([]);
     setSavedWallWallDecisions(new Map());
     setSavedMerges([]);
+    setSavedMarks([]);
     setSheetConfig({ ...DEFAULT_SHEET });
     sessionStorage.removeItem(SESSION_KEY);
   }, []);
@@ -172,6 +180,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         savedOverrides, setSavedOverrides,
         savedWallWallDecisions, setSavedWallWallDecisions,
         savedMerges, setSavedMerges,
+        savedMarks, setSavedMarks,
         resetProject,
         persistSession,
         isLoadingSession

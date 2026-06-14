@@ -505,16 +505,30 @@ export function generateNestingPdf(
         ? rotateEdges(panel.edges, panel.widthM)
         : panel.edges;
 
-      // Panel edges (black stroke).
-      cs += "0 0 0 RG\n0.3 w\n";
-      for (const edge of edges) {
-        const eax = sx + x + edge.a.x;
-        const eay = syTop + y + edge.a.y;
-        const ebx = sx + x + edge.b.x;
-        const eby = syTop + y + edge.b.y;
-        cs += `${tx(eax).toFixed(4)} ${ty(eay).toFixed(4)} m\n`;
-        cs += `${tx(ebx).toFixed(4)} ${ty(eby).toFixed(4)} l\n`;
-        cs += "S\n";
+      // Panel edges. Marked components engrave their openings (hole edges) in
+      // red instead of cutting them; everything else is cut (black). Group by
+      // colour so we don't switch the stroke colour on every line.
+      const isMark = placed.panel.isMark === true;
+      const cutEdges = isMark ? edges.filter((e) => e.hole !== true) : edges;
+      const markEdges = isMark ? edges.filter((e) => e.hole === true) : [];
+
+      const strokeEdges = (group: typeof edges) => {
+        for (const edge of group) {
+          const eax = sx + x + edge.a.x;
+          const eay = syTop + y + edge.a.y;
+          const ebx = sx + x + edge.b.x;
+          const eby = syTop + y + edge.b.y;
+          cs += `${tx(eax).toFixed(4)} ${ty(eay).toFixed(4)} m\n`;
+          cs += `${tx(ebx).toFixed(4)} ${ty(eby).toFixed(4)} l\n`;
+          cs += "S\n";
+        }
+      };
+
+      cs += "0 0 0 RG\n0.3 w\n"; // black — cut
+      strokeEdges(cutEdges);
+      if (markEdges.length > 0) {
+        cs += "1 0 0 RG\n0.3 w\n"; // red — engrave (mark), do not cut
+        strokeEdges(markEdges);
       }
 
       if (includeText) {

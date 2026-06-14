@@ -79,6 +79,7 @@ export interface ReviewScreenProps {
     overrides: ClassificationOverride[],
     wallWallDecisions: WallWallDecisions,
     merges: number[][],
+    marks: number[],
     topologyPhase1: Phase1Result,
   ) => void;
   onCancel: () => void;
@@ -88,6 +89,7 @@ export interface ReviewScreenProps {
   initialOverrides?: ClassificationOverride[];
   initialWallWallDecisions?: WallWallDecisions;
   initialMerges?: number[][];
+  initialMarks?: number[];
   isGenerating?: boolean;
 }
 
@@ -107,6 +109,7 @@ export default function ReviewScreen({
   initialOverrides,
   initialWallWallDecisions,
   initialMerges,
+  initialMarks,
   isGenerating = false,
 }: ReviewScreenProps) {
   const [selectedGroupIds, setSelectedGroupIds] = useState<Set<number>>(
@@ -146,6 +149,11 @@ export default function ReviewScreen({
   // Merge state: sets of group IDs to combine into single panels.
   const [merges, setMerges] = useState<number[][]>(
     () => initialMerges ?? phase1.suggestedMerges ?? [],
+  );
+  // Mark state: component IDs whose openings (door/window holes) are engraved
+  // in red instead of being cut.
+  const [markGroupIds, setMarkGroupIds] = useState<Set<number>>(
+    () => new Set(initialMarks ?? []),
   );
   const [mergeCardOpen, setMergeCardOpen] = useState(true);
   const [isRotating, setIsRotating] = useState(false);
@@ -633,13 +641,22 @@ export default function ReviewScreen({
     });
   }, []);
 
+  const handleToggleMark = useCallback((id: number) => {
+    setMarkGroupIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
   const handleConfirm = useCallback(() => {
     const result: ClassificationOverride[] = [];
     for (const [groupId, newCategory] of overrides.entries()) {
       result.push({ groupId, newCategory });
     }
-    onConfirm(result, wallWallDecisions, merges, workingPhase1);
-  }, [overrides, wallWallDecisions, merges, workingPhase1, onConfirm]);
+    onConfirm(result, wallWallDecisions, merges, [...markGroupIds], workingPhase1);
+  }, [overrides, wallWallDecisions, merges, markGroupIds, workingPhase1, onConfirm]);
 
   // Stats (per effective category).
   const stats = useMemo(() => {
@@ -1285,6 +1302,7 @@ export default function ReviewScreen({
             groups={effectivePhase1.groups}
             selectedGroupIds={selectedGroupIds}
             hiddenGroupIds={hiddenGroupIds}
+            markGroupIds={markGroupIds}
             categoryOverrides={overrides}
             visibleCategories={visibleCategories}
             onSelectGroup={handleSelectGroup}
@@ -1293,6 +1311,7 @@ export default function ReviewScreen({
             onShowGroup={handleShowGroup}
             onShowAllHidden={handleShowAllHidden}
             onChangeCategory={handleChangeCategory}
+            onToggleMark={handleToggleMark}
             onOpenContextMenu={openViewerContextMenu}
           />
         </div>
