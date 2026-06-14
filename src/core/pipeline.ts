@@ -260,7 +260,7 @@ export function canMergeGroups(
 /** Cluster selected groups that share the same plane and can be merged. */
 export function findCoplanarMergeClusters(
   selected: GeometryGroup[],
-  allGroups: GeometryGroup[],
+  _allGroups: GeometryGroup[],
   faces?: Face3D[],
 ): number[][] {
   if (selected.length < 2) return [];
@@ -279,9 +279,13 @@ export function findCoplanarMergeClusters(
     if (ra !== rb) parent[ra] = rb;
   }
 
+  // Agrupar SOLO por coplanaridad estricta (misma dirección de normal + mismo
+  // plano). No usamos canMergeGroups acá porque su fallback de "panel en L"
+  // (unionFormsSinglePanel con normal promediada) fusiona paredes de distinta
+  // dirección que se tocan en una esquina, encadenando Este+Sur en un bloque.
   for (let i = 0; i < selected.length; i++) {
     for (let j = i + 1; j < selected.length; j++) {
-      if (canMergeGroups([selected[i], selected[j]], allGroups, faces)) {
+      if (areGroupsCoplanar([selected[i], selected[j]], faces)) {
         union(i, j);
       }
     }
