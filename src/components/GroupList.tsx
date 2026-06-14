@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { Eye, EyeOff, Layers, PenLine } from "lucide-react";
+import { Eye, EyeOff, Layers } from "lucide-react";
 import type { FaceCategory, GeometryGroup } from "@/core/group-classifier";
 
 const CATEGORY_COLORS: Record<FaceCategory, string> = {
@@ -22,7 +22,6 @@ export interface GroupListProps {
   groups: GeometryGroup[];
   selectedGroupIds: Set<number>;
   hiddenGroupIds: Set<number>;
-  markGroupIds: Set<number>;
   categoryOverrides: Map<number, FaceCategory>;
   visibleCategories: Set<FaceCategory>;
   onSelectGroup: (id: number) => void;
@@ -31,7 +30,6 @@ export interface GroupListProps {
   onShowGroup: (id: number) => void;
   onShowAllHidden: () => void;
   onChangeCategory: (id: number, category: FaceCategory) => void;
-  onToggleMark: (id: number) => void;
   onOpenContextMenu?: (detail: { clientX: number; clientY: number; groupId: number }) => void;
 }
 
@@ -39,7 +37,6 @@ export default function GroupList({
   groups,
   selectedGroupIds,
   hiddenGroupIds,
-  markGroupIds,
   categoryOverrides,
   visibleCategories,
   onSelectGroup,
@@ -48,7 +45,6 @@ export default function GroupList({
   onShowGroup,
   onShowAllHidden,
   onChangeCategory,
-  onToggleMark,
   onOpenContextMenu,
 }: GroupListProps) {
   const listRef = useRef<HTMLDivElement>(null);
@@ -175,22 +171,6 @@ export default function GroupList({
               </div>
 
               <div className="flex items-center gap-0.5 shrink-0 opacity-70 group-hover:opacity-100 transition-opacity">
-                {effectiveCat !== "discard" && (
-                  <button
-                    type="button"
-                    className={`btn btn-ghost btn-xs btn-square rounded-lg ${
-                      markGroupIds.has(group.id) ? "text-error" : ""
-                    }`}
-                    title="Marcar aberturas (grabar en rojo, no cortar)"
-                    aria-pressed={markGroupIds.has(group.id)}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onToggleMark(group.id);
-                    }}
-                  >
-                    <PenLine size={13} />
-                  </button>
-                )}
                 <button
                   type="button"
                   className="btn btn-ghost btn-xs btn-square rounded-lg"
