@@ -14,8 +14,10 @@ import {
   loadStoredAuth,
   loginUser,
   registerUser,
+  verifyEmailToken,
   saveStoredAuth,
   type AuthUser,
+  type RegisterResponse,
 } from "@/services/auth";
 
 interface AuthContextType {
@@ -24,7 +26,10 @@ interface AuthContextType {
   isLoadingAuth: boolean;
   isAuthenticated: boolean;
   login: (email: string, password: string) => Promise<void>;
-  register: (email: string, password: string, nombre?: string) => Promise<void>;
+  /** Crea la cuenta. Devuelve la respuesta de registro (sin JWT). */
+  register: (email: string, password: string, nombre?: string) => Promise<RegisterResponse>;
+  /** Verifica el email con el token del link y aplica la sesión. */
+  verifyEmail: (token: string) => Promise<void>;
   logout: () => void;
 }
 
@@ -75,8 +80,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const register = useCallback(
-    async (email: string, password: string, nombre?: string) => {
-      const data = await registerUser(email, password, nombre);
+    async (email: string, password: string, nombre?: string): Promise<RegisterResponse> => {
+      // Ya no devuelve JWT — solo registra y pide verificar correo.
+      return registerUser(email, password, nombre);
+    },
+    [],
+  );
+
+  const verifyEmail = useCallback(
+    async (verifyToken: string) => {
+      const data = await verifyEmailToken(verifyToken);
       applyAuth(data.access_token, data.user);
     },
     [applyAuth],
@@ -91,6 +104,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isAuthenticated: Boolean(user && token),
         login,
         register,
+        verifyEmail,
         logout,
       }}
     >

@@ -23,15 +23,7 @@ function TopBar({ isAuthPage }: { isAuthPage: boolean }) {
       </Link>
 
       <div className="flex items-center gap-1.5">
-        <button
-          type="button"
-          className="btn btn-ghost btn-sm btn-circle"
-          onClick={() => setTheme(isDark ? "light" : "dark")}
-          title={isDark ? "Tema claro" : "Tema oscuro"}
-          aria-label="Cambiar tema"
-        >
-          {isDark ? <Sun size={16} /> : <Moon size={16} />}
-        </button>
+        
         <Link
           href="/settings"
           className="btn btn-ghost btn-sm btn-circle"
@@ -50,8 +42,7 @@ function TopBar({ isAuthPage }: { isAuthPage: boolean }) {
             </span>
           ) : (
             <>
-              <Link href="/login" className="btn btn-ghost btn-sm">Ingresar</Link>
-              <Link href="/register" className="btn btn-primary btn-sm">Registrarse</Link>
+              <Link href="/login" className="btn btn-primary btn-outline btn-sm">Ingresar</Link>
             </>
           )
         )}
