@@ -101,6 +101,15 @@ function ring2DArea(ring: ReadonlyArray<readonly [number, number]>): number {
 
 export type PanelCategory = "wall" | "floor";
 
+/** A 2D contour edge. `hole` marks edges belonging to an inner ring (a
+ *  window/door opening) rather than the outer silhouette — used to render
+ *  marked openings in red (engrave, not cut). */
+export interface PanelEdge {
+  a: Vec2;
+  b: Vec2;
+  hole?: boolean;
+}
+
 export interface Panel {
   id: string;
   groupName: string;
@@ -108,9 +117,11 @@ export interface Panel {
   floorIndex: number;
   widthM: number;
   heightM: number;
-  edges: Array<{ a: Vec2; b: Vec2 }>;
+  edges: PanelEdge[];
   /** GeometryGroup.id this panel was decomposed from — lets callers map DXF A#/B# back to a group. */
   sourceGroupId: number;
+  /** When true, this component's openings (hole edges) are engraved (red) not cut. */
+  isMark?: boolean;
 }
 
 interface PlacedPanel {
@@ -255,6 +266,8 @@ type RawEdge = {
   ax: number; ay: number; bx: number; by: number;
   via?: number;
   vib?: number;
+  /** Inner-ring (window/door opening) edge — not part of the outer silhouette. */
+  hole?: boolean;
 };
 
 /**
@@ -459,10 +472,12 @@ function unionOutline(faces: Face3D[], uAxis: Vec3, vAxis: Vec3): RawEdge[] | nu
       // ri === 0 is the outer boundary (always kept); ri >= 1 are holes —
       // drop tiny mesh-noise holes but keep real windows/doors.
       if (ri >= 1 && Math.abs(ring2DArea(ring)) < MIN_HOLE_AREA) continue;
+      const isHole = ri >= 1;
       for (let i = 0; i + 1 < ring.length; i++) {
         out.push({
           ax: ring[i][0], ay: ring[i][1],
           bx: ring[i + 1][0], by: ring[i + 1][1],
+          hole: isHole,
         });
       }
     }
@@ -612,7 +627,7 @@ export function projectFacesTo2D(
 ): {
   widthM: number;
   heightM: number;
-  edges: Array<{ a: Vec2; b: Vec2 }>;
+  edges: PanelEdge[];
   /** dot(vAxis, worldUp): >0 ⇒ 2D +y points up; <0 ⇒ 2D +y points down. */
   vUp: number;
   /** Projection axes and origin offsets — use to project 3D points into this panel's 2D space. */
@@ -653,11 +668,12 @@ export function projectFacesTo2D(
   const h = maxV - minV;
   if (w < 0.01 || h < 0.01) return null;
 
-  const edges: Array<{ a: Vec2; b: Vec2 }> = [];
+  const edges: PanelEdge[] = [];
   for (const e of contoured) {
     edges.push({
       a: { x: e.ax - minU, y: e.ay - minV },
       b: { x: e.bx - minU, y: e.by - minV },
+      hole: e.hole,
     });
   }
 
@@ -676,12 +692,12 @@ export function projectFacesTo2D(
  * meaningful survives.
  */
 export function clipPanelAtV(
-  edges: Array<{ a: Vec2; b: Vec2 }>,
+  edges: PanelEdge[],
   cut: number,
   keepAbove: boolean,
-): { widthM: number; heightM: number; edges: Array<{ a: Vec2; b: Vec2 }> } | null {
+): { widthM: number; heightM: number; edges: PanelEdge[] } | null {
   const inSide = (y: number) => (keepAbove ? y >= cut - 1e-9 : y <= cut + 1e-9);
-  const out: Array<{ a: Vec2; b: Vec2 }> = [];
+  const out: PanelEdge[] = [];
   const crossings: number[] = [];
 
   for (const e of edges) {
@@ -696,7 +712,7 @@ export function clipPanelAtV(
       const ix = e.a.x + t * (e.b.x - e.a.x);
       const cutPt = { x: ix, y: cut };
       const keep = aIn ? e.a : e.b;
-      out.push(aIn ? { a: keep, b: cutPt } : { a: cutPt, b: keep });
+      out.push(aIn ? { a: keep, b: cutPt, hole: e.hole } : { a: cutPt, b: keep, hole: e.hole });
       crossings.push(ix);
     }
   }
@@ -723,6 +739,7 @@ export function clipPanelAtV(
   const normalized = out.map((e) => ({
     a: { x: e.a.x - minU, y: e.a.y - minV },
     b: { x: e.b.x - minU, y: e.b.y - minV },
+    hole: e.hole,
   }));
 
   return { widthM: w, heightM: h, edges: normalized };
@@ -735,12 +752,12 @@ export function clipPanelAtV(
  * compensation (trim a wall's width at the side where it meets another wall).
  */
 export function clipPanelAtU(
-  edges: Array<{ a: Vec2; b: Vec2 }>,
+  edges: PanelEdge[],
   cut: number,
   keepRight: boolean,
-): { widthM: number; heightM: number; edges: Array<{ a: Vec2; b: Vec2 }> } | null {
+): { widthM: number; heightM: number; edges: PanelEdge[] } | null {
   const inSide = (x: number) => (keepRight ? x >= cut - 1e-9 : x <= cut + 1e-9);
-  const out: Array<{ a: Vec2; b: Vec2 }> = [];
+  const out: PanelEdge[] = [];
   const crossings: number[] = [];
 
   for (const e of edges) {
@@ -755,7 +772,7 @@ export function clipPanelAtU(
       const iy = e.a.y + t * (e.b.y - e.a.y);
       const cutPt = { x: cut, y: iy };
       const keep = aIn ? e.a : e.b;
-      out.push(aIn ? { a: keep, b: cutPt } : { a: cutPt, b: keep });
+      out.push(aIn ? { a: keep, b: cutPt, hole: e.hole } : { a: cutPt, b: keep, hole: e.hole });
       crossings.push(iy);
     }
   }
@@ -781,6 +798,7 @@ export function clipPanelAtU(
   const normalized = out.map((e) => ({
     a: { x: e.a.x - minU, y: e.a.y - minV },
     b: { x: e.b.x - minU, y: e.b.y - minV },
+    hole: e.hole,
   }));
 
   return { widthM: w, heightM: h, edges: normalized };
@@ -795,12 +813,13 @@ export function clipPanelAtU(
  * assembly base-clip), the bounding box, and therefore nesting/rotation.
  */
 export function mirrorEdgesHorizontal(
-  edges: Array<{ a: Vec2; b: Vec2 }>,
+  edges: PanelEdge[],
   widthM: number,
-): Array<{ a: Vec2; b: Vec2 }> {
+): PanelEdge[] {
   return edges.map((e) => ({
     a: { x: widthM - e.a.x, y: e.a.y },
     b: { x: widthM - e.b.x, y: e.b.y },
+    hole: e.hole,
   }));
 }
 
@@ -1079,6 +1098,7 @@ function layoutPanels(panels: Panel[]): PlacedPanel[] {
 /** Layer definitions for the 4-layer laser cutting protocol. */
 const CS_LAYERS = [
   { name: "CUT_EXTERIOR",   aci: "7" }, // black (white in CAD = black on light bg)
+  { name: "MARK_VECTOR",    aci: "1" }, // red — engrave (mark) openings, do NOT cut
   { name: "ENGRAVE_VECTOR", aci: "5" }, // blue
   { name: "ENGRAVE_RASTER", aci: "8" }, // dark gray
   { name: "CUT_INTERIOR",   aci: "3" }, // green
@@ -1144,7 +1164,7 @@ function fitTextHeight(text: string, maxW: number, maxH: number, targetH: number
 
 function emitPanelEntities(
   lines: string[],
-  edges: Array<{ a: Vec2; b: Vec2 }>,
+  edges: PanelEdge[],
   pw: number,
   ph: number,
   panelId: string,
@@ -1152,12 +1172,16 @@ function emitPanelEntities(
   oy: number,
   scaleDenom: number = 1,
   includeText: boolean = true,
+  isMark: boolean = false,
 ): void {
   for (const edge of edges) {
+    // Marked components engrave their openings (hole edges) in red instead of
+    // cutting them; the outer silhouette is always cut.
+    const mark = isMark && edge.hole === true;
     lines.push(
       "0", "LINE",
-      "8", "CUT_EXTERIOR",
-      "62", "7",
+      "8", mark ? "MARK_VECTOR" : "CUT_EXTERIOR",
+      "62", mark ? "1" : "7",
       "10", r(ox + edge.a.x),
       "20", r(oy + edge.a.y),
       "11", r(ox + edge.b.x),
@@ -1329,6 +1353,7 @@ export function nestedSheetsToDxf(nesting: NestingResult, includeText: boolean =
         sy + y,
         nesting.scaleDenom,
         includeText,
+        panel.isMark === true,
       );
     }
   }

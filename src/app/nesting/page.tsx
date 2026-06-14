@@ -22,6 +22,7 @@ export default function NestingPage() {
     savedOverrides,
     savedWallWallDecisions,
     savedMerges,
+    savedMarks,
     persistSession,
     isLoadingSession
   } = useProjectContext();
@@ -59,13 +60,13 @@ export default function NestingPage() {
           sheetConfig: newConfig,
           minAreaM2,
         };
-        const decomposed = decomposePanels(merged, opts, savedOverrides, savedWallWallDecisions);
+        const decomposed = decomposePanels(merged, opts, savedOverrides, savedWallWallDecisions, new Set(savedMarks));
         const nesting = nestDecomposedPanels(decomposed, newConfig, newScale);
         setNestingData(nesting);
         setIsRecomputing(false);
       }, 30);
     },
-    [phase1Result, savedOverrides, savedWallWallDecisions, savedMerges, paper, minAreaM2, setNestingData],
+    [phase1Result, savedOverrides, savedWallWallDecisions, savedMerges, savedMarks, paper, minAreaM2, setNestingData],
   );
 
   const handleSheetConfigChange = useCallback((newConfig: SheetConfig) => {
