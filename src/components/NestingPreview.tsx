@@ -124,10 +124,13 @@ function SheetCanvas({
         ctx.rect(toX(px), toY(py), pw * scale, ph * scale);
         ctx.fill();
 
-        ctx.strokeStyle = color;
+        // Marked components engrave their openings (hole edges) — draw those in
+        // red; everything else in the panel colour (cut).
+        const isMark = placed.panel.isMark === true;
         ctx.lineWidth = 1.25;
         ctx.lineJoin = "round";
         for (const e of edges) {
+          ctx.strokeStyle = isMark && e.hole === true ? "#dc2626" : color;
           ctx.beginPath();
           ctx.moveTo(toX(px + e.a.x), toY(py + e.a.y));
           ctx.lineTo(toX(px + e.b.x), toY(py + e.b.y));

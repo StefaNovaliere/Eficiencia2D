@@ -772,6 +772,7 @@ export function decomposePanels(
   opts: PipelineOptions,
   overrides?: ClassificationOverride[],
   wallWallDecisions?: Map<number, number>,
+  markGroupIds?: Set<number>,
 ): DecomposeResult {
   const overrideMap = new Map<number, GeometryGroup["category"]>();
   if (overrides) {
@@ -822,6 +823,7 @@ export function decomposePanels(
 
     const isFloor = effectiveCat === "floor";
     const panelCat: PanelCategory = isFloor ? "floor" : "wall";
+    const isMark = markGroupIds?.has(group.id) ?? false;
 
     const faces = group.faceIndices.map((fi) => phase1.faces[fi]).filter(Boolean);
     if (faces.length === 0) continue;
@@ -902,6 +904,7 @@ export function decomposePanels(
           heightM,
           edges,
           sourceGroupId: group.id,
+          isMark,
         });
       } else {
         wallCount++;
@@ -914,6 +917,7 @@ export function decomposePanels(
           heightM,
           edges,
           sourceGroupId: group.id,
+          isMark,
         });
       }
     }
@@ -953,7 +957,9 @@ function panelsToNestingPanels(panels: Panel[], scaleDenom: number): NestingPane
     edges: p.edges.map((e) => ({
       a: { x: e.a.x * s, y: e.a.y * s },
       b: { x: e.b.x * s, y: e.b.y * s },
+      hole: e.hole,
     })),
+    isMark: p.isMark,
   }));
 }
 

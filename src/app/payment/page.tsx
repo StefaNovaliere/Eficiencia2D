@@ -37,6 +37,7 @@ async function generateClientSideZip(
   savedOverrides: ClassificationOverride[],
   savedWallWallDecisions: Map<number, number>,
   savedMerges: number[][],
+  savedMarks: number[],
 ): Promise<Blob> {
   const merged =
     savedMerges.length > 0
@@ -47,6 +48,7 @@ async function generateClientSideZip(
     opts,
     savedOverrides,
     savedWallWallDecisions,
+    new Set(savedMarks),
   );
   const nesting = nestDecomposedPanels(
     decomposed,
@@ -79,6 +81,7 @@ export default function PaymentPage() {
     savedOverrides,
     savedWallWallDecisions,
     savedMerges,
+    savedMarks,
     scale,
     paper,
     minAreaM2,
@@ -157,6 +160,7 @@ export default function PaymentPage() {
         overrides: overridesToRecord(savedOverrides),
         wall_wall_decisions: decisionsToRecord(savedWallWallDecisions),
         merges: savedMerges,
+        marks: savedMarks,
       });
 
       let zipBlob: Blob;
@@ -176,6 +180,7 @@ export default function PaymentPage() {
           savedOverrides,
           savedWallWallDecisions,
           savedMerges,
+          savedMarks,
         );
         triggerDownload(zipBlob, `${stem}_planos.zip`);
       } catch (clientErr: unknown) {
@@ -200,6 +205,7 @@ export default function PaymentPage() {
     savedOverrides,
     savedWallWallDecisions,
     savedMerges,
+    savedMarks,
     triggerDownload,
   ]);
 

@@ -28,7 +28,9 @@ export interface NestingPanel {
   category: "wall" | "floor";
   widthM: number;
   heightM: number;
-  edges: Array<{ a: Vec2; b: Vec2 }>;
+  edges: Array<{ a: Vec2; b: Vec2; hole?: boolean }>;
+  /** When true, this component's openings (hole edges) are engraved (red) not cut. */
+  isMark?: boolean;
 }
 
 export interface PlacedNestingPanel {
@@ -264,11 +266,12 @@ export function nestPanels(
  * Point (x, y) maps to (y, widthM - x).
  */
 export function rotateEdges(
-  edges: Array<{ a: Vec2; b: Vec2 }>,
+  edges: Array<{ a: Vec2; b: Vec2; hole?: boolean }>,
   originalW: number,
-): Array<{ a: Vec2; b: Vec2 }> {
+): Array<{ a: Vec2; b: Vec2; hole?: boolean }> {
   return edges.map((e) => ({
     a: { x: e.a.y, y: originalW - e.a.x },
     b: { x: e.b.y, y: originalW - e.b.x },
+    hole: e.hole,
   }));
 }
