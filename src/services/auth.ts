@@ -13,6 +13,14 @@ export interface AuthResponse {
   user: AuthUser;
 }
 
+/** Respuesta del nuevo registro — sin JWT, con estado pendiente_verificacion */
+export interface RegisterResponse {
+  message: string;
+  email: string;
+  verification_email_sent: boolean;
+  user: AuthUser;
+}
+
 const AUTH_STORAGE_KEY = "e2d_auth";
 
 export interface StoredAuth {
@@ -58,11 +66,12 @@ export function clearStoredAuth(): void {
   localStorage.removeItem(AUTH_STORAGE_KEY);
 }
 
+/** Crea la cuenta — devuelve mensaje de verificación, NO devuelve JWT. */
 export async function registerUser(
   email: string,
   password: string,
   nombre?: string,
-): Promise<AuthResponse> {
+): Promise<RegisterResponse> {
   const res = await apiFetch("/api/auth/register", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -85,6 +94,21 @@ export async function loginUser(email: string, password: string): Promise<AuthRe
 
   if (!res.ok) {
     await parseApiError(res, "No se pudo iniciar sesión");
+  }
+
+  return res.json();
+}
+
+/** Verifica el email con el token del link y devuelve el JWT. */
+export async function verifyEmailToken(token: string): Promise<AuthResponse> {
+  const res = await apiFetch("/api/auth/verify-email", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token }),
+  });
+
+  if (!res.ok) {
+    await parseApiError(res, "El enlace de verificación es inválido o expiró");
   }
 
   return res.json();
