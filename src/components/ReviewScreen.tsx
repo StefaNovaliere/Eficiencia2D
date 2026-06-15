@@ -47,6 +47,7 @@ import {
   MousePointer2,
   Lasso,
   Trash2,
+  PenLine,
 } from "lucide-react";
 import { useReviewHistory } from "@/hooks/useReviewHistory";
 import type { ModelViewerHandle } from "@/components/ModelViewer";
@@ -898,6 +899,25 @@ export default function ReviewScreen({
                 Dividir en {splitPreview.panels} piezas
               </button>
             )}
+            {selectedGroup && getEffectiveCategory(selectedGroup, overrides) !== "discard" && (
+              <button
+                type="button"
+                className={`flex w-full items-center gap-2 px-3 py-2 text-sm text-left transition-colors ${
+                  markGroupIds.has(selectedGroup.id)
+                    ? "hover:bg-error/10 text-error"
+                    : "hover:bg-base-200/80"
+                }`}
+                onClick={() => {
+                  handleToggleMark(selectedGroup.id);
+                  setContextMenu(null);
+                }}
+              >
+                <PenLine size={15} className="shrink-0" />
+                {markGroupIds.has(selectedGroup.id)
+                  ? "Desmarcar aberturas"
+                  : "Marcar aberturas (grabar en rojo)"}
+              </button>
+            )}
             {selectedGroupIds.size > 0 && (
               <button
                 type="button"
@@ -1302,7 +1322,6 @@ export default function ReviewScreen({
             groups={effectivePhase1.groups}
             selectedGroupIds={selectedGroupIds}
             hiddenGroupIds={hiddenGroupIds}
-            markGroupIds={markGroupIds}
             categoryOverrides={overrides}
             visibleCategories={visibleCategories}
             onSelectGroup={handleSelectGroup}
@@ -1311,7 +1330,6 @@ export default function ReviewScreen({
             onShowGroup={handleShowGroup}
             onShowAllHidden={handleShowAllHidden}
             onChangeCategory={handleChangeCategory}
-            onToggleMark={handleToggleMark}
             onOpenContextMenu={openViewerContextMenu}
           />
         </div>
