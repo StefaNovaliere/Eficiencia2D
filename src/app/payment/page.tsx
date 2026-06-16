@@ -12,9 +12,11 @@ import {
 } from "@/core/pipeline";
 import type { PipelineOptions } from "@/core/types";
 import type { Phase1Result, ClassificationOverride } from "@/core/pipeline";
+import type { UserCut } from "@/core/user-cuts";
 import {
   base64ToBlob,
   generateProjectFiles,
+  userCutsForApi,
 } from "@/services/api";
 
 function overridesToRecord(
@@ -38,6 +40,7 @@ async function generateClientSideZip(
   savedWallWallDecisions: Map<number, number>,
   savedMerges: number[][],
   savedMarks: number[],
+  savedUserCuts: UserCut[],
 ): Promise<Blob> {
   const merged =
     savedMerges.length > 0
@@ -49,6 +52,7 @@ async function generateClientSideZip(
     savedOverrides,
     savedWallWallDecisions,
     new Set(savedMarks),
+    savedUserCuts,
   );
   const nesting = nestDecomposedPanels(
     decomposed,
@@ -82,6 +86,7 @@ export default function PaymentPage() {
     savedWallWallDecisions,
     savedMerges,
     savedMarks,
+    savedUserCuts,
     scale,
     paper,
     minAreaM2,
@@ -161,6 +166,7 @@ export default function PaymentPage() {
         wall_wall_decisions: decisionsToRecord(savedWallWallDecisions),
         merges: savedMerges,
         marks: savedMarks,
+        user_cuts: userCutsForApi(savedUserCuts),
       });
 
       let zipBlob: Blob;
@@ -181,6 +187,7 @@ export default function PaymentPage() {
           savedWallWallDecisions,
           savedMerges,
           savedMarks,
+          savedUserCuts,
         );
         triggerDownload(zipBlob, `${stem}_planos.zip`);
       } catch (clientErr: unknown) {
@@ -206,6 +213,7 @@ export default function PaymentPage() {
     savedWallWallDecisions,
     savedMerges,
     savedMarks,
+    savedUserCuts,
     triggerDownload,
   ]);
 

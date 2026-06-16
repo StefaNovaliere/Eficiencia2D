@@ -1,8 +1,14 @@
+import type { UserCut } from "@/core/user-cuts";
+import { serializeUserCutsForApi } from "@/core/user-cuts";
 import { decodePackedFaces } from "@/core/packed-faces";
 import {
   invalidateApiBaseUrl,
   resolveApiBaseUrl,
 } from "@/services/api-base";
+
+export function userCutsForApi(cuts: UserCut[]): Record<string, unknown>[] {
+  return serializeUserCutsForApi(cuts);
+}
 
 export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
   let baseUrl = await resolveApiBaseUrl();
@@ -67,6 +73,8 @@ export interface GenerateRequestPayload {
   /** GeometryGroup ids whose openings (inner-ring holes) must be engraved
    *  (red, MARK_VECTOR / ACI 1) instead of cut. */
   marks?: number[];
+  /** User-defined subtractive cuts in panel-local metres (see user-cuts.ts). */
+  user_cuts?: Record<string, unknown>[];
 }
 
 export interface GenerateResponse {

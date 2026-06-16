@@ -12,6 +12,7 @@ import {
 } from "@/core/pipeline";
 import type { ClassificationOverride, Phase1Result } from "@/core/pipeline";
 import type { PipelineOptions } from "@/core/types";
+import type { UserCut } from "@/core/user-cuts";
 
 export default function ReviewPage() {
   const router = useRouter();
@@ -28,6 +29,8 @@ export default function ReviewPage() {
     setSavedMerges,
     savedMarks,
     setSavedMarks,
+    savedUserCuts,
+    setSavedUserCuts,
     fileId,
     scale,
     paper,
@@ -50,6 +53,7 @@ export default function ReviewPage() {
     wallWallDecisions: Map<number, number>,
     merges: number[][],
     marks: number[],
+    userCuts: UserCut[],
     topologyPhase1: Phase1Result,
   ) => {
     if (!topologyPhase1 || !fileId) return;
@@ -58,6 +62,7 @@ export default function ReviewPage() {
     setSavedWallWallDecisions(wallWallDecisions);
     setSavedMerges(merges);
     setSavedMarks(marks);
+    setSavedUserCuts(userCuts);
     setPhase1Result(topologyPhase1);
     setIsGenerating(true);
 
@@ -70,7 +75,14 @@ export default function ReviewPage() {
         sheetConfig,
         minAreaM2,
       };
-      const decomposed = decomposePanels(merged, opts, overrides, wallWallDecisions, new Set(marks));
+      const decomposed = decomposePanels(
+        merged,
+        opts,
+        overrides,
+        wallWallDecisions,
+        new Set(marks),
+        userCuts,
+      );
       const nesting = nestDecomposedPanels(decomposed, sheetConfig, scale);
       setNestingData(nesting);
       router.push("/nesting");
@@ -89,6 +101,7 @@ export default function ReviewPage() {
     setSavedWallWallDecisions,
     setSavedMerges,
     setSavedMarks,
+    setSavedUserCuts,
     setPhase1Result,
     setNestingData,
     router,
@@ -119,6 +132,7 @@ export default function ReviewPage() {
       initialWallWallDecisions={savedWallWallDecisions}
       initialMerges={savedMerges}
       initialMarks={savedMarks}
+      initialUserCuts={savedUserCuts}
       isGenerating={isGenerating}
     />
   );
