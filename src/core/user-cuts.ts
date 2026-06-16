@@ -396,16 +396,9 @@ function applySingleCut(
   cut: UserCut,
 ): { widthM: number; heightM: number; edges: PanelEdge[] }[] {
   if (cut.kind === "line") {
-    // Return BOTH halves so the panel is split into two separate pieces.
-    const pieces: { widthM: number; heightM: number; edges: PanelEdge[] }[] = [];
-    for (const keep of [true, false]) {
-      const clipped = clipPanelByLine(edges, cut.u0, cut.v0, cut.u1, cut.v1, keep);
-      if (!clipped) continue;
-      const norm = normalizeEdges(clipped);
-      if (norm) pieces.push(norm);
-    }
-    // If nothing survived (degenerate cut), return the original panel unchanged.
-    return pieces.length > 0 ? pieces : [{ widthM, heightM, edges }];
+    // Line cuts are score/fold marks — they appear as dashed lines in the PDF
+    // but do NOT split the panel geometry.
+    return [{ widthM, heightM, edges }];
   }
 
   const cutRing = cutShapePolygon(cut, widthM, heightM);

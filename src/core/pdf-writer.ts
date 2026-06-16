@@ -531,6 +531,30 @@ export function generateNestingPdf(
         strokeEdges(markEdges);
       }
 
+      // Score lines (line cuts): dashed blue lines — score/fold marks only.
+      if (placed.panel.scoreLines && placed.panel.scoreLines.length > 0) {
+        const rawScores = placed.panel.scoreLines;
+        const scores = rotated
+          ? rawScores.map((s) => ({
+              a: { x: s.a.y, y: panel.widthM - s.a.x },
+              b: { x: s.b.y, y: panel.widthM - s.b.x },
+            }))
+          : rawScores;
+        const dashLen = (0.02 * scale).toFixed(4); // 2 cm dash
+        const gapLen = (0.01 * scale).toFixed(4);  // 1 cm gap
+        cs += `0 0.45 0.8 RG\n0.5 w\n[${dashLen} ${gapLen}] 0 d\n`;
+        for (const seg of scores) {
+          const ax = sx + x + seg.a.x;
+          const ay = syTop + y + seg.a.y;
+          const bx = sx + x + seg.b.x;
+          const by = syTop + y + seg.b.y;
+          cs += `${tx(ax).toFixed(4)} ${ty(ay).toFixed(4)} m\n`;
+          cs += `${tx(bx).toFixed(4)} ${ty(by).toFixed(4)} l\n`;
+          cs += "S\n";
+        }
+        cs += "[] 0 d\n"; // reset dash pattern
+      }
+
       if (includeText) {
         const pw = effectiveW;
         const ph = effectiveH;

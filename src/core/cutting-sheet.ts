@@ -122,6 +122,11 @@ export interface Panel {
   sourceGroupId: number;
   /** When true, this component's openings (hole edges) are engraved (red) not cut. */
   isMark?: boolean;
+  /**
+   * Line-cut score marks. Drawn as dashed blue lines in the PDF — they do NOT
+   * cut the panel. Coordinates are in panel-local metres, same space as edges.
+   */
+  scoreLines?: Array<{ a: Vec2; b: Vec2 }>;
 }
 
 interface PlacedPanel {
