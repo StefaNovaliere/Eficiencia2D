@@ -75,6 +75,7 @@ export default function CutToolOverlay({
 }: CutToolOverlayProps) {
   // drag state stored in a ref — no re-renders during drag
   const dragRef = useRef<{ active: boolean; mode: DragMode } | null>(null);
+  const overlayRef = useRef<HTMLDivElement>(null);
 
   // rAF throttle for expensive parent updates
   const rafRef = useRef<number | null>(null);
@@ -136,10 +137,52 @@ export default function CutToolOverlay({
     [userCuts, viewerRef],
   );
 
+  // ── middle mouse: forward to canvas so CameraControls can pan/dolly ──────
+  const handleMiddleMouse = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      const overlay = overlayRef.current;
+      if (!overlay) return;
+
+      // Disable pointer events so subsequent pointermove/up reach the canvas
+      overlay.style.pointerEvents = "none";
+
+      // Find the Three.js canvas and dispatch a synthetic pointerdown to it
+      const canvas = overlay.parentElement?.querySelector("canvas");
+      if (canvas) {
+        canvas.dispatchEvent(
+          new PointerEvent("pointerdown", {
+            pointerId: e.nativeEvent.pointerId,
+            clientX: e.clientX,
+            clientY: e.clientY,
+            screenX: e.nativeEvent.screenX,
+            screenY: e.nativeEvent.screenY,
+            button: 1,
+            buttons: 4,
+            bubbles: true,
+            cancelable: true,
+            pressure: e.nativeEvent.pressure,
+            pointerType: e.nativeEvent.pointerType,
+            isPrimary: e.nativeEvent.isPrimary,
+          }),
+        );
+      }
+
+      // Restore pointer events once the middle button is released
+      const restore = () => {
+        overlay.style.pointerEvents = "";
+        window.removeEventListener("pointerup", restore);
+      };
+      window.addEventListener("pointerup", restore, { once: true });
+    },
+    [],
+  );
+
   // ── pointer down ──────────────────────────────────────────────────────────
   const handlePointerDown = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
-      if (!active || e.button !== 0) return;
+      if (!active) return;
+      if (e.button === 1) { handleMiddleMouse(e); return; }
+      if (e.button !== 0) return;
       if (document.elementFromPoint(e.clientX, e.clientY)?.closest("[data-viewer-chrome]")) return;
 
       e.preventDefault();
@@ -188,7 +231,7 @@ export default function CutToolOverlay({
         isMove: false,
       });
     },
-    [active, shapeKind, viewerRef, findCutAt, scheduleDraft, onMovingCutId],
+    [active, shapeKind, viewerRef, findCutAt, scheduleDraft, onMovingCutId, handleMiddleMouse],
   );
 
   // ── pointer move ──────────────────────────────────────────────────────────
@@ -294,6 +337,7 @@ export default function CutToolOverlay({
   return (
     <>
       <div
+        ref={overlayRef}
         className="absolute inset-0 z-20"
         style={{ cursor: isDraggingMove ? "grabbing" : "crosshair" }}
         onPointerDown={handlePointerDown}

@@ -135,7 +135,7 @@ function buildGroupProjCache(
       group.representativeNormal.y,
       group.representativeNormal.z,
     );
-    const bias = nlen > 1e-6 ? 0.003 : 0;
+    const bias = nlen > 1e-6 ? 0.006 : 0;
     const normal: Vec3 =
       nlen > 1e-6
         ? {
@@ -183,22 +183,28 @@ export function computeCutPreviewSegments(
     const { uAxis, vAxis, originU, originV } = proj;
     const ring = cutToPanelRing(cut);
 
-    const to3 = (p: { x: number; y: number }): Vec3 => {
+    // Emit cut segments on BOTH sides of the panel surface so they are always
+    // visible regardless of which way the group's representativeNormal points.
+    const to3 = (p: { x: number; y: number }, sign: 1 | -1): Vec3 => {
       const w = panel2DTo3D(p.x + originU, p.y + originV, uAxis, vAxis, anchor);
       return {
-        x: w.x + normal.x * bias,
-        y: w.y + normal.y * bias,
-        z: w.z + normal.z * bias,
+        x: w.x + normal.x * bias * sign,
+        y: w.y + normal.y * bias * sign,
+        z: w.z + normal.z * bias * sign,
       };
     };
 
     if (cut.kind === "line") {
-      segments.push({ groupId: cut.groupId, normal, a: to3(ring[0]), b: to3(ring[1]) });
+      for (const sign of [1, -1] as const) {
+        segments.push({ groupId: cut.groupId, normal, a: to3(ring[0], sign), b: to3(ring[1], sign) });
+      }
       continue;
     }
 
     for (let i = 0; i + 1 < ring.length; i++) {
-      segments.push({ groupId: cut.groupId, normal, a: to3(ring[i]), b: to3(ring[i + 1]) });
+      for (const sign of [1, -1] as const) {
+        segments.push({ groupId: cut.groupId, normal, a: to3(ring[i], sign), b: to3(ring[i + 1], sign) });
+      }
     }
   }
 

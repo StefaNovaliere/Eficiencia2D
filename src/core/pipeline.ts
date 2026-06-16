@@ -908,6 +908,15 @@ export function decomposePanels(
           ? applyUserCutsToPanel(widthM, heightM, edges, groupCuts)
           : [{ widthM, heightM, edges }];
 
+      // Line cuts become score marks: dashed lines drawn on the panel in the PDF.
+      // Coordinates must be mirrored the same way edges were (x → widthM - x).
+      const scoreLines = groupCuts
+        .filter((c) => c.kind === "line")
+        .map((c) => ({
+          a: { x: widthM - c.u0, y: c.v0 },
+          b: { x: widthM - c.u1, y: c.v1 },
+        }));
+
       for (const piece of pieces) {
         if (piece.widthM * piece.heightM < (opts.minAreaM2 ?? 0.01)) continue;
 
@@ -923,6 +932,7 @@ export function decomposePanels(
             edges: piece.edges,
             sourceGroupId: group.id,
             isMark,
+            scoreLines: scoreLines.length > 0 ? scoreLines : undefined,
           });
         } else {
           wallCount++;
@@ -936,6 +946,7 @@ export function decomposePanels(
             edges: piece.edges,
             sourceGroupId: group.id,
             isMark,
+            scoreLines: scoreLines.length > 0 ? scoreLines : undefined,
           });
         }
       }
@@ -988,6 +999,10 @@ function panelsToNestingPanels(panels: Panel[], scaleDenom: number): NestingPane
       hole: e.hole,
     })),
     isMark: p.isMark,
+    scoreLines: p.scoreLines?.map((seg) => ({
+      a: { x: seg.a.x * s, y: seg.a.y * s },
+      b: { x: seg.b.x * s, y: seg.b.y * s },
+    })),
   }));
 }
 

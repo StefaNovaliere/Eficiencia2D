@@ -618,7 +618,10 @@ function CutGroupOverlay({
   useFrame(() => {
     if (!lineRef.current) return;
     viewDir.current.subVectors(camera.position, anchor);
-    lineRef.current.visible = viewDir.current.dot(normal) > 0.02;
+    // Show from BOTH sides: representativeNormal can point inward or outward
+    // depending on the model exporter. depthTest:true prevents the lines from
+    // showing through opaque geometry, so only hide when perfectly edge-on.
+    lineRef.current.visible = Math.abs(viewDir.current.dot(normal)) > 0.02;
   });
 
   return (
@@ -1032,24 +1035,68 @@ export interface ModelViewerHandle {
   getPanelSize(groupId: number): { widthM: number; heightM: number } | null;
 }
 
+/**
+ * Pick the best group from a set of raycast hits.
+ *
+ * Strategy — priority order:
+ *  1. Nearest hit whose triangle face-normal opposes the ray (front face).
+ *     Uses a 5 mm "same-surface" window so both sides of a zero-thickness
+ *     panel are considered ties and the front face wins.
+ *  2. Nearest hit at the same surface distance regardless of face direction
+ *     (handles models with flipped/missing face normals).
+ *  3. Nearest non-hidden hit up to 5 cm away (thick walls / layered meshes).
+ *
+ * NOTE: group representativeNormal is intentionally NOT used here. It is not
+ * reliable for choosing the correct surface because the model exporter can
+ * set it to point in any direction. Nearest-hit = visible surface is the
+ * only safe rule.
+ */
 function pickGroupFromRaycast(
   raycaster: THREE.Raycaster,
   hits: THREE.Intersection[],
   hiddenGroupIds: Set<number>,
 ): { groupId: number; point: THREE.Vector3 } | null {
   if (hits.length === 0) return null;
+  const rayDir = raycaster.ray.direction;
   const closestDist = hits[0].distance;
-  for (const hit of hits) {
-    if (hit.distance - closestDist > 0.05) break;
-    const data = hit.object.userData?.mergedMeshData as
-      | { groupIds: number[] }
-      | undefined;
-    if (!data || hit.faceIndex == null || hit.faceIndex < 0) continue;
-    if (hit.faceIndex >= data.groupIds.length) continue;
+
+  function tryHit(hit: THREE.Intersection): { groupId: number; point: THREE.Vector3 } | null {
+    const data = hit.object.userData?.mergedMeshData as { groupIds: number[] } | undefined;
+    if (!data || hit.faceIndex == null || hit.faceIndex < 0) return null;
+    if (hit.faceIndex >= data.groupIds.length) return null;
     const groupId = data.groupIds[hit.faceIndex];
-    if (hiddenGroupIds.has(groupId)) continue;
+    if (hiddenGroupIds.has(groupId)) return null;
     return { groupId, point: hit.point.clone() };
   }
+
+  function isFrontFace(hit: THREE.Intersection): boolean {
+    if (!hit.face) return true;
+    const wn = hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
+    return wn.dot(rayDir) <= 0;
+  }
+
+  // Pass 1: same-surface window (5 mm), front-face triangles only
+  for (const hit of hits) {
+    if (hit.distance - closestDist > 0.005) break;
+    if (!isFrontFace(hit)) continue;
+    const r = tryHit(hit);
+    if (r) return r;
+  }
+
+  // Pass 2: same-surface window, any triangle winding
+  for (const hit of hits) {
+    if (hit.distance - closestDist > 0.005) break;
+    const r = tryHit(hit);
+    if (r) return r;
+  }
+
+  // Pass 3: up to 5 cm — handles thick walls / layered surfaces
+  for (const hit of hits) {
+    if (hit.distance - closestDist > 0.05) break;
+    const r = tryHit(hit);
+    if (r) return r;
+  }
+
   return null;
 }
 
