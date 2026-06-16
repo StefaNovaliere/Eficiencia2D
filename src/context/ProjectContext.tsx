@@ -5,6 +5,7 @@ import type { Phase1Result, ClassificationOverride, NestingPreviewData } from "@
 import { applyPanelBridgeSplits } from "@/core/pipeline";
 import { DEFAULT_SHEET } from "@/core/sheet-nester";
 import type { PipelineOptions, SheetConfig } from "@/core/types";
+import type { UserCut } from "@/core/user-cuts";
 
 interface PersistedSession {
   fileName: string;
@@ -19,6 +20,7 @@ interface PersistedSession {
   wallWallDecisions: [number, number][];
   merges?: number[][];
   marks?: number[];
+  userCuts?: UserCut[];
 }
 
 const SESSION_KEY = "e2d_pending_session";
@@ -53,6 +55,8 @@ interface ProjectContextType {
   setSavedMerges: (merges: number[][]) => void;
   savedMarks: number[];
   setSavedMarks: (marks: number[]) => void;
+  savedUserCuts: UserCut[];
+  setSavedUserCuts: (cuts: UserCut[]) => void;
   resetProject: () => void;
   persistSession: () => Promise<void>;
   isLoadingSession: boolean;
@@ -73,6 +77,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const [savedWallWallDecisions, setSavedWallWallDecisions] = useState<Map<number, number>>(new Map());
   const [savedMerges, setSavedMerges] = useState<number[][]>([]);
   const [savedMarks, setSavedMarks] = useState<number[]>([]);
+  const [savedUserCuts, setSavedUserCuts] = useState<UserCut[]>([]);
   const [sheetConfig, setSheetConfig] = useState<SheetConfig>({ ...DEFAULT_SHEET });
   const [projectFileName, setProjectFileName] = useState<string | null>(null);
   const [isLoadingSession, setIsLoadingSession] = useState(true);
@@ -109,6 +114,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       setSavedMerges(restoredMerges);
 
       setSavedMarks(parsed.marks ?? []);
+      setSavedUserCuts(parsed.userCuts ?? []);
 
       if (!parsed.phase1Result) {
         sessionStorage.removeItem(SESSION_KEY);
@@ -138,12 +144,13 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         wallWallDecisions: Array.from(savedWallWallDecisions.entries()),
         merges: savedMerges,
         marks: savedMarks,
+        userCuts: savedUserCuts,
       };
       sessionStorage.setItem(SESSION_KEY, JSON.stringify(persisted));
     } catch {
       // Storage full
     }
-  }, [file, fileId, previewObj, phase1Result, projectFileName, scale, paper, minAreaM2, sheetConfig, savedOverrides, savedWallWallDecisions, savedMerges, savedMarks]);
+  }, [file, fileId, previewObj, phase1Result, projectFileName, scale, paper, minAreaM2, sheetConfig, savedOverrides, savedWallWallDecisions, savedMerges, savedMarks, savedUserCuts]);
 
   const resetProject = useCallback(() => {
     setFile(null);
@@ -159,6 +166,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     setSavedWallWallDecisions(new Map());
     setSavedMerges([]);
     setSavedMarks([]);
+    setSavedUserCuts([]);
     setSheetConfig({ ...DEFAULT_SHEET });
     sessionStorage.removeItem(SESSION_KEY);
   }, []);
@@ -181,6 +189,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         savedWallWallDecisions, setSavedWallWallDecisions,
         savedMerges, setSavedMerges,
         savedMarks, setSavedMarks,
+        savedUserCuts, setSavedUserCuts,
         resetProject,
         persistSession,
         isLoadingSession

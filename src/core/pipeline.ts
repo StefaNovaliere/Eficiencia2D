@@ -8,6 +8,7 @@
 
 import { parseObj } from "./obj-parser";
 import { generateCuttingSheets, decomposeIntoPanels, nestedSheetsToDxf, projectFacesTo2D, clipPanelAtV, clipPanelAtU, mirrorEdgesHorizontal, unionFormsSinglePanel } from "./cutting-sheet";
+import { applyUserCutsToPanel, type UserCut } from "./user-cuts";
 import type { Panel, PanelCategory } from "./cutting-sheet";
 import { detectUpAxis, extractFacades } from "./facade-extractor";
 import { extractFloorPlans } from "./floor-plan-extractor";
@@ -773,6 +774,7 @@ export function decomposePanels(
   overrides?: ClassificationOverride[],
   wallWallDecisions?: Map<number, number>,
   markGroupIds?: Set<number>,
+  userCuts?: UserCut[],
 ): DecomposeResult {
   const overrideMap = new Map<number, GeometryGroup["category"]>();
   if (overrides) {
@@ -816,6 +818,13 @@ export function decomposePanels(
   const floorPanels: Panel[] = [];
   let wallCount = 0;
   let floorCount = 0;
+
+  const cutsByGroup = new Map<number, UserCut[]>();
+  for (const cut of userCuts ?? []) {
+    const list = cutsByGroup.get(cut.groupId);
+    if (list) list.push(cut);
+    else cutsByGroup.set(cut.groupId, [cut]);
+  }
 
   for (const group of phase1.groups) {
     const effectiveCat = overrideMap.get(group.id) ?? group.category;
@@ -893,32 +902,42 @@ export function decomposePanels(
       // INSIDE of the assembled model (each piece is flipped over on assembly).
       edges = mirrorEdgesHorizontal(edges, widthM);
 
-      if (isFloor) {
-        floorCount++;
-        floorPanels.push({
-          id: `B${floorCount}`,
-          groupName: `floor_${floorCount}`,
-          category: panelCat,
-          floorIndex: 0,
-          widthM,
-          heightM,
-          edges,
-          sourceGroupId: group.id,
-          isMark,
-        });
-      } else {
-        wallCount++;
-        wallPanels.push({
-          id: `A${wallCount}`,
-          groupName: `wall_${wallCount}`,
-          category: panelCat,
-          floorIndex: 0,
-          widthM,
-          heightM,
-          edges,
-          sourceGroupId: group.id,
-          isMark,
-        });
+      const groupCuts = cutsByGroup.get(group.id) ?? [];
+      const pieces =
+        groupCuts.length > 0
+          ? applyUserCutsToPanel(widthM, heightM, edges, groupCuts)
+          : [{ widthM, heightM, edges }];
+
+      for (const piece of pieces) {
+        if (piece.widthM * piece.heightM < (opts.minAreaM2 ?? 0.01)) continue;
+
+        if (isFloor) {
+          floorCount++;
+          floorPanels.push({
+            id: `B${floorCount}`,
+            groupName: `floor_${floorCount}`,
+            category: panelCat,
+            floorIndex: 0,
+            widthM: piece.widthM,
+            heightM: piece.heightM,
+            edges: piece.edges,
+            sourceGroupId: group.id,
+            isMark,
+          });
+        } else {
+          wallCount++;
+          wallPanels.push({
+            id: `A${wallCount}`,
+            groupName: `wall_${wallCount}`,
+            category: panelCat,
+            floorIndex: 0,
+            widthM: piece.widthM,
+            heightM: piece.heightM,
+            edges: piece.edges,
+            sourceGroupId: group.id,
+            isMark,
+          });
+        }
       }
     }
   }
@@ -938,8 +957,17 @@ export function computePanelIdByGroup(
   opts: PipelineOptions,
   overrides?: ClassificationOverride[],
   wallWallDecisions?: Map<number, number>,
+  markGroupIds?: Set<number>,
+  userCuts?: UserCut[],
 ): Map<number, string> {
-  const { wallPanels, floorPanels } = decomposePanels(phase1, opts, overrides, wallWallDecisions);
+  const { wallPanels, floorPanels } = decomposePanels(
+    phase1,
+    opts,
+    overrides,
+    wallWallDecisions,
+    markGroupIds,
+    userCuts,
+  );
   const m = new Map<number, string>();
   for (const p of [...wallPanels, ...floorPanels]) {
     m.set(p.sourceGroupId, p.id);
