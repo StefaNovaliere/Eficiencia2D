@@ -1,10 +1,14 @@
 "use client";
 
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from "react";
-import type { Phase1Result, ClassificationOverride, NestingPreviewData } from "@/core/pipeline";
-import { applyPanelBridgeSplits } from "@/core/pipeline";
+import type {
+  Phase1Result,
+  ClassificationOverride,
+  NestingPreviewData,
+  SplitOp,
+} from "@/core/pipeline";
 import { DEFAULT_SHEET } from "@/core/sheet-nester";
-import type { PipelineOptions, SheetConfig } from "@/core/types";
+import type { SheetConfig } from "@/core/types";
 
 interface PersistedSession {
   fileName: string;
@@ -18,6 +22,7 @@ interface PersistedSession {
   overrides: ClassificationOverride[];
   wallWallDecisions: [number, number][];
   merges?: number[][];
+  splits?: SplitOp[];
   marks?: number[];
 }
 
@@ -51,6 +56,8 @@ interface ProjectContextType {
   setSavedWallWallDecisions: (decisions: Map<number, number>) => void;
   savedMerges: number[][];
   setSavedMerges: (merges: number[][]) => void;
+  savedSplits: SplitOp[];
+  setSavedSplits: (splits: SplitOp[]) => void;
   savedMarks: number[];
   setSavedMarks: (marks: number[]) => void;
   resetProject: () => void;
@@ -72,6 +79,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const [savedOverrides, setSavedOverrides] = useState<ClassificationOverride[]>([]);
   const [savedWallWallDecisions, setSavedWallWallDecisions] = useState<Map<number, number>>(new Map());
   const [savedMerges, setSavedMerges] = useState<number[][]>([]);
+  const [savedSplits, setSavedSplits] = useState<SplitOp[]>([]);
   const [savedMarks, setSavedMarks] = useState<number[]>([]);
   const [sheetConfig, setSheetConfig] = useState<SheetConfig>({ ...DEFAULT_SHEET });
   const [projectFileName, setProjectFileName] = useState<string | null>(null);
@@ -91,11 +99,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       setProjectFileName(parsed.fileName ?? null);
       setFileId(parsed.fileId);
       setPreviewObj(parsed.previewObj);
-      setPhase1Result(
-        parsed.phase1Result
-          ? applyPanelBridgeSplits(parsed.phase1Result)
-          : null,
-      );
+      setPhase1Result(parsed.phase1Result ?? null);
       setScale(parsed.scale);
       setPaper(parsed.paper);
       setMinAreaM2(parsed.minAreaM2);
@@ -108,6 +112,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       const restoredMerges = parsed.merges ?? [];
       setSavedMerges(restoredMerges);
 
+      setSavedSplits(parsed.splits ?? []);
       setSavedMarks(parsed.marks ?? []);
 
       if (!parsed.phase1Result) {
@@ -137,13 +142,14 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         overrides: savedOverrides,
         wallWallDecisions: Array.from(savedWallWallDecisions.entries()),
         merges: savedMerges,
+        splits: savedSplits,
         marks: savedMarks,
       };
       sessionStorage.setItem(SESSION_KEY, JSON.stringify(persisted));
     } catch {
       // Storage full
     }
-  }, [file, fileId, previewObj, phase1Result, projectFileName, scale, paper, minAreaM2, sheetConfig, savedOverrides, savedWallWallDecisions, savedMerges, savedMarks]);
+  }, [file, fileId, previewObj, phase1Result, projectFileName, scale, paper, minAreaM2, sheetConfig, savedOverrides, savedWallWallDecisions, savedMerges, savedSplits, savedMarks]);
 
   const resetProject = useCallback(() => {
     setFile(null);
@@ -158,6 +164,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     setSavedOverrides([]);
     setSavedWallWallDecisions(new Map());
     setSavedMerges([]);
+    setSavedSplits([]);
     setSavedMarks([]);
     setSheetConfig({ ...DEFAULT_SHEET });
     sessionStorage.removeItem(SESSION_KEY);
@@ -180,6 +187,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         savedOverrides, setSavedOverrides,
         savedWallWallDecisions, setSavedWallWallDecisions,
         savedMerges, setSavedMerges,
+        savedSplits, setSavedSplits,
         savedMarks, setSavedMarks,
         resetProject,
         persistSession,

@@ -1,4 +1,5 @@
 import { decodePackedFaces } from "@/core/packed-faces";
+import type { Phase1Result, NestingPreviewData } from "@/core/pipeline";
 import {
   invalidateApiBaseUrl,
   resolveApiBaseUrl,
@@ -32,7 +33,7 @@ export interface UploadResponse {
     discards: number;
     total_groups: number;
   };
-  topology: any; // Mapped to Phase1Result in frontend
+  topology: Phase1Result; // Mapped from backend snake_case + packed faces
   preview_obj: string;
 }
 
@@ -50,6 +51,63 @@ function toCamelCase(obj: any): any {
   return obj;
 }
 
+/**
+ * Mapea la topología cruda del backend (`/api/upload` o `/api/recompute`) al
+ * `Phase1Result` que consume la UI: decodifica la geometría empaquetada y
+ * cameliza el resto de las claves. El backend es dueño de la geometría; acá
+ * sólo desempaquetamos y renombramos.
+ */
+function mapTopology(topo: any, originalFilename?: string): Phase1Result {
+  // Extraer geometría empaquetada antes de camelizar (evita renombrar coords_b64).
+  const facesPacked = topo.faces_packed;
+  const rawFacesPacked = topo.raw_faces_packed;
+  delete topo.faces_packed;
+  delete topo.raw_faces_packed;
+
+  const camel = toCamelCase(topo);
+  camel.faces = facesPacked ? decodePackedFaces(facesPacked) : [];
+  camel.rawFaces = rawFacesPacked ? decodePackedFaces(rawFacesPacked) : [];
+  camel.appliedAxis ??= "Y";
+  camel.preSplitFaceCount ??= camel.rawFaces.length || camel.faces.length;
+  camel.stem ??= originalFilename?.replace(/\.[^.]+$/, "") ?? "";
+  camel.warnings ??= [];
+  camel.suggestedMerges ??= [];
+
+  return camel as Phase1Result;
+}
+
+export interface SplitOperation {
+  group_id: number;
+  mode: "components" | "panels";
+}
+
+/** Payload para `POST /api/recompute` (re-deriva la topología en el backend). */
+export interface RecomputePayload {
+  file_id: string;
+  axis: "Y" | "Z";
+  min_area_m2: number;
+  merges: number[][];
+  splits: SplitOperation[];
+}
+
+/** Payload para `POST /api/nesting-preview`. */
+export interface NestingPreviewPayload {
+  file_id: string;
+  axis: "Y" | "Z";
+  min_area_m2: number;
+  merges: number[][];
+  splits: SplitOperation[];
+  overrides: Record<number, string>;
+  wall_wall_decisions: Record<number, number>;
+  marks: number[];
+  sheet_config: {
+    width_m: number;
+    height_m: number;
+    gap_m: number;
+  };
+  scale_denom: number;
+}
+
 export interface GenerateRequestPayload {
   file_id: string;
   original_filename: string;
@@ -64,6 +122,8 @@ export interface GenerateRequestPayload {
   overrides?: Record<number, string>;
   wall_wall_decisions?: Record<number, number>;
   merges?: number[][];
+  /** Group splits recorded in Review (replayed by the backend). */
+  splits?: SplitOperation[];
   /** GeometryGroup ids whose openings (inner-ring holes) must be engraved
    *  (red, MARK_VECTOR / ACI 1) instead of cut. */
   marks?: number[];
@@ -99,25 +159,49 @@ export async function uploadModelFile(file: File): Promise<UploadResponse> {
 
   const data = await res.json();
   if (data.topology) {
-    const topo = data.topology;
-
-    // Extraer geometría empaquetada antes de camelizar (evita renombrar coords_b64).
-    const facesPacked = topo.faces_packed;
-    const rawFacesPacked = topo.raw_faces_packed;
-    delete topo.faces_packed;
-    delete topo.raw_faces_packed;
-
-    const camel = toCamelCase(topo);
-    camel.faces = facesPacked ? decodePackedFaces(facesPacked) : [];
-    camel.rawFaces = rawFacesPacked ? decodePackedFaces(rawFacesPacked) : [];
-    camel.appliedAxis ??= "Y";
-    camel.preSplitFaceCount ??= camel.rawFaces.length || camel.faces.length;
-    camel.stem ??= data.original_filename?.replace(/\.[^.]+$/, "") ?? "";
-    camel.warnings ??= [];
-
-    data.topology = camel;
+    data.topology = mapTopology(data.topology, data.original_filename);
   }
   return data;
+}
+
+/**
+ * Re-deriva la topología en el backend tras una edición geométrica (cambio de
+ * eje, área mínima, fusión o división). El backend es la fuente de verdad: el
+ * front reemplaza su `phase1Result` con lo que devuelve esta llamada.
+ */
+export async function recomputeTopology(payload: RecomputePayload): Promise<Phase1Result> {
+  const res = await apiFetch("/api/recompute", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => null);
+    throw new Error(errorData?.detail || `Error al recalcular: ${res.statusText}`);
+  }
+
+  const data = await res.json();
+  const topo = data.topology ?? data;
+  return mapTopology(topo);
+}
+
+/** Pide al backend el layout de planchas (nesting) para previsualizar. */
+export async function fetchNestingPreview(
+  payload: NestingPreviewPayload,
+): Promise<NestingPreviewData> {
+  const res = await apiFetch("/api/nesting-preview", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => null);
+    throw new Error(errorData?.detail || `Error al previsualizar nesting: ${res.statusText}`);
+  }
+
+  return toCamelCase(await res.json()) as NestingPreviewData;
 }
 
 export async function uploadDemoObj(textContent: string, filename: string = "demo.obj"): Promise<UploadResponse> {

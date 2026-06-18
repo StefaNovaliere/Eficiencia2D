@@ -5,16 +5,9 @@ import { useRouter } from "next/navigation";
 import { useProjectContext } from "@/context/ProjectContext";
 import PaymentScreen from "@/components/PaymentScreen";
 import {
-  decomposePanels,
-  nestDecomposedPanels,
-  generateFromNesting,
-  applyMerges,
-} from "@/core/pipeline";
-import type { PipelineOptions } from "@/core/types";
-import type { Phase1Result, ClassificationOverride } from "@/core/pipeline";
-import {
   base64ToBlob,
   generateProjectFiles,
+  type SplitOperation,
 } from "@/services/api";
 
 function overridesToRecord(
@@ -31,46 +24,6 @@ function decisionsToRecord(decisions: Map<number, number>): Record<number, numbe
   return out;
 }
 
-async function generateClientSideZip(
-  phase1Result: Phase1Result,
-  opts: PipelineOptions,
-  savedOverrides: ClassificationOverride[],
-  savedWallWallDecisions: Map<number, number>,
-  savedMerges: number[][],
-  savedMarks: number[],
-): Promise<Blob> {
-  const merged =
-    savedMerges.length > 0
-      ? applyMerges(phase1Result, savedMerges)
-      : phase1Result;
-  const decomposed = decomposePanels(
-    merged,
-    opts,
-    savedOverrides,
-    savedWallWallDecisions,
-    new Set(savedMarks),
-  );
-  const nesting = nestDecomposedPanels(
-    decomposed,
-    opts.sheetConfig!,
-    opts.scaleDenom,
-  );
-  const result = generateFromNesting(merged, nesting, opts);
-
-  if (result.files.length === 0) {
-    throw new Error(
-      result.warnings.length > 0
-        ? result.warnings.join(" ")
-        : "No se generaron archivos. Verificá que el modelo tenga geometría válida.",
-    );
-  }
-
-  const { default: JSZip } = await import("jszip");
-  const zip = new JSZip();
-  for (const f of result.files) zip.file(f.name, f.blob);
-  return zip.generateAsync({ type: "blob" });
-}
-
 export default function PaymentPage() {
   const router = useRouter();
   const {
@@ -81,6 +34,7 @@ export default function PaymentPage() {
     savedOverrides,
     savedWallWallDecisions,
     savedMerges,
+    savedSplits,
     savedMarks,
     scale,
     paper,
@@ -132,14 +86,6 @@ export default function PaymentPage() {
     setIsGenerating(true);
     setError("");
 
-    const opts: PipelineOptions = {
-      scaleDenom: scale,
-      paper,
-      includeCuttingSheet: true,
-      sheetConfig,
-      minAreaM2,
-    };
-
     const stem =
       file?.name.replace(/\.[^.]+$/, "") ??
       projectFileName?.replace(/\.[^.]+$/, "") ??
@@ -160,38 +106,26 @@ export default function PaymentPage() {
         overrides: overridesToRecord(savedOverrides),
         wall_wall_decisions: decisionsToRecord(savedWallWallDecisions),
         merges: savedMerges,
+        splits: savedSplits.map((s): SplitOperation => ({ group_id: s.groupId, mode: s.mode })),
         marks: savedMarks,
       });
 
-      let zipBlob: Blob;
-      if (backendRes.zip_base64) {
-        zipBlob = base64ToBlob(backendRes.zip_base64);
-      } else {
+      if (!backendRes.zip_base64) {
         throw new Error("El backend no devolvió el archivo ZIP.");
       }
 
-      triggerDownload(zipBlob, backendRes.zip_filename ?? `${stem}_planos.zip`);
-    } catch (backendErr) {
-      console.warn("Generación en backend falló, usando cliente:", backendErr);
-      try {
-        const zipBlob = await generateClientSideZip(
-          phase1Result,
-          opts,
-          savedOverrides,
-          savedWallWallDecisions,
-          savedMerges,
-          savedMarks,
-        );
-        triggerDownload(zipBlob, `${stem}_planos.zip`);
-      } catch (clientErr: unknown) {
-        console.error(clientErr);
-        setError(
-          clientErr instanceof Error
-            ? clientErr.message
-            : "Error desconocido al procesar.",
-        );
-        setIsGenerating(false);
-      }
+      triggerDownload(
+        base64ToBlob(backendRes.zip_base64),
+        backendRes.zip_filename ?? `${stem}_planos.zip`,
+      );
+    } catch (backendErr: unknown) {
+      console.error(backendErr);
+      setError(
+        backendErr instanceof Error
+          ? backendErr.message
+          : "Error al generar los planos en el servidor.",
+      );
+      setIsGenerating(false);
     }
   }, [
     phase1Result,
@@ -205,6 +139,7 @@ export default function PaymentPage() {
     savedOverrides,
     savedWallWallDecisions,
     savedMerges,
+    savedSplits,
     savedMarks,
     triggerDownload,
   ]);
