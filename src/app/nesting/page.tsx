@@ -4,27 +4,42 @@ import { useEffect, useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useProjectContext } from "@/context/ProjectContext";
 import NestingPreview from "@/components/NestingPreview";
-import { decomposePanels, nestDecomposedPanels, applyMerges } from "@/core/pipeline";
-import type { PipelineOptions, SheetConfig } from "@/core/types";
+import { fetchNestingPreview, type SplitOperation } from "@/services/api";
+import type { SheetConfig } from "@/core/types";
+
+function overridesToRecord(
+  overrides: { groupId: number; newCategory: string }[],
+): Record<number, string> {
+  const out: Record<number, string> = {};
+  for (const o of overrides) out[o.groupId] = o.newCategory;
+  return out;
+}
+
+function decisionsToRecord(decisions: Map<number, number>): Record<number, number> {
+  const out: Record<number, number> = {};
+  for (const [k, v] of decisions) out[k] = v;
+  return out;
+}
 
 export default function NestingPage() {
   const router = useRouter();
-  const { 
-    nestingData, 
+  const {
+    nestingData,
     setNestingData,
     phase1Result,
     scale,
     setScale,
-    paper,
     minAreaM2,
     sheetConfig,
     setSheetConfig,
     savedOverrides,
     savedWallWallDecisions,
     savedMerges,
+    savedSplits,
     savedMarks,
+    fileId,
     persistSession,
-    isLoadingSession
+    isLoadingSession,
   } = useProjectContext();
 
   const [isRecomputing, setIsRecomputing] = useState(false);
@@ -45,38 +60,48 @@ export default function NestingPage() {
     router.push("/review");
   }, [setNestingData, router]);
 
-  // Recalcula el nesting fuera del frame actual para que el overlay
-  // "Recalculando planchas…" alcance a pintarse antes del cálculo pesado.
+  // El nesting lo calcula el backend; el front sólo le pide el layout con la
+  // nueva escala / configuración de plancha.
   const recompute = useCallback(
-    (newScale: number, newConfig: SheetConfig) => {
-      if (!phase1Result) return;
+    async (newScale: number, newConfig: SheetConfig) => {
+      if (!phase1Result || !fileId) return;
       setIsRecomputing(true);
-      setTimeout(() => {
-        const merged = savedMerges.length > 0 ? applyMerges(phase1Result, savedMerges) : phase1Result;
-        const opts: PipelineOptions = {
-          scaleDenom: newScale,
-          paper,
-          includeCuttingSheet: true,
-          sheetConfig: newConfig,
-          minAreaM2,
-        };
-        const decomposed = decomposePanels(merged, opts, savedOverrides, savedWallWallDecisions, new Set(savedMarks));
-        const nesting = nestDecomposedPanels(decomposed, newConfig, newScale);
+      try {
+        const nesting = await fetchNestingPreview({
+          file_id: fileId,
+          axis: phase1Result.appliedAxis,
+          min_area_m2: minAreaM2,
+          merges: savedMerges,
+          splits: savedSplits.map((s): SplitOperation => ({ group_id: s.groupId, mode: s.mode })),
+          overrides: overridesToRecord(savedOverrides),
+          wall_wall_decisions: decisionsToRecord(savedWallWallDecisions),
+          marks: savedMarks,
+          sheet_config: {
+            width_m: newConfig.widthM,
+            height_m: newConfig.heightM,
+            gap_m: newConfig.gapM,
+          },
+          scale_denom: newScale,
+        });
         setNestingData(nesting);
+      } catch (err: unknown) {
+        console.error(err);
+        alert(err instanceof Error ? err.message : "No se pudo recalcular el nesting.");
+      } finally {
         setIsRecomputing(false);
-      }, 30);
+      }
     },
-    [phase1Result, savedOverrides, savedWallWallDecisions, savedMerges, savedMarks, paper, minAreaM2, setNestingData],
+    [phase1Result, fileId, minAreaM2, savedMerges, savedSplits, savedOverrides, savedWallWallDecisions, savedMarks, setNestingData],
   );
 
   const handleSheetConfigChange = useCallback((newConfig: SheetConfig) => {
     setSheetConfig(newConfig);
-    recompute(scale, newConfig);
+    void recompute(scale, newConfig);
   }, [recompute, scale, setSheetConfig]);
 
   const handleScaleChange = useCallback((newScale: number) => {
     setScale(newScale);
-    recompute(newScale, sheetConfig);
+    void recompute(newScale, sheetConfig);
   }, [recompute, sheetConfig, setScale]);
 
   if (isLoadingSession) return null;

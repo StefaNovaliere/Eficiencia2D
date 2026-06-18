@@ -11,20 +11,7 @@ import {
   findGroupsWithSameArea,
   getEffectiveCategory,
 } from "@/core/discard-by-area";
-import {
-  reclassifyWithAxis,
-  computePanelIdByGroup,
-  applyMerges,
-  findCoplanarMergeClusters,
-  splitGroupInPhase1,
-} from "@/core/pipeline";
-import {
-  splitGroupAtPanelBridges,
-  countConnectedComponents,
-} from "@/core/group-splitter";
 import type { Phase1Result, ClassificationOverride } from "@/core/pipeline";
-import type { Joint } from "@/core/joint-detector";
-import type { DimensionAdjustment } from "@/core/assembly-adjuster";
 import type { LeaderMarker } from "./ModelViewer";
 import {
   RefreshCw,
@@ -75,22 +62,31 @@ const ALL_CATEGORIES: FaceCategory[] = [
 // ---------------------------------------------------------------------------
 
 export interface ReviewScreenProps {
+  /** Topología provista por el backend; ya refleja eje/área/merges/splits. */
   phase1: Phase1Result;
+  /** Fusiones activas (clusters de ids originales), controladas por el padre. */
+  merges: number[][];
   onConfirm: (
     overrides: ClassificationOverride[],
     wallWallDecisions: WallWallDecisions,
-    merges: number[][],
     marks: number[],
-    topologyPhase1: Phase1Result,
   ) => void;
   onCancel: () => void;
-  onAxisChange: (newPhase1: Phase1Result) => void;
+  /** Alterna el eje vertical (Y/Z) vía recompute en el backend. */
+  onRotateAxis: () => void;
+  /** Agrega una fusión y dispara recompute. */
+  onAddMerge: (cluster: number[]) => void;
+  /** Quita la fusión en el índice dado y dispara recompute. */
+  onRemoveMerge: (index: number) => void;
+  /** Registra una división de grupo y dispara recompute. */
+  onAddSplit: (groupId: number, mode: "components" | "panels") => void;
   minAreaM2: number;
   onMinAreaChange: (area: number) => void;
   initialOverrides?: ClassificationOverride[];
   initialWallWallDecisions?: WallWallDecisions;
-  initialMerges?: number[][];
   initialMarks?: number[];
+  /** El backend está recalculando la topología (deshabilita controles). */
+  isRecomputing?: boolean;
   isGenerating?: boolean;
 }
 
@@ -102,15 +98,19 @@ const MIN_AREA_OPTIONS = [0, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0];
 
 export default function ReviewScreen({
   phase1,
+  merges,
   onConfirm,
   onCancel,
-  onAxisChange,
+  onRotateAxis,
+  onAddMerge,
+  onRemoveMerge,
+  onAddSplit,
   minAreaM2,
   onMinAreaChange,
   initialOverrides,
   initialWallWallDecisions,
-  initialMerges,
   initialMarks,
+  isRecomputing = false,
   isGenerating = false,
 }: ReviewScreenProps) {
   const [selectedGroupIds, setSelectedGroupIds] = useState<Set<number>>(
@@ -147,17 +147,12 @@ export default function ReviewScreen({
       return m;
     },
   );
-  // Merge state: sets of group IDs to combine into single panels.
-  const [merges, setMerges] = useState<number[][]>(
-    () => initialMerges ?? phase1.suggestedMerges ?? [],
-  );
   // Mark state: component IDs whose openings (door/window holes) are engraved
   // in red instead of being cut.
   const [markGroupIds, setMarkGroupIds] = useState<Set<number>>(
     () => new Set(initialMarks ?? []),
   );
   const [mergeCardOpen, setMergeCardOpen] = useState(true);
-  const [isRotating, setIsRotating] = useState(false);
   const [hiddenGroupIds, setHiddenGroupIds] = useState<Set<number>>(() => new Set());
   const [bulkActionNotice, setBulkActionNotice] = useState<string | null>(null);
   // Pestaña activa del panel derecho: lista de capas vs acciones de la selección.
@@ -169,7 +164,6 @@ export default function ReviewScreen({
     promoteTarget?: "wall" | "floor";
   } | null>(null);
   const [bulkSimilarChecked, setBulkSimilarChecked] = useState<Set<number>>(() => new Set());
-  const [manualPhase1, setManualPhase1] = useState<Phase1Result | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const viewerAreaRef = useRef<HTMLDivElement>(null);
   const skipWallWallReseedRef = useRef(false);
@@ -185,12 +179,10 @@ export default function ReviewScreen({
   const historyState = useMemo(
     () => ({
       overrides,
-      merges,
       hiddenGroupIds,
       wallWallDecisions,
-      manualPhase1,
     }),
-    [overrides, merges, hiddenGroupIds, wallWallDecisions, manualPhase1],
+    [overrides, hiddenGroupIds, wallWallDecisions],
   );
 
   const { canUndo, canRedo, pushHistory, undo, redo } = useReviewHistory(historyState);
@@ -200,10 +192,8 @@ export default function ReviewScreen({
       if (!snap) return;
       skipWallWallReseedRef.current = true;
       setOverrides(snap.overrides);
-      setMerges(snap.merges);
       setHiddenGroupIds(snap.hiddenGroupIds);
       setWallWallDecisions(snap.wallWallDecisions);
-      setManualPhase1(snap.manualPhase1);
       setSelectedGroupIds(new Set());
       setSelectedJointIndex(null);
       setContextMenu(null);
@@ -218,10 +208,6 @@ export default function ReviewScreen({
   const handleRedo = useCallback(() => {
     restoreHistorySnapshot(redo());
   }, [redo, restoreHistorySnapshot]);
-
-  useEffect(() => {
-    setManualPhase1(null);
-  }, [phase1]);
 
   // Auto-cambiar a "Selección" al elegir una sola capa; volver a "Capas" al
   // deseleccionar. Con varias seleccionadas (Ctrl+clic para fusionar) no cambia.
@@ -280,13 +266,16 @@ export default function ReviewScreen({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [handleUndo, handleRedo]);
 
-  const workingPhase1 = manualPhase1 ?? phase1;
+  // El backend ya aplicó eje/área/merges/splits: `phase1` ES la topología
+  // efectiva. El front no recalcula geometría.
 
-  // Effective phase1 with merges applied.
-  const effectivePhase1 = useMemo(
-    () => merges.length > 0 ? applyMerges(workingPhase1, merges) : workingPhase1,
-    [workingPhase1, merges],
-  );
+  // Etiquetas de panel (A1/B2…) provistas por el backend.
+  const panelIdByGroup = useMemo(() => {
+    const m = new Map<number, string>();
+    const rec = phase1.panelIdByGroup;
+    if (rec) for (const [k, v] of Object.entries(rec)) m.set(Number(k), v);
+    return m;
+  }, [phase1.panelIdByGroup]);
 
   // When a single merged group is selected, find which original groups were fused into it.
   const selectedMergeCluster = useMemo(() => {
@@ -350,11 +339,11 @@ export default function ReviewScreen({
       gid: number,
       category: FaceCategory,
     ) => {
-      const original = effectivePhase1.groups.find((g) => g.id === gid)?.category;
+      const original = phase1.groups.find((g) => g.id === gid)?.category;
       if (original === category) next.delete(gid);
       else next.set(gid, category);
     },
-    [effectivePhase1.groups],
+    [phase1.groups],
   );
 
   const handleChangeCategory = useCallback(
@@ -378,26 +367,26 @@ export default function ReviewScreen({
   const selectedGroup = useMemo(() => {
     if (selectedGroupIds.size !== 1) return null;
     const selId = Array.from(selectedGroupIds)[0];
-    return effectivePhase1.groups.find((g) => g.id === selId) ?? null;
-  }, [selectedGroupIds, effectivePhase1.groups]);
+    return phase1.groups.find((g) => g.id === selId) ?? null;
+  }, [selectedGroupIds, phase1.groups]);
 
   const sameAreaMatches = useMemo(() => {
     if (!selectedGroup) return [];
     if (getEffectiveCategory(selectedGroup, overrides) === "discard") return [];
-    return findGroupsWithSameArea(effectivePhase1.groups, selectedGroup, overrides);
-  }, [selectedGroup, effectivePhase1.groups, overrides]);
+    return findGroupsWithSameArea(phase1.groups, selectedGroup, overrides);
+  }, [selectedGroup, phase1.groups, overrides]);
 
   const sameAreaDiscardMatches = useMemo(() => {
     if (!selectedGroup) return [];
     if (getEffectiveCategory(selectedGroup, overrides) !== "discard") return [];
-    return findGroupsWithSameArea(effectivePhase1.groups, selectedGroup, overrides);
-  }, [selectedGroup, effectivePhase1.groups, overrides]);
+    return findGroupsWithSameArea(phase1.groups, selectedGroup, overrides);
+  }, [selectedGroup, phase1.groups, overrides]);
 
   const openBulkSimilarModal = useCallback(
     (mode: "discard" | "promote", promoteTarget?: "wall" | "floor") => {
       if (!selectedGroup) return;
       const similar = collectSimilarGroups(
-        effectivePhase1.groups,
+        phase1.groups,
         selectedGroup,
         overrides,
       );
@@ -409,7 +398,7 @@ export default function ReviewScreen({
         promoteTarget,
       });
     },
-    [selectedGroup, effectivePhase1.groups, overrides],
+    [selectedGroup, phase1.groups, overrides],
   );
 
   const confirmBulkSimilar = useCallback(() => {
@@ -445,21 +434,21 @@ export default function ReviewScreen({
   // Re-seed wall-wall decisions whenever the effective topology changes (axis
   // rotation, min-area, or merge changes recompute joints and their indices).
   // The ref guard skips the initial mount so restored / initial decisions survive.
-  const effectiveRef = useRef(effectivePhase1);
+  const effectiveRef = useRef(phase1);
   useEffect(() => {
     if (skipWallWallReseedRef.current) {
       skipWallWallReseedRef.current = false;
-      effectiveRef.current = effectivePhase1;
+      effectiveRef.current = phase1;
       return;
     }
-    if (effectiveRef.current === effectivePhase1) return;
-    effectiveRef.current = effectivePhase1;
+    if (effectiveRef.current === phase1) return;
+    effectiveRef.current = phase1;
     const m = new Map<number, number>();
-    for (const ww of effectivePhase1.wallWallJoints) {
+    for (const ww of phase1.wallWallJoints) {
       if (ww.suggestedYieldGroupId != null) m.set(ww.jointIndex, ww.suggestedYieldGroupId);
     }
     setWallWallDecisions(m);
-  }, [effectivePhase1]);
+  }, [phase1]);
 
   // Clear the highlighted joint whenever the wall selection changes (switch
   // wall, deselect, merge) so stale leader labels never linger.
@@ -468,24 +457,12 @@ export default function ReviewScreen({
   }, [selectedGroupIds]);
 
   const handleRotateAxis = useCallback(() => {
-    if (isRotating || isGenerating) return;
-    const newAxis = phase1.appliedAxis === "Y" ? "Z" : "Y";
-    setIsRotating(true);
+    if (isRecomputing || isGenerating) return;
     setOverrides(new Map());
     setSelectedGroupIds(new Set());
     setHiddenGroupIds(new Set());
-    queueMicrotask(() => {
-      try {
-        const updated = reclassifyWithAxis(phase1, newAxis, minAreaM2);
-        onAxisChange(updated);
-      } catch (err: unknown) {
-        console.error(err);
-        alert(err instanceof Error ? err.message : "No se pudo rotar el eje.");
-      } finally {
-        setIsRotating(false);
-      }
-    });
-  }, [phase1, minAreaM2, onAxisChange, isRotating, isGenerating]);
+    onRotateAxis();
+  }, [onRotateAxis, isRecomputing, isGenerating]);
 
   const handleMinAreaChangeWithReset = useCallback((newArea: number) => {
     setOverrides(new Map());
@@ -497,38 +474,33 @@ export default function ReviewScreen({
   // Merge selected coplanar groups into one panel.
   const selectedGroups = useMemo(() => {
     return Array.from(selectedGroupIds)
-      .map((id) => effectivePhase1.groups.find((g) => g.id === id))
+      .map((id) => phase1.groups.find((g) => g.id === id))
       .filter((g): g is GeometryGroup => g != null);
-  }, [selectedGroupIds, effectivePhase1.groups]);
+  }, [selectedGroupIds, phase1.groups]);
 
   const selectedWallGroups = useMemo(
     () => selectedGroups.filter((g) => getEffectiveCategory(g, overrides) === "wall"),
     [selectedGroups, overrides],
   );
 
-  const mergeClusters = useMemo(
+  // El cluster a fusionar = las paredes seleccionadas (≥2). El backend valida y
+  // las agrupa por coplanaridad al recalcular; el front sólo recolecta la
+  // decisión.
+  const mergeClusters = useMemo<number[][]>(
     () =>
-      findCoplanarMergeClusters(
-        selectedWallGroups,
-        effectivePhase1.groups,
-        effectivePhase1.faces,
-      ),
-    [selectedWallGroups, effectivePhase1.groups, effectivePhase1.faces],
+      selectedWallGroups.length >= 2
+        ? [selectedWallGroups.map((g) => g.id)]
+        : [],
+    [selectedWallGroups],
   );
 
-  // Fusiona TODAS las direcciones coplanares de la selección a la vez: cada
-  // cluster coplanar (misma dirección + mismo plano) se unifica por separado.
-  // Los componentes sueltos (sin otro coplanar) no se fusionan.
   const canMergeSelected = mergeClusters.length >= 1;
 
   // Etiqueta del botón según el resultado de la fusión.
   const mergeLabel = useMemo(() => {
     if (mergeClusters.length === 0) return "Fusionar";
-    if (mergeClusters.length === 1) {
-      const n = mergeClusters[0].length;
-      return `Fusionar ${n} pared${n !== 1 ? "es" : ""}`;
-    }
-    return `Fusionar por dirección · ${mergeClusters.length} grupos`;
+    const n = mergeClusters[0].length;
+    return `Fusionar ${n} pared${n !== 1 ? "es" : ""}`;
   }, [mergeClusters]);
 
   const mergeBlockedReason = useMemo(() => {
@@ -540,11 +512,10 @@ export default function ReviewScreen({
 
   const handleMergeSelected = useCallback(() => {
     if (mergeClusters.length < 1) return;
-    pushHistory();
-    setMerges((prev) => [...prev, ...mergeClusters]);
+    onAddMerge(mergeClusters[0]);
     setSelectedGroupIds(new Set());
     setContextMenu(null);
-  }, [mergeClusters, pushHistory]);
+  }, [mergeClusters, onAddMerge]);
 
   const handleHideSelected = useCallback(() => {
     if (selectedGroupIds.size === 0) return;
@@ -570,54 +541,30 @@ export default function ReviewScreen({
     [selectedGroupIds.size],
   );
 
-  const splitPreview = useMemo(() => {
-    if (selectedGroupIds.size !== 1) return null;
-    const gid = Array.from(selectedGroupIds)[0];
-    const group = effectivePhase1.groups.find((g) => g.id === gid);
-    if (!group) return null;
-
-    const components = countConnectedComponents(effectivePhase1.faces, group);
-    const { groups: panelPieces } = splitGroupAtPanelBridges(
-      effectivePhase1.faces,
-      group,
-      group.id + 1,
-      { force: true },
-    );
-
-    return {
-      components,
-      panels: panelPieces.length,
-    };
-  }, [selectedGroupIds, effectivePhase1]);
+  // Sin geometría client-side no podemos contar componentes/piezas: ofrecemos
+  // las acciones de división para una capa seleccionada y el backend resuelve
+  // (no-op si no aplica) al recalcular.
+  const canSplit = selectedGroupIds.size === 1;
 
   const handleSplitComponents = useCallback(() => {
     if (selectedGroupIds.size !== 1) return;
     const gid = Array.from(selectedGroupIds)[0];
-    const current = manualPhase1 ?? phase1;
-    const updated = splitGroupInPhase1(current, gid, "components");
-    if (updated === current) return;
-    pushHistory();
-    setManualPhase1(updated);
+    onAddSplit(gid, "components");
     setSelectedGroupIds(new Set());
     setSelectedJointIndex(null);
-  }, [selectedGroupIds, manualPhase1, phase1, pushHistory]);
+  }, [selectedGroupIds, onAddSplit]);
 
   const handleSplitPanels = useCallback(() => {
     if (selectedGroupIds.size !== 1) return;
     const gid = Array.from(selectedGroupIds)[0];
-    const current = manualPhase1 ?? phase1;
-    const updated = splitGroupInPhase1(current, gid, "panels");
-    if (updated === current) return;
-    pushHistory();
-    setManualPhase1(updated);
+    onAddSplit(gid, "panels");
     setSelectedGroupIds(new Set());
     setSelectedJointIndex(null);
-  }, [selectedGroupIds, manualPhase1, phase1, pushHistory]);
+  }, [selectedGroupIds, onAddSplit]);
 
   const handleUnmerge = useCallback((mergeIndex: number) => {
-    pushHistory();
-    setMerges((prev) => prev.filter((_, i) => i !== mergeIndex));
-  }, [pushHistory]);
+    onRemoveMerge(mergeIndex);
+  }, [onRemoveMerge]);
 
   const handleWallWallDecision = useCallback(
     (jointIndex: number, yieldGroupId: number, groupA: number, groupB: number) => {
@@ -656,45 +603,28 @@ export default function ReviewScreen({
     for (const [groupId, newCategory] of overrides.entries()) {
       result.push({ groupId, newCategory });
     }
-    onConfirm(result, wallWallDecisions, merges, [...markGroupIds], workingPhase1);
-  }, [overrides, wallWallDecisions, merges, markGroupIds, workingPhase1, onConfirm]);
+    onConfirm(result, wallWallDecisions, [...markGroupIds]);
+  }, [overrides, wallWallDecisions, markGroupIds, onConfirm]);
 
   // Stats (per effective category).
   const stats = useMemo(() => {
     let floors = 0, walls = 0, discarded = 0;
-    for (const group of effectivePhase1.groups) {
+    for (const group of phase1.groups) {
       const cat = overrides.get(group.id) ?? group.category;
       if (cat === "floor") floors++;
       else if (cat === "wall") walls++;
       else discarded++;
     }
     return { floors, walls, discarded };
-  }, [effectivePhase1.groups, overrides]);
-
-  // Map group.id → DXF panel ID ("A1", "B2", etc.). Derived from decomposePanels
-  // itself (via computePanelIdByGroup) so the labels match the generated cut
-  // sheet exactly — including the groups decomposePanels skips for being empty
-  // or below minAreaM2, which would otherwise shift the A#/B# numbering.
-  const panelIdByGroup = useMemo(() => {
-    const overrideList: ClassificationOverride[] = [];
-    for (const [groupId, newCategory] of overrides.entries()) {
-      overrideList.push({ groupId, newCategory });
-    }
-    return computePanelIdByGroup(
-      effectivePhase1,
-      { scaleDenom: 50, paper: "A4", minAreaM2 },
-      overrideList,
-      wallWallDecisions,
-    );
-  }, [effectivePhase1, overrides, wallWallDecisions, minAreaM2]);
+  }, [phase1.groups, overrides]);
 
   // Wall-wall joints to resolve: skip any whose wall was reclassified to
   // discard (that joint no longer affects the cut).
   const wallWallList = useMemo(() => {
-    const groupById = new Map(effectivePhase1.groups.map((g) => [g.id, g]));
+    const groupById = new Map(phase1.groups.map((g) => [g.id, g]));
     const effCat = (id: number) =>
       overrides.get(id) ?? groupById.get(id)?.category ?? "discard";
-    return effectivePhase1.wallWallJoints
+    return phase1.wallWallJoints
       .filter((ww) => effCat(ww.groupA) !== "discard" && effCat(ww.groupB) !== "discard")
       .map((ww) => ({
         ww,
@@ -706,16 +636,16 @@ export default function ReviewScreen({
           (groupById.get(ww.groupA)?.thickness ?? 0) > 0.001 ||
           (groupById.get(ww.groupB)?.thickness ?? 0) > 0.001,
       }));
-  }, [effectivePhase1.wallWallJoints, effectivePhase1.groups, overrides, panelIdByGroup]);
+  }, [phase1.wallWallJoints, phase1.groups, overrides, panelIdByGroup]);
 
   // Floating reference labels for the selected joint: one per wall of the joint,
   // anchored at each wall's centroid and tagged with its panel id (A#/B#).
   const leaderMarkers = useMemo<LeaderMarker[]>(() => {
     if (selectedJointIndex == null) return [];
-    const ww = effectivePhase1.wallWallJoints.find((w) => w.jointIndex === selectedJointIndex);
+    const ww = phase1.wallWallJoints.find((w) => w.jointIndex === selectedJointIndex);
     if (!ww) return [];
     const selId = selectedGroupIds.size === 1 ? Array.from(selectedGroupIds)[0] : ww.groupA;
-    const byId = new Map(effectivePhase1.groups.map((g) => [g.id, g]));
+    const byId = new Map(phase1.groups.map((g) => [g.id, g]));
     const out: LeaderMarker[] = [];
     for (const gid of [ww.groupA, ww.groupB]) {
       const g = byId.get(gid);
@@ -728,12 +658,12 @@ export default function ReviewScreen({
       });
     }
     return out;
-  }, [selectedJointIndex, effectivePhase1, selectedGroupIds, panelIdByGroup]);
+  }, [selectedJointIndex, phase1, selectedGroupIds, panelIdByGroup]);
 
   const viewToolBtn =
     "btn btn-sm btn-ghost h-9 min-h-9 w-9 px-0 rounded-lg hover:bg-base-200/80";
 
-  // Box selection pointer handlers — placed after effectivePhase1 & hiddenGroupIds
+  // Box selection pointer handlers — placed after phase1 & hiddenGroupIds
   const handleBoxPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
     e.preventDefault();
@@ -798,12 +728,9 @@ export default function ReviewScreen({
       }
 
       if ((e.key === "d" || e.key === "D")) {
-        if (splitPreview?.components && splitPreview.components > 1) {
+        if (canSplit) {
           e.preventDefault();
           handleSplitComponents();
-        } else if (splitPreview?.panels && splitPreview.panels > 1) {
-          e.preventDefault();
-          handleSplitPanels();
         }
         return;
       }
@@ -815,14 +742,14 @@ export default function ReviewScreen({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [canMergeSelected, handleMergeSelected, splitPreview, handleSplitComponents, handleSplitPanels]);
+  }, [canMergeSelected, handleMergeSelected, canSplit, handleSplitComponents]);
 
   return (
     <div className="fixed inset-0 z-50 bg-base-200/40 flex flex-col md:flex-row overflow-hidden">
       <div className="flex-1 relative overflow-hidden" ref={viewerAreaRef}>
         <ModelViewer
-          faces={effectivePhase1.faces}
-          groups={effectivePhase1.groups}
+          faces={phase1.faces}
+          groups={phase1.groups}
           selectedGroupIds={selectedGroupIds}
           categoryOverrides={overrides}
           visibleCategories={visibleCategories}
@@ -837,6 +764,14 @@ export default function ReviewScreen({
           boxSelectActive={boxSelectMode}
           viewerRef={viewerRef}
         />
+
+        {/* Overlay mientras el backend recalcula la topología */}
+        {isRecomputing && (
+          <div className="absolute inset-0 z-40 flex flex-col items-center justify-center gap-3 bg-base-200/50 backdrop-blur-sm">
+            <span className="loading loading-spinner loading-lg text-primary" />
+            <p className="text-sm font-medium text-base-content/80">Recalculando en el servidor…</p>
+          </div>
+        )}
 
         {/* Box-select overlay — captures pointer events when active */}
         {boxSelectMode && (
@@ -879,24 +814,24 @@ export default function ReviewScreen({
                 {mergeBlockedReason}
               </p>
             )}
-            {splitPreview && splitPreview.components > 1 && (
+            {canSplit && (
               <button
                 type="button"
                 className="flex w-full items-center gap-2 px-3 py-2 text-sm text-left hover:bg-base-200/80 transition-colors"
                 onClick={() => { handleSplitComponents(); setContextMenu(null); }}
               >
                 <SquareSplitHorizontal size={15} className="text-base-content/70 shrink-0" />
-                Dividir en {splitPreview.components} componentes
+                Dividir en componentes
               </button>
             )}
-            {splitPreview && splitPreview.panels > 1 && (
+            {canSplit && (
               <button
                 type="button"
                 className="flex w-full items-center gap-2 px-3 py-2 text-sm text-left hover:bg-base-200/80 transition-colors"
                 onClick={() => { handleSplitPanels(); setContextMenu(null); }}
               >
                 <SquareSplitHorizontal size={15} className="text-base-content/70 shrink-0" />
-                Dividir en {splitPreview.panels} piezas
+                Dividir en piezas
               </button>
             )}
             {selectedGroup && getEffectiveCategory(selectedGroup, overrides) !== "discard" && (
@@ -1055,11 +990,11 @@ export default function ReviewScreen({
                   <button
                     type="button"
                     onClick={handleRotateAxis}
-                    disabled={isRotating || isGenerating}
+                    disabled={isRecomputing || isGenerating}
                     className="justify-between"
                   >
                     <span className="flex items-center gap-2">
-                      {isRotating ? <span className="loading loading-spinner loading-xs" /> : <RefreshCw size={15} />}
+                      {isRecomputing ? <span className="loading loading-spinner loading-xs" /> : <RefreshCw size={15} />}
                       Rotar eje vertical
                     </span>
                     <span className="badge badge-sm badge-ghost font-mono">{phase1.appliedAxis === "Y" ? "Y↑" : "Z↑"}</span>
@@ -1132,7 +1067,7 @@ export default function ReviewScreen({
 
         {selectedGroupIds.size === 1 && (() => {
           const selId = Array.from(selectedGroupIds)[0];
-          const selGroup = effectivePhase1.groups.find((g) => g.id === selId);
+          const selGroup = phase1.groups.find((g) => g.id === selId);
           if (!selGroup) return null;
 
           const groupWWJoints = wallWallList.filter(
@@ -1141,7 +1076,7 @@ export default function ReviewScreen({
 
           if (groupWWJoints.length === 0) return null;
 
-          const groupById = new Map(effectivePhase1.groups.map((g) => [g.id, g]));
+          const groupById = new Map(phase1.groups.map((g) => [g.id, g]));
           const selPid = panelIdByGroup.get(selId);
           const cm = (m: number) => `${(m * 100).toFixed(1).replace(".", ",")} cm`;
 
@@ -1301,7 +1236,7 @@ export default function ReviewScreen({
             onClick={() => setSidebarTab("capas")}
           >
             Capas
-            <span className="badge badge-xs badge-neutral font-mono">{effectivePhase1.groups.length}</span>
+            <span className="badge badge-xs badge-neutral font-mono">{phase1.groups.length}</span>
           </button>
           <button
             type="button"
@@ -1319,7 +1254,7 @@ export default function ReviewScreen({
         {/* Pestaña: Capas */}
         <div className={`flex-1 min-h-0 flex flex-col ${sidebarTab === "capas" ? "" : "hidden"}`}>
           <GroupList
-            groups={effectivePhase1.groups}
+            groups={phase1.groups}
             selectedGroupIds={selectedGroupIds}
             hiddenGroupIds={hiddenGroupIds}
             categoryOverrides={overrides}
@@ -1348,9 +1283,9 @@ export default function ReviewScreen({
           {selectedGroupIds.size >= 2 && (() => {
             const selectedGroups = Array.from(selectedGroupIds).map((id) => ({
               id,
-              group: effectivePhase1.groups.find((g) => g.id === id),
+              group: phase1.groups.find((g) => g.id === id),
               pid: panelIdByGroup.get(id),
-              cat: overrides.get(id) ?? effectivePhase1.groups.find((g) => g.id === id)?.category ?? "discard",
+              cat: overrides.get(id) ?? phase1.groups.find((g) => g.id === id)?.category ?? "discard",
             }));
             return (
               <div className="px-4 py-3 border-b border-base-300/30">
@@ -1430,7 +1365,7 @@ export default function ReviewScreen({
                 </div>
                 <div className="flex flex-col gap-1">
                   {selectedMergeCluster.map((id) => {
-                    const g = workingPhase1.groups.find((gr) => gr.id === id);
+                    const g = phase1.groups.find((gr) => gr.id === id);
                     const isSurvivor = id === selId;
                     return (
                       <div
@@ -1510,7 +1445,7 @@ export default function ReviewScreen({
           </div>
         )}
 
-        {(canMergeSelected || mergeBlockedReason || (splitPreview && (splitPreview.components > 1 || splitPreview.panels > 1))) && (
+        {(canMergeSelected || mergeBlockedReason || canSplit) && (
           <div className="px-4 py-3 border-b border-base-300/30 bg-base-100/60 space-y-2">
             <p className="text-[11px] font-semibold uppercase tracking-widest text-base-content/40">
               Capas · fusión / división
@@ -1533,26 +1468,23 @@ export default function ReviewScreen({
               </p>
             )}
 
-            {splitPreview && splitPreview.components > 1 && (
-              <button
-                type="button"
-                className="btn btn-outline btn-sm w-full rounded-xl gap-2 border-warning/40 text-base-content/80 hover:border-warning"
-                onClick={handleSplitComponents}
-              >
-                <SquareSplitHorizontal size={14} />
-                Dividir en {splitPreview.components} componentes
-              </button>
-            )}
-
-            {splitPreview && splitPreview.panels > 1 && (
+            {canSplit && (
               <>
+                <button
+                  type="button"
+                  className="btn btn-outline btn-sm w-full rounded-xl gap-2 border-warning/40 text-base-content/80 hover:border-warning"
+                  onClick={handleSplitComponents}
+                >
+                  <SquareSplitHorizontal size={14} />
+                  Dividir en componentes
+                </button>
                 <button
                   type="button"
                   className="btn btn-outline btn-sm w-full rounded-xl gap-2 border-warning/40 text-base-content/80 hover:border-warning"
                   onClick={handleSplitPanels}
                 >
                   <SquareSplitHorizontal size={14} />
-                  Dividir en {splitPreview.panels} piezas
+                  Dividir en piezas
                 </button>
                 <p className="text-[11px] text-base-content/40 leading-relaxed px-1">
                   Para paneles en L o escalones. Una pared lisa no necesita dividirse.
