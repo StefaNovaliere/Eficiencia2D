@@ -35,9 +35,16 @@ import {
   Lasso,
   Trash2,
   PenLine,
+  Scissors,
+  Circle,
+  Minus,
+  RectangleHorizontal,
 } from "lucide-react";
 import { useReviewHistory } from "@/hooks/useReviewHistory";
 import type { ModelViewerHandle } from "@/components/ModelViewer";
+import CutToolOverlay from "@/components/CutToolOverlay";
+import type { CutDragState, UserCut, ActiveCutShapeKind } from "@/core/user-cuts";
+import { cutDimensionsLabel } from "@/core/user-cuts";
 
 export type WallWallDecisions = Map<number, number>;
 
@@ -70,6 +77,7 @@ export interface ReviewScreenProps {
     overrides: ClassificationOverride[],
     wallWallDecisions: WallWallDecisions,
     marks: number[],
+    userCuts: UserCut[],
   ) => void;
   onCancel: () => void;
   /** Alterna el eje vertical (Y/Z) vía recompute en el backend. */
@@ -85,12 +93,26 @@ export interface ReviewScreenProps {
   initialOverrides?: ClassificationOverride[];
   initialWallWallDecisions?: WallWallDecisions;
   initialMarks?: number[];
+  initialUserCuts?: UserCut[];
   /** El backend está recalculando la topología (deshabilita controles). */
   isRecomputing?: boolean;
   isGenerating?: boolean;
 }
 
 const MIN_AREA_OPTIONS = [0, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0];
+
+const CUT_SHAPE_ORDER: ActiveCutShapeKind[] = ["rect", "circle", "line"];
+
+const CUT_SHAPE_LABELS: Record<ActiveCutShapeKind, string> = {
+  rect: "Rectángulo",
+  circle: "Óvalo / círculo",
+  line: "Línea",
+};
+
+function nextCutShape(current: ActiveCutShapeKind): ActiveCutShapeKind {
+  const i = CUT_SHAPE_ORDER.indexOf(current);
+  return CUT_SHAPE_ORDER[(i + 1) % CUT_SHAPE_ORDER.length];
+}
 
 // ---------------------------------------------------------------------------
 // Component
@@ -110,6 +132,7 @@ export default function ReviewScreen({
   initialOverrides,
   initialWallWallDecisions,
   initialMarks,
+  initialUserCuts,
   isRecomputing = false,
   isGenerating = false,
 }: ReviewScreenProps) {
@@ -152,6 +175,13 @@ export default function ReviewScreen({
   const [markGroupIds, setMarkGroupIds] = useState<Set<number>>(
     () => new Set(initialMarks ?? []),
   );
+  // Cortes manuales del usuario (panel-local, metros). El front captura el gesto
+  // y muestra el preview; el backend aplica los cortes al generar.
+  const [userCuts, setUserCuts] = useState<UserCut[]>(() => initialUserCuts ?? []);
+  const [cutToolMode, setCutToolMode] = useState(false);
+  const [cutShapeKind, setCutShapeKind] = useState<ActiveCutShapeKind>("rect");
+  const [cutDraft, setCutDraft] = useState<CutDragState | null>(null);
+  const [movingCutId, setMovingCutId] = useState<string | null>(null);
   const [mergeCardOpen, setMergeCardOpen] = useState(true);
   const [hiddenGroupIds, setHiddenGroupIds] = useState<Set<number>>(() => new Set());
   const [bulkActionNotice, setBulkActionNotice] = useState<string | null>(null);
@@ -181,8 +211,9 @@ export default function ReviewScreen({
       overrides,
       hiddenGroupIds,
       wallWallDecisions,
+      userCuts,
     }),
-    [overrides, hiddenGroupIds, wallWallDecisions],
+    [overrides, hiddenGroupIds, wallWallDecisions, userCuts],
   );
 
   const { canUndo, canRedo, pushHistory, undo, redo } = useReviewHistory(historyState);
@@ -194,6 +225,7 @@ export default function ReviewScreen({
       setOverrides(snap.overrides);
       setHiddenGroupIds(snap.hiddenGroupIds);
       setWallWallDecisions(snap.wallWallDecisions);
+      setUserCuts(snap.userCuts);
       setSelectedGroupIds(new Set());
       setSelectedJointIndex(null);
       setContextMenu(null);
@@ -240,6 +272,8 @@ export default function ReviewScreen({
 
       if (e.key === "Escape") {
         if (typing) return;
+        setCutToolMode(false);
+        setCutDraft(null);
         setBoxSelectMode(false);
         setDragRect(null);
         setSelectedGroupIds(new Set());
@@ -369,6 +403,11 @@ export default function ReviewScreen({
     const selId = Array.from(selectedGroupIds)[0];
     return phase1.groups.find((g) => g.id === selId) ?? null;
   }, [selectedGroupIds, phase1.groups]);
+
+  const cutsForSelectedGroup = useMemo(() => {
+    if (!selectedGroup) return [];
+    return userCuts.filter((c) => c.groupId === selectedGroup.id);
+  }, [selectedGroup, userCuts]);
 
   const sameAreaMatches = useMemo(() => {
     if (!selectedGroup) return [];
@@ -598,13 +637,37 @@ export default function ReviewScreen({
     });
   }, []);
 
+  const handleCommitCut = useCallback(
+    (cut: UserCut) => {
+      pushHistory();
+      setUserCuts((prev) => [...prev, cut]);
+    },
+    [pushHistory],
+  );
+
+  const handleCommitMove = useCallback(
+    (cut: UserCut) => {
+      pushHistory();
+      setUserCuts((prev) => prev.map((c) => (c.id === cut.id ? cut : c)));
+    },
+    [pushHistory],
+  );
+
+  const handleRemoveCut = useCallback(
+    (cutId: string) => {
+      pushHistory();
+      setUserCuts((prev) => prev.filter((c) => c.id !== cutId));
+    },
+    [pushHistory],
+  );
+
   const handleConfirm = useCallback(() => {
     const result: ClassificationOverride[] = [];
     for (const [groupId, newCategory] of overrides.entries()) {
       result.push({ groupId, newCategory });
     }
-    onConfirm(result, wallWallDecisions, [...markGroupIds]);
-  }, [overrides, wallWallDecisions, markGroupIds, onConfirm]);
+    onConfirm(result, wallWallDecisions, [...markGroupIds], userCuts);
+  }, [overrides, wallWallDecisions, markGroupIds, userCuts, onConfirm]);
 
   // Stats (per effective category).
   const stats = useMemo(() => {
@@ -715,14 +778,30 @@ export default function ReviewScreen({
           target.isContentEditable)
       ) return;
 
+      if (e.key === "c" || e.key === "C") {
+        e.preventDefault();
+        setBoxSelectMode(false);
+        setCutToolMode((prev) => {
+          if (!prev) return true;
+          setCutDraft(null);
+          setCutShapeKind((shape) => nextCutShape(shape));
+          return true;
+        });
+        return;
+      }
+
       if ((e.key === "s" || e.key === "S")) {
         e.preventDefault();
+        setCutToolMode(false);
+        setCutDraft(null);
         setBoxSelectMode((prev) => !prev);
         return;
       }
 
       if ((e.key === "v" || e.key === "V")) {
         e.preventDefault();
+        setCutToolMode(false);
+        setCutDraft(null);
         setBoxSelectMode(false);
         return;
       }
@@ -763,6 +842,21 @@ export default function ReviewScreen({
           isSolid={isSolid}
           boxSelectActive={boxSelectMode}
           viewerRef={viewerRef}
+          markGroupIds={markGroupIds}
+          userCuts={userCuts}
+          cutDraft={cutDraft}
+          movingCutId={movingCutId}
+        />
+
+        <CutToolOverlay
+          active={cutToolMode}
+          shapeKind={cutShapeKind}
+          userCuts={userCuts}
+          viewerRef={viewerRef}
+          onDraftChange={setCutDraft}
+          onMovingCutId={setMovingCutId}
+          onCommitCut={handleCommitCut}
+          onCommitMove={handleCommitMove}
         />
 
         {/* Overlay mientras el backend recalcula la topología */}
@@ -774,11 +868,15 @@ export default function ReviewScreen({
         )}
 
         {/* Box-select overlay — captures pointer events when active */}
-        {boxSelectMode && (
+        {boxSelectMode && !cutToolMode && (
           <div
             className="absolute inset-0 z-20"
             style={{ cursor: "crosshair" }}
-            onPointerDown={handleBoxPointerDown}
+            onPointerDown={(e) => {
+              const under = document.elementFromPoint(e.clientX, e.clientY);
+              if (under?.closest("[data-viewer-chrome]")) return;
+              handleBoxPointerDown(e);
+            }}
             onPointerMove={handleBoxPointerMove}
             onPointerUp={handleBoxPointerUp}
           />
@@ -886,8 +984,11 @@ export default function ReviewScreen({
           </div>
         )}
 
-        {/* Toolbar */}
-        <div className="absolute top-4 left-4 right-4 z-10 flex flex-col gap-2 pointer-events-none">
+        {/* Toolbar — por encima del overlay de cortes/selección (z-20) */}
+        <div
+          data-viewer-chrome
+          className="absolute top-4 left-4 right-4 z-40 flex flex-col gap-2 pointer-events-none"
+        >
           {wallWallList.length > 0 && (
             <div className="pointer-events-auto self-start flex items-center gap-2 px-3 py-2 rounded-xl bg-info/10 border border-info/20 text-info text-xs font-medium backdrop-blur-md">
               <ScanSearch size={14} className="shrink-0" />
@@ -935,10 +1036,14 @@ export default function ReviewScreen({
               <div className="tooltip tooltip-bottom" data-tip="Cursor (V)">
                 <button
                   type="button"
-                  className={`${viewToolBtn} ${!boxSelectMode ? "bg-primary/15 text-primary hover:bg-primary/20" : ""}`}
-                  onClick={() => setBoxSelectMode(false)}
+                  className={`${viewToolBtn} ${!boxSelectMode && !cutToolMode ? "bg-primary/15 text-primary hover:bg-primary/20" : ""}`}
+                  onClick={() => {
+                    setCutToolMode(false);
+                    setCutDraft(null);
+                    setBoxSelectMode(false);
+                  }}
                   aria-label="Cursor"
-                  aria-pressed={!boxSelectMode}
+                  aria-pressed={!boxSelectMode && !cutToolMode}
                 >
                   <MousePointer2 size={15} />
                 </button>
@@ -947,14 +1052,80 @@ export default function ReviewScreen({
                 <button
                   type="button"
                   className={`${viewToolBtn} ${boxSelectMode ? "bg-primary/15 text-primary hover:bg-primary/20" : ""}`}
-                  onClick={() => setBoxSelectMode((s) => !s)}
+                  onClick={() => {
+                    setCutToolMode(false);
+                    setCutDraft(null);
+                    setBoxSelectMode((s) => !s);
+                  }}
                   aria-label="Selección por área"
                   aria-pressed={boxSelectMode}
                 >
                   <Lasso size={15} />
                 </button>
               </div>
+              <div
+                className="tooltip tooltip-bottom"
+                data-tip={
+                  cutToolMode
+                    ? `${CUT_SHAPE_LABELS[cutShapeKind]} · C cambia forma · V sale`
+                    : "Cortes (C) — activar y cambiar forma"
+                }
+              >
+                <button
+                  type="button"
+                  className={`${viewToolBtn} ${cutToolMode ? "bg-warning/20 text-warning hover:bg-warning/25" : ""}`}
+                  onClick={() => {
+                    setBoxSelectMode(false);
+                    setCutDraft(null);
+                    setCutToolMode((active) => {
+                      if (!active) return true;
+                      setCutShapeKind((shape) => nextCutShape(shape));
+                      return true;
+                    });
+                  }}
+                  aria-label="Herramienta de cortes"
+                  aria-pressed={cutToolMode}
+                >
+                  <Scissors size={15} />
+                </button>
+              </div>
             </div>
+
+            {cutToolMode && (
+              <div className="inline-flex items-center gap-1 p-0.5 pl-1.5 rounded-xl bg-warning/10 border border-warning/20">
+                <span className="text-[11px] font-semibold text-warning whitespace-nowrap hidden sm:inline">
+                  {CUT_SHAPE_LABELS[cutShapeKind]}
+                </span>
+                {(
+                  [
+                    { kind: "rect" as const, icon: RectangleHorizontal, tip: "Rectángulo (⇧ cuadrado)" },
+                    { kind: "circle" as const, icon: Circle, tip: "Óvalo desde esquina (⇧ círculo)" },
+                    { kind: "line" as const, icon: Minus, tip: "Línea de corte (⇧ recta)" },
+                  ] as const
+                ).map(({ kind, icon: Icon, tip }) => (
+                  <button
+                    key={kind}
+                    type="button"
+                    className={`${viewToolBtn} ${cutShapeKind === kind ? "bg-warning/25 text-warning ring-1 ring-warning/40" : ""}`}
+                    title={tip}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setCutDraft(null);
+                      setCutShapeKind(kind);
+                    }}
+                    aria-label={tip}
+                    aria-pressed={cutShapeKind === kind}
+                  >
+                    <Icon size={15} />
+                  </button>
+                ))}
+                {userCuts.length > 0 && (
+                  <span className="text-[10px] font-semibold text-warning/80 px-1 tabular-nums border-l border-warning/20 ml-0.5 pl-1.5">
+                    {userCuts.length}
+                  </span>
+                )}
+              </div>
+            )}
 
             <div className="hidden sm:block w-px h-7 bg-base-300/50" />
 
@@ -1388,6 +1559,50 @@ export default function ReviewScreen({
               </div>
             );
           })()}
+
+        {selectedGroupIds.size === 1 && cutsForSelectedGroup.length > 0 && (
+          <div className="px-4 py-3 border-b border-base-300/30 bg-warning/5">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-[11px] font-semibold uppercase tracking-widest text-warning/70">
+                Cortes · {cutsForSelectedGroup.length}
+              </p>
+              <button
+                type="button"
+                className="btn btn-ghost btn-xs gap-1 text-base-content/50 hover:text-warning"
+                onClick={() => {
+                  pushHistory();
+                  setUserCuts((prev) =>
+                    prev.filter((c) => c.groupId !== selectedGroup!.id),
+                  );
+                }}
+              >
+                <Trash2 size={11} />
+                Quitar todos
+              </button>
+            </div>
+            <div className="flex flex-col gap-1">
+              {cutsForSelectedGroup.map((cut) => (
+                <div
+                  key={cut.id}
+                  className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-base-100/80 border border-warning/20 text-xs"
+                >
+                  <Scissors size={10} className="text-warning shrink-0" />
+                  <span className="flex-1 font-mono text-[11px] text-base-content/70">
+                    {cut.kind} · {cutDimensionsLabel(cut)}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-xs btn-circle opacity-50 hover:opacity-100 hover:text-error"
+                    onClick={() => handleRemoveCut(cut.id)}
+                    aria-label="Eliminar corte"
+                  >
+                    <X size={10} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {selectedGroupIds.size === 1 && sameAreaMatches.length > 0 && (
           <div className="px-4 py-2 border-b border-base-300/30 bg-base-100/60">
