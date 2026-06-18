@@ -4,7 +4,6 @@ import { useCallback, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowRight, FileBox, RotateCcw, Trash2 } from "lucide-react";
 import { uploadModelFile, uploadDemoObj } from "@/services/api";
-import { applyPanelBridgeSplits } from "@/core/pipeline";
 import DemoButton from "./DemoButton";
 import { useProjectContext } from "@/context/ProjectContext";
 
@@ -105,7 +104,7 @@ export default function UploadForm() {
       setFile(new File([textContent], "demo.obj", { type: "text/plain" }));
       setProjectFileName("demo.obj");
       setFileId(backendRes.file_id);
-      setPhase1Result(applyPanelBridgeSplits(backendRes.topology));
+      setPhase1Result(backendRes.topology);
       setPreviewObj(backendRes.preview_obj);
 
       router.push("/review");
@@ -141,7 +140,7 @@ export default function UploadForm() {
 
       setProjectFileName(file.name);
       setFileId(backendRes.file_id);
-      setPhase1Result(applyPanelBridgeSplits(backendRes.topology));
+      setPhase1Result(backendRes.topology);
       setPreviewObj(backendRes.preview_obj);
 
       router.push("/review");
