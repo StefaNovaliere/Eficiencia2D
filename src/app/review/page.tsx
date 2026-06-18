@@ -5,9 +5,11 @@ import { useRouter } from "next/navigation";
 import { useProjectContext } from "@/context/ProjectContext";
 import ReviewScreen from "@/components/ReviewScreen";
 import type { ClassificationOverride } from "@/core/pipeline";
+import type { UserCut } from "@/core/user-cuts";
 import {
   recomputeTopology,
   fetchNestingPreview,
+  userCutsForApi,
   type RecomputePayload,
   type SplitOperation,
 } from "@/services/api";
@@ -43,6 +45,8 @@ export default function ReviewPage() {
     setSavedSplits,
     savedMarks,
     setSavedMarks,
+    savedUserCuts,
+    setSavedUserCuts,
     fileId,
     scale,
     sheetConfig,
@@ -139,12 +143,14 @@ export default function ReviewPage() {
       overrides: ClassificationOverride[],
       wallWallDecisions: Map<number, number>,
       marks: number[],
+      userCuts: UserCut[],
     ) => {
       if (!phase1Result || !fileId) return;
 
       setSavedOverrides(overrides);
       setSavedWallWallDecisions(wallWallDecisions);
       setSavedMarks(marks);
+      setSavedUserCuts(userCuts);
       setIsGenerating(true);
 
       try {
@@ -163,6 +169,7 @@ export default function ReviewPage() {
             gap_m: sheetConfig.gapM,
           },
           scale_denom: scale,
+          user_cuts: userCutsForApi(userCuts),
         });
         setNestingData(nesting);
         router.push("/nesting");
@@ -183,6 +190,7 @@ export default function ReviewPage() {
       setSavedOverrides,
       setSavedWallWallDecisions,
       setSavedMarks,
+      setSavedUserCuts,
       setNestingData,
       router,
     ],
@@ -211,6 +219,7 @@ export default function ReviewPage() {
       initialOverrides={savedOverrides}
       initialWallWallDecisions={savedWallWallDecisions}
       initialMarks={savedMarks}
+      initialUserCuts={savedUserCuts}
       isRecomputing={isRecomputing}
       isGenerating={isGenerating}
     />

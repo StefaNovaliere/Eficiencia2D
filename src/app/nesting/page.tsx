@@ -4,7 +4,7 @@ import { useEffect, useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useProjectContext } from "@/context/ProjectContext";
 import NestingPreview from "@/components/NestingPreview";
-import { fetchNestingPreview, type SplitOperation } from "@/services/api";
+import { fetchNestingPreview, userCutsForApi, type SplitOperation } from "@/services/api";
 import type { SheetConfig } from "@/core/types";
 
 function overridesToRecord(
@@ -37,6 +37,7 @@ export default function NestingPage() {
     savedMerges,
     savedSplits,
     savedMarks,
+    savedUserCuts,
     fileId,
     persistSession,
     isLoadingSession,
@@ -82,6 +83,7 @@ export default function NestingPage() {
             gap_m: newConfig.gapM,
           },
           scale_denom: newScale,
+          user_cuts: userCutsForApi(savedUserCuts),
         });
         setNestingData(nesting);
       } catch (err: unknown) {
@@ -91,7 +93,7 @@ export default function NestingPage() {
         setIsRecomputing(false);
       }
     },
-    [phase1Result, fileId, minAreaM2, savedMerges, savedSplits, savedOverrides, savedWallWallDecisions, savedMarks, setNestingData],
+    [phase1Result, fileId, minAreaM2, savedMerges, savedSplits, savedOverrides, savedWallWallDecisions, savedMarks, savedUserCuts, setNestingData],
   );
 
   const handleSheetConfigChange = useCallback((newConfig: SheetConfig) => {

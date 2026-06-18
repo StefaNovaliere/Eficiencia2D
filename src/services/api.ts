@@ -1,9 +1,16 @@
 import { decodePackedFaces } from "@/core/packed-faces";
 import type { Phase1Result, NestingPreviewData } from "@/core/pipeline";
+import type { UserCut } from "@/core/user-cuts";
+import { serializeUserCutsForApi } from "@/core/user-cuts";
 import {
   invalidateApiBaseUrl,
   resolveApiBaseUrl,
 } from "@/services/api-base";
+
+/** Serializa los cortes manuales del usuario al formato snake_case del backend. */
+export function userCutsForApi(cuts: UserCut[]): Record<string, unknown>[] {
+  return serializeUserCutsForApi(cuts);
+}
 
 export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
   let baseUrl = await resolveApiBaseUrl();
@@ -106,6 +113,9 @@ export interface NestingPreviewPayload {
     gap_m: number;
   };
   scale_denom: number;
+  /** Cortes manuales del usuario (panel-local, metros). Para previsualizar las
+   *  planchas con los recortes aplicados. */
+  user_cuts?: Record<string, unknown>[];
 }
 
 export interface GenerateRequestPayload {

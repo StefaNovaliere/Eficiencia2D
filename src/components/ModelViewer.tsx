@@ -7,6 +7,16 @@ import type React from "react";
 import * as THREE from "three";
 import type { Face3D, Vec3 } from "@/core/types";
 import type { FaceCategory, GeometryGroup } from "@/core/group-classifier";
+import { computeMarkedOpeningGroups3D, type MarkOpeningGroupLines } from "@/core/mark-preview";
+import { computeCutPreviewSegments, type CutPreviewSegment } from "@/core/cut-preview";
+import {
+  worldPointToPanelUV,
+  getGroupPanelSize,
+  getGroupProjection,
+  type PanelProjection,
+} from "@/core/cut-preview";
+import type { UserCut } from "@/core/user-cuts";
+import type { CutDragState } from "@/core/user-cuts";
 import { useViewerPalette, type ViewerPalette } from "@/context/ThemeContext";
 
 // A floating reference label (panel id) anchored to a component in 3D, drawn
@@ -465,6 +475,213 @@ function CameraControls({ target, maxDistance, minDistance, enabled = true }: Ca
 }
 
 // ---------------------------------------------------------------------------
+// Mark opening overlays — red hole contours, hidden on back faces & behind geometry
+// ---------------------------------------------------------------------------
+
+const MARK_OPENING_MATERIAL = new THREE.LineBasicMaterial({
+  color: 0xdc2626,
+  depthTest: true,
+  depthWrite: false,
+});
+
+function buildMarkOpeningGeometry(segments: MarkOpeningGroupLines["segments"]): THREE.BufferGeometry {
+  const positions = new Float32Array(segments.length * 6);
+  let i = 0;
+  for (const s of segments) {
+    positions[i++] = s.a.x;
+    positions[i++] = s.a.y;
+    positions[i++] = s.a.z;
+    positions[i++] = s.b.x;
+    positions[i++] = s.b.y;
+    positions[i++] = s.b.z;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  return geo;
+}
+
+function MarkOpeningGroupOverlay({
+  data,
+  anchor,
+}: {
+  data: MarkOpeningGroupLines;
+  anchor: THREE.Vector3;
+}) {
+  const lineRef = useRef<THREE.LineSegments>(null);
+  const viewDir = useRef(new THREE.Vector3());
+  const { camera } = useThree();
+  const normal = useMemo(
+    () => new THREE.Vector3(data.normal.x, data.normal.y, data.normal.z),
+    [data.normal.x, data.normal.y, data.normal.z],
+  );
+  const geometry = useMemo(
+    () => buildMarkOpeningGeometry(data.segments),
+    [data.segments],
+  );
+
+  useEffect(() => () => geometry.dispose(), [geometry]);
+
+  useFrame(() => {
+    if (!lineRef.current) return;
+    viewDir.current.subVectors(camera.position, anchor);
+    lineRef.current.visible = viewDir.current.dot(normal) > 0.02;
+  });
+
+  return (
+    <lineSegments ref={lineRef} geometry={geometry} material={MARK_OPENING_MATERIAL} renderOrder={2} />
+  );
+}
+
+function MarkOpeningOverlays({
+  groupLines,
+  groups,
+  centerOffset,
+}: {
+  groupLines: MarkOpeningGroupLines[];
+  groups: GeometryGroup[];
+  centerOffset: Vec3;
+}) {
+  const groupById = useMemo(() => new Map(groups.map((g) => [g.id, g])), [groups]);
+
+  const anchors = useMemo(() => {
+    const map = new Map<number, THREE.Vector3>();
+    for (const data of groupLines) {
+      const group = groupById.get(data.groupId);
+      if (!group) continue;
+      map.set(
+        data.groupId,
+        new THREE.Vector3(
+          group.centroid.x - centerOffset.x,
+          group.centroid.y - centerOffset.y,
+          group.centroid.z - centerOffset.z,
+        ),
+      );
+    }
+    return map;
+  }, [groupLines, groupById, centerOffset.x, centerOffset.y, centerOffset.z]);
+
+  return (
+    <>
+      {groupLines.map((data) => {
+        const anchor = anchors.get(data.groupId);
+        if (!anchor) return null;
+        return <MarkOpeningGroupOverlay key={data.groupId} data={data} anchor={anchor} />;
+      })}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// User cut overlays — orange preview of subtract regions
+// ---------------------------------------------------------------------------
+
+const CUT_PREVIEW_MATERIAL = new THREE.LineBasicMaterial({
+  color: 0xf97316,
+  depthTest: true,
+  depthWrite: false,
+});
+
+function buildCutPreviewGeometry(segments: CutPreviewSegment[]): THREE.BufferGeometry {
+  const positions = new Float32Array(segments.length * 6);
+  let i = 0;
+  for (const s of segments) {
+    positions[i++] = s.a.x;
+    positions[i++] = s.a.y;
+    positions[i++] = s.a.z;
+    positions[i++] = s.b.x;
+    positions[i++] = s.b.y;
+    positions[i++] = s.b.z;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  return geo;
+}
+
+function CutGroupOverlay({
+  groupId,
+  segments,
+  anchor,
+  normal,
+}: {
+  groupId: number;
+  segments: CutPreviewSegment[];
+  anchor: THREE.Vector3;
+  normal: THREE.Vector3;
+}) {
+  const lineRef = useRef<THREE.LineSegments>(null);
+  const viewDir = useRef(new THREE.Vector3());
+  const { camera } = useThree();
+  const geometry = useMemo(() => buildCutPreviewGeometry(segments), [segments]);
+
+  useEffect(() => () => geometry.dispose(), [geometry]);
+
+  useFrame(() => {
+    if (!lineRef.current) return;
+    viewDir.current.subVectors(camera.position, anchor);
+    // Show from BOTH sides: representativeNormal can point inward or outward
+    // depending on the model exporter. depthTest:true prevents the lines from
+    // showing through opaque geometry, so only hide when perfectly edge-on.
+    lineRef.current.visible = Math.abs(viewDir.current.dot(normal)) > 0.02;
+  });
+
+  return (
+    <lineSegments
+      ref={lineRef}
+      geometry={geometry}
+      material={CUT_PREVIEW_MATERIAL}
+      renderOrder={3}
+    />
+  );
+}
+
+function CutPreviewOverlays({
+  segments,
+  groups,
+  centerOffset,
+}: {
+  segments: CutPreviewSegment[];
+  groups: GeometryGroup[];
+  centerOffset: Vec3;
+}) {
+  const byGroup = useMemo(() => {
+    const map = new Map<number, CutPreviewSegment[]>();
+    for (const s of segments) {
+      const arr = map.get(s.groupId);
+      if (arr) arr.push(s);
+      else map.set(s.groupId, [s]);
+    }
+    return map;
+  }, [segments]);
+
+  const groupById = useMemo(() => new Map(groups.map((g) => [g.id, g])), [groups]);
+
+  return (
+    <>
+      {[...byGroup.entries()].map(([groupId, segs]) => {
+        const group = groupById.get(groupId);
+        if (!group || segs.length === 0) return null;
+        const anchor = new THREE.Vector3(
+          group.centroid.x - centerOffset.x,
+          group.centroid.y - centerOffset.y,
+          group.centroid.z - centerOffset.z,
+        );
+        const n = segs[0].normal;
+        const normal = new THREE.Vector3(n.x, n.y, n.z);
+        return (
+          <CutGroupOverlay
+            key={groupId}
+            groupId={groupId}
+            segments={segs}
+            anchor={anchor}
+            normal={normal}
+          />
+        );
+      })}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Scene
 // ---------------------------------------------------------------------------
 
@@ -483,9 +700,24 @@ interface SceneProps {
   leaderMarkers?: LeaderMarker[];
   isSolid?: boolean;
   boxSelectActive?: boolean;
+  markGroupIds?: Set<number>;
+  userCuts?: UserCut[];
+  cutDraft?: CutDragState | null;
+  movingCutId?: string | null;
+  panelRaycastRef: React.MutableRefObject<PanelRaycastContext>;
   palette: ViewerPalette;
   materials: ViewerMaterials;
 }
+
+export interface PanelRaycastContext {
+  faces: Face3D[];
+  groups: GeometryGroup[];
+  hiddenGroupIds: Set<number>;
+  appliedAxis: "Y" | "Z";
+  modelCenter: Vec3;
+}
+
+const EMPTY_MARK_SET = new Set<number>();
 
 function Scene({
   faces,
@@ -502,6 +734,11 @@ function Scene({
   leaderMarkers = [],
   isSolid = false,
   boxSelectActive = false,
+  markGroupIds = EMPTY_MARK_SET,
+  userCuts = [],
+  cutDraft = null,
+  movingCutId = null,
+  panelRaycastRef,
   palette,
   materials,
 }: SceneProps) {
@@ -603,6 +840,32 @@ function Scene({
     });
   }, [leaderMarkers, bounds.diag, upVec]);
 
+  // Red contours for marked openings — one overlay per group, culled by facing.
+  const markOpeningGroups = useMemo(
+    () =>
+      computeMarkedOpeningGroups3D(
+        faces,
+        groups,
+        markGroupIds,
+        appliedAxis,
+        hiddenGroupIds,
+      ),
+    [faces, groups, markGroupIds, appliedAxis, hiddenGroupIds],
+  );
+
+  const cutPreviewSegments = useMemo(
+    () => computeCutPreviewSegments(faces, groups, userCuts, cutDraft, appliedAxis, movingCutId),
+    [faces, groups, userCuts, cutDraft, appliedAxis, movingCutId],
+  );
+
+  panelRaycastRef.current = {
+    faces,
+    groups,
+    hiddenGroupIds,
+    appliedAxis,
+    modelCenter: bounds.center,
+  };
+
   return (
     <>
       <CameraControls
@@ -647,6 +910,22 @@ function Scene({
               <primitive object={materials.highlightWire} attach="material" />
             </lineSegments>
           </>
+        )}
+
+        {markOpeningGroups.length > 0 && (
+          <MarkOpeningOverlays
+            groupLines={markOpeningGroups}
+            groups={groups}
+            centerOffset={bounds.center}
+          />
+        )}
+
+        {cutPreviewSegments.length > 0 && (
+          <CutPreviewOverlays
+            segments={cutPreviewSegments}
+            groups={groups}
+            centerOffset={bounds.center}
+          />
         )}
 
         {/* Leader lines + floating reference tags for the selected joint */}
@@ -723,14 +1002,112 @@ export interface ModelViewerHandle {
     rectH: number,
     hiddenGroupIds: Set<number>,
   ): Set<number>;
+  /** Raycast to a panel surface; returns group id and UV in panel metres. */
+  raycastPanelUV(clientX: number, clientY: number): {
+    groupId: number;
+    u: number;
+    v: number;
+  } | null;
+  /**
+   * Full raycast that also returns the panel projection so subsequent
+   * pointer-move events can use the cheap getUVFromMouseOnPlane instead of
+   * a full scene raycast.
+   */
+  raycastPanelFull(clientX: number, clientY: number): {
+    groupId: number;
+    u: number;
+    v: number;
+    /** 3-D hit point in scene (shifted) coords — use as the plane anchor. */
+    scenePoint: { x: number; y: number; z: number };
+    projection: PanelProjection;
+  } | null;
+  /**
+   * O(1) ray-plane intersection — no scene traversal.
+   * Uses the projection cached from a previous raycastPanelFull call.
+   */
+  getUVFromMouseOnPlane(
+    clientX: number,
+    clientY: number,
+    sceneAnchor: { x: number; y: number; z: number },
+    projection: PanelProjection,
+  ): { u: number; v: number } | null;
+  /** Panel bounding size in metres (same frame as raycastPanelUV). */
+  getPanelSize(groupId: number): { widthM: number; heightM: number } | null;
+}
+
+/**
+ * Pick the best group from a set of raycast hits.
+ *
+ * Strategy — priority order:
+ *  1. Nearest hit whose triangle face-normal opposes the ray (front face).
+ *     Uses a 5 mm "same-surface" window so both sides of a zero-thickness
+ *     panel are considered ties and the front face wins.
+ *  2. Nearest hit at the same surface distance regardless of face direction
+ *     (handles models with flipped/missing face normals).
+ *  3. Nearest non-hidden hit up to 5 cm away (thick walls / layered meshes).
+ *
+ * NOTE: group representativeNormal is intentionally NOT used here. It is not
+ * reliable for choosing the correct surface because the model exporter can
+ * set it to point in any direction. Nearest-hit = visible surface is the
+ * only safe rule.
+ */
+function pickGroupFromRaycast(
+  raycaster: THREE.Raycaster,
+  hits: THREE.Intersection[],
+  hiddenGroupIds: Set<number>,
+): { groupId: number; point: THREE.Vector3 } | null {
+  if (hits.length === 0) return null;
+  const rayDir = raycaster.ray.direction;
+  const closestDist = hits[0].distance;
+
+  function tryHit(hit: THREE.Intersection): { groupId: number; point: THREE.Vector3 } | null {
+    const data = hit.object.userData?.mergedMeshData as { groupIds: number[] } | undefined;
+    if (!data || hit.faceIndex == null || hit.faceIndex < 0) return null;
+    if (hit.faceIndex >= data.groupIds.length) return null;
+    const groupId = data.groupIds[hit.faceIndex];
+    if (hiddenGroupIds.has(groupId)) return null;
+    return { groupId, point: hit.point.clone() };
+  }
+
+  function isFrontFace(hit: THREE.Intersection): boolean {
+    if (!hit.face) return true;
+    const wn = hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
+    return wn.dot(rayDir) <= 0;
+  }
+
+  // Pass 1: same-surface window (5 mm), front-face triangles only
+  for (const hit of hits) {
+    if (hit.distance - closestDist > 0.005) break;
+    if (!isFrontFace(hit)) continue;
+    const r = tryHit(hit);
+    if (r) return r;
+  }
+
+  // Pass 2: same-surface window, any triangle winding
+  for (const hit of hits) {
+    if (hit.distance - closestDist > 0.005) break;
+    const r = tryHit(hit);
+    if (r) return r;
+  }
+
+  // Pass 3: up to 5 cm — handles thick walls / layered surfaces
+  for (const hit of hits) {
+    if (hit.distance - closestDist > 0.05) break;
+    const r = tryHit(hit);
+    if (r) return r;
+  }
+
+  return null;
 }
 
 function SceneBridge({
   handleRef,
   modelCenter,
+  panelRaycastRef,
 }: {
   handleRef: React.MutableRefObject<ModelViewerHandle | null>;
   modelCenter: { x: number; y: number; z: number };
+  panelRaycastRef: React.MutableRefObject<PanelRaycastContext>;
 }) {
   const { camera, gl, scene } = useThree();
 
@@ -796,6 +1173,122 @@ function SceneBridge({
 
         return hitGroupIds;
       },
+
+      raycastPanelUV(clientX, clientY) {
+        const ctx = panelRaycastRef.current;
+        const canvas = gl.domElement;
+        const canvasRect = canvas.getBoundingClientRect();
+        if (canvasRect.width === 0 || canvasRect.height === 0) return null;
+
+        const ndcX = ((clientX - canvasRect.left) / canvasRect.width) * 2 - 1;
+        const ndcY = -((clientY - canvasRect.top) / canvasRect.height) * 2 + 1;
+
+        const raycaster = new THREE.Raycaster();
+        raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
+        const hits = raycaster.intersectObjects(scene.children, true);
+        const picked = pickGroupFromRaycast(raycaster, hits, ctx.hiddenGroupIds);
+        if (!picked) return null;
+
+        const group = ctx.groups.find((g) => g.id === picked.groupId);
+        if (!group) return null;
+
+        const modelPoint = {
+          x: picked.point.x + ctx.modelCenter.x,
+          y: picked.point.y + ctx.modelCenter.y,
+          z: picked.point.z + ctx.modelCenter.z,
+        };
+        const uv = worldPointToPanelUV(modelPoint, ctx.faces, group, ctx.appliedAxis);
+        if (!uv) return null;
+        return { groupId: picked.groupId, u: uv.u, v: uv.v };
+      },
+
+      raycastPanelFull(clientX, clientY) {
+        const ctx = panelRaycastRef.current;
+        const canvas = gl.domElement;
+        const canvasRect = canvas.getBoundingClientRect();
+        if (canvasRect.width === 0 || canvasRect.height === 0) return null;
+
+        const ndcX = ((clientX - canvasRect.left) / canvasRect.width) * 2 - 1;
+        const ndcY = -((clientY - canvasRect.top) / canvasRect.height) * 2 + 1;
+
+        const raycaster = new THREE.Raycaster();
+        raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
+        const hits = raycaster.intersectObjects(scene.children, true);
+        const picked = pickGroupFromRaycast(raycaster, hits, ctx.hiddenGroupIds);
+        if (!picked) return null;
+
+        const group = ctx.groups.find((g) => g.id === picked.groupId);
+        if (!group) return null;
+
+        const modelPoint = {
+          x: picked.point.x + ctx.modelCenter.x,
+          y: picked.point.y + ctx.modelCenter.y,
+          z: picked.point.z + ctx.modelCenter.z,
+        };
+        const uv = worldPointToPanelUV(modelPoint, ctx.faces, group, ctx.appliedAxis);
+        if (!uv) return null;
+
+        const projection = getGroupProjection(ctx.faces, group, ctx.appliedAxis);
+        if (!projection) return null;
+
+        return {
+          groupId: picked.groupId,
+          u: uv.u,
+          v: uv.v,
+          scenePoint: { x: picked.point.x, y: picked.point.y, z: picked.point.z },
+          projection,
+        };
+      },
+
+      getUVFromMouseOnPlane(clientX, clientY, sceneAnchor, projection) {
+        const canvas = gl.domElement;
+        const canvasRect = canvas.getBoundingClientRect();
+        if (canvasRect.width === 0 || canvasRect.height === 0) return null;
+
+        const ndcX = ((clientX - canvasRect.left) / canvasRect.width) * 2 - 1;
+        const ndcY = -((clientY - canvasRect.top) / canvasRect.height) * 2 + 1;
+
+        // Build ray from camera through pixel
+        const rayOrigin = camera.position.clone();
+        const rayDir = new THREE.Vector3(ndcX, ndcY, 0.5)
+          .unproject(camera)
+          .sub(rayOrigin)
+          .normalize();
+
+        // Ray-plane intersection: n · (P - anchor) = 0, P = origin + t*dir
+        const n = new THREE.Vector3(
+          projection.normal.x,
+          projection.normal.y,
+          projection.normal.z,
+        );
+        const anchor = new THREE.Vector3(sceneAnchor.x, sceneAnchor.y, sceneAnchor.z);
+
+        const denom = n.dot(rayDir);
+        if (Math.abs(denom) < 1e-6) return null; // ray parallel to plane
+        const t = n.dot(anchor.clone().sub(rayOrigin)) / denom;
+        if (t < 0) return null; // behind camera
+
+        const scenePoint = rayOrigin.clone().addScaledVector(rayDir, t);
+
+        // Scene coords → model coords (undo the centering shift)
+        const ctx = panelRaycastRef.current;
+        const mx = scenePoint.x + ctx.modelCenter.x;
+        const my = scenePoint.y + ctx.modelCenter.y;
+        const mz = scenePoint.z + ctx.modelCenter.z;
+
+        // Project onto UV axes
+        const { uAxis, vAxis, originU, originV } = projection;
+        const u = mx * uAxis.x + my * uAxis.y + mz * uAxis.z - originU;
+        const v = mx * vAxis.x + my * vAxis.y + mz * vAxis.z - originV;
+        return { u, v };
+      },
+
+      getPanelSize(groupId) {
+        const ctx = panelRaycastRef.current;
+        const group = ctx.groups.find((g) => g.id === groupId);
+        if (!group) return null;
+        return getGroupPanelSize(ctx.faces, group, ctx.appliedAxis);
+      },
     };
     return () => {
       handleRef.current = null;
@@ -825,6 +1318,11 @@ export interface ModelViewerProps {
   isSolid?: boolean;
   boxSelectActive?: boolean;
   viewerRef?: React.MutableRefObject<ModelViewerHandle | null>;
+  /** Groups whose openings (holes) are engraved in red on the cut sheet. */
+  markGroupIds?: Set<number>;
+  userCuts?: UserCut[];
+  cutDraft?: CutDragState | null;
+  movingCutId?: string | null;
 }
 
 export default function ModelViewer({
@@ -843,10 +1341,22 @@ export default function ModelViewer({
   isSolid = false,
   boxSelectActive = false,
   viewerRef,
+  markGroupIds = EMPTY_MARK_SET,
+  userCuts = [],
+  cutDraft = null,
+  movingCutId = null,
 }: ModelViewerProps) {
   const palette = useViewerPalette();
   const materials = useMemo(() => createViewerMaterials(palette), [palette]);
   useEffect(() => () => disposeViewerMaterials(materials), [materials]);
+
+  const panelRaycastRef = useRef<PanelRaycastContext>({
+    faces: [],
+    groups: [],
+    hiddenGroupIds: new Set(),
+    appliedAxis: "Y",
+    modelCenter: { x: 0, y: 0, z: 0 },
+  });
 
   const { camDist, modelCenter } = useMemo(() => {
     let minX = Infinity, minY = Infinity, minZ = Infinity;
@@ -913,12 +1423,21 @@ export default function ModelViewer({
         leaderMarkers={leaderMarkers}
         isSolid={isSolid}
         boxSelectActive={boxSelectActive}
+        markGroupIds={markGroupIds}
+        userCuts={userCuts}
+        cutDraft={cutDraft}
+        movingCutId={movingCutId}
+        panelRaycastRef={panelRaycastRef}
         palette={palette}
         materials={materials}
       />
 
       {viewerRef && (
-        <SceneBridge handleRef={viewerRef} modelCenter={modelCenter} />
+        <SceneBridge
+          handleRef={viewerRef}
+          modelCenter={modelCenter}
+          panelRaycastRef={panelRaycastRef}
+        />
       )}
 
       {/* Gizmo en la esquina para referencia de orientación constante */}
