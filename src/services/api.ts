@@ -127,6 +127,9 @@ export interface GenerateRequestPayload {
   /** GeometryGroup ids whose openings (inner-ring holes) must be engraved
    *  (red, MARK_VECTOR / ACI 1) instead of cut. */
   marks?: number[];
+  /** Recortes manuales del usuario (panel-local, metros). Campo reservado: la
+   *  herramienta de corte se re-implementará contra el backend. */
+  user_cuts?: Record<string, unknown>[];
 }
 
 export interface GenerateResponse {
