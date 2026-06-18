@@ -1,18 +1,22 @@
 import { useCallback, useRef, useState } from "react";
 import type { FaceCategory } from "@/core/group-classifier";
+import type { UserCut } from "@/core/user-cuts";
 
-// Sólo se versiona el estado de etiquetado client-side (categorías, ocultos,
-// decisiones de unión). Eje/área/merges/splits viven en el backend (recompute).
+// Sólo se versiona el estado de etiquetado/edición client-side (categorías,
+// ocultos, decisiones de unión, cortes manuales). Eje/área/merges/splits viven
+// en el backend (recompute).
 export interface ReviewHistoryState {
   overrides: Map<number, FaceCategory>;
   hiddenGroupIds: Set<number>;
   wallWallDecisions: Map<number, number>;
+  userCuts: UserCut[];
 }
 
 interface SerializedSnapshot {
   overrides: [number, FaceCategory][];
   hiddenGroupIds: number[];
   wallWallDecisions: [number, number][];
+  userCuts: UserCut[];
 }
 
 const MAX_HISTORY = 50;
@@ -22,6 +26,7 @@ function serialize(state: ReviewHistoryState): string {
     overrides: Array.from(state.overrides.entries()),
     hiddenGroupIds: Array.from(state.hiddenGroupIds),
     wallWallDecisions: Array.from(state.wallWallDecisions.entries()),
+    userCuts: state.userCuts,
   };
   return JSON.stringify(payload);
 }
@@ -32,6 +37,7 @@ function deserialize(raw: string): ReviewHistoryState {
     overrides: new Map(payload.overrides),
     hiddenGroupIds: new Set(payload.hiddenGroupIds),
     wallWallDecisions: new Map(payload.wallWallDecisions),
+    userCuts: payload.userCuts ?? [],
   };
 }
 

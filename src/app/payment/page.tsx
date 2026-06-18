@@ -7,6 +7,7 @@ import PaymentScreen from "@/components/PaymentScreen";
 import {
   base64ToBlob,
   generateProjectFiles,
+  userCutsForApi,
   type SplitOperation,
 } from "@/services/api";
 
@@ -36,6 +37,7 @@ export default function PaymentPage() {
     savedMerges,
     savedSplits,
     savedMarks,
+    savedUserCuts,
     scale,
     paper,
     minAreaM2,
@@ -108,6 +110,7 @@ export default function PaymentPage() {
         merges: savedMerges,
         splits: savedSplits.map((s): SplitOperation => ({ group_id: s.groupId, mode: s.mode })),
         marks: savedMarks,
+        user_cuts: userCutsForApi(savedUserCuts),
       });
 
       if (!backendRes.zip_base64) {
@@ -141,6 +144,7 @@ export default function PaymentPage() {
     savedMerges,
     savedSplits,
     savedMarks,
+    savedUserCuts,
     triggerDownload,
   ]);
 
