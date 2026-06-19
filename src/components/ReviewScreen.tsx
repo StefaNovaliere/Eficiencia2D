@@ -30,11 +30,11 @@ import {
   Copy,
   SquareSplitHorizontal,
   ArrowLeft as ArrowBackIcon,
-  MousePointerClick,
   MousePointer2,
   Lasso,
   Trash2,
   PenLine,
+  Lightbulb,
   Scissors,
   Circle,
   Minus,
@@ -182,6 +182,9 @@ export default function ReviewScreen({
   const [cutShapeKind, setCutShapeKind] = useState<ActiveCutShapeKind>("rect");
   const [cutDraft, setCutDraft] = useState<CutDragState | null>(null);
   const [movingCutId, setMovingCutId] = useState<string | null>(null);
+  // Foco de ayuda de la ventana de encuentros pared-pared: apagado por defecto
+  // para ganar espacio; el usuario lo enciende para ver la explicación.
+  const [showWallWallHelp, setShowWallWallHelp] = useState(false);
   const [mergeCardOpen, setMergeCardOpen] = useState(true);
   const [hiddenGroupIds, setHiddenGroupIds] = useState<Set<number>>(() => new Set());
   const [bulkActionNotice, setBulkActionNotice] = useState<string | null>(null);
@@ -989,13 +992,6 @@ export default function ReviewScreen({
           data-viewer-chrome
           className="absolute top-4 left-4 right-4 z-40 flex flex-col gap-2 pointer-events-none"
         >
-          {wallWallList.length > 0 && (
-            <div className="pointer-events-auto self-start flex items-center gap-2 px-3 py-2 rounded-xl bg-info/10 border border-info/20 text-info text-xs font-medium backdrop-blur-md">
-              <ScanSearch size={14} className="shrink-0" />
-              Hacé clic en una pared para resolver sus encuentros con otras paredes
-            </div>
-          )}
-
           <div className="pointer-events-auto flex flex-wrap items-center gap-2 p-2 rounded-2xl bg-base-100/85 backdrop-blur-xl border border-base-300/40 shadow-lg shadow-base-content/5">
             <VisibilityFilters
               stats={stats}
@@ -1226,16 +1222,6 @@ export default function ReviewScreen({
           </div>
         </div>
 
-        {/* Guía de primera carga: visible al entrar, hasta que se selecciona algo */}
-        {selectedGroupIds.size === 0 && (
-          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 pointer-events-none px-3 w-full flex justify-center">
-            <div className="flex items-center gap-2 px-3.5 py-2 rounded-full bg-base-100/90 backdrop-blur-md border border-base-300/50 shadow-md text-sm text-base-content/70 max-w-full">
-              <MousePointerClick size={15} className="text-primary shrink-0" />
-              <span className="truncate">Hacé clic en una capa para clasificarla: piso, pared o descartar.</span>
-            </div>
-          </div>
-        )}
-
         {selectedGroupIds.size === 1 && (() => {
           const selId = Array.from(selectedGroupIds)[0];
           const selGroup = phase1.groups.find((g) => g.id === selId);
@@ -1266,12 +1252,28 @@ export default function ReviewScreen({
                         <span className="font-mono text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded">{selPid}</span>
                       )}
                     </h3>
-                    <p className="text-xs text-base-content/60 mt-1 leading-snug">
-                      Donde dos paredes se cruzan, al armar la maqueta se pisarían por el espesor del
-                      material. Una se acorta para que encajen. Elegí cuál se acorta
-                      <span className="text-base-content/45"> (ya sugerimos una).</span>
-                    </p>
+                    {showWallWallHelp && (
+                      <p className="text-xs text-base-content/60 mt-1 leading-snug">
+                        Donde dos paredes se cruzan, al armar la maqueta se pisarían por el espesor del
+                        material. Una se acorta para que encajen. Elegí cuál se acorta
+                        <span className="text-base-content/45"> (ya sugerimos una).</span>
+                      </p>
+                    )}
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowWallWallHelp((v) => !v)}
+                    className={`flex items-center justify-center w-7 h-7 rounded-lg shrink-0 transition-colors ${
+                      showWallWallHelp
+                        ? "text-warning bg-warning/15"
+                        : "text-base-content/40 hover:bg-base-200/80 hover:text-base-content/70"
+                    }`}
+                    aria-label="Mostrar ayuda"
+                    aria-pressed={showWallWallHelp}
+                    title={showWallWallHelp ? "Ocultar ayuda" : "¿Qué es esto?"}
+                  >
+                    <Lightbulb size={15} />
+                  </button>
                 </div>
               </div>
 
@@ -1378,7 +1380,7 @@ export default function ReviewScreen({
       {!hideSidebar && (
         <aside className="w-full md:w-[21rem] lg:w-[24rem] flex flex-col border-t md:border-t-0 md:border-l border-base-300/40 bg-base-100 shrink-0 h-[42vh] md:h-full z-20 shadow-2xl shadow-base-content/5">
         <div className="px-4 pt-4 pb-3 border-b border-base-300/30 shrink-0">
-          <StepIndicator current="review" />
+          <StepIndicator current="review" variant="compact" />
         </div>
         <div className="px-4 py-3.5 border-b border-base-300/30 bg-base-100/80">
           <p className="text-[11px] font-semibold uppercase tracking-widest text-primary/80 mb-0.5">
