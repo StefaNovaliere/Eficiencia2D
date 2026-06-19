@@ -153,7 +153,7 @@ export default function PaymentScreen({
     <div className="fixed inset-0 z-[100] bg-base-200/80 backdrop-blur-sm flex items-center justify-center p-4">
       <div className="card bg-base-100 shadow-2xl border border-base-200 w-full max-w-md p-8">
         <div className="mb-6">
-          <StepIndicator current="payment" />
+          <StepIndicator current="payment" variant="compact" />
         </div>
         <h2 className="text-2xl font-bold text-center mb-2">Descargá tus planos</h2>
         <p className="text-base-content/70 text-center mb-6">
