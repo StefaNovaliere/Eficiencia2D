@@ -250,7 +250,7 @@ export default function NestingPreview({
           &larr; Volver a revisión
         </button>
         <div className="hidden md:block w-64">
-          <StepIndicator current="nesting" />
+          <StepIndicator current="nesting" variant="compact" />
         </div>
         <div className="flex items-center gap-2 flex-wrap text-sm">
           <label className="font-medium text-base-content/70">Escala:</label>
