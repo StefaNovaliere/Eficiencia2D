@@ -181,7 +181,7 @@ export default function UploadForm() {
                 </p>
                 <p className="font-semibold text-base-content truncate">{displayName}</p>
                 <p className="text-xs text-base-content/50 mt-1">
-                  {phase1Result?.groups.length ?? 0} capas detectadas
+                  {phase1Result?.groups.length ?? 0} componentes detectados
                   {nestingData ? " · planchas configuradas" : " · pendiente de revisión"}
                 </p>
               </div>

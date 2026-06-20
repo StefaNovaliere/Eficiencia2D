@@ -39,7 +39,7 @@ export function findGroupsWithSameArea(
   });
 }
 
-/** Referencia + todas las capas similares (incluye la referencia). */
+/** Referencia + todos los componentes similares (incluye la referencia). */
 export function collectSimilarGroups(
   groups: GeometryGroup[],
   reference: GeometryGroup,
