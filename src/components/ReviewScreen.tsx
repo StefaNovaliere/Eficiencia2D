@@ -185,6 +185,8 @@ export default function ReviewScreen({
   // Foco de ayuda de la ventana de encuentros pared-pared: apagado por defecto
   // para ganar espacio; el usuario lo enciende para ver la explicación.
   const [showWallWallHelp, setShowWallWallHelp] = useState(false);
+  /** Pared cuyo panel de encuentros está abierto (independiente de la selección 3D). */
+  const [encountersWallId, setEncountersWallId] = useState<number | null>(null);
   const [mergeCardOpen, setMergeCardOpen] = useState(true);
   const [hiddenGroupIds, setHiddenGroupIds] = useState<Set<number>>(() => new Set());
   const [bulkActionNotice, setBulkActionNotice] = useState<string | null>(null);
@@ -243,16 +245,6 @@ export default function ReviewScreen({
   const handleRedo = useCallback(() => {
     restoreHistorySnapshot(redo());
   }, [redo, restoreHistorySnapshot]);
-
-  // Auto-cambiar a "Selección" al elegir una sola capa; volver a "Capas" al
-  // deseleccionar. Con varias seleccionadas (Ctrl+clic para fusionar) no cambia.
-  useEffect(() => {
-    setSidebarTab((prev) => {
-      if (selectedGroupIds.size >= 1) return "seleccion";
-      if (selectedGroupIds.size === 0) return "capas";
-      return prev;
-    });
-  }, [selectedGroupIds]);
 
   useEffect(() => {
     if (!contextMenu) return;
@@ -424,6 +416,32 @@ export default function ReviewScreen({
     return findGroupsWithSameArea(phase1.groups, selectedGroup, overrides);
   }, [selectedGroup, phase1.groups, overrides]);
 
+  /** True when the "Selección" tab has panels/actions worth showing. */
+  const hasSelectionTabContent = useMemo(() => {
+    if (selectedGroupIds.size === 0) return false;
+    if (selectedGroupIds.size >= 2) return true;
+    if (selectedMergeCluster && selectedMergeCluster.length >= 2) return true;
+    if (cutsForSelectedGroup.length > 0) return true;
+    if (sameAreaMatches.length > 0) return true;
+    if (sameAreaDiscardMatches.length > 0) return true;
+    return false;
+  }, [
+    selectedGroupIds.size,
+    selectedMergeCluster,
+    cutsForSelectedGroup.length,
+    sameAreaMatches.length,
+    sameAreaDiscardMatches.length,
+  ]);
+
+  // Ir a "Selección" solo si hay contenido; si no, quedarse en "Componentes".
+  useEffect(() => {
+    setSidebarTab((prev) => {
+      if (selectedGroupIds.size === 0) return "capas";
+      if (hasSelectionTabContent) return "seleccion";
+      return "capas";
+    });
+  }, [selectedGroupIds.size, hasSelectionTabContent]);
+
   const openBulkSimilarModal = useCallback(
     (mode: "discard" | "promote", promoteTarget?: "wall" | "floor") => {
       if (!selectedGroup) return;
@@ -492,11 +510,10 @@ export default function ReviewScreen({
     setWallWallDecisions(m);
   }, [phase1]);
 
-  // Clear the highlighted joint whenever the wall selection changes (switch
-  // wall, deselect, merge) so stale leader labels never linger.
+  // Clear the highlighted joint when the encounters panel closes.
   useEffect(() => {
-    setSelectedJointIndex(null);
-  }, [selectedGroupIds]);
+    if (encountersWallId == null) setSelectedJointIndex(null);
+  }, [encountersWallId]);
 
   const handleRotateAxis = useCallback(() => {
     if (isRecomputing || isGenerating) return;
@@ -584,40 +601,39 @@ export default function ReviewScreen({
   );
 
   // Sin geometría client-side no podemos contar componentes/piezas: ofrecemos
-  // las acciones de división para una capa seleccionada y el backend resuelve
-  // (no-op si no aplica) al recalcular.
-  const canSplit = selectedGroupIds.size === 1;
+  // la acción de división solo cuando la capa seleccionada pertenece a una fusión.
+  const canSplitMerged = useMemo(
+    () =>
+      selectedGroupIds.size === 1 &&
+      selectedMergeCluster != null &&
+      selectedMergeCluster.length >= 2,
+    [selectedGroupIds.size, selectedMergeCluster],
+  );
 
-  const handleSplitComponents = useCallback(() => {
-    if (selectedGroupIds.size !== 1) return;
-    const gid = Array.from(selectedGroupIds)[0];
-    onAddSplit(gid, "components");
-    setSelectedGroupIds(new Set());
-    setSelectedJointIndex(null);
-  }, [selectedGroupIds, onAddSplit]);
-
-  const handleSplitPanels = useCallback(() => {
-    if (selectedGroupIds.size !== 1) return;
-    const gid = Array.from(selectedGroupIds)[0];
-    onAddSplit(gid, "panels");
-    setSelectedGroupIds(new Set());
-    setSelectedJointIndex(null);
-  }, [selectedGroupIds, onAddSplit]);
+  const selectedMergeIndex = useMemo(() => {
+    if (!canSplitMerged) return -1;
+    const selId = Array.from(selectedGroupIds)[0];
+    return merges.findIndex((c) => c.includes(selId));
+  }, [canSplitMerged, selectedGroupIds, merges]);
 
   const handleUnmerge = useCallback((mergeIndex: number) => {
     onRemoveMerge(mergeIndex);
   }, [onRemoveMerge]);
 
+  const handleDivideMerged = useCallback(() => {
+    if (selectedMergeIndex < 0) return;
+    handleUnmerge(selectedMergeIndex);
+  }, [selectedMergeIndex, handleUnmerge]);
+
   const handleWallWallDecision = useCallback(
-    (jointIndex: number, yieldGroupId: number, groupA: number, groupB: number) => {
+    (jointIndex: number, yieldGroupId: number) => {
       pushHistory();
       setWallWallDecisions((prev) => {
         const next = new Map(prev);
         next.set(jointIndex, yieldGroupId);
         return next;
       });
-      // Highlight both walls of the joint in the 3D viewer.
-      setSelectedGroupIds(new Set([groupA, groupB]));
+      setSelectedJointIndex(jointIndex);
     },
     [pushHistory],
   );
@@ -704,13 +720,29 @@ export default function ReviewScreen({
       }));
   }, [phase1.wallWallJoints, phase1.groups, overrides, panelIdByGroup]);
 
+  // Abrir panel de encuentros al seleccionar una pared con cruces (solo si aún no está abierto).
+  useEffect(() => {
+    if (selectedGroupIds.size !== 1) return;
+    const id = Array.from(selectedGroupIds)[0];
+    const hasJoints = wallWallList.some(
+      ({ ww }) => ww.groupA === id || ww.groupB === id,
+    );
+    if (hasJoints) {
+      setEncountersWallId((cur) => cur ?? id);
+    }
+  }, [selectedGroupIds, wallWallList]);
+
+  useEffect(() => {
+    if (selectedGroupIds.size === 0) setEncountersWallId(null);
+  }, [selectedGroupIds.size]);
+
   // Floating reference labels for the selected joint: one per wall of the joint,
   // anchored at each wall's centroid and tagged with its panel id (A#/B#).
   const leaderMarkers = useMemo<LeaderMarker[]>(() => {
     if (selectedJointIndex == null) return [];
     const ww = phase1.wallWallJoints.find((w) => w.jointIndex === selectedJointIndex);
     if (!ww) return [];
-    const selId = selectedGroupIds.size === 1 ? Array.from(selectedGroupIds)[0] : ww.groupA;
+    const selId = encountersWallId ?? (selectedGroupIds.size === 1 ? Array.from(selectedGroupIds)[0] : ww.groupA);
     const byId = new Map(phase1.groups.map((g) => [g.id, g]));
     const out: LeaderMarker[] = [];
     for (const gid of [ww.groupA, ww.groupB]) {
@@ -724,7 +756,7 @@ export default function ReviewScreen({
       });
     }
     return out;
-  }, [selectedJointIndex, phase1, selectedGroupIds, panelIdByGroup]);
+  }, [selectedJointIndex, phase1, selectedGroupIds, panelIdByGroup, encountersWallId]);
 
   const viewToolBtn =
     "btn btn-sm btn-ghost h-9 min-h-9 w-9 px-0 rounded-lg hover:bg-base-200/80";
@@ -810,9 +842,9 @@ export default function ReviewScreen({
       }
 
       if ((e.key === "d" || e.key === "D")) {
-        if (canSplit) {
+        if (canSplitMerged) {
           e.preventDefault();
-          handleSplitComponents();
+          handleDivideMerged();
         }
         return;
       }
@@ -824,7 +856,7 @@ export default function ReviewScreen({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [canMergeSelected, handleMergeSelected, canSplit, handleSplitComponents]);
+  }, [canMergeSelected, handleMergeSelected, canSplitMerged, handleDivideMerged]);
 
   return (
     <div className="fixed inset-0 z-50 bg-base-200/40 flex flex-col md:flex-row overflow-hidden">
@@ -915,24 +947,14 @@ export default function ReviewScreen({
                 {mergeBlockedReason}
               </p>
             )}
-            {canSplit && (
+            {canSplitMerged && (
               <button
                 type="button"
                 className="flex w-full items-center gap-2 px-3 py-2 text-sm text-left hover:bg-base-200/80 transition-colors"
-                onClick={() => { handleSplitComponents(); setContextMenu(null); }}
+                onClick={() => { handleDivideMerged(); setContextMenu(null); }}
               >
                 <SquareSplitHorizontal size={15} className="text-base-content/70 shrink-0" />
                 Dividir en componentes
-              </button>
-            )}
-            {canSplit && (
-              <button
-                type="button"
-                className="flex w-full items-center gap-2 px-3 py-2 text-sm text-left hover:bg-base-200/80 transition-colors"
-                onClick={() => { handleSplitPanels(); setContextMenu(null); }}
-              >
-                <SquareSplitHorizontal size={15} className="text-base-content/70 shrink-0" />
-                Dividir en piezas
               </button>
             )}
             {selectedGroup && getEffectiveCategory(selectedGroup, overrides) !== "discard" && (
@@ -1222,8 +1244,8 @@ export default function ReviewScreen({
           </div>
         </div>
 
-        {selectedGroupIds.size === 1 && (() => {
-          const selId = Array.from(selectedGroupIds)[0];
+        {encountersWallId != null && (() => {
+          const selId = encountersWallId;
           const selGroup = phase1.groups.find((g) => g.id === selId);
           if (!selGroup) return null;
 
@@ -1273,6 +1295,15 @@ export default function ReviewScreen({
                     title={showWallWallHelp ? "Ocultar ayuda" : "¿Qué es esto?"}
                   >
                     <Lightbulb size={15} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEncountersWallId(null)}
+                    className="flex items-center justify-center w-7 h-7 rounded-lg shrink-0 text-base-content/40 hover:bg-base-200/80 hover:text-base-content/70 transition-colors"
+                    aria-label="Cerrar encuentros"
+                    title="Cerrar"
+                  >
+                    <X size={15} />
                   </button>
                 </div>
               </div>
@@ -1324,7 +1355,7 @@ export default function ReviewScreen({
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleWallWallDecision(ww.jointIndex, selId, ww.groupA, ww.groupB);
+                              handleWallWallDecision(ww.jointIndex, selId);
                             }}
                             className={`flex items-center gap-2 w-full text-left rounded-lg border px-3 py-2 transition-colors ${
                               effYielder === selId
@@ -1347,7 +1378,7 @@ export default function ReviewScreen({
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleWallWallDecision(ww.jointIndex, otherId, ww.groupA, ww.groupB);
+                              handleWallWallDecision(ww.jointIndex, otherId);
                             }}
                             className={`flex items-center gap-2 w-full text-left rounded-lg border px-3 py-2 transition-colors ${
                               effYielder === otherId
@@ -1489,46 +1520,41 @@ export default function ReviewScreen({
             );
           })()}
 
-          {/* Botón de fusión prominente cuando hay selección múltiple */}
-          {canMergeSelected && selectedGroupIds.size >= 2 && (
-            <div className="px-4 py-3 border-b border-base-300/30">
-              <button
-                type="button"
-                className="btn btn-primary btn-sm w-full rounded-xl gap-2"
-                onClick={handleMergeSelected}
-              >
-                <Link2 size={14} />
-                {mergeLabel} · F
-              </button>
-              {mergeBlockedReason && (
-                <p className="text-[11px] text-base-content/45 leading-relaxed px-1 mt-2">
+          {/* Fusión: una sola sección cuando hay varias capas seleccionadas */}
+          {selectedGroupIds.size >= 2 && (
+            <div className="px-4 py-3 border-b border-base-300/30 bg-base-100/60 space-y-2">
+              <p className="text-[11px] font-semibold uppercase tracking-widest text-base-content/40">
+                Fusión
+              </p>
+              {canMergeSelected ? (
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm w-full rounded-xl gap-2"
+                  onClick={handleMergeSelected}
+                >
+                  <Link2 size={14} />
+                  {mergeLabel} · F
+                </button>
+              ) : mergeBlockedReason ? (
+                <p className="text-[11px] text-base-content/45 leading-relaxed px-1">
                   {mergeBlockedReason}
+                </p>
+              ) : (
+                <p className="text-[11px] text-base-content/45 leading-relaxed px-1">
+                  Seleccioná varios componentes con Ctrl+clic o los checkboxes de la lista.
                 </p>
               )}
             </div>
           )}
 
-          {/* Info del grupo fusionado cuando hay 1 seleccionado */}
+          {/* Grupo fusionado: dividir solo aquí, una sola vez */}
           {selectedGroupIds.size === 1 && selectedMergeCluster && (() => {
             const selId = Array.from(selectedGroupIds)[0];
-            const mergeIdx = merges.findIndex((c) => c.includes(selId));
             return (
-              <div className="px-4 py-3 border-b border-base-300/30 bg-primary/5">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-[11px] font-semibold uppercase tracking-widest text-primary/60">
-                    Fusionada · {selectedMergeCluster.length} paredes
-                  </p>
-                  {mergeIdx >= 0 && (
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-xs gap-1 text-base-content/50 hover:text-error"
-                      onClick={() => handleUnmerge(mergeIdx)}
-                    >
-                      <X size={11} />
-                      Desfusionar
-                    </button>
-                  )}
-                </div>
+              <div className="px-4 py-3 border-b border-base-300/30 bg-primary/5 space-y-2">
+                <p className="text-[11px] font-semibold uppercase tracking-widest text-primary/60">
+                  Fusionada · {selectedMergeCluster.length} paredes
+                </p>
                 <div className="flex flex-col gap-1">
                   {selectedMergeCluster.map((id) => {
                     const g = phase1.groups.find((gr) => gr.id === id);
@@ -1551,6 +1577,16 @@ export default function ReviewScreen({
                     );
                   })}
                 </div>
+                {selectedMergeIndex >= 0 && (
+                  <button
+                    type="button"
+                    className="btn btn-outline btn-sm w-full rounded-xl gap-2 border-warning/40 text-base-content/80 hover:border-warning"
+                    onClick={handleDivideMerged}
+                  >
+                    <SquareSplitHorizontal size={14} />
+                    Dividir en componentes · D
+                  </button>
+                )}
               </div>
             );
           })()}
@@ -1647,76 +1683,6 @@ export default function ReviewScreen({
           </div>
         )}
 
-        {selectedGroup && getEffectiveCategory(selectedGroup, overrides) === "wall" && (
-          <div className="px-4 py-2 border-b border-base-300/30 bg-primary/5">
-            <p className="text-[11px] text-base-content/50 leading-relaxed">
-              Seleccioná más piezas del mismo plano y clic derecho → Fusionar, o usá los checkboxes.
-            </p>
-          </div>
-        )}
-
-        {(canMergeSelected || mergeBlockedReason || canSplit) && (
-          <div className="px-4 py-3 border-b border-base-300/30 bg-base-100/60 space-y-2">
-            <p className="text-[11px] font-semibold uppercase tracking-widest text-base-content/40">
-              Componentes · fusión / división
-            </p>
-
-            {canMergeSelected && (
-              <button
-                type="button"
-                className="btn btn-primary btn-sm w-full rounded-xl gap-2"
-                onClick={handleMergeSelected}
-              >
-                <Link2 size={14} />
-                {mergeLabel}
-              </button>
-            )}
-
-            {mergeBlockedReason && (
-              <p className="text-[11px] text-base-content/45 leading-relaxed px-1">
-                {mergeBlockedReason}
-              </p>
-            )}
-
-            {canSplit && (
-              <>
-                <button
-                  type="button"
-                  className="btn btn-outline btn-sm w-full rounded-xl gap-2 border-warning/40 text-base-content/80 hover:border-warning"
-                  onClick={handleSplitComponents}
-                >
-                  <SquareSplitHorizontal size={14} />
-                  Dividir en componentes
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-outline btn-sm w-full rounded-xl gap-2 border-warning/40 text-base-content/80 hover:border-warning"
-                  onClick={handleSplitPanels}
-                >
-                  <SquareSplitHorizontal size={14} />
-                  Dividir en piezas
-                </button>
-                <p className="text-[11px] text-base-content/40 leading-relaxed px-1">
-                  Para paneles en L o escalones. Una pared lisa no necesita dividirse.
-                </p>
-              </>
-            )}
-
-            {selectedGroupIds.size >= 2 && !canMergeSelected && !mergeBlockedReason && (
-              <p className="text-[11px] text-base-content/45 leading-relaxed px-1">
-                Seleccioná varios componentes con Ctrl+clic o los checkboxes de la lista.
-              </p>
-            )}
-          </div>
-        )}
-
-        {selectedGroupIds.size >= 2 && !canMergeSelected && !mergeBlockedReason && (
-          <div className="px-4 py-2 border-b border-base-300/30 bg-base-100/40">
-            <p className="text-[11px] text-base-content/45 leading-relaxed">
-              Ctrl+clic en la lista para seleccionar varios componentes y fusionarlas.
-            </p>
-          </div>
-        )}
         </div>
         {/* /Pestaña: Selección */}
 

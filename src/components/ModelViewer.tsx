@@ -805,6 +805,49 @@ function Scene({
     };
   }, [selectedGeometry]);
 
+  // When reviewing wall-wall encounters, softly tint the *secondary* wall so it
+  // is easier to see its extent in 3D (same colour as the leader marker).
+  const secondaryEncounterGeometry = useMemo(() => {
+    const secondaryIds = leaderMarkers.filter((m) => !m.primary).map((m) => m.groupId);
+    if (secondaryIds.length === 0) return null;
+    const byId = new Map(groups.map((g) => [g.id, g]));
+    const faceIndices: number[] = [];
+    for (const gid of secondaryIds) {
+      const g = byId.get(gid);
+      if (!g) continue;
+      faceIndices.push(...g.faceIndices);
+    }
+    if (faceIndices.length === 0) return null;
+    return buildSelectedGeometry(faces, faceIndices);
+  }, [faces, groups, leaderMarkers]);
+
+  useEffect(() => {
+    return () => {
+      secondaryEncounterGeometry?.dispose();
+    };
+  }, [secondaryEncounterGeometry]);
+
+  const secondaryEncounterMaterial = useMemo(() => {
+    const m = new THREE.MeshStandardMaterial({
+      color: hexToNumber(palette.leaderSecondary),
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.22,
+      depthTest: true,
+      depthWrite: false,
+      roughness: 0.65,
+      metalness: 0.05,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
+    });
+    return m;
+  }, [palette.leaderSecondary]);
+
+  useEffect(() => {
+    return () => secondaryEncounterMaterial.dispose();
+  }, [secondaryEncounterMaterial]);
+
   // Centred target: average centroid of selected groups, or model centre.
   const focusTarget: Vec3 = selectedGroups.length > 0
     ? {
@@ -910,6 +953,14 @@ function Scene({
               <primitive object={materials.highlightWire} attach="material" />
             </lineSegments>
           </>
+        )}
+
+        {secondaryEncounterGeometry && (
+          <mesh
+            geometry={secondaryEncounterGeometry}
+            material={secondaryEncounterMaterial}
+            renderOrder={2}
+          />
         )}
 
         {markOpeningGroups.length > 0 && (
