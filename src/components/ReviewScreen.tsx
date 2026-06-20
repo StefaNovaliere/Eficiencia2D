@@ -44,7 +44,11 @@ import {
 import { useReviewHistory } from "@/hooks/useReviewHistory";
 import type { ModelViewerHandle } from "@/components/ModelViewer";
 import CutToolOverlay from "@/components/CutToolOverlay";
-import type { CutDragState, UserCut, ActiveCutShapeKind } from "@/core/user-cuts";
+import type {
+  CutDragState,
+  UserCut,
+  ActiveCutShapeKind,
+} from "@/core/user-cuts";
 import { cutDimensionsLabel } from "@/core/user-cuts";
 
 export type WallWallDecisions = Map<number, number>;
@@ -59,11 +63,7 @@ const ModelViewer = dynamic(() => import("./ModelViewer"), {
   ),
 });
 
-const ALL_CATEGORIES: FaceCategory[] = [
-  "floor",
-  "wall",
-  "discard",
-];
+const ALL_CATEGORIES: FaceCategory[] = ["floor", "wall", "discard"];
 
 // ---------------------------------------------------------------------------
 // Props
@@ -133,13 +133,20 @@ function findMergeClusterForGroupId(
   return null;
 }
 
-function findMergeSurvivorId(cluster: number[], groups: GeometryGroup[]): number | null {
+function findMergeSurvivorId(
+  cluster: number[],
+  groups: GeometryGroup[],
+): number | null {
   const present = groups.filter((g) => cluster.includes(g.id));
   if (present.length === 0) return null;
-  return present.reduce((best, g) => (g.totalArea > best.totalArea ? g : best)).id;
+  return present.reduce((best, g) => (g.totalArea > best.totalArea ? g : best))
+    .id;
 }
 
-function findMergeClusterIndex(cluster: number[] | null, merges: number[][]): number {
+function findMergeClusterIndex(
+  cluster: number[] | null,
+  merges: number[][],
+): number {
   if (!cluster) return -1;
   return merges.findIndex(
     (c) => c.length === cluster.length && c.every((id) => cluster.includes(id)),
@@ -194,6 +201,175 @@ function filterTrueMergeMembers(
   });
 }
 
+/** Expande ids con miembros de fusiones existentes y todas las coplanares. */
+function listCoplanarFacadeIds(
+  reference: GeometryGroup,
+  groups: GeometryGroup[],
+  overrides: Map<number, FaceCategory>,
+): number[] {
+  if (getEffectiveCategory(reference, overrides) !== "wall") return [];
+  return groups
+    .filter(
+      (g) =>
+        getEffectiveCategory(g, overrides) === "wall" &&
+        areGroupsCoplanar(reference, g),
+    )
+    .map((g) => g.id);
+}
+
+/** Mapea ids de miembros fusionados → superviviente en groups. */
+function buildWallIdAliasMap(
+  merges: number[][],
+  groups: GeometryGroup[],
+): Map<number, number> {
+  const map = new Map<number, number>();
+  for (const g of groups) map.set(g.id, g.id);
+  for (const cluster of merges) {
+    const survivor = findMergeSurvivorId(cluster, groups) ?? cluster[0];
+    for (const id of cluster) map.set(id, survivor);
+  }
+  return map;
+}
+
+function resolveWallId(id: number, aliasMap: Map<number, number>): number {
+  return aliasMap.get(id) ?? id;
+}
+
+function wallInPriority(
+  wallId: number,
+  priority: Set<number>,
+  aliasMap: Map<number, number>,
+): boolean {
+  const resolved = resolveWallId(wallId, aliasMap);
+  for (const pid of priority) {
+    if (resolveWallId(pid, aliasMap) === resolved) return true;
+  }
+  return false;
+}
+
+function yielderMatchesWall(
+  yieldId: number | undefined,
+  wallId: number,
+  aliasMap: Map<number, number>,
+): boolean {
+  if (yieldId == null) return false;
+  return resolveWallId(yieldId, aliasMap) === resolveWallId(wallId, aliasMap);
+}
+
+/** Id del lado fachada vs perpendicular en un cruce (para UI y bulk). */
+function facadeJointSides(
+  ww: WallWallJoint,
+  refGroup: GeometryGroup,
+  groups: GeometryGroup[],
+  aliasMap: Map<number, number>,
+  referenceResolved: number,
+): { facadeId: number; otherId: number } | null {
+  const groupFor = (id: number) =>
+    groups.find((g) => g.id === resolveWallId(id, aliasMap));
+  const ga = groupFor(ww.groupA);
+  const gb = groupFor(ww.groupB);
+  if (!ga || !gb) return null;
+
+  const aCoplanar = areGroupsCoplanar(refGroup, ga);
+  const bCoplanar = areGroupsCoplanar(refGroup, gb);
+
+  if (aCoplanar && !bCoplanar) return { facadeId: ww.groupA, otherId: ww.groupB };
+  if (bCoplanar && !aCoplanar) return { facadeId: ww.groupB, otherId: ww.groupA };
+
+  if (aCoplanar && bCoplanar) {
+    const ra = resolveWallId(ww.groupA, aliasMap);
+    const rb = resolveWallId(ww.groupB, aliasMap);
+    if (ra === referenceResolved && rb !== referenceResolved) {
+      return { facadeId: ww.groupA, otherId: ww.groupB };
+    }
+    if (rb === referenceResolved && ra !== referenceResolved) {
+      return { facadeId: ww.groupB, otherId: ww.groupA };
+    }
+  }
+  return null;
+}
+
+function resolveBulkYieldTarget(
+  ww: WallWallJoint,
+  refGroup: GeometryGroup,
+  groups: GeometryGroup[],
+  aliasMap: Map<number, number>,
+  referenceResolved: number,
+  onlyReferenceWall: boolean,
+): number | null {
+  const sides = facadeJointSides(ww, refGroup, groups, aliasMap, referenceResolved);
+  if (!sides) return null;
+  if (
+    onlyReferenceWall &&
+    resolveWallId(sides.facadeId, aliasMap) !== referenceResolved
+  ) {
+    return null;
+  }
+  return sides.otherId;
+}
+
+type WallWallListItem = {
+  ww: WallWallJoint;
+  hasThickness: boolean;
+};
+
+/** Cruces donde las paredes prioritarias ganan (las otras se acortan). */
+function countBulkYieldOthersJoints(
+  refGroup: GeometryGroup,
+  groups: GeometryGroup[],
+  wallWallList: WallWallListItem[],
+  aliasMap: Map<number, number>,
+  referenceResolved: number,
+  onlyReferenceWall: boolean,
+): number {
+  let n = 0;
+  for (const { ww, hasThickness } of wallWallList) {
+    if (!hasThickness) continue;
+    if (
+      resolveBulkYieldTarget(
+        ww,
+        refGroup,
+        groups,
+        aliasMap,
+        referenceResolved,
+        onlyReferenceWall,
+      ) != null
+    ) {
+      n++;
+    }
+  }
+  return n;
+}
+
+function applyBulkYieldOthersDecisions(
+  prev: WallWallDecisions,
+  refGroup: GeometryGroup,
+  groups: GeometryGroup[],
+  wallWallList: WallWallListItem[],
+  aliasMap: Map<number, number>,
+  referenceResolved: number,
+  onlyReferenceWall: boolean,
+): { next: WallWallDecisions; updated: number } {
+  const next = new Map(prev);
+  let updated = 0;
+  for (const { ww, hasThickness } of wallWallList) {
+    if (!hasThickness) continue;
+    const yieldId = resolveBulkYieldTarget(
+      ww,
+      refGroup,
+      groups,
+      aliasMap,
+      referenceResolved,
+      onlyReferenceWall,
+    );
+    if (yieldId == null) continue;
+    const prevYield = prev.get(ww.jointIndex) ?? ww.suggestedYieldGroupId;
+    if (!yielderMatchesWall(prevYield, yieldId, aliasMap)) updated++;
+    next.set(ww.jointIndex, yieldId);
+  }
+  return { next, updated };
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -220,14 +396,12 @@ export default function ReviewScreen({
   const [selectedGroupIds, setSelectedGroupIds] = useState<Set<number>>(
     () => new Set(),
   );
-  const [overrides, setOverrides] = useState<Map<number, FaceCategory>>(
-    () => {
-      if (!initialOverrides || initialOverrides.length === 0) return new Map();
-      const m = new Map<number, FaceCategory>();
-      for (const o of initialOverrides) m.set(o.groupId, o.newCategory);
-      return m;
-    },
-  );
+  const [overrides, setOverrides] = useState<Map<number, FaceCategory>>(() => {
+    if (!initialOverrides || initialOverrides.length === 0) return new Map();
+    const m = new Map<number, FaceCategory>();
+    for (const o of initialOverrides) m.set(o.groupId, o.newCategory);
+    return m;
+  });
   const [visibleCategories, setVisibleCategories] = useState<Set<FaceCategory>>(
     () => new Set(ALL_CATEGORIES),
   );
@@ -236,7 +410,9 @@ export default function ReviewScreen({
   const [hideSidebar, setHideSidebar] = useState(false);
   // Which wall-wall joint (by jointIndex) is highlighted with leader labels in
   // the 3D viewer. Null = none selected.
-  const [selectedJointIndex, setSelectedJointIndex] = useState<number | null>(null);
+  const [selectedJointIndex, setSelectedJointIndex] = useState<number | null>(
+    null,
+  );
   // Wall-wall joint decisions: jointIndex → groupId that yields. Seeded from
   // each joint's safe default suggestion (thinner wall yields), overridable.
   const [wallWallDecisions, setWallWallDecisions] = useState<WallWallDecisions>(
@@ -246,7 +422,8 @@ export default function ReviewScreen({
       }
       const m = new Map<number, number>();
       for (const ww of phase1.wallWallJoints) {
-        if (ww.suggestedYieldGroupId != null) m.set(ww.jointIndex, ww.suggestedYieldGroupId);
+        if (ww.suggestedYieldGroupId != null)
+          m.set(ww.jointIndex, ww.suggestedYieldGroupId);
       }
       return m;
     },
@@ -258,7 +435,9 @@ export default function ReviewScreen({
   );
   // Cortes manuales del usuario (panel-local, metros). El front captura el gesto
   // y muestra el preview; el backend aplica los cortes al generar.
-  const [userCuts, setUserCuts] = useState<UserCut[]>(() => initialUserCuts ?? []);
+  const [userCuts, setUserCuts] = useState<UserCut[]>(
+    () => initialUserCuts ?? [],
+  );
   const [cutToolMode, setCutToolMode] = useState(false);
   const [cutShapeKind, setCutShapeKind] = useState<ActiveCutShapeKind>("rect");
   const [cutDraft, setCutDraft] = useState<CutDragState | null>(null);
@@ -269,10 +448,14 @@ export default function ReviewScreen({
   /** Pared cuyo panel de encuentros está abierto (independiente de la selección 3D). */
   const [encountersWallId, setEncountersWallId] = useState<number | null>(null);
   /** Within a merged cluster, which original wall is currently focused. */
-  const [mergeMemberFocusId, setMergeMemberFocusId] = useState<number | null>(null);
+  const [mergeMemberFocusId, setMergeMemberFocusId] = useState<number | null>(
+    null,
+  );
   const groupFaceIndexByIdRef = useRef<Map<number, number[]>>(new Map());
   const [mergeCardOpen, setMergeCardOpen] = useState(true);
-  const [hiddenGroupIds, setHiddenGroupIds] = useState<Set<number>>(() => new Set());
+  const [hiddenGroupIds, setHiddenGroupIds] = useState<Set<number>>(
+    () => new Set(),
+  );
   const [bulkActionNotice, setBulkActionNotice] = useState<string | null>(null);
   // Pestaña activa del panel derecho: lista de capas vs acciones de la selección.
   const [sidebarTab, setSidebarTab] = useState<"capas" | "seleccion">("capas");
@@ -282,17 +465,33 @@ export default function ReviewScreen({
     mode: "discard" | "promote";
     promoteTarget?: "wall" | "floor";
   } | null>(null);
-  const [bulkSimilarChecked, setBulkSimilarChecked] = useState<Set<number>>(() => new Set());
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [bulkSimilarChecked, setBulkSimilarChecked] = useState<Set<number>>(
+    () => new Set(),
+  );
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
   const viewerAreaRef = useRef<HTMLDivElement>(null);
   const skipWallWallReseedRef = useRef(false);
 
   // Box selection
   const [boxSelectMode, setBoxSelectMode] = useState(false);
-  const [dragRect, setDragRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  const [dragRect, setDragRect] = useState<{
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+  } | null>(null);
   const viewerRef = useRef<ModelViewerHandle | null>(null);
-  const boxDragRef = useRef<{ startX: number; startY: number; active: boolean }>({
-    startX: 0, startY: 0, active: false,
+  const boxDragRef = useRef<{
+    startX: number;
+    startY: number;
+    active: boolean;
+  }>({
+    startX: 0,
+    startY: 0,
+    active: false,
   });
 
   const historyState = useMemo(
@@ -305,7 +504,8 @@ export default function ReviewScreen({
     [overrides, hiddenGroupIds, wallWallDecisions, userCuts],
   );
 
-  const { canUndo, canRedo, pushHistory, undo, redo } = useReviewHistory(historyState);
+  const { canUndo, canRedo, pushHistory, undo, redo } =
+    useReviewHistory(historyState);
 
   const restoreHistorySnapshot = useCallback(
     (snap: ReturnType<typeof undo>) => {
@@ -423,17 +623,20 @@ export default function ReviewScreen({
     return faces && faces.length > 0 ? faces : null;
   }, [mergeMemberFocusId, groupFaceIndexById]);
 
-  const handleHideGroup = useCallback((id: number) => {
-    pushHistory();
-    setHiddenGroupIds((prev) => new Set(prev).add(id));
-    setSelectedGroupIds((prev) => {
-      if (!prev.has(id)) return prev;
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
-    });
-    setSelectedJointIndex(null);
-  }, [pushHistory]);
+  const handleHideGroup = useCallback(
+    (id: number) => {
+      pushHistory();
+      setHiddenGroupIds((prev) => new Set(prev).add(id));
+      setSelectedGroupIds((prev) => {
+        if (!prev.has(id)) return prev;
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+      setSelectedJointIndex(null);
+    },
+    [pushHistory],
+  );
 
   const handleSelectGroup = useCallback((id: number) => {
     setSelectedGroupIds((prev) => {
@@ -457,14 +660,17 @@ export default function ReviewScreen({
     setSelectedJointIndex(null);
   }, []);
 
-  const handleShowGroup = useCallback((id: number) => {
-    pushHistory();
-    setHiddenGroupIds((prev) => {
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
-    });
-  }, [pushHistory]);
+  const handleShowGroup = useCallback(
+    (id: number) => {
+      pushHistory();
+      setHiddenGroupIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    },
+    [pushHistory],
+  );
 
   const handleShowAllHidden = useCallback(() => {
     if (hiddenGroupIds.size === 0) return;
@@ -473,11 +679,7 @@ export default function ReviewScreen({
   }, [hiddenGroupIds.size, pushHistory]);
 
   const applyCategoryOverride = useCallback(
-    (
-      next: Map<number, FaceCategory>,
-      gid: number,
-      category: FaceCategory,
-    ) => {
+    (next: Map<number, FaceCategory>, gid: number, category: FaceCategory) => {
       const original = phase1.groups.find((g) => g.id === gid)?.category;
       if (original === category) next.delete(gid);
       else next.set(gid, category);
@@ -526,35 +728,6 @@ export default function ReviewScreen({
     return findGroupsWithSameArea(phase1.groups, selectedGroup, overrides);
   }, [selectedGroup, phase1.groups, overrides]);
 
-  /** True when the "Selección" tab has panels/actions worth showing. */
-  const hasSelectionTabContent = useMemo(() => {
-    if (selectedGroupIds.size === 0) return false;
-    if (selectedGroupIds.size >= 2) return true;
-    if (encountersWallId != null) return true;
-    if (selectedMergeCluster && displayMergeMembers.length >= 2) return true;
-    if (cutsForSelectedGroup.length > 0) return true;
-    if (sameAreaMatches.length > 0) return true;
-    if (sameAreaDiscardMatches.length > 0) return true;
-    return false;
-  }, [
-    selectedGroupIds.size,
-    encountersWallId,
-    selectedMergeCluster,
-    displayMergeMembers.length,
-    cutsForSelectedGroup.length,
-    sameAreaMatches.length,
-    sameAreaDiscardMatches.length,
-  ]);
-
-  // Ir a "Selección" solo si hay contenido; si no, quedarse en "Componentes".
-  useEffect(() => {
-    setSidebarTab((prev) => {
-      if (selectedGroupIds.size === 0) return "capas";
-      if (hasSelectionTabContent) return "seleccion";
-      return "capas";
-    });
-  }, [selectedGroupIds.size, hasSelectionTabContent]);
-
   const openBulkSimilarModal = useCallback(
     (mode: "discard" | "promote", promoteTarget?: "wall" | "floor") => {
       if (!selectedGroup) return;
@@ -580,7 +753,7 @@ export default function ReviewScreen({
     const target: FaceCategory =
       bulkSimilarModal.mode === "discard"
         ? "discard"
-        : bulkSimilarModal.promoteTarget ?? "wall";
+        : (bulkSimilarModal.promoteTarget ?? "wall");
 
     pushHistory();
     setOverrides((prev) => {
@@ -602,7 +775,12 @@ export default function ReviewScreen({
       window.setTimeout(() => setBulkActionNotice(null), 4000);
     }
     setBulkSimilarModal(null);
-  }, [bulkSimilarModal, bulkSimilarChecked, applyCategoryOverride, pushHistory]);
+  }, [
+    bulkSimilarModal,
+    bulkSimilarChecked,
+    applyCategoryOverride,
+    pushHistory,
+  ]);
 
   // Re-seed wall-wall decisions whenever the effective topology changes (axis
   // rotation, min-area, or merge changes recompute joints and their indices).
@@ -618,7 +796,8 @@ export default function ReviewScreen({
     effectiveRef.current = phase1;
     const m = new Map<number, number>();
     for (const ww of phase1.wallWallJoints) {
-      if (ww.suggestedYieldGroupId != null) m.set(ww.jointIndex, ww.suggestedYieldGroupId);
+      if (ww.suggestedYieldGroupId != null)
+        m.set(ww.jointIndex, ww.suggestedYieldGroupId);
     }
     setWallWallDecisions(m);
   }, [phase1]);
@@ -636,12 +815,15 @@ export default function ReviewScreen({
     onRotateAxis();
   }, [onRotateAxis, isRecomputing, isGenerating]);
 
-  const handleMinAreaChangeWithReset = useCallback((newArea: number) => {
-    setOverrides(new Map());
-    setSelectedGroupIds(new Set());
-    setHiddenGroupIds(new Set());
-    onMinAreaChange(newArea);
-  }, [onMinAreaChange]);
+  const handleMinAreaChangeWithReset = useCallback(
+    (newArea: number) => {
+      setOverrides(new Map());
+      setSelectedGroupIds(new Set());
+      setHiddenGroupIds(new Set());
+      onMinAreaChange(newArea);
+    },
+    [onMinAreaChange],
+  );
 
   // Merge selected coplanar groups into one panel.
   const selectedGroups = useMemo(() => {
@@ -651,7 +833,10 @@ export default function ReviewScreen({
   }, [selectedGroupIds, phase1.groups]);
 
   const selectedWallGroups = useMemo(
-    () => selectedGroups.filter((g) => getEffectiveCategory(g, overrides) === "wall"),
+    () =>
+      selectedGroups.filter(
+        (g) => getEffectiveCategory(g, overrides) === "wall",
+      ),
     [selectedGroups, overrides],
   );
 
@@ -678,7 +863,8 @@ export default function ReviewScreen({
   const mergeBlockedReason = useMemo(() => {
     if (selectedGroups.length < 2) return null;
     if (canMergeSelected) return null;
-    if (selectedWallGroups.length < 2) return "Solo se pueden fusionar paredes.";
+    if (selectedWallGroups.length < 2)
+      return "Solo se pueden fusionar paredes.";
     return "No hay paredes coplanares en la selección.";
   }, [selectedGroups.length, selectedWallGroups.length, canMergeSelected]);
 
@@ -744,9 +930,12 @@ export default function ReviewScreen({
     );
   }, [displayMergeMembers]);
 
-  const handleUnmerge = useCallback((mergeIndex: number) => {
-    onRemoveMerge(mergeIndex);
-  }, [onRemoveMerge]);
+  const handleUnmerge = useCallback(
+    (mergeIndex: number) => {
+      onRemoveMerge(mergeIndex);
+    },
+    [onRemoveMerge],
+  );
 
   const handleDivideMerged = useCallback(() => {
     if (selectedMergeIndex < 0) return;
@@ -761,7 +950,12 @@ export default function ReviewScreen({
   // Remove ONLY the currently selected wall from its merge cluster.
   // If the remaining cluster is still 2+ walls, re-add it; otherwise drop it.
   const handleRemoveSelectedFromMerge = useCallback(() => {
-    if (selectedMergeIndex < 0 || !selectedMergeCluster || displayMergeMembers.length === 0) return;
+    if (
+      selectedMergeIndex < 0 ||
+      !selectedMergeCluster ||
+      displayMergeMembers.length === 0
+    )
+      return;
     const selId = mergeMemberFocusId ?? displayMergeMembers[0];
     if (selId == null) return;
     const cluster = merges[selectedMergeIndex];
@@ -774,8 +968,8 @@ export default function ReviewScreen({
 
     const nextSelection =
       remaining.length >= 2
-        ? findMergeSurvivorId(remaining, phase1.groups) ?? remaining[0]
-        : remaining[0] ?? null;
+        ? (findMergeSurvivorId(remaining, phase1.groups) ?? remaining[0])
+        : (remaining[0] ?? null);
     setSelectedGroupIds(new Set(nextSelection != null ? [nextSelection] : []));
     setSelectedJointIndex(null);
     setMergeMemberFocusId(remaining.length >= 2 ? remaining[0] : null);
@@ -854,7 +1048,9 @@ export default function ReviewScreen({
 
   // Stats (per effective category).
   const stats = useMemo(() => {
-    let floors = 0, walls = 0, discarded = 0;
+    let floors = 0,
+      walls = 0,
+      discarded = 0;
     for (const group of phase1.groups) {
       const cat = overrides.get(group.id) ?? group.category;
       if (cat === "floor") floors++;
@@ -871,7 +1067,10 @@ export default function ReviewScreen({
     const effCat = (id: number) =>
       overrides.get(id) ?? groupById.get(id)?.category ?? "discard";
     return phase1.wallWallJoints
-      .filter((ww) => effCat(ww.groupA) !== "discard" && effCat(ww.groupB) !== "discard")
+      .filter(
+        (ww) =>
+          effCat(ww.groupA) !== "discard" && effCat(ww.groupB) !== "discard",
+      )
       .map((ww) => ({
         ww,
         labelA: groupById.get(ww.groupA)?.label ?? `Grupo ${ww.groupA}`,
@@ -883,6 +1082,203 @@ export default function ReviewScreen({
           (groupById.get(ww.groupB)?.thickness ?? 0) > 0.001,
       }));
   }, [phase1.wallWallJoints, phase1.groups, overrides, panelIdByGroup]);
+
+  const wallIdAliasMap = useMemo(
+    () => buildWallIdAliasMap(merges, phase1.groups),
+    [merges, phase1.groups],
+  );
+
+  /** Todas las paredes coplanares visibles (misma fachada / mismo plano). */
+  const coplanarFacadeIds = useMemo(() => {
+    if (
+      !selectedGroup ||
+      getEffectiveCategory(selectedGroup, overrides) !== "wall"
+    )
+      return [];
+    return listCoplanarFacadeIds(selectedGroup, phase1.groups, overrides);
+  }, [selectedGroup, phase1.groups, overrides]);
+
+  const facadeReferenceResolved = useMemo(() => {
+    if (!selectedGroup) return -1;
+    return resolveWallId(selectedGroup.id, wallIdAliasMap);
+  }, [selectedGroup, wallIdAliasMap]);
+
+  const facadeRefGroup = useMemo(() => {
+    if (facadeReferenceResolved < 0) return null;
+    return (
+      phase1.groups.find((g) => g.id === facadeReferenceResolved) ?? selectedGroup
+    );
+  }, [facadeReferenceResolved, phase1.groups, selectedGroup]);
+
+  const bulkYieldCountForWall = useMemo(() => {
+    if (!facadeRefGroup || facadeReferenceResolved < 0) return 0;
+    return countBulkYieldOthersJoints(
+      facadeRefGroup,
+      phase1.groups,
+      wallWallList,
+      wallIdAliasMap,
+      facadeReferenceResolved,
+      true,
+    );
+  }, [
+    facadeRefGroup,
+    phase1.groups,
+    wallWallList,
+    wallIdAliasMap,
+    facadeReferenceResolved,
+  ]);
+
+  const bulkYieldCountForFacade = useMemo(() => {
+    if (!facadeRefGroup || facadeReferenceResolved < 0) return 0;
+    return countBulkYieldOthersJoints(
+      facadeRefGroup,
+      phase1.groups,
+      wallWallList,
+      wallIdAliasMap,
+      facadeReferenceResolved,
+      false,
+    );
+  }, [
+    facadeRefGroup,
+    phase1.groups,
+    wallWallList,
+    wallIdAliasMap,
+    facadeReferenceResolved,
+  ]);
+
+  const canMergeCoplanarFacade = useMemo(() => {
+    if (coplanarFacadeIds.length < 2) return false;
+    const existing = findMergeClusterForGroupId(
+      coplanarFacadeIds[0],
+      merges,
+      phase1.groups,
+    );
+    if (!existing) return true;
+    const resolvedExisting = new Set(
+      existing.map((id) => resolveWallId(id, wallIdAliasMap)),
+    );
+    return !coplanarFacadeIds.every((id) => resolvedExisting.has(id));
+  }, [coplanarFacadeIds, merges, phase1.groups, wallIdAliasMap]);
+
+  const showFacadeActions =
+    selectedGroupIds.size === 1 &&
+    selectedGroup != null &&
+    getEffectiveCategory(selectedGroup, overrides) === "wall" &&
+    (canMergeCoplanarFacade ||
+      bulkYieldCountForWall > 0 ||
+      bulkYieldCountForFacade > 0);
+
+  /** True when the "Selección" tab has panels/actions worth showing. */
+  const hasSelectionTabContent = useMemo(() => {
+    if (selectedGroupIds.size === 0) return false;
+    if (selectedGroupIds.size >= 2) return true;
+    if (encountersWallId != null) return true;
+    if (selectedMergeCluster && displayMergeMembers.length >= 2) return true;
+    if (cutsForSelectedGroup.length > 0) return true;
+    if (sameAreaMatches.length > 0) return true;
+    if (sameAreaDiscardMatches.length > 0) return true;
+    if (showFacadeActions) return true;
+    return false;
+  }, [
+    selectedGroupIds.size,
+    encountersWallId,
+    selectedMergeCluster,
+    displayMergeMembers.length,
+    cutsForSelectedGroup.length,
+    sameAreaMatches.length,
+    sameAreaDiscardMatches.length,
+    showFacadeActions,
+  ]);
+
+  // Ir a "Selección" solo si hay contenido; si no, quedarse en "Componentes".
+  useEffect(() => {
+    setSidebarTab((prev) => {
+      if (selectedGroupIds.size === 0) return "capas";
+      if (hasSelectionTabContent) return "seleccion";
+      return "capas";
+    });
+  }, [selectedGroupIds.size, hasSelectionTabContent]);
+
+  const handleBulkYieldOthers = useCallback(
+    (useFullFacade: boolean) => {
+      if (!facadeRefGroup || facadeReferenceResolved < 0) return;
+      if (
+        countBulkYieldOthersJoints(
+          facadeRefGroup,
+          phase1.groups,
+          wallWallList,
+          wallIdAliasMap,
+          facadeReferenceResolved,
+          !useFullFacade,
+        ) === 0
+      )
+        return;
+      pushHistory();
+      const result = applyBulkYieldOthersDecisions(
+        wallWallDecisions,
+        facadeRefGroup,
+        phase1.groups,
+        wallWallList,
+        wallIdAliasMap,
+        facadeReferenceResolved,
+        !useFullFacade,
+      );
+      setWallWallDecisions(result.next);
+      if (result.updated > 0) {
+        setBulkActionNotice(
+          `Se actualizaron ${result.updated} cruce${result.updated !== 1 ? "s" : ""}: las otras paredes se acortan`,
+        );
+        window.setTimeout(() => setBulkActionNotice(null), 4000);
+      }
+    },
+    [
+      facadeRefGroup,
+      facadeReferenceResolved,
+      phase1.groups,
+      wallWallList,
+      wallWallDecisions,
+      wallIdAliasMap,
+      pushHistory,
+    ],
+  );
+
+  const handleMergeCoplanarFacade = useCallback(() => {
+    if (
+      !selectedGroup ||
+      coplanarFacadeIds.length < 2 ||
+      !canMergeCoplanarFacade
+    )
+      return;
+    const cluster = coplanarFacadeIds.filter((id) =>
+      phase1.groups.some((g) => g.id === id),
+    );
+    if (cluster.length < 2) return;
+    const resolvedCluster = new Set(
+      cluster.map((id) => resolveWallId(id, wallIdAliasMap)),
+    );
+    const nextMerges = merges.filter(
+      (c) =>
+        !c.some((id) => resolvedCluster.has(resolveWallId(id, wallIdAliasMap))),
+    );
+    nextMerges.push(cluster);
+    onReplaceMerges(nextMerges);
+    const survivorId =
+      findMergeSurvivorId(cluster, phase1.groups) ?? cluster[0];
+    setSelectedGroupIds(new Set([survivorId]));
+    setMergeMemberFocusId(null);
+    setEncountersWallId(survivorId);
+    setContextMenu(null);
+    setBulkActionNotice(`Fusionando ${cluster.length} paredes de la fachada…`);
+    window.setTimeout(() => setBulkActionNotice(null), 4000);
+  }, [
+    selectedGroup,
+    coplanarFacadeIds,
+    canMergeCoplanarFacade,
+    merges,
+    onReplaceMerges,
+    phase1.groups,
+    wallIdAliasMap,
+  ]);
 
   // Abrir panel de encuentros al seleccionar una pared con cruces (solo si aún no está abierto).
   useEffect(() => {
@@ -904,68 +1300,92 @@ export default function ReviewScreen({
   // anchored at each wall's centroid and tagged with its panel id (A#/B#).
   const leaderMarkers = useMemo<LeaderMarker[]>(() => {
     if (selectedJointIndex == null) return [];
-    const ww = phase1.wallWallJoints.find((w) => w.jointIndex === selectedJointIndex);
+    const ww = phase1.wallWallJoints.find(
+      (w) => w.jointIndex === selectedJointIndex,
+    );
     if (!ww) return [];
-    const focusId = encountersWallId ?? (selectedGroupIds.size === 1 ? Array.from(selectedGroupIds)[0] : ww.groupA);
-    const cluster = findMergeClusterForGroupId(focusId, merges, phase1.groups);
-    const primaryId =
-      (cluster ? findMergeSurvivorId(cluster, phase1.groups) : null) ?? focusId;
+    const effYielder =
+      wallWallDecisions.get(ww.jointIndex) ?? ww.suggestedYieldGroupId;
     const byId = new Map(phase1.groups.map((g) => [g.id, g]));
     const out: LeaderMarker[] = [];
     for (const gid of [ww.groupA, ww.groupB]) {
-      const g = byId.get(gid);
+      const resolved = resolveWallId(gid, wallIdAliasMap);
+      const g = byId.get(resolved) ?? byId.get(gid);
       if (!g) continue;
+      const yields = yielderMatchesWall(effYielder, gid, wallIdAliasMap);
       out.push({
-        groupId: gid,
+        groupId: g.id,
         anchor: g.centroid,
-        label: panelIdByGroup.get(gid) ?? "",
-        primary: gid === primaryId,
+        label: panelIdByGroup.get(gid) ?? panelIdByGroup.get(g.id) ?? "",
+        primary: !yields,
       });
     }
     return out;
-  }, [selectedJointIndex, phase1, selectedGroupIds, panelIdByGroup, encountersWallId, merges]);
+  }, [
+    selectedJointIndex,
+    phase1,
+    panelIdByGroup,
+    wallWallDecisions,
+    wallIdAliasMap,
+  ]);
 
   const viewToolBtn =
     "btn btn-sm btn-ghost h-9 min-h-9 w-9 px-0 rounded-lg hover:bg-base-200/80";
 
   // Box selection pointer handlers — placed after phase1 & hiddenGroupIds
-  const handleBoxPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    if (e.button !== 0) return;
-    e.preventDefault();
-    e.currentTarget.setPointerCapture(e.pointerId);
-    boxDragRef.current = { startX: e.clientX, startY: e.clientY, active: true };
-    setDragRect(null);
-  }, []);
+  const handleBoxPointerDown = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      e.currentTarget.setPointerCapture(e.pointerId);
+      boxDragRef.current = {
+        startX: e.clientX,
+        startY: e.clientY,
+        active: true,
+      };
+      setDragRect(null);
+    },
+    [],
+  );
 
-  const handleBoxPointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    if (!boxDragRef.current.active) return;
-    const { startX, startY } = boxDragRef.current;
-    setDragRect({
-      x: Math.min(startX, e.clientX),
-      y: Math.min(startY, e.clientY),
-      w: Math.abs(e.clientX - startX),
-      h: Math.abs(e.clientY - startY),
-    });
-  }, []);
+  const handleBoxPointerMove = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (!boxDragRef.current.active) return;
+      const { startX, startY } = boxDragRef.current;
+      setDragRect({
+        x: Math.min(startX, e.clientX),
+        y: Math.min(startY, e.clientY),
+        w: Math.abs(e.clientX - startX),
+        h: Math.abs(e.clientY - startY),
+      });
+    },
+    [],
+  );
 
-  const handleBoxPointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    if (!boxDragRef.current.active) return;
-    boxDragRef.current.active = false;
-    const rect = dragRect;
-    setDragRect(null);
+  const handleBoxPointerUp = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (!boxDragRef.current.active) return;
+      boxDragRef.current.active = false;
+      const rect = dragRect;
+      setDragRect(null);
 
-    if (!rect || rect.w < 6 || rect.h < 6) return;
+      if (!rect || rect.w < 6 || rect.h < 6) return;
 
-    const selected = viewerRef.current?.selectGroupsInRect(
-      rect.x, rect.y, rect.w, rect.h,
-      hiddenGroupIds,
-    );
+      const selected = viewerRef.current?.selectGroupsInRect(
+        rect.x,
+        rect.y,
+        rect.w,
+        rect.h,
+        hiddenGroupIds,
+      );
 
-    if (selected && selected.size > 0) {
-      setSelectedGroupIds(selected);
-      setSelectedJointIndex(null);
-    }
-  }, [dragRect, hiddenGroupIds]);
+      if (selected && selected.size > 0) {
+        setSelectedGroupIds(selected);
+        setSelectedJointIndex(null);
+      }
+    },
+    [dragRect, hiddenGroupIds],
+  );
 
   // Keyboard shortcut: F to merge selected groups
   useEffect(() => {
@@ -978,7 +1398,8 @@ export default function ReviewScreen({
           target.tagName === "TEXTAREA" ||
           target.tagName === "SELECT" ||
           target.isContentEditable)
-      ) return;
+      )
+        return;
 
       if (e.key === "c" || e.key === "C") {
         e.preventDefault();
@@ -992,7 +1413,7 @@ export default function ReviewScreen({
         return;
       }
 
-      if ((e.key === "s" || e.key === "S")) {
+      if (e.key === "s" || e.key === "S") {
         e.preventDefault();
         setCutToolMode(false);
         setCutDraft(null);
@@ -1000,7 +1421,7 @@ export default function ReviewScreen({
         return;
       }
 
-      if ((e.key === "v" || e.key === "V")) {
+      if (e.key === "v" || e.key === "V") {
         e.preventDefault();
         setCutToolMode(false);
         setCutDraft(null);
@@ -1008,7 +1429,7 @@ export default function ReviewScreen({
         return;
       }
 
-      if ((e.key === "d" || e.key === "D")) {
+      if (e.key === "d" || e.key === "D") {
         if (canSplitMerged) {
           e.preventDefault();
           handleDivideMerged();
@@ -1023,7 +1444,18 @@ export default function ReviewScreen({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [canMergeSelected, handleMergeSelected, canSplitMerged, handleDivideMerged]);
+  }, [
+    canMergeSelected,
+    handleMergeSelected,
+    canSplitMerged,
+    handleDivideMerged,
+  ]);
+
+  const [showWallWallHelp2, setShowWallWallHelp2] = useState(false);
+
+  const wallWallHelp2Title = useMemo(() => {
+    return showWallWallHelp2 ? "Ocultar ayuda" : "¿Qué es esto?";
+  }, [showWallWallHelp2]);
 
   return (
     <div className="fixed inset-0 z-50 bg-base-200/40 flex flex-col md:flex-row overflow-hidden">
@@ -1066,7 +1498,9 @@ export default function ReviewScreen({
         {isRecomputing && (
           <div className="absolute inset-0 z-40 flex flex-col items-center justify-center gap-3 bg-base-200/50 backdrop-blur-sm">
             <span className="loading loading-spinner loading-lg text-primary" />
-            <p className="text-sm font-medium text-base-content/80">Recalculando en el servidor…</p>
+            <p className="text-sm font-medium text-base-content/80">
+              Recalculando en el servidor…
+            </p>
           </div>
         )}
 
@@ -1089,7 +1523,12 @@ export default function ReviewScreen({
         {dragRect && (
           <div
             className="fixed z-30 pointer-events-none border-2 border-primary bg-primary/10 rounded-sm"
-            style={{ left: dragRect.x, top: dragRect.y, width: dragRect.w, height: dragRect.h }}
+            style={{
+              left: dragRect.x,
+              top: dragRect.y,
+              width: dragRect.w,
+              height: dragRect.h,
+            }}
           />
         )}
 
@@ -1110,40 +1549,49 @@ export default function ReviewScreen({
                 {mergeLabel}
               </button>
             )}
-            {selectedGroupIds.size >= 2 && !canMergeSelected && mergeBlockedReason && (
-              <p className="px-3 py-2 text-[11px] text-base-content/45 leading-relaxed border-b border-base-300/30">
-                {mergeBlockedReason}
-              </p>
-            )}
+            {selectedGroupIds.size >= 2 &&
+              !canMergeSelected &&
+              mergeBlockedReason && (
+                <p className="px-3 py-2 text-[11px] text-base-content/45 leading-relaxed border-b border-base-300/30">
+                  {mergeBlockedReason}
+                </p>
+              )}
             {canSplitMerged && (
               <button
                 type="button"
                 className="flex w-full items-center gap-2 px-3 py-2 text-sm text-left hover:bg-base-200/80 transition-colors"
-                onClick={() => { handleDivideMerged(); setContextMenu(null); }}
-              >
-                <SquareSplitHorizontal size={15} className="text-base-content/70 shrink-0" />
-                {divideAllLabel}
-              </button>
-            )}
-            {selectedGroup && getEffectiveCategory(selectedGroup, overrides) !== "discard" && (
-              <button
-                type="button"
-                className={`flex w-full items-center gap-2 px-3 py-2 text-sm text-left transition-colors ${
-                  markGroupIds.has(selectedGroup.id)
-                    ? "hover:bg-error/10 text-error"
-                    : "hover:bg-base-200/80"
-                }`}
                 onClick={() => {
-                  handleToggleMark(selectedGroup.id);
+                  handleDivideMerged();
                   setContextMenu(null);
                 }}
               >
-                <PenLine size={15} className="shrink-0" />
-                {markGroupIds.has(selectedGroup.id)
-                  ? "Desmarcar aberturas"
-                  : "Marcar aberturas (grabar en rojo)"}
+                <SquareSplitHorizontal
+                  size={15}
+                  className="text-base-content/70 shrink-0"
+                />
+                {divideAllLabel}
               </button>
             )}
+            {selectedGroup &&
+              getEffectiveCategory(selectedGroup, overrides) !== "discard" && (
+                <button
+                  type="button"
+                  className={`flex w-full items-center gap-2 px-3 py-2 text-sm text-left transition-colors ${
+                    markGroupIds.has(selectedGroup.id)
+                      ? "hover:bg-error/10 text-error"
+                      : "hover:bg-base-200/80"
+                  }`}
+                  onClick={() => {
+                    handleToggleMark(selectedGroup.id);
+                    setContextMenu(null);
+                  }}
+                >
+                  <PenLine size={15} className="shrink-0" />
+                  {markGroupIds.has(selectedGroup.id)
+                    ? "Desmarcar aberturas"
+                    : "Marcar aberturas (grabar en rojo)"}
+                </button>
+              )}
             {selectedGroupIds.size > 0 && (
               <button
                 type="button"
@@ -1153,7 +1601,8 @@ export default function ReviewScreen({
                   pushHistory();
                   setOverrides((prev) => {
                     const next = new Map(prev);
-                    for (const gid of ids) applyCategoryOverride(next, gid, "discard");
+                    for (const gid of ids)
+                      applyCategoryOverride(next, gid, "discard");
                     return next;
                   });
                   setSelectedGroupIds(new Set());
@@ -1161,7 +1610,10 @@ export default function ReviewScreen({
                 }}
               >
                 <Trash2 size={15} className="shrink-0" />
-                Descartar {selectedGroupIds.size === 1 ? "capa" : `${selectedGroupIds.size} capas`}
+                Descartar{" "}
+                {selectedGroupIds.size === 1
+                  ? "capa"
+                  : `${selectedGroupIds.size} capas`}
               </button>
             )}
             {selectedGroupIds.size > 0 && (
@@ -1171,7 +1623,10 @@ export default function ReviewScreen({
                 onClick={handleHideSelected}
               >
                 <EyeOff size={15} className="text-base-content/60 shrink-0" />
-                Ocultar {selectedGroupIds.size === 1 ? "capa" : `${selectedGroupIds.size} capas`}
+                Ocultar{" "}
+                {selectedGroupIds.size === 1
+                  ? "capa"
+                  : `${selectedGroupIds.size} capas`}
               </button>
             )}
           </div>
@@ -1192,7 +1647,10 @@ export default function ReviewScreen({
             <div className="hidden sm:block w-px h-7 bg-base-300/50" />
 
             <div className="inline-flex items-center gap-0.5 p-0.5 rounded-xl bg-base-200/50">
-              <div className="tooltip tooltip-bottom" data-tip="Deshacer (Ctrl+Z)">
+              <div
+                className="tooltip tooltip-bottom"
+                data-tip="Deshacer (Ctrl+Z)"
+              >
                 <button
                   type="button"
                   className={viewToolBtn}
@@ -1203,7 +1661,10 @@ export default function ReviewScreen({
                   <ArrowBackIcon size={15} />
                 </button>
               </div>
-              <div className="tooltip tooltip-bottom" data-tip="Rehacer (Ctrl+Y)">
+              <div
+                className="tooltip tooltip-bottom"
+                data-tip="Rehacer (Ctrl+Y)"
+              >
                 <button
                   type="button"
                   className={viewToolBtn}
@@ -1234,7 +1695,10 @@ export default function ReviewScreen({
                   <MousePointer2 size={15} />
                 </button>
               </div>
-              <div className="tooltip tooltip-bottom" data-tip="Selección por área (S)">
+              <div
+                className="tooltip tooltip-bottom"
+                data-tip="Selección por área (S)"
+              >
                 <button
                   type="button"
                   className={`${viewToolBtn} ${boxSelectMode ? "bg-primary/15 text-primary hover:bg-primary/20" : ""}`}
@@ -1284,9 +1748,21 @@ export default function ReviewScreen({
                 </span>
                 {(
                   [
-                    { kind: "rect" as const, icon: RectangleHorizontal, tip: "Rectángulo (⇧ cuadrado)" },
-                    { kind: "circle" as const, icon: Circle, tip: "Óvalo desde esquina (⇧ círculo)" },
-                    { kind: "line" as const, icon: Minus, tip: "Línea de corte (⇧ recta)" },
+                    {
+                      kind: "rect" as const,
+                      icon: RectangleHorizontal,
+                      tip: "Rectángulo (⇧ cuadrado)",
+                    },
+                    {
+                      kind: "circle" as const,
+                      icon: Circle,
+                      tip: "Óvalo desde esquina (⇧ círculo)",
+                    },
+                    {
+                      kind: "line" as const,
+                      icon: Minus,
+                      tip: "Línea de corte (⇧ recta)",
+                    },
                   ] as const
                 ).map(({ kind, icon: Icon, tip }) => (
                   <button
@@ -1320,14 +1796,19 @@ export default function ReviewScreen({
             {hiddenGroupIds.size > 0 && (
               <>
                 <div className="inline-flex items-center gap-0.5 p-0.5 rounded-xl bg-base-200/50">
-                  <div className="tooltip tooltip-bottom" data-tip="Mostrar ocultos">
+                  <div
+                    className="tooltip tooltip-bottom"
+                    data-tip="Mostrar ocultos"
+                  >
                     <button
                       type="button"
                       className={`${viewToolBtn} w-auto px-2 gap-1`}
                       onClick={handleShowAllHidden}
                     >
                       <Eye size={14} />
-                      <span className="text-xs font-semibold tabular-nums">{hiddenGroupIds.size}</span>
+                      <span className="text-xs font-semibold tabular-nums">
+                        {hiddenGroupIds.size}
+                      </span>
                     </button>
                   </div>
                 </div>
@@ -1337,12 +1818,21 @@ export default function ReviewScreen({
 
             {/* Vista y opciones — divulgación progresiva en un solo menú */}
             <div className="dropdown dropdown-end">
-              <div tabIndex={0} role="button" className="btn btn-sm btn-ghost gap-1.5 rounded-lg">
+              <div
+                tabIndex={0}
+                role="button"
+                className="btn btn-sm btn-ghost gap-1.5 rounded-lg"
+              >
                 <SlidersHorizontal size={15} />
-                <span className="text-sm font-medium hidden sm:inline">Vista</span>
+                <span className="text-sm font-medium hidden sm:inline">
+                  Vista
+                </span>
                 <ChevronDown size={14} className="opacity-60" />
               </div>
-              <ul tabIndex={0} className="dropdown-content menu bg-base-100 rounded-2xl shadow-xl border border-base-300/40 w-64 p-2 mt-2 z-30">
+              <ul
+                tabIndex={0}
+                className="dropdown-content menu bg-base-100 rounded-2xl shadow-xl border border-base-300/40 w-64 p-2 mt-2 z-30"
+              >
                 <li>
                   <button
                     type="button"
@@ -1351,15 +1841,23 @@ export default function ReviewScreen({
                     className="justify-between"
                   >
                     <span className="flex items-center gap-2">
-                      {isRecomputing ? <span className="loading loading-spinner loading-xs" /> : <RefreshCw size={15} />}
+                      {isRecomputing ? (
+                        <span className="loading loading-spinner loading-xs" />
+                      ) : (
+                        <RefreshCw size={15} />
+                      )}
                       Rotar eje vertical
                     </span>
-                    <span className="badge badge-sm badge-ghost font-mono">{phase1.appliedAxis === "Y" ? "Y↑" : "Z↑"}</span>
+                    <span className="badge badge-sm badge-ghost font-mono">
+                      {phase1.appliedAxis === "Y" ? "Y↑" : "Z↑"}
+                    </span>
                   </button>
                 </li>
                 <li>
                   <label className="justify-between cursor-pointer">
-                    <span className="flex items-center gap-2"><Crosshair size={15} /> Mostrar ejes</span>
+                    <span className="flex items-center gap-2">
+                      <Crosshair size={15} /> Mostrar ejes
+                    </span>
                     <input
                       type="checkbox"
                       className="toggle toggle-sm toggle-primary"
@@ -1370,7 +1868,9 @@ export default function ReviewScreen({
                 </li>
                 <li>
                   <label className="justify-between cursor-pointer">
-                    <span className="flex items-center gap-2"><Box size={15} /> Vista maciza</span>
+                    <span className="flex items-center gap-2">
+                      <Box size={15} /> Vista maciza
+                    </span>
                     <input
                       type="checkbox"
                       className="toggle toggle-sm toggle-primary"
@@ -1381,7 +1881,9 @@ export default function ReviewScreen({
                 </li>
                 <li>
                   <label className="justify-between cursor-pointer">
-                    <span className="flex items-center gap-2"><Maximize size={15} /> Pantalla completa</span>
+                    <span className="flex items-center gap-2">
+                      <Maximize size={15} /> Pantalla completa
+                    </span>
                     <input
                       type="checkbox"
                       className="toggle toggle-sm toggle-primary"
@@ -1392,12 +1894,19 @@ export default function ReviewScreen({
                 </li>
                 <div className="divider my-1" />
                 <li>
-                  <div className="flex items-center justify-between gap-2 py-1" title="Componentes más chicos que este umbral se descartan al generar">
-                    <span className="flex items-center gap-2"><SlidersHorizontal size={15} /> Descartar &lt; (mín. área)</span>
+                  <div
+                    className="flex items-center justify-between gap-2 py-1"
+                    title="Componentes más chicos que este umbral se descartan al generar"
+                  >
+                    <span className="flex items-center gap-2">
+                      <SlidersHorizontal size={15} /> Descartar &lt; (mín. área)
+                    </span>
                     <select
                       className="select select-bordered select-xs h-7 min-h-0 rounded-lg font-mono"
                       value={minAreaM2}
-                      onChange={(e) => handleMinAreaChangeWithReset(Number(e.target.value))}
+                      onChange={(e) =>
+                        handleMinAreaChangeWithReset(Number(e.target.value))
+                      }
                     >
                       {MIN_AREA_OPTIONS.map((a) => (
                         <option key={a} value={a}>
@@ -1411,364 +1920,698 @@ export default function ReviewScreen({
             </div>
           </div>
         </div>
-
       </div>
 
       {!hideSidebar && (
         <aside className="w-full md:w-[21rem] lg:w-[24rem] flex flex-col border-t md:border-t-0 md:border-l border-base-300/40 bg-base-100 shrink-0 h-[42vh] md:h-full z-20 shadow-2xl shadow-base-content/5">
-        <div className="px-4 pt-4 pb-3 border-b border-base-300/30 shrink-0 bg-base-100/80 text-primary font-semibold tracking-widest">
-          <StepIndicator current="review" variant="compact" />
-        </div>
-
-
-        {bulkActionNotice && (
-          <div className="px-4 py-2 border-b border-base-300/30 bg-success/5">
-            <p className="text-[11px] text-success font-medium px-2 py-1.5 rounded-lg bg-success/10 border border-success/20">
-              {bulkActionNotice}
-            </p>
+          <div className="px-4 pt-4 pb-3 border-b border-base-300/30 shrink-0 bg-base-100/80 text-primary font-semibold tracking-widest">
+            <StepIndicator current="review" variant="compact" />
           </div>
-        )}
 
-        {/* Pestañas: lista de componentes vs acciones de la selección */}
-        <div role="tablist" className="tabs tabs-bordered px-2 shrink-0 bg-base-100">
-          <button
-            type="button"
-            role="tab"
-            className={`tab gap-1.5 ${sidebarTab === "capas" ? "tab-active" : ""}`}
-            onClick={() => setSidebarTab("capas")}
-          >
-            Componentes
-            <span className="badge badge-xs badge-neutral font-mono">{phase1.groups.length}</span>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            className={`tab gap-1.5 ${sidebarTab === "seleccion" ? "tab-active" : ""}`}
-            onClick={() => setSidebarTab("seleccion")}
-          >
-            Selección
-            {selectedGroupIds.size > 0 && (
-              <span className="badge badge-xs badge-primary font-mono">{selectedGroupIds.size}</span>
-            )}
-          </button>
-        </div>
-
-        {/* Pestaña: Capas */}
-        <div className={`flex-1 min-h-0 flex flex-col ${sidebarTab === "capas" ? "" : "hidden"}`}>
-          <GroupList
-            groups={phase1.groups}
-            selectedGroupIds={selectedGroupIds}
-            hiddenGroupIds={hiddenGroupIds}
-            categoryOverrides={overrides}
-            visibleCategories={visibleCategories}
-            listActive={sidebarTab === "capas"}
-            onSelectGroup={handleSelectGroup}
-            onToggleGroup={handleToggleGroup}
-            onHideGroup={handleHideGroup}
-            onShowGroup={handleShowGroup}
-            onShowAllHidden={handleShowAllHidden}
-            onChangeCategory={handleChangeCategory}
-            onOpenContextMenu={openViewerContextMenu}
-          />
-        </div>
-
-        {/* Pestaña: Selección */}
-        <div className={`flex-1 min-h-0 overflow-y-auto custom-scrollbar ${sidebarTab === "seleccion" ? "" : "hidden"}`}>
-          {/* Grupo fusionado: ver paredes, enfocar y desfusionar solo una */}
-          {selectedGroupIds.size === 1 && displayMergeMembers.length >= 2 && (
-            <div className="px-4 py-3 border-b border-base-300/30 bg-primary/5 space-y-2">
-              <p className="text-[11px] font-semibold uppercase tracking-widest text-primary/60">
-                Fusionada · {displayMergeMembers.length} pared{displayMergeMembers.length !== 1 ? "es" : ""}
+          {bulkActionNotice && (
+            <div className="px-4 py-2 border-b border-base-300/30 bg-success/5">
+              <p className="text-[11px] text-success font-medium px-2 py-1.5 rounded-lg bg-success/10 border border-success/20">
+                {bulkActionNotice}
               </p>
-              <div className="flex flex-col gap-1">
-                {displayMergeMembers.map((id) => {
-                  const g = phase1.groups.find((gr) => gr.id === id);
-                  const isFocused = mergeMemberFocusId != null && id === mergeMemberFocusId;
-                  const pid = panelIdByGroup.get(id);
-                  const label = g?.label ?? (pid ? `Panel ${pid}` : `Pared ${id}`);
-                  return (
-                    <div
-                      key={id}
-                      className={`flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs cursor-pointer transition-colors border ${
-                        isFocused
-                          ? "bg-primary/10 border-primary/25 text-primary font-medium"
-                          : "bg-base-200/50 border-base-300/20 text-base-content/70 hover:bg-base-200/70"
-                      }`}
-                      onClick={() => {
-                        setMergeMemberFocusId(id);
-                        setEncountersWallId(id);
-                        setSelectedJointIndex(null);
-                        const survivorId = findMergeSurvivorId(
-                          selectedMergeCluster ?? displayMergeMembers,
-                          phase1.groups,
-                        );
-                        if (survivorId != null) {
-                          setSelectedGroupIds(new Set([survivorId]));
-                        }
-                      }}
-                      title="Click para enfocar y ver encuentros"
-                    >
-                      <Link2 size={10} className="shrink-0 opacity-60" />
-                      <span className="flex-1 truncate">{label}</span>
-                      {pid && (
-                        <span className="font-mono text-[10px] text-base-content/45 bg-base-100 border border-base-300/40 px-1 rounded">
-                          {pid}
-                        </span>
-                      )}
-                      {isFocused && (
-                        <span className="text-[10px] opacity-70">seleccionada</span>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-
-              {selectedMergeIndex >= 0 && (
-                <div className="flex flex-col gap-2 pt-0.5">
-                  <button
-                    type="button"
-                    className="btn btn-outline btn-sm w-full rounded-xl gap-2 border-error/40 text-error hover:bg-error/10 hover:border-error"
-                    onClick={handleDivideMerged}
-                    title="Separa todas las paredes de esta fusión de una vez"
-                  >
-                    <SquareSplitHorizontal size={14} />
-                    {divideAllLabel}
-                    <span className="text-[10px] opacity-60 font-normal">· D</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-outline btn-sm w-full rounded-xl gap-2 border-error/30 text-base-content/80 hover:border-error hover:text-error"
-                    onClick={handleRemoveSelectedFromMerge}
-                    title={
-                      mergeMemberFocusId != null
-                        ? "Saca la pared seleccionada (arriba) de la fusión y deja el resto fusionado"
-                        : "Saca la primera pared de la lista; clic en una pared arriba para elegir cuál"
-                    }
-                  >
-                    <X size={14} />
-                    Desfusionar solo esta pared
-                    {mergeMemberFocusId != null && (
-                      <span className="font-mono text-[10px] opacity-50 truncate max-w-[5rem]">
-                        {panelIdByGroup.get(mergeMemberFocusId) ?? `#${mergeMemberFocusId}`}
-                      </span>
-                    )}
-                  </button>
-                </div>
-              )}
             </div>
           )}
 
-          {/* Encuentros pared-pared */}
-          {encountersWallId != null && (() => {
-            const memberCluster = findMergeClusterForGroupId(encountersWallId, merges, phase1.groups);
-            const survivorId =
-              (memberCluster ? findMergeSurvivorId(memberCluster, phase1.groups) : null) ??
-              encountersWallId;
-            const selGroup = phase1.groups.find((g) => g.id === survivorId);
-            if (!selGroup) return null;
+          {/* Pestañas: lista de componentes vs acciones de la selección */}
+          <div
+            role="tablist"
+            className="tabs tabs-bordered px-2 shrink-0 bg-base-100"
+          >
+            <button
+              type="button"
+              role="tab"
+              className={`tab gap-1.5 ${sidebarTab === "capas" ? "tab-active" : ""}`}
+              onClick={() => setSidebarTab("capas")}
+            >
+              Componentes
+              <span className="badge badge-xs badge-neutral font-mono">
+                {phase1.groups.length}
+              </span>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              className={`tab gap-1.5 ${sidebarTab === "seleccion" ? "tab-active" : ""}`}
+              onClick={() => setSidebarTab("seleccion")}
+            >
+              Selección
+              {selectedGroupIds.size > 0 && (
+                <span className="badge badge-xs badge-primary font-mono">
+                  {selectedGroupIds.size}
+                </span>
+              )}
+            </button>
+          </div>
 
-            const groupWWJoints = wallWallList.filter(
-              ({ ww }) => ww.groupA === survivorId || ww.groupB === survivorId,
-            );
-            if (groupWWJoints.length === 0) return null;
+          {/* Pestaña: Capas */}
+          <div
+            className={`flex-1 min-h-0 flex flex-col ${sidebarTab === "capas" ? "" : "hidden"}`}
+          >
+            <GroupList
+              groups={phase1.groups}
+              selectedGroupIds={selectedGroupIds}
+              hiddenGroupIds={hiddenGroupIds}
+              categoryOverrides={overrides}
+              visibleCategories={visibleCategories}
+              listActive={sidebarTab === "capas"}
+              onSelectGroup={handleSelectGroup}
+              onToggleGroup={handleToggleGroup}
+              onHideGroup={handleHideGroup}
+              onShowGroup={handleShowGroup}
+              onShowAllHidden={handleShowAllHidden}
+              onChangeCategory={handleChangeCategory}
+              onOpenContextMenu={openViewerContextMenu}
+            />
+          </div>
 
-            const groupById = new Map(phase1.groups.map((g) => [g.id, g]));
-            const selPid = panelIdByGroup.get(encountersWallId) ?? panelIdByGroup.get(survivorId);
-            const cm = (m: number) => `${(m * 100).toFixed(1).replace(".", ",")} cm`;
-
-            return (
-              <div className="px-4 py-3 border-b border-base-300/30 bg-base-100/60">
-                <div className="flex items-start gap-2.5">
-                  <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary/10 text-primary shrink-0">
-                    <Link2 size={16} />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <h3 className="text-sm font-semibold leading-tight flex items-center gap-1.5">
-                      Encuentros de esta pared
-                      {selPid && (
-                        <span className="font-mono text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded">
-                          {selPid}
-                        </span>
-                      )}
-                    </h3>
-                    {showWallWallHelp && (
-                      <p className="text-xs text-base-content/60 mt-1 leading-snug">
-                        Donde dos paredes se cruzan, al armar la maqueta se pisarían por el espesor del
-                        material. Una se acorta para que encajen. Elegí cuál se acorta
-                        <span className="text-base-content/45"> (ya sugerimos una).</span>
-                      </p>
-                    )}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setShowWallWallHelp((v) => !v)}
-                    className={`flex items-center justify-center w-7 h-7 rounded-lg shrink-0 transition-colors ${
-                      showWallWallHelp
-                        ? "text-warning bg-warning/15"
-                        : "text-base-content/40 hover:bg-base-200/80 hover:text-base-content/70"
-                    }`}
-                    aria-label="Mostrar ayuda"
-                    aria-pressed={showWallWallHelp}
-                    title={showWallWallHelp ? "Ocultar ayuda" : "¿Qué es esto?"}
-                  >
-                    <Lightbulb size={15} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setEncountersWallId(null)}
-                    className="flex items-center justify-center w-7 h-7 rounded-lg shrink-0 text-base-content/40 hover:bg-base-200/80 hover:text-base-content/70 transition-colors"
-                    aria-label="Cerrar encuentros"
-                    title="Cerrar"
-                  >
-                    <X size={15} />
-                  </button>
-                </div>
-
-                <div className="mt-3 flex flex-col gap-2.5">
-                  {groupWWJoints.map(({ ww, labelA, labelB, pidA, pidB, hasThickness }) => {
-                    const otherId = ww.groupA === survivorId ? ww.groupB : ww.groupA;
-                    const otherLabel = ww.groupA === survivorId ? labelB : labelA;
-                    const otherPid = ww.groupA === survivorId ? pidB : pidA;
-                    const effYielder = wallWallDecisions.get(ww.jointIndex) ?? ww.suggestedYieldGroupId;
-                    const suggested = ww.suggestedYieldGroupId;
-                    const isOpen = selectedJointIndex === ww.jointIndex;
-
-                    const selThick = groupById.get(survivorId)?.thickness ?? 0;
-                    const otherThick = groupById.get(otherId)?.thickness ?? 0;
-                    const trimIfSel = otherThick > 0.001 ? otherThick : selThick > 0.001 ? selThick : 0;
-                    const trimIfOther = selThick > 0.001 ? selThick : otherThick > 0.001 ? otherThick : 0;
-
+          {/* Pestaña: Selección */}
+          <div
+            className={`flex-1 min-h-0 overflow-y-auto custom-scrollbar ${sidebarTab === "seleccion" ? "" : "hidden"}`}
+          >
+            {/* Grupo fusionado: ver paredes, enfocar y desfusionar solo una */}
+            {selectedGroupIds.size === 1 && displayMergeMembers.length >= 2 && (
+              <div className="px-4 py-3 border-b border-base-300/30 bg-primary/5 space-y-2">
+                <p className="text-[11px] font-semibold uppercase tracking-widest text-primary/60">
+                  Fusionada · {displayMergeMembers.length} pared
+                  {displayMergeMembers.length !== 1 ? "es" : ""}
+                </p>
+                <div className="flex flex-col gap-1">
+                  {displayMergeMembers.map((id) => {
+                    const g = phase1.groups.find((gr) => gr.id === id);
+                    const isFocused =
+                      mergeMemberFocusId != null && id === mergeMemberFocusId;
+                    const pid = panelIdByGroup.get(id);
+                    const label =
+                      g?.label ?? (pid ? `Panel ${pid}` : `Pared ${id}`);
                     return (
                       <div
-                        key={ww.jointIndex}
-                        onClick={() =>
-                          setSelectedJointIndex((cur) => (cur === ww.jointIndex ? null : ww.jointIndex))
-                        }
-                        className={`rounded-xl border p-3 cursor-pointer transition-all ${
-                          isOpen
-                            ? "border-primary/50 bg-primary/5 ring-1 ring-primary/20"
-                            : "border-base-300/50 bg-base-200/30 hover:bg-base-200/50 hover:border-base-300/70"
+                        key={id}
+                        className={`flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs cursor-pointer transition-colors border ${
+                          isFocused
+                            ? "bg-primary/10 border-primary/25 text-primary font-medium"
+                            : "bg-base-200/50 border-base-300/20 text-base-content/70 hover:bg-base-200/70"
                         }`}
+                        onClick={() => {
+                          setMergeMemberFocusId(id);
+                          setEncountersWallId(id);
+                          setSelectedJointIndex(null);
+                          const survivorId = findMergeSurvivorId(
+                            selectedMergeCluster ?? displayMergeMembers,
+                            phase1.groups,
+                          );
+                          if (survivorId != null) {
+                            setSelectedGroupIds(new Set([survivorId]));
+                          }
+                        }}
+                        title="Click para enfocar y ver encuentros"
                       >
-                        <div className="flex items-center gap-1.5 text-sm font-medium">
-                          <span className="text-base-content/50">Cruce con</span>
-                          {otherPid && (
-                            <span className="font-mono text-xs bg-base-100 border border-base-300/50 px-1.5 py-0.5 rounded">
-                              {otherPid}
-                            </span>
-                          )}
-                          <span className="truncate text-base-content/80">{otherLabel}</span>
-                        </div>
-
-                        {!hasThickness ? (
-                          <p className="mt-2 text-xs text-base-content/55 px-2.5 py-2 rounded-lg bg-base-100/80 border border-base-300/40">
-                            Sin ajuste necesario — no se detectó espesor en ninguna de las dos.
-                          </p>
-                        ) : (
-                          <div className="mt-2.5 flex flex-col gap-1.5">
-                            <p className="text-xs font-medium text-base-content/55">¿Cuál se acorta?</p>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleWallWallDecision(ww.jointIndex, survivorId);
-                              }}
-                              className={`flex items-center gap-2 w-full text-left rounded-lg border px-3 py-2 transition-colors ${
-                                effYielder === survivorId
-                                  ? "border-primary bg-primary/10"
-                                  : "border-base-300/50 bg-base-100 hover:bg-base-200/60"
-                              }`}
-                            >
-                              <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: "#f59e0b" }} />
-                              <span className="flex-1 text-sm">
-                                Esta pared{" "}
-                                {selPid && <span className="font-mono text-xs text-base-content/60">({selPid})</span>}
-                              </span>
-                              {effYielder === survivorId ? (
-                                <span className="text-xs font-semibold text-primary tabular-nums">−{cm(trimIfSel)}</span>
-                              ) : (
-                                suggested === survivorId && (
-                                  <span className="text-[11px] font-medium text-base-content/45">Sugerida</span>
-                                )
-                              )}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleWallWallDecision(ww.jointIndex, otherId);
-                              }}
-                              className={`flex items-center gap-2 w-full text-left rounded-lg border px-3 py-2 transition-colors ${
-                                effYielder === otherId
-                                  ? "border-primary bg-primary/10"
-                                  : "border-base-300/50 bg-base-100 hover:bg-base-200/60"
-                              }`}
-                            >
-                              <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: "#3b82f6" }} />
-                              <span className="flex-1 text-sm">
-                                La otra{" "}
-                                {otherPid && <span className="font-mono text-xs text-base-content/60">({otherPid})</span>}
-                              </span>
-                              {effYielder === otherId ? (
-                                <span className="text-xs font-semibold text-primary tabular-nums">−{cm(trimIfOther)}</span>
-                              ) : (
-                                suggested === otherId && (
-                                  <span className="text-[11px] font-medium text-base-content/45">Sugerida</span>
-                                )
-                              )}
-                            </button>
-                          </div>
+                        <Link2 size={10} className="shrink-0 opacity-60" />
+                        <span className="flex-1 truncate">{label}</span>
+                        {pid && (
+                          <span className="font-mono text-[10px] text-base-content/45 bg-base-100 border border-base-300/40 px-1 rounded">
+                            {pid}
+                          </span>
+                        )}
+                        {isFocused && (
+                          <span className="text-[10px] opacity-70">
+                            seleccionada
+                          </span>
                         )}
                       </div>
                     );
                   })}
                 </div>
-              </div>
-            );
-          })()}
 
-          {selectedGroupIds.size === 0 && (
-            <div className="flex flex-col items-center justify-center h-full text-center px-6 gap-2 text-base-content/50">
-              <ScanSearch size={26} className="text-base-content/25" />
-              <p className="text-sm">Seleccioná una capa para ver sus acciones</p>
-              <p className="text-xs text-base-content/35">Tipo, fusión/división y opciones por tamaño.</p>
-            </div>
-          )}
-
-          {/* Lista de capas cuando hay 2 o más seleccionadas */}
-          {selectedGroupIds.size >= 2 && (() => {
-            const selectedGroups = Array.from(selectedGroupIds).map((id) => ({
-              id,
-              group: phase1.groups.find((g) => g.id === id),
-              pid: panelIdByGroup.get(id),
-              cat: overrides.get(id) ?? phase1.groups.find((g) => g.id === id)?.category ?? "discard",
-            }));
-            return (
-              <div className="px-4 py-3 border-b border-base-300/30">
-                <p className="text-[11px] font-semibold uppercase tracking-widest text-base-content/40 mb-2">
-                  {selectedGroupIds.size} capas seleccionadas
-                </p>
-                <div className="flex flex-col gap-1">
-                  {selectedGroups.map(({ id, group, pid, cat }) => (
-                    <div key={id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-base-200/40 text-sm">
-                      <span
-                        className={`w-2 h-2 rounded-full shrink-0 ${
-                          cat === "wall" ? "bg-primary" : cat === "floor" ? "bg-success" : "bg-base-content/25"
-                        }`}
-                      />
-                      <span className="flex-1 truncate text-base-content/80 text-xs">
-                        {group?.label ?? `Grupo ${id}`}
+                {selectedMergeIndex >= 0 && (
+                  <div className="flex flex-col gap-2 pt-0.5">
+                    <button
+                      type="button"
+                      className="btn btn-outline btn-sm w-full rounded-xl gap-2 border-error/40 text-error hover:bg-error/10 hover:border-error"
+                      onClick={handleDivideMerged}
+                      title="Separa todas las paredes de esta fusión de una vez"
+                    >
+                      <SquareSplitHorizontal size={14} />
+                      {divideAllLabel}
+                      <span className="text-[10px] opacity-60 font-normal">
+                        · D
                       </span>
-                      {pid && (
-                        <span className="font-mono text-[10px] text-base-content/40 bg-base-100 border border-base-300/50 px-1 rounded">
-                          {pid}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-outline btn-sm w-full rounded-xl gap-2 border-error/30 text-base-content/80 hover:border-error hover:text-error"
+                      onClick={handleRemoveSelectedFromMerge}
+                      title={
+                        mergeMemberFocusId != null
+                          ? "Saca la pared seleccionada (arriba) de la fusión y deja el resto fusionado"
+                          : "Saca la primera pared de la lista; clic en una pared arriba para elegir cuál"
+                      }
+                    >
+                      <X size={14} />
+                      Desfusionar solo esta pared
+                      {mergeMemberFocusId != null && (
+                        <span className="font-mono text-[10px] opacity-50 truncate max-w-[5rem]">
+                          {panelIdByGroup.get(mergeMemberFocusId) ??
+                            `#${mergeMemberFocusId}`}
                         </span>
                       )}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Encuentros pared-pared */}
+            {encountersWallId != null &&
+              (() => {
+                const memberCluster = findMergeClusterForGroupId(
+                  encountersWallId,
+                  merges,
+                  phase1.groups,
+                );
+                const survivorId =
+                  (memberCluster
+                    ? findMergeSurvivorId(memberCluster, phase1.groups)
+                    : null) ?? encountersWallId;
+                const selGroup = phase1.groups.find((g) => g.id === survivorId);
+                if (!selGroup) return null;
+
+                const facadeIdSet = new Set(coplanarFacadeIds);
+                const groupWWJoints = wallWallList.filter(({ ww }) => {
+                  if (!facadeRefGroup) return false;
+                  if (
+                    facadeJointSides(
+                      ww,
+                      facadeRefGroup,
+                      phase1.groups,
+                      wallIdAliasMap,
+                      facadeReferenceResolved,
+                    )
+                  ) {
+                    return true;
+                  }
+                  return (
+                    facadeIdSet.has(ww.groupA) ||
+                    facadeIdSet.has(ww.groupB) ||
+                    wallInPriority(ww.groupA, facadeIdSet, wallIdAliasMap) ||
+                    wallInPriority(ww.groupB, facadeIdSet, wallIdAliasMap)
+                  );
+                });
+                if (groupWWJoints.length === 0) return null;
+
+                const groupById = new Map(phase1.groups.map((g) => [g.id, g]));
+                const selPid =
+                  panelIdByGroup.get(encountersWallId) ??
+                  panelIdByGroup.get(survivorId);
+                const cm = (m: number) =>
+                  `${(m * 100).toFixed(1).replace(".", ",")} cm`;
+
+                return (
+                  <div className="px-4 py-3 border-b border-base-300/30 bg-base-100/60">
+                    <div className="flex items-center gap-2.5">
+                      <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary/10 text-primary shrink-0">
+                        <Link2 size={16} />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <h3 className="text-sm font-semibold leading-tight flex items-center  gap-1.5">
+                          {coplanarFacadeIds.length > 1
+                            ? "Encuentros de la fachada"
+                            : "Encuentros de esta pared"}
+                          {selPid && (
+                            <span className="font-mono text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded">
+                              {selPid}
+                            </span>
+                          )}
+                        </h3>
+                        {showWallWallHelp && (
+                          <p className="text-xs text-base-content/60 mt-1 leading-snug">
+                            Donde dos paredes se cruzan, al armar la maqueta se
+                            pisarían por el espesor del material. Una se acorta
+                            para que encajen. Elegí cuál se acorta
+                            <span className="text-base-content/45">
+                              {" "}
+                              (ya sugerimos una).
+                            </span>
+                          </p>
+                        )}
+                        <p className="text-[11px] text-base-content/45 mt-1.5 leading-snug border-l-2 border-base-300/40 pl-2">
+                          La vista 3D muestra el modelo original. El acorte (p.
+                          ej. −10,2 cm) se aplica al plano de corte, no recorta
+                          la geometría acá. Naranja = manda · Azul = se acorta.
+                        </p>
+                      </div>
                       <button
                         type="button"
-                        className="btn btn-ghost btn-xs btn-circle opacity-50 hover:opacity-100"
-                        onClick={() => handleToggleGroup(id)}
-                        aria-label="Quitar de selección"
+                        onClick={() => setShowWallWallHelp((v) => !v)}
+                        className={`flex items-center justify-center w-7 h-7 rounded-lg shrink-0 transition-colors ${
+                          showWallWallHelp
+                            ? "text-warning bg-warning/15"
+                            : "text-base-content/40 hover:bg-base-200/80 hover:text-base-content/70"
+                        }`}
+                        aria-label="Mostrar ayuda"
+                        aria-pressed={showWallWallHelp}
+                        title={
+                          showWallWallHelp ? "Ocultar ayuda" : "¿Qué es esto?"
+                        }
+                      >
+                        <Lightbulb size={15} />
+                      </button>
+                    </div>
+
+                    {/* Fachada coplanar: fusionar y/o acortar perpendiculares en bloque */}
+                    {showFacadeActions && selectedGroup && (
+                      <div className="px-4 py-3 border-b border-base-300/30 mt-4 bg-info/5 space-y-2">
+                        <p className="text-[11px] font-semibold uppercase tracking-widest text-secondary/70 flex items-center justify-between">
+                          Fachada coplanar
+                          <span className="ml-1.5 font-normal normal-case text-base-content/45">
+                            · {selectedGroup.orientation}
+                          </span>
+                          <button
+                          type="button"
+                          className="btn btn-outline btn-sm  rounded-xl gap-2 border-base-300/50 text-base-content/70"
+                          onClick={() => setShowWallWallHelp2((v) => !v)}
+                          title={
+                            showWallWallHelp ? "Ocultar ayuda" : "¿Qué es esto?"
+                          }
+                        >
+                          <Lightbulb size={15} />
+                        </button>
+                        </p>
+
+                        {showWallWallHelp2 && (
+                          <p className="text-[11px] text-base-content/50 leading-snug">
+                            Unificá el frente en un solo panel o hacé que{" "}
+                            {coplanarFacadeIds.length > 1
+                              ? "estas paredes"
+                              : "esta pared"}{" "}
+                            mande en los cruces — las perpendiculares se
+                            acortan.
+                          </p>
+                        )}
+                       
+                        <div className="flex flex-col gap-2">
+                          {canMergeCoplanarFacade && (
+                            <button
+                              type="button"
+                              className="btn btn-primary btn-sm w-full rounded-xl gap-2"
+                              onClick={handleMergeCoplanarFacade}
+                              title="Fusiona todas las paredes del mismo plano en un solo panel de corte"
+                            >
+                              <Link2 size={14} />
+                              Fusionar toda la fachada ·{" "}
+                              {coplanarFacadeIds.length} paredes
+                            </button>
+                          )}
+                          {coplanarFacadeIds.length > 1 &&
+                            bulkYieldCountForFacade > 0 && (
+                              <button
+                                type="button"
+                                className="btn btn-outline btn-sm w-full rounded-xl gap-2 border-info/40 text-base-content/90 hover:border-info hover:bg-info/10"
+                                onClick={() => handleBulkYieldOthers(true)}
+                                title="En cada cruce con una pared perpendicular, la otra se acorta"
+                              >
+                                <Scissors size={14} />
+                                Acortar las otras en toda la fachada ·{" "}
+                                {bulkYieldCountForFacade} cruces
+                              </button>
+                            )}
+                          {bulkYieldCountForWall > 0 &&
+                            coplanarFacadeIds.length === 1 && (
+                              <button
+                                type="button"
+                                className="btn btn-outline btn-sm w-full rounded-xl gap-2 border-base-300/50 text-base-content/70 hover:border-info/40"
+                                onClick={() => handleBulkYieldOthers(false)}
+                                title="En cada cruce con una pared perpendicular, la otra se acorta"
+                              >
+                                <Scissors size={14} />
+                                Acortar las otras en todos los cruces ·{" "}
+                                {bulkYieldCountForWall}
+                              </button>
+                            )}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="mt-3 flex flex-col gap-2.5">
+                      {groupWWJoints.map(
+                        ({ ww, labelA, labelB, pidA, pidB, hasThickness }) => {
+                          const sides =
+                            facadeRefGroup &&
+                            facadeJointSides(
+                              ww,
+                              facadeRefGroup,
+                              phase1.groups,
+                              wallIdAliasMap,
+                              facadeReferenceResolved,
+                            );
+                          const fallbackSides = (() => {
+                            const aOn = wallInPriority(
+                              ww.groupA,
+                              facadeIdSet,
+                              wallIdAliasMap,
+                            );
+                            const bOn = wallInPriority(
+                              ww.groupB,
+                              facadeIdSet,
+                              wallIdAliasMap,
+                            );
+                            if (aOn && !bOn) {
+                              return { facadeId: ww.groupA, otherId: ww.groupB };
+                            }
+                            if (bOn && !aOn) {
+                              return { facadeId: ww.groupB, otherId: ww.groupA };
+                            }
+                            return {
+                              facadeId: survivorId,
+                              otherId:
+                                ww.groupA === survivorId ? ww.groupB : ww.groupA,
+                            };
+                          })();
+                          const { facadeId: thisId, otherId } =
+                            sides ?? fallbackSides;
+                          const thisLabel =
+                            ww.groupA === thisId ? labelA : labelB;
+                          const otherLabel =
+                            ww.groupA === thisId ? labelB : labelA;
+                          const thisPid = ww.groupA === thisId ? pidA : pidB;
+                          const otherPid = ww.groupA === thisId ? pidB : pidA;
+                          const effYielder =
+                            wallWallDecisions.get(ww.jointIndex) ??
+                            ww.suggestedYieldGroupId;
+                          const suggested = ww.suggestedYieldGroupId;
+                          const isOpen = selectedJointIndex === ww.jointIndex;
+
+                          const thisResolved = resolveWallId(
+                            thisId,
+                            wallIdAliasMap,
+                          );
+                          const otherResolved = resolveWallId(
+                            otherId,
+                            wallIdAliasMap,
+                          );
+                          const thisThick =
+                            groupById.get(thisResolved)?.thickness ?? 0;
+                          const otherThick =
+                            groupById.get(otherResolved)?.thickness ?? 0;
+                          const trimIfThis =
+                            otherThick > 0.001
+                              ? otherThick
+                              : thisThick > 0.001
+                                ? thisThick
+                                : 0;
+                          const trimIfOther =
+                            thisThick > 0.001
+                              ? thisThick
+                              : otherThick > 0.001
+                                ? otherThick
+                                : 0;
+
+                          return (
+                            <div
+                              key={ww.jointIndex}
+                              onClick={() =>
+                                setSelectedJointIndex((cur) =>
+                                  cur === ww.jointIndex ? null : ww.jointIndex,
+                                )
+                              }
+                              className={`rounded-xl border p-3 cursor-pointer transition-all ${
+                                isOpen
+                                  ? "border-primary/50 bg-primary/5 ring-1 ring-primary/20"
+                                  : "border-base-300/50 bg-base-200/30 hover:bg-base-200/50 hover:border-base-300/70"
+                              }`}
+                            >
+                              <div className="flex items-center gap-1.5 text-sm font-medium">
+                                <span className="text-base-content/50">
+                                  Cruce con
+                                </span>
+                                {otherPid && (
+                                  <span className="font-mono text-xs bg-base-100 border border-base-300/50 px-1.5 py-0.5 rounded">
+                                    {otherPid}
+                                  </span>
+                                )}
+                                <span className="truncate text-base-content/80">
+                                  {otherLabel}
+                                </span>
+                              </div>
+
+                              {!hasThickness ? (
+                                <p className="mt-2 text-xs text-base-content/55 px-2.5 py-2 rounded-lg bg-base-100/80 border border-base-300/40">
+                                  Sin ajuste necesario — no se detectó espesor
+                                  en ninguna de las dos.
+                                </p>
+                              ) : (
+                                <div className="mt-2.5 flex flex-col gap-1.5">
+                                  <p className="text-xs font-medium text-base-content/55">
+                                    ¿Cuál se acorta?
+                                  </p>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleWallWallDecision(
+                                        ww.jointIndex,
+                                        thisId,
+                                      );
+                                    }}
+                                    className={`flex items-center gap-2 w-full text-left rounded-lg border px-3 py-2 transition-colors ${
+                                      yielderMatchesWall(
+                                        effYielder,
+                                        thisId,
+                                        wallIdAliasMap,
+                                      )
+                                        ? "border-primary bg-primary/10"
+                                        : "border-base-300/50 bg-base-100 hover:bg-base-200/60"
+                                    }`}
+                                  >
+                                    <span
+                                      className="w-2.5 h-2.5 rounded-full shrink-0"
+                                      style={{ backgroundColor: "#f59e0b" }}
+                                    />
+                                    <span className="flex-1 text-sm">
+                                      Esta pared{" "}
+                                      {thisPid && (
+                                        <span className="font-mono text-xs text-base-content/60">
+                                          ({thisPid})
+                                        </span>
+                                      )}
+                                    </span>
+                                    {yielderMatchesWall(
+                                      effYielder,
+                                      thisId,
+                                      wallIdAliasMap,
+                                    ) ? (
+                                      <span className="text-xs font-semibold text-primary tabular-nums">
+                                        −{cm(trimIfThis)}
+                                      </span>
+                                    ) : (
+                                      yielderMatchesWall(
+                                        suggested,
+                                        thisId,
+                                        wallIdAliasMap,
+                                      ) && (
+                                        <span className="text-[11px] font-medium text-base-content/45">
+                                          Sugerida
+                                        </span>
+                                      )
+                                    )}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleWallWallDecision(
+                                        ww.jointIndex,
+                                        otherId,
+                                      );
+                                    }}
+                                    className={`flex items-center gap-2 w-full text-left rounded-lg border px-3 py-2 transition-colors ${
+                                      yielderMatchesWall(
+                                        effYielder,
+                                        otherId,
+                                        wallIdAliasMap,
+                                      )
+                                        ? "border-primary bg-primary/10"
+                                        : "border-base-300/50 bg-base-100 hover:bg-base-200/60"
+                                    }`}
+                                  >
+                                    <span
+                                      className="w-2.5 h-2.5 rounded-full shrink-0"
+                                      style={{ backgroundColor: "#3b82f6" }}
+                                    />
+                                    <span className="flex-1 text-sm">
+                                      La otra{" "}
+                                      {otherPid && (
+                                        <span className="font-mono text-xs text-base-content/60">
+                                          ({otherPid})
+                                        </span>
+                                      )}
+                                    </span>
+                                    {yielderMatchesWall(
+                                      effYielder,
+                                      otherId,
+                                      wallIdAliasMap,
+                                    ) ? (
+                                      <span className="text-xs font-semibold text-primary tabular-nums">
+                                        −{cm(trimIfOther)}
+                                      </span>
+                                    ) : (
+                                      yielderMatchesWall(
+                                        suggested,
+                                        otherId,
+                                        wallIdAliasMap,
+                                      ) && (
+                                        <span className="text-[11px] font-medium text-base-content/45">
+                                          Sugerida
+                                        </span>
+                                      )
+                                    )}
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        },
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+
+            {selectedGroupIds.size === 0 && (
+              <div className="flex flex-col items-center justify-center h-full text-center px-6 gap-2 text-base-content/50">
+                <ScanSearch size={26} className="text-base-content/25" />
+                <p className="text-sm">
+                  Seleccioná una capa para ver sus acciones
+                </p>
+                <p className="text-xs text-base-content/35">
+                  Tipo, fusión/división y opciones por tamaño.
+                </p>
+              </div>
+            )}
+
+            {/* Lista de capas cuando hay 2 o más seleccionadas */}
+            {selectedGroupIds.size >= 2 &&
+              (() => {
+                const selectedGroups = Array.from(selectedGroupIds).map(
+                  (id) => ({
+                    id,
+                    group: phase1.groups.find((g) => g.id === id),
+                    pid: panelIdByGroup.get(id),
+                    cat:
+                      overrides.get(id) ??
+                      phase1.groups.find((g) => g.id === id)?.category ??
+                      "discard",
+                  }),
+                );
+                return (
+                  <div className="px-4 py-3 border-b border-base-300/30">
+                    <p className="text-[11px] font-semibold uppercase tracking-widest text-base-content/40 mb-2">
+                      {selectedGroupIds.size} capas seleccionadas
+                    </p>
+                    <div className="flex flex-col gap-1">
+                      {selectedGroups.map(({ id, group, pid, cat }) => (
+                        <div
+                          key={id}
+                          className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-base-200/40 text-sm"
+                        >
+                          <span
+                            className={`w-2 h-2 rounded-full shrink-0 ${
+                              cat === "wall"
+                                ? "bg-primary"
+                                : cat === "floor"
+                                  ? "bg-success"
+                                  : "bg-base-content/25"
+                            }`}
+                          />
+                          <span className="flex-1 truncate text-base-content/80 text-xs">
+                            {group?.label ?? `Grupo ${id}`}
+                          </span>
+                          {pid && (
+                            <span className="font-mono text-[10px] text-base-content/40 bg-base-100 border border-base-300/50 px-1 rounded">
+                              {pid}
+                            </span>
+                          )}
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-xs btn-circle opacity-50 hover:opacity-100"
+                            onClick={() => handleToggleGroup(id)}
+                            aria-label="Quitar de selección"
+                          >
+                            <X size={10} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+
+            {/* Fusión: una sola sección cuando hay varias capas seleccionadas */}
+            {selectedGroupIds.size >= 2 && (
+              <div className="px-4 py-3 border-b border-base-300/30 bg-base-100/60 space-y-2">
+                <p className="text-[11px] font-semibold uppercase tracking-widest text-base-content/40">
+                  Fusión
+                </p>
+                {canMergeSelected ? (
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm w-full rounded-xl gap-2"
+                    onClick={handleMergeSelected}
+                  >
+                    <Link2 size={14} />
+                    {mergeLabel} · F
+                  </button>
+                ) : mergeBlockedReason ? (
+                  <p className="text-[11px] text-base-content/45 leading-relaxed px-1">
+                    {mergeBlockedReason}
+                  </p>
+                ) : (
+                  <p className="text-[11px] text-base-content/45 leading-relaxed px-1">
+                    Seleccioná varios componentes con Ctrl+clic o los checkboxes
+                    de la lista.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {selectedGroupIds.size === 1 && cutsForSelectedGroup.length > 0 && (
+              <div className="px-4 py-3 border-b border-base-300/30 bg-warning/5">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-widest text-warning/70">
+                    Cortes · {cutsForSelectedGroup.length}
+                  </p>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-xs gap-1 text-base-content/50 hover:text-warning"
+                    onClick={() => {
+                      pushHistory();
+                      setUserCuts((prev) =>
+                        prev.filter((c) => c.groupId !== selectedGroup!.id),
+                      );
+                    }}
+                  >
+                    <Trash2 size={11} />
+                    Quitar todos
+                  </button>
+                </div>
+                <div className="flex flex-col gap-1">
+                  {cutsForSelectedGroup.map((cut) => (
+                    <div
+                      key={cut.id}
+                      className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-base-100/80 border border-warning/20 text-xs"
+                    >
+                      <Scissors size={10} className="text-warning shrink-0" />
+                      <span className="flex-1 font-mono text-[11px] text-base-content/70">
+                        {cut.kind} · {cutDimensionsLabel(cut)}
+                      </span>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-xs btn-circle opacity-50 hover:opacity-100 hover:text-error"
+                        onClick={() => handleRemoveCut(cut.id)}
+                        aria-label="Eliminar corte"
                       >
                         <X size={10} />
                       </button>
@@ -1776,223 +2619,101 @@ export default function ReviewScreen({
                   ))}
                 </div>
               </div>
-            );
-          })()}
+            )}
 
-          {/* Fusión: una sola sección cuando hay varias capas seleccionadas */}
-          {selectedGroupIds.size >= 2 && (
-            <div className="px-4 py-3 border-b border-base-300/30 bg-base-100/60 space-y-2">
-              <p className="text-[11px] font-semibold uppercase tracking-widest text-base-content/40">
-                Fusión
-              </p>
-              {canMergeSelected ? (
+            {selectedGroupIds.size === 1 && sameAreaMatches.length > 0 && (
+              <div className="px-4 py-2 border-b border-base-300/30 bg-base-100/60">
+                <p className="text-[11px] text-base-content/45 mb-2">
+                  {sameAreaMatches.length} capa
+                  {sameAreaMatches.length !== 1 ? "s" : ""} más con{" "}
+                  <span className="font-mono font-semibold text-base-content/70">
+                    {selectedGroup?.totalArea.toFixed(2)} m²
+                  </span>{" "}
+                  · misma orientación y tipo
+                </p>
                 <button
                   type="button"
-                  className="btn btn-primary btn-sm w-full rounded-xl gap-2"
-                  onClick={handleMergeSelected}
+                  className="btn btn-outline btn-sm w-full rounded-xl gap-2 border-base-300 text-base-content/70"
+                  onClick={() => openBulkSimilarModal("discard")}
                 >
-                  <Link2 size={14} />
-                  {mergeLabel} · F
+                  <Copy size={14} />
+                  Descartar del mismo tamaño…
                 </button>
-              ) : mergeBlockedReason ? (
-                <p className="text-[11px] text-base-content/45 leading-relaxed px-1">
-                  {mergeBlockedReason}
-                </p>
-              ) : (
-                <p className="text-[11px] text-base-content/45 leading-relaxed px-1">
-                  Seleccioná varios componentes con Ctrl+clic o los checkboxes de la lista.
-                </p>
-              )}
-            </div>
-          )}
-
-
-
-        {selectedGroupIds.size === 1 && cutsForSelectedGroup.length > 0 && (
-          <div className="px-4 py-3 border-b border-base-300/30 bg-warning/5">
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-[11px] font-semibold uppercase tracking-widest text-warning/70">
-                Cortes · {cutsForSelectedGroup.length}
-              </p>
-              <button
-                type="button"
-                className="btn btn-ghost btn-xs gap-1 text-base-content/50 hover:text-warning"
-                onClick={() => {
-                  pushHistory();
-                  setUserCuts((prev) =>
-                    prev.filter((c) => c.groupId !== selectedGroup!.id),
-                  );
-                }}
-              >
-                <Trash2 size={11} />
-                Quitar todos
-              </button>
-            </div>
-            <div className="flex flex-col gap-1">
-              {cutsForSelectedGroup.map((cut) => (
-                <div
-                  key={cut.id}
-                  className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-base-100/80 border border-warning/20 text-xs"
-                >
-                  <Scissors size={10} className="text-warning shrink-0" />
-                  <span className="flex-1 font-mono text-[11px] text-base-content/70">
-                    {cut.kind} · {cutDimensionsLabel(cut)}
-                  </span>
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-xs btn-circle opacity-50 hover:opacity-100 hover:text-error"
-                    onClick={() => handleRemoveCut(cut.id)}
-                    aria-label="Eliminar corte"
-                  >
-                    <X size={10} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {selectedGroupIds.size === 1 && sameAreaMatches.length > 0 && (
-          <div className="px-4 py-2 border-b border-base-300/30 bg-base-100/60">
-            <p className="text-[11px] text-base-content/45 mb-2">
-              {sameAreaMatches.length} capa{sameAreaMatches.length !== 1 ? "s" : ""} más con{" "}
-              <span className="font-mono font-semibold text-base-content/70">
-                {selectedGroup?.totalArea.toFixed(2)} m²
-              </span>
-              {" "}· misma orientación y tipo
-            </p>
-            <button
-              type="button"
-              className="btn btn-outline btn-sm w-full rounded-xl gap-2 border-base-300 text-base-content/70"
-              onClick={() => openBulkSimilarModal("discard")}
-            >
-              <Copy size={14} />
-              Descartar del mismo tamaño…
-            </button>
-          </div>
-        )}
-
-        {selectedGroupIds.size === 1 && sameAreaDiscardMatches.length > 0 && (
-          <div className="px-4 py-2 border-b border-base-300/30 bg-info/5">
-            <p className="text-[11px] text-base-content/45 mb-2 leading-relaxed">
-              {sameAreaDiscardMatches.length} descarte{sameAreaDiscardMatches.length !== 1 ? "s" : ""} más
-              iguales ({selectedGroup?.totalArea.toFixed(2)} m² · {selectedGroup?.orientation}).
-              Marcá todas como pared o piso para incluirlas en los planos (p. ej. ventanas).
-            </p>
-            <div className="flex flex-col gap-1.5">
-              <button
-                type="button"
-                className="btn btn-outline btn-sm w-full rounded-xl gap-2 border-info/40 text-base-content/80"
-                onClick={() => openBulkSimilarModal("promote", "wall")}
-              >
-                <Copy size={14} />
-                Marcar iguales como Pared…
-              </button>
-              <button
-                type="button"
-                className="btn btn-outline btn-sm w-full rounded-xl gap-2 border-info/40 text-base-content/80"
-                onClick={() => openBulkSimilarModal("promote", "floor")}
-              >
-                <Copy size={14} />
-                Marcar iguales como Piso…
-              </button>
-            </div>
-          </div>
-        )}
-
-        </div>
-        {/* /Pestaña: Selección */}
-
-        {merges.length > 0 && (
-          <div className="border-b border-base-300/30 bg-base-100/60">
-            <button
-              type="button"
-              className="flex w-full items-center justify-between px-4 py-3 hover:bg-base-200/40 transition-colors"
-              onClick={() => setMergeCardOpen((o) => !o)}
-            >
-              <span className="text-sm font-medium">
-                Fusiones activas
-                <span className="ml-2 badge badge-sm badge-neutral font-mono">{merges.length}</span>
-              </span>
-              {mergeCardOpen ? (
-                <ChevronDown size={16} className="text-base-content/40" />
-              ) : (
-                <ChevronRight size={16} className="text-base-content/40" />
-              )}
-            </button>
-            {mergeCardOpen && (
-              <div className="px-4 pb-3 flex flex-col gap-1.5">
-                {merges.map((ids, i) => {
-                  const members = filterTrueMergeMembers(
-                    ids,
-                    phase1.groups,
-                    phase1.wallWallJoints,
-                  );
-                  const labels = members.map((id) => {
-                    const g = phase1.groups.find((gr) => gr.id === id);
-                    const pid = panelIdByGroup.get(id);
-                    return g?.label ?? (pid ? `Panel ${pid}` : `Grupo ${id}`);
-                  });
-                  return (
-                    <div
-                      key={i}
-                      className="flex justify-between items-center gap-2 bg-base-200/50 border border-base-300/30 rounded-lg px-3 py-2 text-xs"
-                    >
-                      <span className="truncate font-medium text-base-content/80">{labels.join(" + ")}</span>
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-xs btn-square text-base-content/40 hover:text-error hover:bg-error/10"
-                        onClick={() => handleUnmerge(i)}
-                        title="Deshacer fusión"
-                      >
-                        <X size={14} />
-                      </button>
-                    </div>
-                  );
-                })}
               </div>
             )}
-          </div>
-        )}
 
-        <div className="mt-auto border-t border-base-300/40 p-4 bg-base-100 shrink-0">
-          {overrides.size > 0 && (
-            <p className="text-[11px] text-warning mb-3 px-2 py-1.5 rounded-lg bg-warning/8 border border-warning/15 text-center font-medium">
-              {overrides.size} clasificación{overrides.size !== 1 ? "es" : ""} modificada{overrides.size !== 1 ? "s" : ""}
-            </p>
-          )}
-
-         
-
-          <div className="flex gap-2">
-            <button
-              type="button"
-              className="btn btn-ghost flex-1 rounded-xl border border-base-300/40"
-              onClick={onCancel}
-              disabled={isGenerating}
-            >
-              Volver
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary flex-[1.4] rounded-xl gap-2 shadow-md shadow-primary/20"
-              onClick={handleConfirm}
-              disabled={isGenerating}
-            >
-              {isGenerating ? (
-                <>
-                  <span className="loading loading-spinner loading-sm" />
-                  Generando…
-                </>
-              ) : (
-                <>
-                  Continuar
-                  <ArrowRight size={15} />
-                </>
+            {selectedGroupIds.size === 1 &&
+              sameAreaDiscardMatches.length > 0 && (
+                <div className="px-4 py-2 border-b border-base-300/30 bg-info/5">
+                  <p className="text-[11px] text-base-content/45 mb-2 leading-relaxed">
+                    {sameAreaDiscardMatches.length} descarte
+                    {sameAreaDiscardMatches.length !== 1 ? "s" : ""} más iguales
+                    ({selectedGroup?.totalArea.toFixed(2)} m² ·{" "}
+                    {selectedGroup?.orientation}). Marcá todas como pared o piso
+                    para incluirlas en los planos (p. ej. ventanas).
+                  </p>
+                  <div className="flex flex-col gap-1.5">
+                    <button
+                      type="button"
+                      className="btn btn-outline btn-sm w-full rounded-xl gap-2 border-info/40 text-base-content/80"
+                      onClick={() => openBulkSimilarModal("promote", "wall")}
+                    >
+                      <Copy size={14} />
+                      Marcar iguales como Pared…
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-outline btn-sm w-full rounded-xl gap-2 border-info/40 text-base-content/80"
+                      onClick={() => openBulkSimilarModal("promote", "floor")}
+                    >
+                      <Copy size={14} />
+                      Marcar iguales como Piso…
+                    </button>
+                  </div>
+                </div>
               )}
-            </button>
           </div>
-        </div>
+          {/* /Pestaña: Selección */}
+
+
+
+          <div className="mt-auto border-t border-base-300/40 p-4 bg-base-100 shrink-0">
+            {overrides.size > 0 && (
+              <p className="text-[11px] text-warning mb-3 px-2 py-1.5 rounded-lg bg-warning/8 border border-warning/15 text-center font-medium">
+                {overrides.size} clasificación{overrides.size !== 1 ? "es" : ""}{" "}
+                modificada{overrides.size !== 1 ? "s" : ""}
+              </p>
+            )}
+
+            <div className="flex gap-2">
+              <button
+                type="button"
+                className="btn btn-ghost flex-1 rounded-xl border border-base-300/40"
+                onClick={onCancel}
+                disabled={isGenerating}
+              >
+                Volver
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary flex-[1.4] rounded-xl gap-2 shadow-md shadow-primary/20"
+                onClick={handleConfirm}
+                disabled={isGenerating}
+              >
+                {isGenerating ? (
+                  <>
+                    <span className="loading loading-spinner loading-sm" />
+                    Generando…
+                  </>
+                ) : (
+                  <>
+                    Continuar
+                    <ArrowRight size={15} />
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
         </aside>
       )}
 
@@ -2009,17 +2730,22 @@ export default function ReviewScreen({
               <span className="font-mono font-semibold">
                 {bulkSimilarModal.reference.totalArea.toFixed(2)} m²
               </span>
-              , la misma orientación y tipo. Desmarcá las que no quieras incluir.
+              , la misma orientación y tipo. Desmarcá las que no quieras
+              incluir.
             </p>
             {bulkSimilarModal.mode === "promote" && (
               <div className="mt-3 flex gap-2">
                 <button
                   type="button"
                   className={`btn btn-sm flex-1 rounded-xl ${
-                    bulkSimilarModal.promoteTarget === "wall" ? "btn-primary" : "btn-outline"
+                    bulkSimilarModal.promoteTarget === "wall"
+                      ? "btn-primary"
+                      : "btn-outline"
                   }`}
                   onClick={() =>
-                    setBulkSimilarModal((m) => m && { ...m, promoteTarget: "wall" })
+                    setBulkSimilarModal(
+                      (m) => m && { ...m, promoteTarget: "wall" },
+                    )
                   }
                 >
                   Pared
@@ -2027,10 +2753,14 @@ export default function ReviewScreen({
                 <button
                   type="button"
                   className={`btn btn-sm flex-1 rounded-xl ${
-                    bulkSimilarModal.promoteTarget === "floor" ? "btn-primary" : "btn-outline"
+                    bulkSimilarModal.promoteTarget === "floor"
+                      ? "btn-primary"
+                      : "btn-outline"
                   }`}
                   onClick={() =>
-                    setBulkSimilarModal((m) => m && { ...m, promoteTarget: "floor" })
+                    setBulkSimilarModal(
+                      (m) => m && { ...m, promoteTarget: "floor" },
+                    )
                   }
                 >
                   Piso
@@ -2038,36 +2768,44 @@ export default function ReviewScreen({
               </div>
             )}
             <div className="mt-4 max-h-56 overflow-y-auto space-y-1.5 custom-scrollbar">
-              {[bulkSimilarModal.reference, ...bulkSimilarModal.matches].map((g) => {
-                const eff = getEffectiveCategory(g, overrides);
-                return (
-                  <label
-                    key={g.id}
-                    className="flex items-start gap-2.5 p-2.5 rounded-xl border border-base-300/40 bg-base-200/30 cursor-pointer hover:bg-base-200/60 transition-colors"
-                  >
-                    <input
-                      type="checkbox"
-                      className="checkbox checkbox-xs checkbox-primary rounded mt-0.5"
-                      checked={bulkSimilarChecked.has(g.id)}
-                      onChange={(e) => {
-                        setBulkSimilarChecked((prev) => {
-                          const next = new Set(prev);
-                          if (e.target.checked) next.add(g.id);
-                          else next.delete(g.id);
-                          return next;
-                        });
-                      }}
-                    />
-                    <div className="min-w-0">
-                      <span className="text-sm font-medium truncate block">{g.label}</span>
-                      <span className="text-[11px] text-base-content/45">
-                        {g.totalArea.toFixed(2)} m² ·{" "}
-                        {eff === "wall" ? "Pared" : eff === "floor" ? "Piso" : "Descartar"}
-                      </span>
-                    </div>
-                  </label>
-                );
-              })}
+              {[bulkSimilarModal.reference, ...bulkSimilarModal.matches].map(
+                (g) => {
+                  const eff = getEffectiveCategory(g, overrides);
+                  return (
+                    <label
+                      key={g.id}
+                      className="flex items-start gap-2.5 p-2.5 rounded-xl border border-base-300/40 bg-base-200/30 cursor-pointer hover:bg-base-200/60 transition-colors"
+                    >
+                      <input
+                        type="checkbox"
+                        className="checkbox checkbox-xs checkbox-primary rounded mt-0.5"
+                        checked={bulkSimilarChecked.has(g.id)}
+                        onChange={(e) => {
+                          setBulkSimilarChecked((prev) => {
+                            const next = new Set(prev);
+                            if (e.target.checked) next.add(g.id);
+                            else next.delete(g.id);
+                            return next;
+                          });
+                        }}
+                      />
+                      <div className="min-w-0">
+                        <span className="text-sm font-medium truncate block">
+                          {g.label}
+                        </span>
+                        <span className="text-[11px] text-base-content/45">
+                          {g.totalArea.toFixed(2)} m² ·{" "}
+                          {eff === "wall"
+                            ? "Pared"
+                            : eff === "floor"
+                              ? "Piso"
+                              : "Descartar"}
+                        </span>
+                      </div>
+                    </label>
+                  );
+                },
+              )}
             </div>
             <div className="modal-action mt-4">
               <button
@@ -2086,7 +2824,9 @@ export default function ReviewScreen({
                 {bulkSimilarModal.mode === "discard"
                   ? `Descartar ${bulkSimilarChecked.size} capa${bulkSimilarChecked.size !== 1 ? "s" : ""}`
                   : `Marcar ${bulkSimilarChecked.size} como ${
-                      bulkSimilarModal.promoteTarget === "floor" ? "piso" : "pared"
+                      bulkSimilarModal.promoteTarget === "floor"
+                        ? "piso"
+                        : "pared"
                     }`}
               </button>
             </div>

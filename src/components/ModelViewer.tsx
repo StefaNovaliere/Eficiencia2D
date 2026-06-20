@@ -810,8 +810,7 @@ function Scene({
     };
   }, [selectedGeometry]);
 
-  // When reviewing wall-wall encounters, softly tint the *secondary* wall so it
-  // is easier to see its extent in 3D (same colour as the leader marker).
+  // When reviewing wall-wall encounters, tint the yielding wall (la que se acorta).
   const secondaryEncounterGeometry = useMemo(() => {
     const secondaryIds = leaderMarkers.filter((m) => !m.primary).map((m) => m.groupId);
     if (secondaryIds.length === 0) return null;
