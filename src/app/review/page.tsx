@@ -49,6 +49,7 @@ export default function ReviewPage() {
     setSavedUserCuts,
     fileId,
     scale,
+    setScale,
     sheetConfig,
     setNestingData,
     isLoadingSession,
@@ -231,6 +232,7 @@ export default function ReviewPage() {
       initialUserCuts={savedUserCuts}
       isRecomputing={isRecomputing}
       isGenerating={isGenerating}
+      onPrintScaleChange={setScale}
     />
   );
 }

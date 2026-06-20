@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { Bell, Check, Loader2, LogOut, Palette } from "lucide-react";
+import { Bell, Check, Keyboard, Loader2, LogOut, Palette } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { useSettings } from "@/context/SettingsContext";
 import { THEMES, useTheme, type ThemeId } from "@/context/ThemeContext";
@@ -95,6 +95,27 @@ export default function UserSettingsForm() {
       )}
 
       <section className="space-y-3">
+        <div className="flex items-start gap-3">
+          <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-primary/10 text-primary shrink-0">
+            <Keyboard size={18} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <h2 className="text-sm font-semibold text-base-content">Atajos de teclado</h2>
+            <p className="text-xs text-base-content/55 mt-1">
+              Consultá las combinaciones de teclas del visor 3D y la pantalla de revisión.
+            </p>
+          </div>
+          <Link
+            href="/settings/shortcuts"
+            className="btn btn-outline btn-sm rounded-xl border-base-300 gap-2 shrink-0"
+          >
+            <Keyboard size={16} />
+            Ver atajos
+          </Link>
+        </div>
+      </section>
+
+      <section className="space-y-3 pt-2 border-t border-base-300/40">
         <div className="flex items-start gap-3">
           <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-primary/10 text-primary shrink-0">
             <Palette size={18} />

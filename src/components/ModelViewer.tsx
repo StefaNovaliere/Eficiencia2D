@@ -9,6 +9,9 @@ import type { Face3D, Vec3 } from "@/core/types";
 import type { FaceCategory, GeometryGroup } from "@/core/group-classifier";
 import { computeMarkedOpeningGroups3D, type MarkOpeningGroupLines } from "@/core/mark-preview";
 import { computeCutPreviewSegments, type CutPreviewSegment } from "@/core/cut-preview";
+import { computeMeasurePreviewSegments, computeMeasureLabelPlacements } from "@/core/measure-preview";
+import type { MeasureDragState, UserMeasure, MeasureLabelOptions } from "@/core/measure-tool";
+import { DEFAULT_MEASURE_LABEL_OPTIONS } from "@/core/measure-tool";
 import {
   worldPointToPanelUV,
   getGroupPanelSize,
@@ -17,6 +20,7 @@ import {
 } from "@/core/cut-preview";
 import type { UserCut } from "@/core/user-cuts";
 import type { CutDragState } from "@/core/user-cuts";
+import { cutGroupOwnerId, type DerivedTriangleRef } from "@/core/cut-derived-groups";
 import { useViewerPalette, type ViewerPalette } from "@/context/ThemeContext";
 
 // A floating reference label (panel id) anchored to a component in 3D, drawn
@@ -234,11 +238,23 @@ function pushThicknessSides(
   }
 }
 
+function pushTriangleToBucket(
+  bucket: { positions: number[]; groupIds: number[] },
+  groupId: number,
+  a: Vec3,
+  b: Vec3,
+  c: Vec3,
+): void {
+  bucket.positions.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
+  bucket.groupIds.push(groupId);
+}
+
 function buildMergedGeometries(
   faces: Face3D[],
   groups: GeometryGroup[],
   overrides: Map<number, FaceCategory>,
   hiddenGroupIds: Set<number>,
+  derivedCutTriangles?: Map<number, DerivedTriangleRef[]>,
 ): MergedMeshData[] {
   const byCategory = new Map<
     FaceCategory,
@@ -252,6 +268,22 @@ function buildMergedGeometries(
     if (hiddenGroupIds.has(group.id)) continue;
     const cat = overrides.get(group.id) ?? group.category;
     const bucket = byCategory.get(cat)!;
+
+    const triSubset = derivedCutTriangles?.get(group.id);
+    if (triSubset) {
+      for (const { faceIndex, i0, i1, i2 } of triSubset) {
+        const face = faces[faceIndex];
+        if (!face) continue;
+        pushTriangleToBucket(
+          bucket,
+          group.id,
+          face.vertices[i0],
+          face.vertices[i1],
+          face.vertices[i2],
+        );
+      }
+      continue;
+    }
 
     for (const fi of group.faceIndices) {
       const face = faces[fi];
@@ -327,6 +359,24 @@ function buildMergedGeometries(
 // ---------------------------------------------------------------------------
 // Selected-group overlay geometry (just the faces of one group)
 // ---------------------------------------------------------------------------
+
+function buildSelectedGeometryFromTriangles(
+  faces: Face3D[],
+  tris: DerivedTriangleRef[],
+): THREE.BufferGeometry {
+  const positions: number[] = [];
+  for (const { faceIndex, i0, i1, i2 } of tris) {
+    const face = faces[faceIndex];
+    if (!face) continue;
+    const a = face.vertices[i0];
+    const b = face.vertices[i1];
+    const c = face.vertices[i2];
+    positions.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  return geo;
+}
 
 function buildSelectedGeometry(
   faces: Face3D[],
@@ -581,6 +631,12 @@ const CUT_PREVIEW_MATERIAL = new THREE.LineBasicMaterial({
   depthWrite: false,
 });
 
+const MEASURE_PREVIEW_MATERIAL = new THREE.LineBasicMaterial({
+  color: 0x38bdf8,
+  depthTest: true,
+  depthWrite: false,
+});
+
 function buildCutPreviewGeometry(segments: CutPreviewSegment[]): THREE.BufferGeometry {
   const positions = new Float32Array(segments.length * 6);
   let i = 0;
@@ -602,11 +658,13 @@ function CutGroupOverlay({
   segments,
   anchor,
   normal,
+  material,
 }: {
   groupId: number;
   segments: CutPreviewSegment[];
   anchor: THREE.Vector3;
   normal: THREE.Vector3;
+  material: THREE.LineBasicMaterial;
 }) {
   const lineRef = useRef<THREE.LineSegments>(null);
   const viewDir = useRef(new THREE.Vector3());
@@ -628,20 +686,22 @@ function CutGroupOverlay({
     <lineSegments
       ref={lineRef}
       geometry={geometry}
-      material={CUT_PREVIEW_MATERIAL}
+      material={material}
       renderOrder={3}
     />
   );
 }
 
-function CutPreviewOverlays({
+function PreviewOverlays({
   segments,
   groups,
   centerOffset,
+  material,
 }: {
   segments: CutPreviewSegment[];
   groups: GeometryGroup[];
   centerOffset: Vec3;
+  material: THREE.LineBasicMaterial;
 }) {
   const byGroup = useMemo(() => {
     const map = new Map<number, CutPreviewSegment[]>();
@@ -674,7 +734,47 @@ function CutPreviewOverlays({
             segments={segs}
             anchor={anchor}
             normal={normal}
+            material={material}
           />
+        );
+      })}
+    </>
+  );
+}
+
+function MeasureHtmlLabels({
+  placements,
+  highlightMeasureId = null,
+}: {
+  placements: ReturnType<typeof computeMeasureLabelPlacements>;
+  highlightMeasureId?: string | null;
+}) {
+  if (placements.length === 0) return null;
+  return (
+    <>
+      {placements.map((p) => {
+        const highlighted = !p.isDraft && p.id === highlightMeasureId;
+        return (
+        <Html
+          key={p.id}
+          position={[p.position.x, p.position.y, p.position.z]}
+          center
+          occlude={false}
+          zIndexRange={[100, 0]}
+          style={{ pointerEvents: "none" }}
+        >
+          <div
+            className={`px-2 py-0.5 rounded-lg font-mono text-xs font-semibold shadow-md border whitespace-nowrap ${
+              p.isDraft
+                ? "bg-base-100/90 border-sky-400/70 text-sky-600 dark:text-sky-300"
+                : highlighted
+                  ? "bg-amber-400 border-amber-300 text-amber-950 ring-2 ring-amber-200 scale-110"
+                  : "bg-sky-500/95 border-sky-400 text-white"
+            }`}
+          >
+            {p.label}
+          </div>
+        </Html>
         );
       })}
     </>
@@ -704,15 +804,24 @@ interface SceneProps {
   userCuts?: UserCut[];
   cutDraft?: CutDragState | null;
   movingCutId?: string | null;
+  measureDraft?: MeasureDragState | null;
+  measures?: UserMeasure[];
+  measureLabelOptions?: MeasureLabelOptions;
+  highlightMeasureId?: string | null;
   panelRaycastRef: React.MutableRefObject<PanelRaycastContext>;
   palette: ViewerPalette;
   materials: ViewerMaterials;
   mergeMemberFaceIndices?: number[] | null;
+  /** Original groups for panel UV projection (cuts use parent frame). */
+  projectionGroups?: GeometryGroup[];
+  /** Triangle subsets for groups created by user cuts. */
+  derivedCutTriangles?: Map<number, DerivedTriangleRef[]>;
 }
 
 export interface PanelRaycastContext {
   faces: Face3D[];
   groups: GeometryGroup[];
+  projectionGroups: GeometryGroup[];
   hiddenGroupIds: Set<number>;
   appliedAxis: "Y" | "Z";
   modelCenter: Vec3;
@@ -739,10 +848,16 @@ function Scene({
   userCuts = [],
   cutDraft = null,
   movingCutId = null,
+  measureDraft = null,
+  measures = [],
+  measureLabelOptions = DEFAULT_MEASURE_LABEL_OPTIONS,
+  highlightMeasureId = null,
   panelRaycastRef,
   palette,
   materials,
   mergeMemberFaceIndices = null,
+  projectionGroups,
+  derivedCutTriangles,
 }: SceneProps) {
   const selectedGroups = groups.filter((g) => selectedGroupIds.has(g.id));
 
@@ -771,8 +886,15 @@ function Scene({
 
   // Merged geometries — rebuilt when categories or overrides change.
   const mergedMeshes = useMemo(
-    () => buildMergedGeometries(faces, groups, categoryOverrides, hiddenGroupIds),
-    [faces, groups, categoryOverrides, hiddenGroupIds],
+    () =>
+      buildMergedGeometries(
+        faces,
+        groups,
+        categoryOverrides,
+        hiddenGroupIds,
+        derivedCutTriangles,
+      ),
+    [faces, groups, categoryOverrides, hiddenGroupIds, derivedCutTriangles],
   );
 
   const groupAreaById = useMemo(() => {
@@ -797,12 +919,46 @@ function Scene({
       return buildSelectedGeometry(faces, mergeMemberFaceIndices);
     }
     if (selectedGroups.length === 0) return null;
+
+    const allTris: DerivedTriangleRef[] = [];
     const allFaceIndices: number[] = [];
     for (const g of selectedGroups) {
-      allFaceIndices.push(...g.faceIndices);
+      const triSubset = derivedCutTriangles?.get(g.id);
+      if (triSubset) allTris.push(...triSubset);
+      else allFaceIndices.push(...g.faceIndices);
     }
-    return buildSelectedGeometry(faces, allFaceIndices);
-  }, [faces, selectedGroups, mergeMemberFaceIndices]);
+
+    if (allTris.length > 0 && allFaceIndices.length === 0) {
+      return buildSelectedGeometryFromTriangles(faces, allTris);
+    }
+    if (allTris.length === 0) {
+      return buildSelectedGeometry(faces, allFaceIndices);
+    }
+
+    const positions: number[] = [];
+    for (const { faceIndex, i0, i1, i2 } of allTris) {
+      const face = faces[faceIndex];
+      if (!face) continue;
+      const a = face.vertices[i0];
+      const b = face.vertices[i1];
+      const c = face.vertices[i2];
+      positions.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
+    }
+    for (const idx of allFaceIndices) {
+      const face = faces[idx];
+      if (!face || face.vertices.length < 3) continue;
+      const tris = triangulateFace(face);
+      for (let i = 0; i < tris.length; i += 3) {
+        const a = face.vertices[tris[i]];
+        const b = face.vertices[tris[i + 1]];
+        const c = face.vertices[tris[i + 2]];
+        positions.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+    return geo;
+  }, [faces, selectedGroups, mergeMemberFaceIndices, derivedCutTriangles]);
 
   useEffect(() => {
     return () => {
@@ -901,13 +1057,47 @@ function Scene({
   );
 
   const cutPreviewSegments = useMemo(
-    () => computeCutPreviewSegments(faces, groups, userCuts, cutDraft, appliedAxis, movingCutId),
-    [faces, groups, userCuts, cutDraft, appliedAxis, movingCutId],
+    () =>
+      computeCutPreviewSegments(
+        faces,
+        projectionGroups ?? groups,
+        userCuts,
+        cutDraft,
+        appliedAxis,
+        movingCutId,
+      ),
+    [faces, groups, projectionGroups, userCuts, cutDraft, appliedAxis, movingCutId],
+  );
+
+  const measurePreviewSegments = useMemo(
+    () =>
+      computeMeasurePreviewSegments(
+        faces,
+        groups,
+        measures,
+        measureDraft ?? null,
+        appliedAxis,
+      ),
+    [faces, groups, measures, measureDraft, appliedAxis],
+  );
+
+  const measureLabelPlacements = useMemo(
+    () =>
+      computeMeasureLabelPlacements(
+        faces,
+        groups,
+        measures,
+        measureDraft ?? null,
+        appliedAxis,
+        measureLabelOptions,
+      ),
+    [faces, groups, measures, measureDraft, appliedAxis, measureLabelOptions],
   );
 
   panelRaycastRef.current = {
     faces,
     groups,
+    projectionGroups: projectionGroups ?? groups,
     hiddenGroupIds,
     appliedAxis,
     modelCenter: bounds.center,
@@ -976,12 +1166,27 @@ function Scene({
         )}
 
         {cutPreviewSegments.length > 0 && (
-          <CutPreviewOverlays
+          <PreviewOverlays
             segments={cutPreviewSegments}
             groups={groups}
             centerOffset={bounds.center}
+            material={CUT_PREVIEW_MATERIAL}
           />
         )}
+
+        {measurePreviewSegments.length > 0 && (
+          <PreviewOverlays
+            segments={measurePreviewSegments}
+            groups={groups}
+            centerOffset={bounds.center}
+            material={MEASURE_PREVIEW_MATERIAL}
+          />
+        )}
+
+        <MeasureHtmlLabels
+          placements={measureLabelPlacements}
+          highlightMeasureId={highlightMeasureId}
+        />
 
         {/* Leader lines + floating reference tags for the selected joint */}
         {leaders.map((m) => (
@@ -1087,7 +1292,16 @@ export interface ModelViewerHandle {
     projection: PanelProjection,
   ): { u: number; v: number } | null;
   /** Panel bounding size in metres (same frame as raycastPanelUV). */
-  getPanelSize(groupId: number): { widthM: number; heightM: number } | null;
+  /** Panel size for display groups (measure tool). */
+  getDisplayPanelSize(groupId: number): { widthM: number; heightM: number } | null;
+  /** Raycast for measure tool — uses visible group id + its panel frame. */
+  raycastMeasure(clientX: number, clientY: number): {
+    hitGroupId: number;
+    u: number;
+    v: number;
+    scenePoint: { x: number; y: number; z: number };
+    projection: PanelProjection;
+  } | null;
 }
 
 /**
@@ -1247,14 +1461,18 @@ function SceneBridge({
         const group = ctx.groups.find((g) => g.id === picked.groupId);
         if (!group) return null;
 
+        const ownerId = cutGroupOwnerId(picked.groupId);
+        const projGroup =
+          ctx.projectionGroups.find((g) => g.id === ownerId) ?? group;
+
         const modelPoint = {
           x: picked.point.x + ctx.modelCenter.x,
           y: picked.point.y + ctx.modelCenter.y,
           z: picked.point.z + ctx.modelCenter.z,
         };
-        const uv = worldPointToPanelUV(modelPoint, ctx.faces, group, ctx.appliedAxis);
+        const uv = worldPointToPanelUV(modelPoint, ctx.faces, projGroup, ctx.appliedAxis);
         if (!uv) return null;
-        return { groupId: picked.groupId, u: uv.u, v: uv.v };
+        return { groupId: ownerId, u: uv.u, v: uv.v };
       },
 
       raycastPanelFull(clientX, clientY) {
@@ -1275,19 +1493,23 @@ function SceneBridge({
         const group = ctx.groups.find((g) => g.id === picked.groupId);
         if (!group) return null;
 
+        const ownerId = cutGroupOwnerId(picked.groupId);
+        const projGroup =
+          ctx.projectionGroups.find((g) => g.id === ownerId) ?? group;
+
         const modelPoint = {
           x: picked.point.x + ctx.modelCenter.x,
           y: picked.point.y + ctx.modelCenter.y,
           z: picked.point.z + ctx.modelCenter.z,
         };
-        const uv = worldPointToPanelUV(modelPoint, ctx.faces, group, ctx.appliedAxis);
+        const uv = worldPointToPanelUV(modelPoint, ctx.faces, projGroup, ctx.appliedAxis);
         if (!uv) return null;
 
-        const projection = getGroupProjection(ctx.faces, group, ctx.appliedAxis);
+        const projection = getGroupProjection(ctx.faces, projGroup, ctx.appliedAxis);
         if (!projection) return null;
 
         return {
-          groupId: picked.groupId,
+          groupId: ownerId,
           u: uv.u,
           v: uv.v,
           scenePoint: { x: picked.point.x, y: picked.point.y, z: picked.point.z },
@@ -1340,9 +1562,57 @@ function SceneBridge({
 
       getPanelSize(groupId) {
         const ctx = panelRaycastRef.current;
+        const ownerId = cutGroupOwnerId(groupId);
+        const group =
+          ctx.projectionGroups.find((g) => g.id === ownerId) ??
+          ctx.groups.find((g) => g.id === ownerId);
+        if (!group) return null;
+        return getGroupPanelSize(ctx.faces, group, ctx.appliedAxis);
+      },
+
+      getDisplayPanelSize(groupId) {
+        const ctx = panelRaycastRef.current;
         const group = ctx.groups.find((g) => g.id === groupId);
         if (!group) return null;
         return getGroupPanelSize(ctx.faces, group, ctx.appliedAxis);
+      },
+
+      raycastMeasure(clientX, clientY) {
+        const ctx = panelRaycastRef.current;
+        const canvas = gl.domElement;
+        const canvasRect = canvas.getBoundingClientRect();
+        if (canvasRect.width === 0 || canvasRect.height === 0) return null;
+
+        const ndcX = ((clientX - canvasRect.left) / canvasRect.width) * 2 - 1;
+        const ndcY = -((clientY - canvasRect.top) / canvasRect.height) * 2 + 1;
+
+        const raycaster = new THREE.Raycaster();
+        raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
+        const hits = raycaster.intersectObjects(scene.children, true);
+        const picked = pickGroupFromRaycast(raycaster, hits, ctx.hiddenGroupIds);
+        if (!picked) return null;
+
+        const group = ctx.groups.find((g) => g.id === picked.groupId);
+        if (!group) return null;
+
+        const modelPoint = {
+          x: picked.point.x + ctx.modelCenter.x,
+          y: picked.point.y + ctx.modelCenter.y,
+          z: picked.point.z + ctx.modelCenter.z,
+        };
+        const uv = worldPointToPanelUV(modelPoint, ctx.faces, group, ctx.appliedAxis);
+        if (!uv) return null;
+
+        const projection = getGroupProjection(ctx.faces, group, ctx.appliedAxis);
+        if (!projection) return null;
+
+        return {
+          hitGroupId: picked.groupId,
+          u: uv.u,
+          v: uv.v,
+          scenePoint: { x: picked.point.x, y: picked.point.y, z: picked.point.z },
+          projection,
+        };
       },
     };
     return () => {
@@ -1378,8 +1648,16 @@ export interface ModelViewerProps {
   userCuts?: UserCut[];
   cutDraft?: CutDragState | null;
   movingCutId?: string | null;
+  measureDraft?: MeasureDragState | null;
+  measures?: UserMeasure[];
+  measureLabelOptions?: MeasureLabelOptions;
+  highlightMeasureId?: string | null;
   /** Face indices to highlight for a focused merge member (subset of merged group). */
   mergeMemberFaceIndices?: number[] | null;
+  /** Original topology groups for cut UV projection (parent panel frame). */
+  projectionGroups?: GeometryGroup[];
+  /** Triangle subsets for groups created by user cuts. */
+  derivedCutTriangles?: Map<number, DerivedTriangleRef[]>;
 }
 
 export default function ModelViewer({
@@ -1402,7 +1680,13 @@ export default function ModelViewer({
   userCuts = [],
   cutDraft = null,
   movingCutId = null,
+  measureDraft = null,
+  measures = [],
+  measureLabelOptions = DEFAULT_MEASURE_LABEL_OPTIONS,
+  highlightMeasureId = null,
   mergeMemberFaceIndices = null,
+  projectionGroups,
+  derivedCutTriangles,
 }: ModelViewerProps) {
   const palette = useViewerPalette();
   const materials = useMemo(() => createViewerMaterials(palette), [palette]);
@@ -1411,6 +1695,7 @@ export default function ModelViewer({
   const panelRaycastRef = useRef<PanelRaycastContext>({
     faces: [],
     groups: [],
+    projectionGroups: [],
     hiddenGroupIds: new Set(),
     appliedAxis: "Y",
     modelCenter: { x: 0, y: 0, z: 0 },
@@ -1485,10 +1770,16 @@ export default function ModelViewer({
         userCuts={userCuts}
         cutDraft={cutDraft}
         movingCutId={movingCutId}
+        measureDraft={measureDraft}
+        measures={measures}
+        measureLabelOptions={measureLabelOptions}
+        highlightMeasureId={highlightMeasureId}
         panelRaycastRef={panelRaycastRef}
         palette={palette}
         materials={materials}
         mergeMemberFaceIndices={mergeMemberFaceIndices}
+        projectionGroups={projectionGroups}
+        derivedCutTriangles={derivedCutTriangles}
       />
 
       {viewerRef && (

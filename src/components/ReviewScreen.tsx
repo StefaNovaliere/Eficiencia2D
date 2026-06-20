@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import GroupList from "./GroupList";
+import MeasureList from "./MeasureList";
+import MeasureScaleSelect from "./MeasureScaleSelect";
 import VisibilityFilters from "./VisibilityFilters";
 import StepIndicator from "./StepIndicator";
 import type { FaceCategory, GeometryGroup } from "@/core/group-classifier";
@@ -40,16 +42,32 @@ import {
   Circle,
   Minus,
   RectangleHorizontal,
+  Magnet,
+  Ruler,
 } from "lucide-react";
 import { useReviewHistory } from "@/hooks/useReviewHistory";
 import type { ModelViewerHandle } from "@/components/ModelViewer";
 import CutToolOverlay from "@/components/CutToolOverlay";
+import MeasureToolOverlay from "@/components/MeasureToolOverlay";
 import type {
   CutDragState,
   UserCut,
   ActiveCutShapeKind,
 } from "@/core/user-cuts";
 import { cutDimensionsLabel } from "@/core/user-cuts";
+import {
+  buildDisplayGroupsFromCuts,
+  cutGroupOwnerId,
+} from "@/core/cut-derived-groups";
+import type {
+  MeasureDragState,
+  MeasureShapeKind,
+  UserMeasure,
+} from "@/core/measure-tool";
+import {
+  MEASURE_SCALE_ORIGINAL,
+  isOriginalMeasureScale,
+} from "@/core/print-scale";
 
 export type WallWallDecisions = Map<number, number>;
 
@@ -100,9 +118,22 @@ export interface ReviewScreenProps {
   /** El backend está recalculando la topología (deshabilita controles). */
   isRecomputing?: boolean;
   isGenerating?: boolean;
+  /** Escala de impresión del proyecto (1:N), compartida con nesting/PDF. */
+  onPrintScaleChange: (scale: number) => void;
 }
 
 const MIN_AREA_OPTIONS = [0, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0];
+
+function formatMinAreaOption(areaM2: number): string {
+  if (areaM2 === 0) return "Ninguno";
+  const n =
+    areaM2 >= 1
+      ? String(areaM2)
+      : areaM2.toLocaleString("es-AR", {
+          maximumSignificantDigits: 3,
+        });
+  return `${n} m²`;
+}
 
 const CUT_SHAPE_ORDER: ActiveCutShapeKind[] = ["rect", "circle", "line"];
 
@@ -116,6 +147,11 @@ function nextCutShape(current: ActiveCutShapeKind): ActiveCutShapeKind {
   const i = CUT_SHAPE_ORDER.indexOf(current);
   return CUT_SHAPE_ORDER[(i + 1) % CUT_SHAPE_ORDER.length];
 }
+
+const MEASURE_SHAPE_LABELS: Record<MeasureShapeKind, string> = {
+  line: "Distancia",
+  rect: "Área",
+};
 
 /** Cluster de fusión que contiene un id (incl. cuando solo queda el superviviente en groups). */
 function findMergeClusterForGroupId(
@@ -273,8 +309,10 @@ function facadeJointSides(
   const aCoplanar = areGroupsCoplanar(refGroup, ga);
   const bCoplanar = areGroupsCoplanar(refGroup, gb);
 
-  if (aCoplanar && !bCoplanar) return { facadeId: ww.groupA, otherId: ww.groupB };
-  if (bCoplanar && !aCoplanar) return { facadeId: ww.groupB, otherId: ww.groupA };
+  if (aCoplanar && !bCoplanar)
+    return { facadeId: ww.groupA, otherId: ww.groupB };
+  if (bCoplanar && !aCoplanar)
+    return { facadeId: ww.groupB, otherId: ww.groupA };
 
   if (aCoplanar && bCoplanar) {
     const ra = resolveWallId(ww.groupA, aliasMap);
@@ -297,7 +335,13 @@ function resolveBulkYieldTarget(
   referenceResolved: number,
   onlyReferenceWall: boolean,
 ): number | null {
-  const sides = facadeJointSides(ww, refGroup, groups, aliasMap, referenceResolved);
+  const sides = facadeJointSides(
+    ww,
+    refGroup,
+    groups,
+    aliasMap,
+    referenceResolved,
+  );
   if (!sides) return null;
   if (
     onlyReferenceWall &&
@@ -392,6 +436,7 @@ export default function ReviewScreen({
   initialUserCuts,
   isRecomputing = false,
   isGenerating = false,
+  onPrintScaleChange,
 }: ReviewScreenProps) {
   const [selectedGroupIds, setSelectedGroupIds] = useState<Set<number>>(
     () => new Set(),
@@ -440,8 +485,23 @@ export default function ReviewScreen({
   );
   const [cutToolMode, setCutToolMode] = useState(false);
   const [cutShapeKind, setCutShapeKind] = useState<ActiveCutShapeKind>("rect");
+  /** Snap cortes a los bordes del panel (corte completo de pared). Alt desactiva temporalmente. */
+  const [cutEdgeSnap, setCutEdgeSnap] = useState(true);
   const [cutDraft, setCutDraft] = useState<CutDragState | null>(null);
   const [movingCutId, setMovingCutId] = useState<string | null>(null);
+  const [measureToolMode, setMeasureToolMode] = useState(false);
+  const [measureShapeKind, setMeasureShapeKind] =
+    useState<MeasureShapeKind>("line");
+  const [measureDraft, setMeasureDraft] = useState<MeasureDragState | null>(
+    null,
+  );
+  const [measures, setMeasures] = useState<UserMeasure[]>([]);
+  const [selectedMeasureId, setSelectedMeasureId] = useState<string | null>(
+    null,
+  );
+  const [measureLabelScale, setMeasureLabelScale] = useState(
+    MEASURE_SCALE_ORIGINAL,
+  );
   // Foco de ayuda de la ventana de encuentros pared-pared: apagado por defecto
   // para ganar espacio; el usuario lo enciende para ver la explicación.
   const [showWallWallHelp, setShowWallWallHelp] = useState(false);
@@ -553,6 +613,8 @@ export default function ReviewScreen({
         if (typing) return;
         setCutToolMode(false);
         setCutDraft(null);
+        setMeasureToolMode(false);
+        setMeasureDraft(null);
         setBoxSelectMode(false);
         setDragRect(null);
         setSelectedGroupIds(new Set());
@@ -581,6 +643,32 @@ export default function ReviewScreen({
 
   // El backend ya aplicó eje/área/merges/splits: `phase1` ES la topología
   // efectiva. El front no recalcula geometría.
+
+  /** Grupos visibles tras aplicar cortes manuales (piezas separadas seleccionables). */
+  const cutGroupsResult = useMemo(
+    () =>
+      buildDisplayGroupsFromCuts(
+        phase1.groups,
+        phase1.faces,
+        userCuts,
+        phase1.appliedAxis,
+      ),
+    [phase1.groups, phase1.faces, userCuts, phase1.appliedAxis],
+  );
+  const displayGroups = cutGroupsResult.displayGroups;
+  const derivedCutTriangles = cutGroupsResult.derivedTriangles;
+
+  const displayGroupIds = useMemo(
+    () => new Set(displayGroups.map((g) => g.id)),
+    [displayGroups],
+  );
+
+  useEffect(() => {
+    setSelectedGroupIds((prev) => {
+      const next = new Set([...prev].filter((id) => displayGroupIds.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [displayGroupIds]);
 
   // Etiquetas de panel (A1/B2…) provistas por el backend.
   const panelIdByGroup = useMemo(() => {
@@ -708,12 +796,13 @@ export default function ReviewScreen({
   const selectedGroup = useMemo(() => {
     if (selectedGroupIds.size !== 1) return null;
     const selId = Array.from(selectedGroupIds)[0];
-    return phase1.groups.find((g) => g.id === selId) ?? null;
-  }, [selectedGroupIds, phase1.groups]);
+    return displayGroups.find((g) => g.id === selId) ?? null;
+  }, [selectedGroupIds, displayGroups]);
 
   const cutsForSelectedGroup = useMemo(() => {
     if (!selectedGroup) return [];
-    return userCuts.filter((c) => c.groupId === selectedGroup.id);
+    const ownerId = cutGroupOwnerId(selectedGroup.id);
+    return userCuts.filter((c) => c.groupId === ownerId);
   }, [selectedGroup, userCuts]);
 
   const sameAreaMatches = useMemo(() => {
@@ -1038,6 +1127,51 @@ export default function ReviewScreen({
     [pushHistory],
   );
 
+  const handleCommitMeasure = useCallback((measure: UserMeasure) => {
+    setMeasures((prev) => [...prev, measure]);
+  }, []);
+
+  const handleClearMeasures = useCallback(() => {
+    setMeasures([]);
+    setMeasureDraft(null);
+    setSelectedMeasureId(null);
+  }, []);
+
+  const handleRemoveMeasure = useCallback((id: string) => {
+    setMeasures((prev) => prev.filter((m) => m.id !== id));
+    setSelectedMeasureId((prev) => (prev === id ? null : prev));
+  }, []);
+
+  const handleSelectMeasure = useCallback(
+    (id: string) => {
+      setSelectedMeasureId(id);
+      const measure = measures.find((m) => m.id === id);
+      if (measure) {
+        setSelectedGroupIds(new Set([measure.groupId]));
+        setSelectedJointIndex(null);
+        setSidebarTab("capas");
+      }
+    },
+    [measures],
+  );
+
+  const handleMeasureScaleChange = useCallback(
+    (scaleDenom: number) => {
+      setMeasureLabelScale(scaleDenom);
+      if (!isOriginalMeasureScale(scaleDenom)) {
+        onPrintScaleChange(scaleDenom);
+      }
+    },
+    [onPrintScaleChange],
+  );
+
+  const measureLabelOptions = useMemo(
+    () => ({
+      scaleDenom: measureLabelScale,
+    }),
+    [measureLabelScale],
+  );
+
   const handleConfirm = useCallback(() => {
     const result: ClassificationOverride[] = [];
     for (const [groupId, newCategory] of overrides.entries()) {
@@ -1106,7 +1240,8 @@ export default function ReviewScreen({
   const facadeRefGroup = useMemo(() => {
     if (facadeReferenceResolved < 0) return null;
     return (
-      phase1.groups.find((g) => g.id === facadeReferenceResolved) ?? selectedGroup
+      phase1.groups.find((g) => g.id === facadeReferenceResolved) ??
+      selectedGroup
     );
   }, [facadeReferenceResolved, phase1.groups, selectedGroup]);
 
@@ -1403,6 +1538,8 @@ export default function ReviewScreen({
 
       if (e.key === "c" || e.key === "C") {
         e.preventDefault();
+        setMeasureToolMode(false);
+        setMeasureDraft(null);
         setBoxSelectMode(false);
         setCutToolMode((prev) => {
           if (!prev) return true;
@@ -1413,10 +1550,35 @@ export default function ReviewScreen({
         return;
       }
 
+      if (e.key === "m" || e.key === "M") {
+        e.preventDefault();
+        setCutToolMode(false);
+        setCutDraft(null);
+        setBoxSelectMode(false);
+        setMeasureDraft(null);
+        setMeasureToolMode((prev) => !prev);
+        return;
+      }
+
+      if (e.key === "Delete" || e.key === "Backspace") {
+        if (selectedMeasureId) {
+          e.preventDefault();
+          handleRemoveMeasure(selectedMeasureId);
+          return;
+        }
+        if (measureToolMode && measures.length > 0) {
+          e.preventDefault();
+          setMeasures((prev) => prev.slice(0, -1));
+          return;
+        }
+      }
+
       if (e.key === "s" || e.key === "S") {
         e.preventDefault();
         setCutToolMode(false);
         setCutDraft(null);
+        setMeasureToolMode(false);
+        setMeasureDraft(null);
         setBoxSelectMode((prev) => !prev);
         return;
       }
@@ -1425,6 +1587,8 @@ export default function ReviewScreen({
         e.preventDefault();
         setCutToolMode(false);
         setCutDraft(null);
+        setMeasureToolMode(false);
+        setMeasureDraft(null);
         setBoxSelectMode(false);
         return;
       }
@@ -1449,6 +1613,10 @@ export default function ReviewScreen({
     handleMergeSelected,
     canSplitMerged,
     handleDivideMerged,
+    measureToolMode,
+    selectedMeasureId,
+    handleRemoveMeasure,
+    measures.length,
   ]);
 
   const [showWallWallHelp2, setShowWallWallHelp2] = useState(false);
@@ -1462,7 +1630,9 @@ export default function ReviewScreen({
       <div className="flex-1 relative overflow-hidden" ref={viewerAreaRef}>
         <ModelViewer
           faces={phase1.faces}
-          groups={phase1.groups}
+          groups={displayGroups}
+          projectionGroups={phase1.groups}
+          derivedCutTriangles={derivedCutTriangles}
           selectedGroupIds={selectedGroupIds}
           mergeMemberFaceIndices={mergeMemberHighlightFaceIndices}
           categoryOverrides={overrides}
@@ -1481,17 +1651,31 @@ export default function ReviewScreen({
           userCuts={userCuts}
           cutDraft={cutDraft}
           movingCutId={movingCutId}
+          measureDraft={measureDraft}
+          measures={measures}
+          measureLabelOptions={measureLabelOptions}
+          highlightMeasureId={selectedMeasureId}
         />
 
         <CutToolOverlay
           active={cutToolMode}
           shapeKind={cutShapeKind}
+          edgeSnapEnabled={cutEdgeSnap}
           userCuts={userCuts}
           viewerRef={viewerRef}
           onDraftChange={setCutDraft}
           onMovingCutId={setMovingCutId}
           onCommitCut={handleCommitCut}
           onCommitMove={handleCommitMove}
+        />
+
+        <MeasureToolOverlay
+          active={measureToolMode}
+          shapeKind={measureShapeKind}
+          edgeSnapEnabled={cutEdgeSnap}
+          viewerRef={viewerRef}
+          onDraftChange={setMeasureDraft}
+          onCommitMeasure={handleCommitMeasure}
         />
 
         {/* Overlay mientras el backend recalcula la topología */}
@@ -1505,7 +1689,7 @@ export default function ReviewScreen({
         )}
 
         {/* Box-select overlay — captures pointer events when active */}
-        {boxSelectMode && !cutToolMode && (
+        {boxSelectMode && !cutToolMode && !measureToolMode && (
           <div
             className="absolute inset-0 z-20"
             style={{ cursor: "crosshair" }}
@@ -1683,14 +1867,18 @@ export default function ReviewScreen({
               <div className="tooltip tooltip-bottom" data-tip="Cursor (V)">
                 <button
                   type="button"
-                  className={`${viewToolBtn} ${!boxSelectMode && !cutToolMode ? "bg-primary/15 text-primary hover:bg-primary/20" : ""}`}
+                  className={`${viewToolBtn} ${!boxSelectMode && !cutToolMode && !measureToolMode ? "bg-primary/15 text-primary hover:bg-primary/20" : ""}`}
                   onClick={() => {
                     setCutToolMode(false);
                     setCutDraft(null);
+                    setMeasureToolMode(false);
+                    setMeasureDraft(null);
                     setBoxSelectMode(false);
                   }}
                   aria-label="Cursor"
-                  aria-pressed={!boxSelectMode && !cutToolMode}
+                  aria-pressed={
+                    !boxSelectMode && !cutToolMode && !measureToolMode
+                  }
                 >
                   <MousePointer2 size={15} />
                 </button>
@@ -1705,6 +1893,8 @@ export default function ReviewScreen({
                   onClick={() => {
                     setCutToolMode(false);
                     setCutDraft(null);
+                    setMeasureToolMode(false);
+                    setMeasureDraft(null);
                     setBoxSelectMode((s) => !s);
                   }}
                   aria-label="Selección por área"
@@ -1717,14 +1907,16 @@ export default function ReviewScreen({
                 className="tooltip tooltip-bottom"
                 data-tip={
                   cutToolMode
-                    ? `${CUT_SHAPE_LABELS[cutShapeKind]} · C cambia forma · V sale`
-                    : "Cortes (C) — activar y cambiar forma"
+                    ? `${CUT_SHAPE_LABELS[cutShapeKind]} · C cambia forma · Alt libera bordes · V sale`
+                    : "Cortes (C)"
                 }
               >
                 <button
                   type="button"
-                  className={`${viewToolBtn} ${cutToolMode ? "bg-warning/20 text-warning hover:bg-warning/25" : ""}`}
+                  className={`${viewToolBtn} ${cutToolMode ? "bg-secondary/20 text-secondary hover:bg-secondary/25" : ""}`}
                   onClick={() => {
+                    setMeasureToolMode(false);
+                    setMeasureDraft(null);
                     setBoxSelectMode(false);
                     setCutDraft(null);
                     setCutToolMode((active) => {
@@ -1739,11 +1931,124 @@ export default function ReviewScreen({
                   <Scissors size={15} />
                 </button>
               </div>
+              <div
+                className="tooltip tooltip-bottom"
+                data-tip={
+                  measureToolMode
+                    ? `${MEASURE_SHAPE_LABELS[measureShapeKind]} · M apaga · V sale`
+                    : "Medir (M) "
+                }
+              >
+                <button
+                  type="button"
+                  className={`${viewToolBtn} ${measureToolMode ? "bg-secondary/20 text-secondary hover:bg-secondary/25" : ""}`}
+                  onClick={() => {
+                    setCutToolMode(false);
+                    setCutDraft(null);
+                    setBoxSelectMode(false);
+                    setMeasureDraft(null);
+                    setMeasureToolMode((active) => !active);
+                  }}
+                  aria-label="Herramienta de medición"
+                  aria-pressed={measureToolMode}
+                >
+                  <Ruler size={15} />
+                </button>
+              </div>
             </div>
 
+            {measureToolMode && (
+              <div className="inline-flex items-center gap-1 p-0.5 pl-1.5 rounded-xl bg-secondary/10 border border-secondary/25">
+                <span className="text-[11px] font-semibold text-secondary whitespace-nowrap hidden sm:inline">
+                  {MEASURE_SHAPE_LABELS[measureShapeKind]}
+                </span>
+                {(
+                  [
+                    {
+                      kind: "line" as const,
+                      icon: Minus,
+                      tip: "Distancia (⇧ recta)",
+                    },
+                    {
+                      kind: "rect" as const,
+                      icon: RectangleHorizontal,
+                      tip: "Área / alto × ancho (⇧ cuadrado)",
+                    },
+                  ] as const
+                ).map(({ kind, icon: Icon, tip }) => (
+                  <button
+                    key={kind}
+                    type="button"
+                    className={`${viewToolBtn} ${measureShapeKind === kind ? "bg-secondary/25 text-secondary ring-1 ring-secondary/40" : ""}`}
+                    title={tip}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setMeasureDraft(null);
+                      setMeasureShapeKind(kind);
+                    }}
+                    aria-label={tip}
+                    aria-pressed={measureShapeKind === kind}
+                  >
+                    <Icon size={15} />
+                  </button>
+                ))}
+                <MeasureScaleSelect
+                  value={measureLabelScale}
+                  onChange={handleMeasureScaleChange}
+                  onClick={(e) => e.stopPropagation()}
+                  className="border-l border-secondary/25 pl-1 ml-0.5"
+                  selectClassName="select select-bordered select-xs h-8 min-h-8 w-[5.75rem] bg-base-100 font-mono text-[11px]"
+                />
+                <div
+                  className="tooltip tooltip-bottom"
+                  data-tip={
+                    cutEdgeSnap
+                      ? "Bordes pegajosos ON — Alt libera al medir"
+                      : "Bordes pegajosos OFF — clic para activar"
+                  }
+                >
+                  <button
+                    type="button"
+                    className={`${viewToolBtn} ${cutEdgeSnap ? "bg-secondary/25 text-secondary ring-1 ring-secondary/40" : "text-base-content/50"}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setCutEdgeSnap((on) => !on);
+                    }}
+                    aria-label="Bordes pegajosos"
+                    aria-pressed={cutEdgeSnap}
+                  >
+                    <Magnet size={15} />
+                  </button>
+                </div>
+                {measures.length > 0 && (
+                  <>
+                    <span className="text-[11px] font-mono font-semibold text-secondary/80 px-1">
+                      {measures.length}
+                    </span>
+                    <div
+                      className="tooltip tooltip-bottom"
+                      data-tip="Borrar todas las medidas · Supr quita la seleccionada o la última"
+                    >
+                      <button
+                        type="button"
+                        className={`${viewToolBtn} text-base-content/50 hover:text-error`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleClearMeasures();
+                        }}
+                        aria-label="Borrar medidas"
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
             {cutToolMode && (
-              <div className="inline-flex items-center gap-1 p-0.5 pl-1.5 rounded-xl bg-warning/10 border border-warning/20">
-                <span className="text-[11px] font-semibold text-warning whitespace-nowrap hidden sm:inline">
+              <div className="inline-flex items-center gap-1 p-0.5 pl-1.5 rounded-xl bg-secondary/10 border border-secondary/20">
+                <span className="text-[11px] font-semibold text-secondary whitespace-nowrap hidden sm:inline">
                   {CUT_SHAPE_LABELS[cutShapeKind]}
                 </span>
                 {(
@@ -1768,7 +2073,7 @@ export default function ReviewScreen({
                   <button
                     key={kind}
                     type="button"
-                    className={`${viewToolBtn} ${cutShapeKind === kind ? "bg-warning/25 text-warning ring-1 ring-warning/40" : ""}`}
+                    className={`${viewToolBtn} ${cutShapeKind === kind ? "bg-secondary/25 text-secondary ring-1 ring-secondary/40" : ""}`}
                     title={tip}
                     onClick={(e) => {
                       e.stopPropagation();
@@ -1781,6 +2086,27 @@ export default function ReviewScreen({
                     <Icon size={15} />
                   </button>
                 ))}
+                <div
+                  className="tooltip tooltip-bottom"
+                  data-tip={
+                    cutEdgeSnap
+                      ? "Bordes pegajosos ON — Alt libera al dibujar"
+                      : "Bordes pegajosos OFF — clic para activar"
+                  }
+                >
+                  <button
+                    type="button"
+                    className={`${viewToolBtn} ${cutEdgeSnap ? "bg-secondary/25 text-secondary ring-1 ring-secondary/40" : "text-base-content/50"}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setCutEdgeSnap((on) => !on);
+                    }}
+                    aria-label="Bordes pegajosos"
+                    aria-pressed={cutEdgeSnap}
+                  >
+                    <Magnet size={15} />
+                  </button>
+                </div>
                 {userCuts.length > 0 && (
                   <span className="text-[10px] font-semibold text-warning/80 px-1 tabular-nums border-l border-warning/20 ml-0.5 pl-1.5">
                     {userCuts.length}
@@ -1892,31 +2218,39 @@ export default function ReviewScreen({
                     />
                   </label>
                 </li>
-                <div className="divider my-1" />
-                <li>
-                  <div
-                    className="flex items-center justify-between gap-2 py-1"
-                    title="Componentes más chicos que este umbral se descartan al generar"
-                  >
-                    <span className="flex items-center gap-2">
-                      <SlidersHorizontal size={15} /> Descartar &lt; (mín. área)
-                    </span>
-                    <select
-                      className="select select-bordered select-xs h-7 min-h-0 rounded-lg font-mono"
-                      value={minAreaM2}
-                      onChange={(e) =>
-                        handleMinAreaChangeWithReset(Number(e.target.value))
-                      }
-                    >
-                      {MIN_AREA_OPTIONS.map((a) => (
-                        <option key={a} value={a}>
-                          {a === 0 ? "Ninguno" : `${a} m²`}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </li>
               </ul>
+            </div>
+            <div className="hidden sm:block w-px h-7 bg-base-300/50" />
+            <div
+              className="tooltip tooltip-bottom inline-flex items-center gap-1.5"
+              data-tip="Descartar automáticamente capas más pequeñas que el umbral"
+            >
+              <Trash2
+                size={14}
+                className="text-base-content/45 shrink-0 hidden sm:block"
+                aria-hidden
+              />
+              <label className="sr-only" htmlFor="min-area-select">
+                Descartar capas menores a
+              </label>
+              <select
+                id="min-area-select"
+                className="select select-bordered select-xs h-7 min-h-7 w-[6.25rem] bg-base-100 font-mono text-[11px] rounded-lg"
+                value={minAreaM2}
+                disabled={isRecomputing || isGenerating}
+                onClick={(e) => e.stopPropagation()}
+                onChange={(e) =>
+                  handleMinAreaChangeWithReset(Number(e.target.value))
+                }
+                aria-label="Descartar capas menores a"
+                title="Descartar capas menores a…"
+              >
+                {MIN_AREA_OPTIONS.map((a) => (
+                  <option key={a} value={a}>
+                    {formatMinAreaOption(a)}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
         </div>
@@ -1949,8 +2283,13 @@ export default function ReviewScreen({
             >
               Componentes
               <span className="badge badge-xs badge-neutral font-mono">
-                {phase1.groups.length}
+                {displayGroups.length}
               </span>
+              {measures.length > 0 && (
+                <span className="badge badge-xs badge-info font-mono">
+                  {measures.length} med.
+                </span>
+              )}
             </button>
             <button
               type="button"
@@ -1971,8 +2310,19 @@ export default function ReviewScreen({
           <div
             className={`flex-1 min-h-0 flex flex-col ${sidebarTab === "capas" ? "" : "hidden"}`}
           >
+            <MeasureList
+              measures={measures}
+              groups={displayGroups}
+              labelOptions={measureLabelOptions}
+              measureScaleDenom={measureLabelScale}
+              onMeasureScaleChange={handleMeasureScaleChange}
+              selectedMeasureId={selectedMeasureId}
+              onSelectMeasure={handleSelectMeasure}
+              onRemoveMeasure={handleRemoveMeasure}
+              onClearMeasures={handleClearMeasures}
+            />
             <GroupList
-              groups={phase1.groups}
+              groups={displayGroups}
               selectedGroupIds={selectedGroupIds}
               hiddenGroupIds={hiddenGroupIds}
               categoryOverrides={overrides}
@@ -2190,15 +2540,17 @@ export default function ReviewScreen({
                             · {selectedGroup.orientation}
                           </span>
                           <button
-                          type="button"
-                          className="btn btn-outline btn-sm  rounded-xl gap-2 border-base-300/50 text-base-content/70"
-                          onClick={() => setShowWallWallHelp2((v) => !v)}
-                          title={
-                            showWallWallHelp ? "Ocultar ayuda" : "¿Qué es esto?"
-                          }
-                        >
-                          <Lightbulb size={15} />
-                        </button>
+                            type="button"
+                            className="btn btn-outline btn-sm  rounded-xl gap-2 border-base-300/50 text-base-content/70"
+                            onClick={() => setShowWallWallHelp2((v) => !v)}
+                            title={
+                              showWallWallHelp
+                                ? "Ocultar ayuda"
+                                : "¿Qué es esto?"
+                            }
+                          >
+                            <Lightbulb size={15} />
+                          </button>
                         </p>
 
                         {showWallWallHelp2 && (
@@ -2211,7 +2563,7 @@ export default function ReviewScreen({
                             acortan.
                           </p>
                         )}
-                       
+
                         <div className="flex flex-col gap-2">
                           {canMergeCoplanarFacade && (
                             <button
@@ -2279,15 +2631,23 @@ export default function ReviewScreen({
                               wallIdAliasMap,
                             );
                             if (aOn && !bOn) {
-                              return { facadeId: ww.groupA, otherId: ww.groupB };
+                              return {
+                                facadeId: ww.groupA,
+                                otherId: ww.groupB,
+                              };
                             }
                             if (bOn && !aOn) {
-                              return { facadeId: ww.groupB, otherId: ww.groupA };
+                              return {
+                                facadeId: ww.groupB,
+                                otherId: ww.groupA,
+                              };
                             }
                             return {
                               facadeId: survivorId,
                               otherId:
-                                ww.groupA === survivorId ? ww.groupB : ww.groupA,
+                                ww.groupA === survivorId
+                                  ? ww.groupB
+                                  : ww.groupA,
                             };
                           })();
                           const { facadeId: thisId, otherId } =
@@ -2674,8 +3034,6 @@ export default function ReviewScreen({
               )}
           </div>
           {/* /Pestaña: Selección */}
-
-
 
           <div className="mt-auto border-t border-base-300/40 p-4 bg-base-100 shrink-0">
             {overrides.size > 0 && (
