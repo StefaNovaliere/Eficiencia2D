@@ -1379,18 +1379,10 @@ export default function ReviewScreen({
 
       {!hideSidebar && (
         <aside className="w-full md:w-[21rem] lg:w-[24rem] flex flex-col border-t md:border-t-0 md:border-l border-base-300/40 bg-base-100 shrink-0 h-[42vh] md:h-full z-20 shadow-2xl shadow-base-content/5">
-        <div className="px-4 pt-4 pb-3 border-b border-base-300/30 shrink-0">
+        <div className="px-4 pt-4 pb-3 border-b border-base-300/30 shrink-0 bg-base-100/80 text-primary font-semibold tracking-widest">
           <StepIndicator current="review" variant="compact" />
         </div>
-        <div className="px-4 py-3.5 border-b border-base-300/30 bg-base-100/80">
-          <p className="text-[11px] font-semibold uppercase tracking-widest text-primary/80 mb-0.5">
-            Revisión
-          </p>
-          <h2 className="text-base font-semibold tracking-tight">Clasificación del modelo</h2>
-          <p className="text-[11px] text-base-content/45 mt-0.5 leading-relaxed">
-            Verificá capas, fusiones y uniones antes de generar planos.
-          </p>
-        </div>
+
 
         {bulkActionNotice && (
           <div className="px-4 py-2 border-b border-base-300/30 bg-success/5">
@@ -1400,7 +1392,7 @@ export default function ReviewScreen({
           </div>
         )}
 
-        {/* Pestañas: lista de capas vs acciones de la selección */}
+        {/* Pestañas: lista de componentes vs acciones de la selección */}
         <div role="tablist" className="tabs tabs-bordered px-2 shrink-0 bg-base-100">
           <button
             type="button"
@@ -1408,7 +1400,7 @@ export default function ReviewScreen({
             className={`tab gap-1.5 ${sidebarTab === "capas" ? "tab-active" : ""}`}
             onClick={() => setSidebarTab("capas")}
           >
-            Capas
+            Componentes
             <span className="badge badge-xs badge-neutral font-mono">{phase1.groups.length}</span>
           </button>
           <button
@@ -1432,6 +1424,7 @@ export default function ReviewScreen({
             hiddenGroupIds={hiddenGroupIds}
             categoryOverrides={overrides}
             visibleCategories={visibleCategories}
+            listActive={sidebarTab === "capas"}
             onSelectGroup={handleSelectGroup}
             onToggleGroup={handleToggleGroup}
             onHideGroup={handleHideGroup}
@@ -1665,7 +1658,7 @@ export default function ReviewScreen({
         {(canMergeSelected || mergeBlockedReason || canSplit) && (
           <div className="px-4 py-3 border-b border-base-300/30 bg-base-100/60 space-y-2">
             <p className="text-[11px] font-semibold uppercase tracking-widest text-base-content/40">
-              Capas · fusión / división
+              Componentes · fusión / división
             </p>
 
             {canMergeSelected && (
@@ -1711,7 +1704,7 @@ export default function ReviewScreen({
 
             {selectedGroupIds.size >= 2 && !canMergeSelected && !mergeBlockedReason && (
               <p className="text-[11px] text-base-content/45 leading-relaxed px-1">
-                Seleccioná varias capas con Ctrl+clic o los checkboxes de la lista.
+                Seleccioná varios componentes con Ctrl+clic o los checkboxes de la lista.
               </p>
             )}
           </div>
@@ -1720,7 +1713,7 @@ export default function ReviewScreen({
         {selectedGroupIds.size >= 2 && !canMergeSelected && !mergeBlockedReason && (
           <div className="px-4 py-2 border-b border-base-300/30 bg-base-100/40">
             <p className="text-[11px] text-base-content/45 leading-relaxed">
-              Ctrl+clic en la lista para seleccionar varias capas y fusionarlas.
+              Ctrl+clic en la lista para seleccionar varios componentes y fusionarlas.
             </p>
           </div>
         )}
@@ -1823,11 +1816,11 @@ export default function ReviewScreen({
           <div className="modal-box max-w-md rounded-2xl">
             <h3 className="font-semibold text-base">
               {bulkSimilarModal.mode === "discard"
-                ? "Descartar capas del mismo tamaño"
-                : "Reclasificar capas del mismo tamaño"}
+                ? "Descartar componentes del mismo tamaño"
+                : "Reclasificar componentes del mismo tamaño"}
             </h3>
             <p className="text-xs text-base-content/55 mt-2 leading-relaxed">
-              Estas capas tienen{" "}
+              Estos componentes tienen{" "}
               <span className="font-mono font-semibold">
                 {bulkSimilarModal.reference.totalArea.toFixed(2)} m²
               </span>

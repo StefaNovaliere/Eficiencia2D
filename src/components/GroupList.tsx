@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { Eye, EyeOff, Layers } from "lucide-react";
 import type { FaceCategory, GeometryGroup } from "@/core/group-classifier";
 
@@ -24,6 +24,8 @@ export interface GroupListProps {
   hiddenGroupIds: Set<number>;
   categoryOverrides: Map<number, FaceCategory>;
   visibleCategories: Set<FaceCategory>;
+  /** When true, scroll the primary selected row into view (e.g. tab became visible). */
+  listActive?: boolean;
   onSelectGroup: (id: number) => void;
   onToggleGroup: (id: number) => void;
   onHideGroup: (id: number) => void;
@@ -39,6 +41,7 @@ export default function GroupList({
   hiddenGroupIds,
   categoryOverrides,
   visibleCategories,
+  listActive = true,
   onSelectGroup,
   onToggleGroup,
   onHideGroup,
@@ -49,6 +52,11 @@ export default function GroupList({
 }: GroupListProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const selectedRef = useRef<HTMLDivElement>(null);
+
+  const primarySelectedId = useMemo(() => {
+    if (selectedGroupIds.size === 0) return null;
+    return Array.from(selectedGroupIds)[0];
+  }, [selectedGroupIds]);
 
   const visibleGroups = groups.filter((g) => {
     const eff = categoryOverrides.get(g.id) ?? g.category;
@@ -65,10 +73,20 @@ export default function GroupList({
     visibleGroups.length > 0 && selectedVisibleCount === visibleGroups.length;
 
   useEffect(() => {
-    if (selectedRef.current) {
-      selectedRef.current.scrollIntoView({ behavior: "smooth", block: "nearest" });
-    }
-  }, [selectedGroupIds]);
+    if (!listActive || primarySelectedId == null) return;
+
+    let cancelled = false;
+    const frame = requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (cancelled) return;
+        selectedRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
+    });
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(frame);
+    };
+  }, [primarySelectedId, listActive, selectedGroupIds]);
 
   return (
     <div className="flex flex-col flex-1 min-h-0 relative z-10" ref={listRef}>
@@ -124,7 +142,7 @@ export default function GroupList({
           return (
             <div
               key={group.id}
-              ref={isSelected ? selectedRef : undefined}
+              ref={group.id === primarySelectedId ? selectedRef : undefined}
               className={`group flex items-center gap-2 p-2.5 rounded-xl cursor-pointer transition-all duration-200 border ${
                 isSelected
                   ? "bg-primary/8 border-primary/25 shadow-sm"
@@ -223,6 +241,7 @@ export default function GroupList({
                 return (
                   <div
                     key={group.id}
+                    ref={group.id === primarySelectedId ? selectedRef : undefined}
                     className="flex items-center justify-between gap-2 p-2 rounded-lg border border-dashed border-base-300/50 bg-base-200/30"
                   >
                     <div className="flex items-center gap-2 min-w-0">
