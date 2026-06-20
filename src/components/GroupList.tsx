@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
-import { Eye, EyeOff, Layers } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown, ChevronRight, Eye, EyeOff, Layers } from "lucide-react";
 import type { FaceCategory, GeometryGroup } from "@/core/group-classifier";
 
 const CATEGORY_COLORS: Record<FaceCategory, string> = {
@@ -50,6 +50,7 @@ export default function GroupList({
   onChangeCategory,
   onOpenContextMenu,
 }: GroupListProps) {
+  const [collapsed, setCollapsed] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   const selectedRef = useRef<HTMLDivElement>(null);
 
@@ -73,7 +74,7 @@ export default function GroupList({
     visibleGroups.length > 0 && selectedVisibleCount === visibleGroups.length;
 
   useEffect(() => {
-    if (!listActive || primarySelectedId == null) return;
+    if (!listActive || primarySelectedId == null || collapsed) return;
 
     let cancelled = false;
     const frame = requestAnimationFrame(() => {
@@ -86,24 +87,53 @@ export default function GroupList({
       cancelled = true;
       cancelAnimationFrame(frame);
     };
-  }, [primarySelectedId, listActive, selectedGroupIds]);
+  }, [primarySelectedId, listActive, selectedGroupIds, collapsed]);
+
+  const summary = `${shownGroups.length} visible${shownGroups.length !== 1 ? "s" : ""}${
+    hiddenGroups.length > 0
+      ? ` · ${hiddenGroups.length} oculta${hiddenGroups.length !== 1 ? "s" : ""}`
+      : ""
+  }`;
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 relative z-10" ref={listRef}>
-      <div className="flex items-center justify-between px-4 py-3 border-b border-base-300/30 bg-base-100/60">
-        <div className="flex items-center gap-2 min-w-0">
-          <Layers size={15} className="text-primary shrink-0" />
-          <div className="min-w-0">
-            <h3 className="font-semibold text-sm tracking-tight">Capas</h3>
-            <p className="text-[11px] text-base-content/50 truncate">
-              {shownGroups.length} visible{shownGroups.length !== 1 ? "s" : ""}
-              {hiddenGroups.length > 0 && ` · ${hiddenGroups.length} oculta${hiddenGroups.length !== 1 ? "s" : ""}`}
-              {" · clic varias paredes del mismo plano para fusionar"}
-            </p>
-          </div>
-        </div>
-        {visibleGroups.length > 0 && (
-          <label className="flex items-center gap-2 text-[11px] cursor-pointer text-base-content/60 hover:text-base-content transition-colors shrink-0">
+    <div
+      className={`flex flex-col min-h-0 relative z-10 ${collapsed ? "shrink-0" : "flex-1"}`}
+      ref={listRef}
+    >
+      <div className="flex items-center gap-2 px-3 py-2 shrink-0 border-b border-base-300/30 bg-base-100/60">
+        <button
+          type="button"
+          className="btn btn-ghost btn-xs btn-square h-7 min-h-7 rounded-lg shrink-0 text-base-content/60"
+          onClick={() => setCollapsed((c) => !c)}
+          aria-expanded={!collapsed}
+          aria-label={collapsed ? "Expandir capas" : "Contraer capas"}
+          title={collapsed ? "Expandir" : "Contraer"}
+        >
+          {collapsed ? <ChevronRight size={15} /> : <ChevronDown size={15} />}
+        </button>
+
+        <Layers size={14} className="text-primary shrink-0" />
+
+        <button
+          type="button"
+          className="flex-1 min-w-0 text-left"
+          onClick={() => setCollapsed((c) => !c)}
+        >
+          <h3 className="font-semibold text-sm tracking-tight text-base-content leading-tight">
+            Capas
+            <span className="ml-1.5 font-mono text-[11px] font-normal text-base-content/45">
+              ({visibleGroups.length})
+            </span>
+          </h3>
+          <p className="text-[10px] text-base-content/45 truncate mt-0.5">
+            {collapsed
+              ? summary
+              : `${summary} · clic varias paredes del mismo plano para fusionar`}
+          </p>
+        </button>
+
+        {!collapsed && visibleGroups.length > 0 && (
+          <label className="flex items-center gap-1.5 text-[10px] cursor-pointer text-base-content/60 hover:text-base-content transition-colors shrink-0">
             <input
               type="checkbox"
               className="checkbox checkbox-xs checkbox-primary rounded"
@@ -125,7 +155,8 @@ export default function GroupList({
         )}
       </div>
 
-      <div className="flex-1 overflow-y-auto p-3 space-y-1.5 custom-scrollbar">
+      {!collapsed && (
+      <div className="flex-1 overflow-y-auto p-3 space-y-1.5 custom-scrollbar min-h-0">
         {shownGroups.length === 0 && (
           <div className="flex flex-col items-center justify-center py-12 text-center px-4">
             <Layers size={28} className="text-base-content/20 mb-3" />
@@ -268,6 +299,7 @@ export default function GroupList({
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }

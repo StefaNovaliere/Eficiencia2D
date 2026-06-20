@@ -126,6 +126,8 @@ function polygonsToEdges(polys: [number, number][][]): PanelEdge[] {
 function normalizeEdges(edges: PanelEdge[]): {
   widthM: number;
   heightM: number;
+  minU: number;
+  minV: number;
   edges: PanelEdge[];
 } | null {
   if (edges.length < 3) return null;
@@ -140,6 +142,8 @@ function normalizeEdges(edges: PanelEdge[]): {
   const h = maxV - minV;
   if (w < 0.01 || h < 0.01) return null;
   return {
+    minU,
+    minV,
     widthM: w,
     heightM: h,
     edges: edges.map((e) => ({
@@ -288,7 +292,8 @@ export function hitTestCut(
     onHEdge || onVEdge
   );
 }
-function cutShapePolygon(
+/** Closed ring for a cut shape in panel-local metres (preview / derived groups). */
+export function cutShapePolygon(
   cut: UserCut,
   widthM: number,
   heightM: number,
@@ -394,18 +399,16 @@ function applySingleCut(
   heightM: number,
   edges: PanelEdge[],
   cut: UserCut,
-): { widthM: number; heightM: number; edges: PanelEdge[] }[] {
+): { widthM: number; heightM: number; minU: number; minV: number; edges: PanelEdge[] }[] {
   if (cut.kind === "line") {
-    // Line cuts are score/fold marks — they appear as dashed lines in the PDF
-    // but do NOT split the panel geometry.
-    return [{ widthM, heightM, edges }];
+    return [{ widthM, heightM, minU: 0, minV: 0, edges }];
   }
 
   const cutRing = cutShapePolygon(cut, widthM, heightM);
-  if (!cutRing) return [{ widthM, heightM, edges }];
+  if (!cutRing) return [{ widthM, heightM, minU: 0, minV: 0, edges }];
 
   const panelRings = edgesToPolygons(edges);
-  if (panelRings.length === 0) return [{ widthM, heightM, edges }];
+  if (panelRings.length === 0) return [{ widthM, heightM, minU: 0, minV: 0, edges }];
 
   const panelPoly: [number, number][][] = panelRings.map((ring) =>
     ring.map(([x, y]) => [snap(x), snap(y)] as [number, number]),
@@ -415,17 +418,25 @@ function applySingleCut(
   try {
     result = difference(panelPoly, [[cutRing]]);
   } catch {
-    return [{ widthM, heightM, edges }];
+    return [{ widthM, heightM, minU: 0, minV: 0, edges }];
   }
 
-  const pieces: { widthM: number; heightM: number; edges: PanelEdge[] }[] = [];
+  const pieces: { widthM: number; heightM: number; minU: number; minV: number; edges: PanelEdge[] }[] = [];
   for (const poly of result) {
     const sorted = [...poly].sort(
       (a, b) => Math.abs(ringArea(b)) - Math.abs(ringArea(a)),
     );
     const pieceEdges = polygonsToEdges(sorted);
     const norm = normalizeEdges(pieceEdges);
-    if (norm && norm.widthM * norm.heightM >= 0.0001) pieces.push(norm);
+    if (norm && norm.widthM * norm.heightM >= 0.0001) {
+      pieces.push({
+        widthM: norm.widthM,
+        heightM: norm.heightM,
+        minU: norm.minU,
+        minV: norm.minV,
+        edges: norm.edges,
+      });
+    }
   }
   return pieces;
 }
@@ -436,21 +447,122 @@ export function applyUserCutsToPanel(
   heightM: number,
   edges: PanelEdge[],
   cuts: UserCut[],
-): { widthM: number; heightM: number; edges: PanelEdge[] }[] {
-  let pieces: { widthM: number; heightM: number; edges: PanelEdge[] }[] = [
-    { widthM, heightM, edges },
+): { widthM: number; heightM: number; minU: number; minV: number; edges: PanelEdge[] }[] {
+  let pieces: { widthM: number; heightM: number; minU: number; minV: number; edges: PanelEdge[] }[] = [
+    { widthM, heightM, minU: 0, minV: 0, edges },
   ];
 
   for (const cut of cuts) {
     const next: typeof pieces = [];
     for (const piece of pieces) {
-      next.push(...applySingleCut(piece.widthM, piece.heightM, piece.edges, cut));
+      next.push(
+        ...applySingleCut(piece.widthM, piece.heightM, piece.edges, cut).map((p) => ({
+          ...p,
+          minU: p.minU + piece.minU,
+          minV: p.minV + piece.minV,
+        })),
+      );
     }
     pieces = next.filter((p) => p.edges.length >= 3);
     if (pieces.length === 0) break;
   }
 
   return pieces.length > 0 ? pieces : [];
+}
+
+/** Outer boundary + holes for a panel piece described by contour edges. */
+export function panelPiecePolygons(
+  edges: PanelEdge[],
+): { outer: [number, number][]; holes: [number, number][][] } | null {
+  const rings = edgesToPolygons(edges);
+  if (rings.length === 0) return null;
+  const sorted = [...rings].sort(
+    (a, b) => Math.abs(ringArea(b)) - Math.abs(ringArea(a)),
+  );
+  return { outer: sorted[0], holes: sorted.slice(1) };
+}
+
+/** Snap radius in panel metres (~6 cm, scales with panel size). */
+export function panelEdgeSnapTolerance(widthM: number, heightM: number): number {
+  const minDim = Math.min(widthM, heightM);
+  return Math.max(0.06, minDim * 0.045);
+}
+
+function snapScalarToEdges(value: number, limit: number, tol: number): number {
+  if (value <= tol) return 0;
+  if (value >= limit - tol) return limit;
+  return value;
+}
+
+function snapScalarPair(
+  a: number,
+  b: number,
+  limit: number,
+  tol: number,
+): [number, number] {
+  let lo = Math.min(a, b);
+  let hi = Math.max(a, b);
+  if (lo <= tol) lo = 0;
+  if (hi >= limit - tol) hi = limit;
+  if (hi - lo >= limit - 2 * tol) {
+    lo = 0;
+    hi = limit;
+  }
+  return a <= b ? [lo, hi] : [hi, lo];
+}
+
+/** Snap cut drag coords to panel edges (sticky borders for full-wall cuts). */
+export function snapCutDragToPanelEdges(
+  state: CutDragState,
+  panelSize: { widthM: number; heightM: number },
+  enabled: boolean,
+): CutDragState {
+  if (!enabled) return state;
+  const tol = panelEdgeSnapTolerance(panelSize.widthM, panelSize.heightM);
+  const { widthM, heightM } = panelSize;
+  let { u0, v0, u1, v1 } = state;
+
+  if (state.kind === "line") {
+    u0 = snapScalarToEdges(u0, widthM, tol);
+    u1 = snapScalarToEdges(u1, widthM, tol);
+    v0 = snapScalarToEdges(v0, heightM, tol);
+    v1 = snapScalarToEdges(v1, heightM, tol);
+    return { ...state, u0, v0, u1, v1 };
+  }
+
+  [u0, u1] = snapScalarPair(u0, u1, widthM, tol);
+  [v0, v1] = snapScalarPair(v0, v1, heightM, tol);
+  return { ...state, u0, v0, u1, v1 };
+}
+
+/** Snap a single UV point (drag start / hover). */
+export function snapPointToPanelEdges(
+  u: number,
+  v: number,
+  panelSize: { widthM: number; heightM: number },
+  enabled: boolean,
+): { u: number; v: number } {
+  if (!enabled) return { u, v };
+  const tol = panelEdgeSnapTolerance(panelSize.widthM, panelSize.heightM);
+  return {
+    u: snapScalarToEdges(u, panelSize.widthM, tol),
+    v: snapScalarToEdges(v, panelSize.heightM, tol),
+  };
+}
+
+/** Which panel edges are within snap range (for UI hints). */
+export function panelEdgeSnapHints(
+  u: number,
+  v: number,
+  panelSize: { widthM: number; heightM: number },
+): { left: boolean; right: boolean; bottom: boolean; top: boolean } {
+  const tol = panelEdgeSnapTolerance(panelSize.widthM, panelSize.heightM);
+  return {
+    left: u <= tol,
+    right: u >= panelSize.widthM - tol,
+    bottom: v <= tol,
+    top: v >= panelSize.heightM - tol,
+  };
 }
 
 /** Resolve drag end coords with Shift constraints. */

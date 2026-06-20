@@ -5,6 +5,7 @@ import type { NestingPreviewData } from "@/core/pipeline";
 import type { NestingResult, NestingSheet, PlacedNestingPanel } from "@/core/sheet-nester";
 import { rotateEdges } from "@/core/sheet-nester";
 import type { SheetConfig } from "@/core/types";
+import { PRINT_SCALE_OPTIONS } from "@/core/print-scale";
 import { getNestingCanvasColors, useTheme } from "@/context/ThemeContext";
 import StepIndicator from "./StepIndicator";
 
@@ -182,7 +183,7 @@ function SheetCanvas({
   );
 }
 
-const SCALE_OPTIONS = [20, 25, 50, 75, 100, 125, 150, 200, 250, 500];
+const SCALE_OPTIONS = PRINT_SCALE_OPTIONS;
 
 export default function NestingPreview({
   nesting,

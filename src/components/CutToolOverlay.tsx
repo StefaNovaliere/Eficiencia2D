@@ -8,7 +8,10 @@ import {
   createUserCutId,
   cutDimensionsLabel,
   hitTestCut,
+  panelEdgeSnapHints,
   resolveCutDrag,
+  snapCutDragToPanelEdges,
+  snapPointToPanelEdges,
   translateCut,
 } from "@/core/user-cuts";
 import type { PanelProjection } from "@/core/cut-preview";
@@ -27,6 +30,8 @@ type DragMode =
 interface CutToolOverlayProps {
   active: boolean;
   shapeKind: ActiveCutShapeKind;
+  /** Sticky snap to panel edges (full-width / full-height cuts). Alt temporarily disables. */
+  edgeSnapEnabled: boolean;
   userCuts: UserCut[];
   viewerRef: React.RefObject<ModelViewerHandle | null>;
   /** Throttled (rAF) — drives the 3D preview for both create and move. */
@@ -66,6 +71,7 @@ function minSize(
 export default function CutToolOverlay({
   active,
   shapeKind,
+  edgeSnapEnabled,
   userCuts,
   viewerRef,
   onDraftChange,
@@ -87,7 +93,45 @@ export default function CutToolOverlay({
     x: number;
     y: number;
     isMove: boolean;
+    snapActive: boolean;
+    edgeHints: { left: boolean; right: boolean; bottom: boolean; top: boolean } | null;
   } | null>(null);
+
+  const [altHeld, setAltHeld] = useState(false);
+  const hoverRafRef = useRef<number | null>(null);
+
+  const snapActive = edgeSnapEnabled && !altHeld;
+
+  useEffect(() => {
+    if (!active) {
+      setAltHeld(false);
+      return;
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Alt") setAltHeld(true);
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key === "Alt") setAltHeld(false);
+    };
+    const onBlur = () => setAltHeld(false);
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, [active]);
+
+  const snapDraft = useCallback(
+    (draft: CutDragState): CutDragState => {
+      const ps = viewerRef.current?.getPanelSize(draft.groupId);
+      if (!ps) return draft;
+      return snapCutDragToPanelEdges(draft, ps, snapActive);
+    },
+    [viewerRef, snapActive],
+  );
 
   // Flush draft to ModelViewer at most once per animation frame
   const scheduleDraft = useCallback(
@@ -116,6 +160,10 @@ export default function CutToolOverlay({
       if (rafRef.current != null) {
         cancelAnimationFrame(rafRef.current);
         rafRef.current = null;
+      }
+      if (hoverRafRef.current != null) {
+        cancelAnimationFrame(hoverRafRef.current);
+        hoverRafRef.current = null;
       }
       scheduleDraft(null);
       onMovingCutId(null);
@@ -199,29 +247,51 @@ export default function CutToolOverlay({
 
       const existing = findCutAt(hit.groupId, hit.u, hit.v);
 
+      const panelSize = viewerRef.current?.getPanelSize(hit.groupId);
+      const startUv =
+        panelSize != null
+          ? snapPointToPanelEdges(hit.u, hit.v, panelSize, snapActive)
+          : { u: hit.u, v: hit.v };
+
       if (existing) {
         // START MOVE — hide original, show draft at same position
         onMovingCutId(existing.id);
         scheduleDraft(userCutToDraft(existing));
         dragRef.current = {
           active: true,
-          mode: { type: "move", startU: hit.u, startV: hit.v, original: existing, latest: existing, plane },
+          mode: {
+            type: "move",
+            startU: startUv.u,
+            startV: startUv.v,
+            original: existing,
+            latest: existing,
+            plane,
+          },
         };
-        setLabelInfo({ cut: existing, x: e.clientX, y: e.clientY, isMove: true });
+        setLabelInfo({
+          cut: existing,
+          x: e.clientX,
+          y: e.clientY,
+          isMove: true,
+          snapActive,
+          edgeHints: panelSize ? panelEdgeSnapHints(startUv.u, startUv.v, panelSize) : null,
+        });
         return;
       }
 
       // START CREATE
-      const initDraft: CutDragState = {
+      const initDraft: CutDragState = snapDraft({
         groupId: hit.groupId,
         kind: shapeKind,
-        u0: hit.u, v0: hit.v,
-        u1: hit.u, v1: hit.v,
+        u0: startUv.u,
+        v0: startUv.v,
+        u1: startUv.u,
+        v1: startUv.v,
         shiftKey: e.shiftKey,
-      };
+      });
       dragRef.current = {
         active: true,
-        mode: { type: "create", groupId: hit.groupId, u0: hit.u, v0: hit.v, plane },
+        mode: { type: "create", groupId: hit.groupId, u0: startUv.u, v0: startUv.v, plane },
       };
       scheduleDraft(initDraft);
       setLabelInfo({
@@ -229,15 +299,61 @@ export default function CutToolOverlay({
         x: e.clientX,
         y: e.clientY,
         isMove: false,
+        snapActive,
+        edgeHints: panelSize ? panelEdgeSnapHints(startUv.u, startUv.v, panelSize) : null,
       });
     },
-    [active, shapeKind, viewerRef, findCutAt, scheduleDraft, onMovingCutId, handleMiddleMouse],
+    [active, shapeKind, viewerRef, findCutAt, scheduleDraft, onMovingCutId, handleMiddleMouse, snapActive, snapDraft],
   );
 
   // ── pointer move ──────────────────────────────────────────────────────────
   const handlePointerMove = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
-      if (!dragRef.current?.active) return;
+      if (!dragRef.current?.active) {
+        if (!active) return;
+        if (document.elementFromPoint(e.clientX, e.clientY)?.closest("[data-viewer-chrome]")) {
+          setLabelInfo(null);
+          return;
+        }
+        if (hoverRafRef.current != null) return;
+        hoverRafRef.current = requestAnimationFrame(() => {
+          hoverRafRef.current = null;
+          const hit = viewerRef.current?.raycastPanelFull(e.clientX, e.clientY);
+          if (!hit) {
+            setLabelInfo(null);
+            return;
+          }
+          const ps = viewerRef.current?.getPanelSize(hit.groupId);
+          if (!ps) {
+            setLabelInfo(null);
+            return;
+          }
+          const snapped = snapPointToPanelEdges(hit.u, hit.v, ps, snapActive);
+          const hints = panelEdgeSnapHints(snapped.u, snapped.v, ps);
+          const nearEdge = hints.left || hints.right || hints.bottom || hints.top;
+          if (!nearEdge && !snapActive) {
+            setLabelInfo(null);
+            return;
+          }
+          setLabelInfo({
+            cut: {
+              groupId: hit.groupId,
+              kind: shapeKind,
+              u0: snapped.u,
+              v0: snapped.v,
+              u1: snapped.u,
+              v1: snapped.v,
+            },
+            x: e.clientX,
+            y: e.clientY,
+            isMove: false,
+            snapActive,
+            edgeHints: nearEdge ? hints : null,
+          });
+        });
+        return;
+      }
+
       const mode = dragRef.current.mode;
 
       // O(1) plane intersection — no scene traversal during drag
@@ -248,18 +364,30 @@ export default function CutToolOverlay({
         mode.plane.projection,
       );
 
+      const ps = viewerRef.current?.getPanelSize(
+        mode.type === "move" ? mode.original.groupId : mode.groupId,
+      );
+
       if (mode.type === "move") {
         const u = uv ? uv.u : mode.startU;
         const v = uv ? uv.v : mode.startV;
 
         const moved = translateCut(mode.original, u - mode.startU, v - mode.startV);
+        const snapped = snapDraft(userCutToDraft(moved));
 
-        setLabelInfo({ cut: moved, x: e.clientX, y: e.clientY, isMove: true });
-        scheduleDraft(userCutToDraft(moved));
+        setLabelInfo({
+          cut: snapped,
+          x: e.clientX,
+          y: e.clientY,
+          isMove: true,
+          snapActive,
+          edgeHints: ps ? panelEdgeSnapHints(snapped.u0, snapped.v0, ps) : null,
+        });
+        scheduleDraft(snapped);
 
         dragRef.current = {
           active: true,
-          mode: { ...mode, latest: moved },
+          mode: { ...mode, latest: { ...moved, ...snapped } },
         };
         return;
       }
@@ -268,22 +396,29 @@ export default function CutToolOverlay({
       const u1 = uv ? uv.u : (latestDraftRef.current?.u1 ?? mode.u0);
       const v1 = uv ? uv.v : (latestDraftRef.current?.v1 ?? mode.v0);
 
-      const draft: CutDragState = {
+      const draft = snapDraft({
         groupId: mode.groupId,
         kind: shapeKind,
-        u0: mode.u0, v0: mode.v0,
-        u1, v1,
+        u0: mode.u0,
+        v0: mode.v0,
+        u1,
+        v1,
         shiftKey: e.shiftKey,
-      };
+      });
       scheduleDraft(draft);
+      const resolved = resolveCutDrag(draft);
       setLabelInfo({
-        cut: { ...draft, ...resolveCutDrag(draft) },
+        cut: { ...draft, ...resolved },
         x: e.clientX,
         y: e.clientY,
         isMove: false,
+        snapActive,
+        edgeHints: ps
+          ? panelEdgeSnapHints(resolved.u1, resolved.v1, ps)
+          : null,
       });
     },
-    [shapeKind, viewerRef, scheduleDraft],
+    [active, shapeKind, viewerRef, scheduleDraft, snapActive, snapDraft],
   );
 
   // ── pointer up ────────────────────────────────────────────────────────────
@@ -308,22 +443,27 @@ export default function CutToolOverlay({
       // CREATE — use the captured value
       if (!committedDraft) return;
 
-      const resolved = resolveCutDrag({ ...committedDraft, shiftKey: e.shiftKey });
+      const snapped = snapDraft({ ...committedDraft, shiftKey: e.shiftKey });
+      const resolved = resolveCutDrag({ ...snapped, shiftKey: e.shiftKey });
       if (minSize(shapeKind, resolved) < 0.05) return;
 
       onCommitCut({
         id: createUserCutId(),
-        groupId: committedDraft.groupId,
+        groupId: snapped.groupId,
         kind: shapeKind,
         ...resolved,
       });
     },
-    [shapeKind, onCommitCut, onCommitMove, onMovingCutId, scheduleDraft],
+    [shapeKind, onCommitCut, onCommitMove, onMovingCutId, scheduleDraft, snapDraft],
   );
 
-  // ── cursor: show "move" pointer when hovering over a committed cut ─────────
-  // (no expensive raycast on hover — just show crosshair always, upgrade on drag)
   const isDraggingMove = dragRef.current?.active && dragRef.current.mode.type === "move";
+  const nearEdgeHover =
+    labelInfo?.edgeHints != null &&
+    (labelInfo.edgeHints.left ||
+      labelInfo.edgeHints.right ||
+      labelInfo.edgeHints.bottom ||
+      labelInfo.edgeHints.top);
 
   if (!active) return null;
 
@@ -333,26 +473,75 @@ export default function CutToolOverlay({
       : undefined;
 
   const label = labelInfo ? cutDimensionsLabel(labelInfo.cut, panelSize) : null;
+  const isHoverOnly =
+    labelInfo != null &&
+    !dragRef.current?.active &&
+    labelInfo.cut.u0 === labelInfo.cut.u1 &&
+    labelInfo.cut.v0 === labelInfo.cut.v1;
+
+  const edgeHintLabel = (() => {
+    const h = labelInfo?.edgeHints;
+    if (!h) return null;
+    const parts: string[] = [];
+    if (h.left) parts.push("izq");
+    if (h.right) parts.push("der");
+    if (h.bottom) parts.push("abajo");
+    if (h.top) parts.push("arriba");
+    return parts.length > 0 ? parts.join(" · ") : null;
+  })();
 
   return (
     <>
       <div
         ref={overlayRef}
         className="absolute inset-0 z-20"
-        style={{ cursor: isDraggingMove ? "grabbing" : "crosshair" }}
+        style={{
+          cursor: isDraggingMove
+            ? "grabbing"
+            : nearEdgeHover && snapActive
+              ? "cell"
+              : altHeld
+                ? "crosshair"
+                : "crosshair",
+        }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
+        onPointerLeave={() => {
+          if (!dragRef.current?.active) setLabelInfo(null);
+        }}
       />
       {label && labelInfo && (
         <div
-          className="fixed z-30 pointer-events-none px-2.5 py-1.5 rounded-xl bg-base-100/96 border border-warning/50 shadow-lg text-sm font-mono text-warning max-w-xs leading-snug"
+          className={`fixed z-30 pointer-events-none px-2.5 py-1.5 rounded-xl bg-base-100/96 border shadow-lg text-sm font-mono max-w-xs leading-snug ${
+            snapActive ? "border-warning/50 text-warning" : "border-base-300/60 text-base-content/80"
+          }`}
           style={{ left: labelInfo.x + 16, top: labelInfo.y + 16 }}
         >
-          {label}
+          {isHoverOnly ? (
+            <span className="text-[11px] font-sans text-base-content/70">
+              {snapActive
+                ? edgeHintLabel
+                  ? `Borde ${edgeHintLabel} — soltá acá para cortar completo`
+                  : "Acercate a un borde para guiar el corte"
+                : "Modo libre — el corte no pegará a los bordes"}
+            </span>
+          ) : (
+            label
+          )}
           {labelInfo.isMove && (
             <span className="block text-[11px] text-base-content/50 mt-0.5 font-sans">
               Soltá para confirmar · Ctrl+Z deshace
+            </span>
+          )}
+          {!labelInfo.isMove && !isHoverOnly && snapActive && edgeHintLabel && (
+            <span className="block text-[11px] text-warning/70 mt-0.5 font-sans">
+              Pegado a {edgeHintLabel}
+            </span>
+          )}
+          {!labelInfo.isMove && !isHoverOnly && altHeld && (
+            <span className="block text-[11px] text-base-content/50 mt-0.5 font-sans">
+              Alt — corte libre (puerta / ventana)
             </span>
           )}
         </div>

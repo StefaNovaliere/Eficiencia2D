@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   serializeUserCutsForApi,
   parseUserCutsFromApi,
+  snapCutDragToPanelEdges,
+  snapPointToPanelEdges,
   type UserCut,
 } from "@/core/user-cuts";
 import { projectFacesTo2D } from "@/core/panel-projection";
@@ -35,6 +37,36 @@ describe("user-cuts API serialization", () => {
   it("parseUserCutsFromApi ignora entradas inválidas", () => {
     expect(parseUserCutsFromApi(null)).toEqual([]);
     expect(parseUserCutsFromApi([{ kind: "rect" }])).toEqual([]); // falta group_id
+  });
+});
+
+describe("panel edge snap", () => {
+  const panel = { widthM: 4, heightM: 3 };
+
+  it("snapPointToPanelEdges pega al borde izquierdo", () => {
+    const pt = snapPointToPanelEdges(0.04, 1.5, panel, true);
+    expect(pt.u).toBe(0);
+    expect(pt.v).toBe(1.5);
+  });
+
+  it("snapCutDragToPanelEdges expande a ancho completo", () => {
+    const draft = snapCutDragToPanelEdges(
+      { groupId: 1, kind: "rect", u0: 0.05, v0: 1.2, u1: 3.92, v1: 1.5, shiftKey: false },
+      panel,
+      true,
+    );
+    expect(draft.u0).toBe(0);
+    expect(draft.u1).toBe(4);
+  });
+
+  it("no modifica coords cuando snap está desactivado", () => {
+    const draft = snapCutDragToPanelEdges(
+      { groupId: 1, kind: "rect", u0: 0.5, v0: 0.5, u1: 1.2, v1: 1.0, shiftKey: false },
+      panel,
+      false,
+    );
+    expect(draft.u0).toBe(0.5);
+    expect(draft.u1).toBe(1.2);
   });
 });
 
