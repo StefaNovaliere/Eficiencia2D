@@ -12,6 +12,7 @@ import {
   getEffectiveCategory,
 } from "@/core/discard-by-area";
 import type { Phase1Result, ClassificationOverride } from "@/core/pipeline";
+import type { WallWallJoint } from "@/core/assembly-adjuster";
 import type { LeaderMarker } from "./ModelViewer";
 import {
   RefreshCw,
@@ -86,6 +87,8 @@ export interface ReviewScreenProps {
   onAddMerge: (cluster: number[]) => void;
   /** Quita la fusión en el índice dado y dispara recompute. */
   onRemoveMerge: (index: number) => void;
+  /** Reemplaza la lista completa de fusiones (p. ej. desfusionar un miembro). */
+  onReplaceMerges: (merges: number[][]) => void;
   /** Registra una división de grupo y dispara recompute. */
   onAddSplit: (groupId: number, mode: "components" | "panels") => void;
   minAreaM2: number;
@@ -114,6 +117,83 @@ function nextCutShape(current: ActiveCutShapeKind): ActiveCutShapeKind {
   return CUT_SHAPE_ORDER[(i + 1) % CUT_SHAPE_ORDER.length];
 }
 
+/** Cluster de fusión que contiene un id (incl. cuando solo queda el superviviente en groups). */
+function findMergeClusterForGroupId(
+  groupId: number,
+  merges: number[][],
+  groups: GeometryGroup[],
+): number[] | null {
+  const direct = merges.find((cluster) => cluster.includes(groupId));
+  if (direct) return direct;
+  for (const cluster of merges) {
+    if (cluster.length < 2) continue;
+    const present = cluster.filter((id) => groups.some((g) => g.id === id));
+    if (present.length === 1 && present[0] === groupId) return cluster;
+  }
+  return null;
+}
+
+function findMergeSurvivorId(cluster: number[], groups: GeometryGroup[]): number | null {
+  const present = groups.filter((g) => cluster.includes(g.id));
+  if (present.length === 0) return null;
+  return present.reduce((best, g) => (g.totalArea > best.totalArea ? g : best)).id;
+}
+
+function findMergeClusterIndex(cluster: number[] | null, merges: number[][]): number {
+  if (!cluster) return -1;
+  return merges.findIndex(
+    (c) => c.length === cluster.length && c.every((id) => cluster.includes(id)),
+  );
+}
+
+function areGroupsCoplanar(a: GeometryGroup, b: GeometryGroup): boolean {
+  const na = a.representativeNormal;
+  const nb = b.representativeNormal;
+  const dot = na.x * nb.x + na.y * nb.y + na.z * nb.z;
+  if (Math.abs(Math.abs(dot) - 1) > 0.02) return false;
+  const ca = a.centroid;
+  const cb = b.centroid;
+  const planeDist =
+    (cb.x - ca.x) * na.x + (cb.y - ca.y) * na.y + (cb.z - ca.z) * na.z;
+  return Math.abs(planeDist) < 0.02;
+}
+
+/**
+ * Paredes que realmente forman la fusión coplanar. Excluye paredes aledañas que
+ * solo cruzan la fusión (encuentros pared-pared) y quedaron en el cluster por
+ * selección múltiple o ids residuales.
+ */
+function filterTrueMergeMembers(
+  cluster: number[],
+  groups: GeometryGroup[],
+  wallWallJoints: WallWallJoint[],
+): number[] {
+  const survivorId = findMergeSurvivorId(cluster, groups);
+  if (survivorId == null) return cluster;
+
+  const survivor = groups.find((g) => g.id === survivorId);
+  if (!survivor) return cluster;
+
+  const groupById = new Map(groups.map((g) => [g.id, g]));
+  const encounterPartnerIds = new Set<number>();
+  for (const ww of wallWallJoints) {
+    if (ww.groupA === survivorId) encounterPartnerIds.add(ww.groupB);
+    if (ww.groupB === survivorId) encounterPartnerIds.add(ww.groupA);
+  }
+
+  return cluster.filter((id) => {
+    if (id === survivorId) return true;
+    // Absorbida en el panel fusionado — ya no existe como grupo aparte.
+    if (!groupById.has(id)) return true;
+    const g = groupById.get(id)!;
+    // Sigue como grupo separado: solo si es coplanar con el superviviente.
+    if (!areGroupsCoplanar(survivor, g)) return false;
+    // Coplanar pero cruce pared-pared → es aledaña, no miembro de la fusión.
+    if (encounterPartnerIds.has(id)) return false;
+    return true;
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -126,6 +206,7 @@ export default function ReviewScreen({
   onRotateAxis,
   onAddMerge,
   onRemoveMerge,
+  onReplaceMerges,
   onAddSplit,
   minAreaM2,
   onMinAreaChange,
@@ -187,6 +268,9 @@ export default function ReviewScreen({
   const [showWallWallHelp, setShowWallWallHelp] = useState(false);
   /** Pared cuyo panel de encuentros está abierto (independiente de la selección 3D). */
   const [encountersWallId, setEncountersWallId] = useState<number | null>(null);
+  /** Within a merged cluster, which original wall is currently focused. */
+  const [mergeMemberFocusId, setMergeMemberFocusId] = useState<number | null>(null);
+  const groupFaceIndexByIdRef = useRef<Map<number, number[]>>(new Map());
   const [mergeCardOpen, setMergeCardOpen] = useState(true);
   const [hiddenGroupIds, setHiddenGroupIds] = useState<Set<number>>(() => new Set());
   const [bulkActionNotice, setBulkActionNotice] = useState<string | null>(null);
@@ -310,8 +394,34 @@ export default function ReviewScreen({
   const selectedMergeCluster = useMemo(() => {
     if (selectedGroupIds.size !== 1 || merges.length === 0) return null;
     const selId = Array.from(selectedGroupIds)[0];
-    return merges.find((cluster) => cluster.includes(selId)) ?? null;
-  }, [selectedGroupIds, merges]);
+    return findMergeClusterForGroupId(selId, merges, phase1.groups);
+  }, [selectedGroupIds, merges, phase1.groups]);
+
+  /** Miembros reales de la fusión (sin paredes de encuentro que interceptan). */
+  const displayMergeMembers = useMemo(() => {
+    if (!selectedMergeCluster) return [];
+    return filterTrueMergeMembers(
+      selectedMergeCluster,
+      phase1.groups,
+      phase1.wallWallJoints,
+    );
+  }, [selectedMergeCluster, phase1.groups, phase1.wallWallJoints]);
+
+  // Cache face indices per group id before merges collapse them (for member highlight).
+  const groupFaceIndexById = useMemo(() => {
+    const next = new Map(groupFaceIndexByIdRef.current);
+    for (const g of phase1.groups) {
+      if (!next.has(g.id)) next.set(g.id, [...g.faceIndices]);
+    }
+    groupFaceIndexByIdRef.current = next;
+    return next;
+  }, [phase1.groups]);
+
+  const mergeMemberHighlightFaceIndices = useMemo(() => {
+    if (mergeMemberFocusId == null) return null;
+    const faces = groupFaceIndexById.get(mergeMemberFocusId);
+    return faces && faces.length > 0 ? faces : null;
+  }, [mergeMemberFocusId, groupFaceIndexById]);
 
   const handleHideGroup = useCallback((id: number) => {
     pushHistory();
@@ -420,14 +530,17 @@ export default function ReviewScreen({
   const hasSelectionTabContent = useMemo(() => {
     if (selectedGroupIds.size === 0) return false;
     if (selectedGroupIds.size >= 2) return true;
-    if (selectedMergeCluster && selectedMergeCluster.length >= 2) return true;
+    if (encountersWallId != null) return true;
+    if (selectedMergeCluster && displayMergeMembers.length >= 2) return true;
     if (cutsForSelectedGroup.length > 0) return true;
     if (sameAreaMatches.length > 0) return true;
     if (sameAreaDiscardMatches.length > 0) return true;
     return false;
   }, [
     selectedGroupIds.size,
+    encountersWallId,
     selectedMergeCluster,
+    displayMergeMembers.length,
     cutsForSelectedGroup.length,
     sameAreaMatches.length,
     sameAreaDiscardMatches.length,
@@ -600,21 +713,36 @@ export default function ReviewScreen({
     [selectedGroupIds.size],
   );
 
+  const selectedMergeIndex = useMemo(
+    () => findMergeClusterIndex(selectedMergeCluster, merges),
+    [selectedMergeCluster, merges],
+  );
+
   // Sin geometría client-side no podemos contar componentes/piezas: ofrecemos
   // la acción de división solo cuando la capa seleccionada pertenece a una fusión.
   const canSplitMerged = useMemo(
     () =>
       selectedGroupIds.size === 1 &&
-      selectedMergeCluster != null &&
-      selectedMergeCluster.length >= 2,
-    [selectedGroupIds.size, selectedMergeCluster],
+      displayMergeMembers.length >= 2 &&
+      selectedMergeIndex >= 0,
+    [selectedGroupIds.size, displayMergeMembers.length, selectedMergeIndex],
   );
 
-  const selectedMergeIndex = useMemo(() => {
-    if (!canSplitMerged) return -1;
-    const selId = Array.from(selectedGroupIds)[0];
-    return merges.findIndex((c) => c.includes(selId));
-  }, [canSplitMerged, selectedGroupIds, merges]);
+  const divideAllLabel = useMemo(() => {
+    const n = displayMergeMembers.length;
+    return `Desfusionar todas · ${n} pared${n !== 1 ? "es" : ""}`;
+  }, [displayMergeMembers.length]);
+
+  // Keep a focused merge member for actions like "desfusionar solo esta pared".
+  useEffect(() => {
+    if (displayMergeMembers.length === 0) {
+      setMergeMemberFocusId(null);
+      return;
+    }
+    setMergeMemberFocusId((cur) =>
+      cur != null && displayMergeMembers.includes(cur) ? cur : null,
+    );
+  }, [displayMergeMembers]);
 
   const handleUnmerge = useCallback((mergeIndex: number) => {
     onRemoveMerge(mergeIndex);
@@ -622,8 +750,44 @@ export default function ReviewScreen({
 
   const handleDivideMerged = useCallback(() => {
     if (selectedMergeIndex < 0) return;
-    handleUnmerge(selectedMergeIndex);
-  }, [selectedMergeIndex, handleUnmerge]);
+    const formerMembers = [...displayMergeMembers];
+    onRemoveMerge(selectedMergeIndex);
+    setSelectedGroupIds(new Set(formerMembers));
+    setMergeMemberFocusId(null);
+    setEncountersWallId(null);
+    setSelectedJointIndex(null);
+  }, [selectedMergeIndex, onRemoveMerge, displayMergeMembers]);
+
+  // Remove ONLY the currently selected wall from its merge cluster.
+  // If the remaining cluster is still 2+ walls, re-add it; otherwise drop it.
+  const handleRemoveSelectedFromMerge = useCallback(() => {
+    if (selectedMergeIndex < 0 || !selectedMergeCluster || displayMergeMembers.length === 0) return;
+    const selId = mergeMemberFocusId ?? displayMergeMembers[0];
+    if (selId == null) return;
+    const cluster = merges[selectedMergeIndex];
+    if (!cluster || cluster.length < 2) return;
+
+    const remaining = cluster.filter((id) => id !== selId);
+    const nextMerges = merges.filter((_, i) => i !== selectedMergeIndex);
+    if (remaining.length >= 2) nextMerges.push(remaining);
+    onReplaceMerges(nextMerges);
+
+    const nextSelection =
+      remaining.length >= 2
+        ? findMergeSurvivorId(remaining, phase1.groups) ?? remaining[0]
+        : remaining[0] ?? null;
+    setSelectedGroupIds(new Set(nextSelection != null ? [nextSelection] : []));
+    setSelectedJointIndex(null);
+    setMergeMemberFocusId(remaining.length >= 2 ? remaining[0] : null);
+  }, [
+    selectedMergeIndex,
+    selectedMergeCluster,
+    displayMergeMembers,
+    mergeMemberFocusId,
+    merges,
+    onReplaceMerges,
+    phase1.groups,
+  ]);
 
   const handleWallWallDecision = useCallback(
     (jointIndex: number, yieldGroupId: number) => {
@@ -742,7 +906,10 @@ export default function ReviewScreen({
     if (selectedJointIndex == null) return [];
     const ww = phase1.wallWallJoints.find((w) => w.jointIndex === selectedJointIndex);
     if (!ww) return [];
-    const selId = encountersWallId ?? (selectedGroupIds.size === 1 ? Array.from(selectedGroupIds)[0] : ww.groupA);
+    const focusId = encountersWallId ?? (selectedGroupIds.size === 1 ? Array.from(selectedGroupIds)[0] : ww.groupA);
+    const cluster = findMergeClusterForGroupId(focusId, merges, phase1.groups);
+    const primaryId =
+      (cluster ? findMergeSurvivorId(cluster, phase1.groups) : null) ?? focusId;
     const byId = new Map(phase1.groups.map((g) => [g.id, g]));
     const out: LeaderMarker[] = [];
     for (const gid of [ww.groupA, ww.groupB]) {
@@ -752,11 +919,11 @@ export default function ReviewScreen({
         groupId: gid,
         anchor: g.centroid,
         label: panelIdByGroup.get(gid) ?? "",
-        primary: gid === selId,
+        primary: gid === primaryId,
       });
     }
     return out;
-  }, [selectedJointIndex, phase1, selectedGroupIds, panelIdByGroup, encountersWallId]);
+  }, [selectedJointIndex, phase1, selectedGroupIds, panelIdByGroup, encountersWallId, merges]);
 
   const viewToolBtn =
     "btn btn-sm btn-ghost h-9 min-h-9 w-9 px-0 rounded-lg hover:bg-base-200/80";
@@ -865,6 +1032,7 @@ export default function ReviewScreen({
           faces={phase1.faces}
           groups={phase1.groups}
           selectedGroupIds={selectedGroupIds}
+          mergeMemberFaceIndices={mergeMemberHighlightFaceIndices}
           categoryOverrides={overrides}
           visibleCategories={visibleCategories}
           hiddenGroupIds={hiddenGroupIds}
@@ -954,7 +1122,7 @@ export default function ReviewScreen({
                 onClick={() => { handleDivideMerged(); setContextMenu(null); }}
               >
                 <SquareSplitHorizontal size={15} className="text-base-content/70 shrink-0" />
-                Dividir en componentes
+                {divideAllLabel}
               </button>
             )}
             {selectedGroup && getEffectiveCategory(selectedGroup, overrides) !== "discard" && (
@@ -1244,168 +1412,6 @@ export default function ReviewScreen({
           </div>
         </div>
 
-        {encountersWallId != null && (() => {
-          const selId = encountersWallId;
-          const selGroup = phase1.groups.find((g) => g.id === selId);
-          if (!selGroup) return null;
-
-          const groupWWJoints = wallWallList.filter(
-            ({ ww }) => ww.groupA === selId || ww.groupB === selId,
-          );
-
-          if (groupWWJoints.length === 0) return null;
-
-          const groupById = new Map(phase1.groups.map((g) => [g.id, g]));
-          const selPid = panelIdByGroup.get(selId);
-          const cm = (m: number) => `${(m * 100).toFixed(1).replace(".", ",")} cm`;
-
-          return (
-            <div className="absolute bottom-4 right-4 z-10 w-[min(25rem,calc(100%-2rem))] max-h-[52vh] overflow-y-auto bg-base-100/95 backdrop-blur-xl border border-base-300/50 rounded-2xl shadow-xl shadow-base-content/10 pointer-events-auto custom-scrollbar">
-              {/* Encabezado: qué es y por qué */}
-              <div className="sticky top-0 z-10 px-4 pt-4 pb-3 bg-base-100/95 backdrop-blur-md border-b border-base-300/40">
-                <div className="flex items-start gap-2.5">
-                  <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary/10 text-primary shrink-0">
-                    <Link2 size={16} />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <h3 className="text-sm font-semibold leading-tight flex items-center gap-1.5">
-                      Encuentros de esta pared
-                      {selPid && (
-                        <span className="font-mono text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded">{selPid}</span>
-                      )}
-                    </h3>
-                    {showWallWallHelp && (
-                      <p className="text-xs text-base-content/60 mt-1 leading-snug">
-                        Donde dos paredes se cruzan, al armar la maqueta se pisarían por el espesor del
-                        material. Una se acorta para que encajen. Elegí cuál se acorta
-                        <span className="text-base-content/45"> (ya sugerimos una).</span>
-                      </p>
-                    )}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setShowWallWallHelp((v) => !v)}
-                    className={`flex items-center justify-center w-7 h-7 rounded-lg shrink-0 transition-colors ${
-                      showWallWallHelp
-                        ? "text-warning bg-warning/15"
-                        : "text-base-content/40 hover:bg-base-200/80 hover:text-base-content/70"
-                    }`}
-                    aria-label="Mostrar ayuda"
-                    aria-pressed={showWallWallHelp}
-                    title={showWallWallHelp ? "Ocultar ayuda" : "¿Qué es esto?"}
-                  >
-                    <Lightbulb size={15} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setEncountersWallId(null)}
-                    className="flex items-center justify-center w-7 h-7 rounded-lg shrink-0 text-base-content/40 hover:bg-base-200/80 hover:text-base-content/70 transition-colors"
-                    aria-label="Cerrar encuentros"
-                    title="Cerrar"
-                  >
-                    <X size={15} />
-                  </button>
-                </div>
-              </div>
-
-              {/* Lista de encuentros */}
-              <div className="p-3 flex flex-col gap-2.5">
-                {groupWWJoints.map(({ ww, labelA, labelB, pidA, pidB, hasThickness }) => {
-                  const otherId = ww.groupA === selId ? ww.groupB : ww.groupA;
-                  const otherLabel = ww.groupA === selId ? labelB : labelA;
-                  const otherPid = ww.groupA === selId ? pidB : pidA;
-                  const effYielder = wallWallDecisions.get(ww.jointIndex) ?? ww.suggestedYieldGroupId;
-                  const suggested = ww.suggestedYieldGroupId;
-                  const isOpen = selectedJointIndex === ww.jointIndex;
-
-                  const selThick = groupById.get(selId)?.thickness ?? 0;
-                  const otherThick = groupById.get(otherId)?.thickness ?? 0;
-                  const trimIfSel = otherThick > 0.001 ? otherThick : selThick > 0.001 ? selThick : 0;
-                  const trimIfOther = selThick > 0.001 ? selThick : otherThick > 0.001 ? otherThick : 0;
-
-                  return (
-                    <div
-                      key={ww.jointIndex}
-                      onClick={() =>
-                        setSelectedJointIndex((cur) => (cur === ww.jointIndex ? null : ww.jointIndex))
-                      }
-                      className={`rounded-xl border p-3 cursor-pointer transition-all ${
-                        isOpen
-                          ? "border-primary/50 bg-primary/5 ring-1 ring-primary/20"
-                          : "border-base-300/50 bg-base-200/30 hover:bg-base-200/50 hover:border-base-300/70"
-                      }`}
-                    >
-                      {/* Con qué pared se cruza */}
-                      <div className="flex items-center gap-1.5 text-sm font-medium">
-                        <span className="text-base-content/50">Cruce con</span>
-                        {otherPid && (
-                          <span className="font-mono text-xs bg-base-100 border border-base-300/50 px-1.5 py-0.5 rounded">{otherPid}</span>
-                        )}
-                        <span className="truncate text-base-content/80">{otherLabel}</span>
-                      </div>
-
-                      {!hasThickness ? (
-                        <p className="mt-2 text-xs text-base-content/55 px-2.5 py-2 rounded-lg bg-base-100/80 border border-base-300/40">
-                          Sin ajuste necesario — no se detectó espesor en ninguna de las dos.
-                        </p>
-                      ) : (
-                        <div className="mt-2.5 flex flex-col gap-1.5">
-                          <p className="text-xs font-medium text-base-content/55">¿Cuál se acorta?</p>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleWallWallDecision(ww.jointIndex, selId);
-                            }}
-                            className={`flex items-center gap-2 w-full text-left rounded-lg border px-3 py-2 transition-colors ${
-                              effYielder === selId
-                                ? "border-primary bg-primary/10"
-                                : "border-base-300/50 bg-base-100 hover:bg-base-200/60"
-                            }`}
-                          >
-                            <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: "#f59e0b" }} />
-                            <span className="flex-1 text-sm">
-                              Esta pared{" "}
-                              {selPid && <span className="font-mono text-xs text-base-content/60">({selPid})</span>}
-                            </span>
-                            {effYielder === selId ? (
-                              <span className="text-xs font-semibold text-primary tabular-nums">−{cm(trimIfSel)}</span>
-                            ) : (
-                              suggested === selId && <span className="text-[11px] font-medium text-base-content/45">Sugerida</span>
-                            )}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleWallWallDecision(ww.jointIndex, otherId);
-                            }}
-                            className={`flex items-center gap-2 w-full text-left rounded-lg border px-3 py-2 transition-colors ${
-                              effYielder === otherId
-                                ? "border-primary bg-primary/10"
-                                : "border-base-300/50 bg-base-100 hover:bg-base-200/60"
-                            }`}
-                          >
-                            <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: "#3b82f6" }} />
-                            <span className="flex-1 text-sm">
-                              La otra{" "}
-                              {otherPid && <span className="font-mono text-xs text-base-content/60">({otherPid})</span>}
-                            </span>
-                            {effYielder === otherId ? (
-                              <span className="text-xs font-semibold text-primary tabular-nums">−{cm(trimIfOther)}</span>
-                            ) : (
-                              suggested === otherId && <span className="text-[11px] font-medium text-base-content/45">Sugerida</span>
-                            )}
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          );
-        })()}
       </div>
 
       {!hideSidebar && (
@@ -1468,6 +1474,259 @@ export default function ReviewScreen({
 
         {/* Pestaña: Selección */}
         <div className={`flex-1 min-h-0 overflow-y-auto custom-scrollbar ${sidebarTab === "seleccion" ? "" : "hidden"}`}>
+          {/* Grupo fusionado: ver paredes, enfocar y desfusionar solo una */}
+          {selectedGroupIds.size === 1 && displayMergeMembers.length >= 2 && (
+            <div className="px-4 py-3 border-b border-base-300/30 bg-primary/5 space-y-2">
+              <p className="text-[11px] font-semibold uppercase tracking-widest text-primary/60">
+                Fusionada · {displayMergeMembers.length} pared{displayMergeMembers.length !== 1 ? "es" : ""}
+              </p>
+              <div className="flex flex-col gap-1">
+                {displayMergeMembers.map((id) => {
+                  const g = phase1.groups.find((gr) => gr.id === id);
+                  const isFocused = mergeMemberFocusId != null && id === mergeMemberFocusId;
+                  const pid = panelIdByGroup.get(id);
+                  const label = g?.label ?? (pid ? `Panel ${pid}` : `Pared ${id}`);
+                  return (
+                    <div
+                      key={id}
+                      className={`flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs cursor-pointer transition-colors border ${
+                        isFocused
+                          ? "bg-primary/10 border-primary/25 text-primary font-medium"
+                          : "bg-base-200/50 border-base-300/20 text-base-content/70 hover:bg-base-200/70"
+                      }`}
+                      onClick={() => {
+                        setMergeMemberFocusId(id);
+                        setEncountersWallId(id);
+                        setSelectedJointIndex(null);
+                        const survivorId = findMergeSurvivorId(
+                          selectedMergeCluster ?? displayMergeMembers,
+                          phase1.groups,
+                        );
+                        if (survivorId != null) {
+                          setSelectedGroupIds(new Set([survivorId]));
+                        }
+                      }}
+                      title="Click para enfocar y ver encuentros"
+                    >
+                      <Link2 size={10} className="shrink-0 opacity-60" />
+                      <span className="flex-1 truncate">{label}</span>
+                      {pid && (
+                        <span className="font-mono text-[10px] text-base-content/45 bg-base-100 border border-base-300/40 px-1 rounded">
+                          {pid}
+                        </span>
+                      )}
+                      {isFocused && (
+                        <span className="text-[10px] opacity-70">seleccionada</span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {selectedMergeIndex >= 0 && (
+                <div className="flex flex-col gap-2 pt-0.5">
+                  <button
+                    type="button"
+                    className="btn btn-outline btn-sm w-full rounded-xl gap-2 border-error/40 text-error hover:bg-error/10 hover:border-error"
+                    onClick={handleDivideMerged}
+                    title="Separa todas las paredes de esta fusión de una vez"
+                  >
+                    <SquareSplitHorizontal size={14} />
+                    {divideAllLabel}
+                    <span className="text-[10px] opacity-60 font-normal">· D</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-outline btn-sm w-full rounded-xl gap-2 border-error/30 text-base-content/80 hover:border-error hover:text-error"
+                    onClick={handleRemoveSelectedFromMerge}
+                    title={
+                      mergeMemberFocusId != null
+                        ? "Saca la pared seleccionada (arriba) de la fusión y deja el resto fusionado"
+                        : "Saca la primera pared de la lista; clic en una pared arriba para elegir cuál"
+                    }
+                  >
+                    <X size={14} />
+                    Desfusionar solo esta pared
+                    {mergeMemberFocusId != null && (
+                      <span className="font-mono text-[10px] opacity-50 truncate max-w-[5rem]">
+                        {panelIdByGroup.get(mergeMemberFocusId) ?? `#${mergeMemberFocusId}`}
+                      </span>
+                    )}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Encuentros pared-pared */}
+          {encountersWallId != null && (() => {
+            const memberCluster = findMergeClusterForGroupId(encountersWallId, merges, phase1.groups);
+            const survivorId =
+              (memberCluster ? findMergeSurvivorId(memberCluster, phase1.groups) : null) ??
+              encountersWallId;
+            const selGroup = phase1.groups.find((g) => g.id === survivorId);
+            if (!selGroup) return null;
+
+            const groupWWJoints = wallWallList.filter(
+              ({ ww }) => ww.groupA === survivorId || ww.groupB === survivorId,
+            );
+            if (groupWWJoints.length === 0) return null;
+
+            const groupById = new Map(phase1.groups.map((g) => [g.id, g]));
+            const selPid = panelIdByGroup.get(encountersWallId) ?? panelIdByGroup.get(survivorId);
+            const cm = (m: number) => `${(m * 100).toFixed(1).replace(".", ",")} cm`;
+
+            return (
+              <div className="px-4 py-3 border-b border-base-300/30 bg-base-100/60">
+                <div className="flex items-start gap-2.5">
+                  <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary/10 text-primary shrink-0">
+                    <Link2 size={16} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <h3 className="text-sm font-semibold leading-tight flex items-center gap-1.5">
+                      Encuentros de esta pared
+                      {selPid && (
+                        <span className="font-mono text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded">
+                          {selPid}
+                        </span>
+                      )}
+                    </h3>
+                    {showWallWallHelp && (
+                      <p className="text-xs text-base-content/60 mt-1 leading-snug">
+                        Donde dos paredes se cruzan, al armar la maqueta se pisarían por el espesor del
+                        material. Una se acorta para que encajen. Elegí cuál se acorta
+                        <span className="text-base-content/45"> (ya sugerimos una).</span>
+                      </p>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowWallWallHelp((v) => !v)}
+                    className={`flex items-center justify-center w-7 h-7 rounded-lg shrink-0 transition-colors ${
+                      showWallWallHelp
+                        ? "text-warning bg-warning/15"
+                        : "text-base-content/40 hover:bg-base-200/80 hover:text-base-content/70"
+                    }`}
+                    aria-label="Mostrar ayuda"
+                    aria-pressed={showWallWallHelp}
+                    title={showWallWallHelp ? "Ocultar ayuda" : "¿Qué es esto?"}
+                  >
+                    <Lightbulb size={15} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEncountersWallId(null)}
+                    className="flex items-center justify-center w-7 h-7 rounded-lg shrink-0 text-base-content/40 hover:bg-base-200/80 hover:text-base-content/70 transition-colors"
+                    aria-label="Cerrar encuentros"
+                    title="Cerrar"
+                  >
+                    <X size={15} />
+                  </button>
+                </div>
+
+                <div className="mt-3 flex flex-col gap-2.5">
+                  {groupWWJoints.map(({ ww, labelA, labelB, pidA, pidB, hasThickness }) => {
+                    const otherId = ww.groupA === survivorId ? ww.groupB : ww.groupA;
+                    const otherLabel = ww.groupA === survivorId ? labelB : labelA;
+                    const otherPid = ww.groupA === survivorId ? pidB : pidA;
+                    const effYielder = wallWallDecisions.get(ww.jointIndex) ?? ww.suggestedYieldGroupId;
+                    const suggested = ww.suggestedYieldGroupId;
+                    const isOpen = selectedJointIndex === ww.jointIndex;
+
+                    const selThick = groupById.get(survivorId)?.thickness ?? 0;
+                    const otherThick = groupById.get(otherId)?.thickness ?? 0;
+                    const trimIfSel = otherThick > 0.001 ? otherThick : selThick > 0.001 ? selThick : 0;
+                    const trimIfOther = selThick > 0.001 ? selThick : otherThick > 0.001 ? otherThick : 0;
+
+                    return (
+                      <div
+                        key={ww.jointIndex}
+                        onClick={() =>
+                          setSelectedJointIndex((cur) => (cur === ww.jointIndex ? null : ww.jointIndex))
+                        }
+                        className={`rounded-xl border p-3 cursor-pointer transition-all ${
+                          isOpen
+                            ? "border-primary/50 bg-primary/5 ring-1 ring-primary/20"
+                            : "border-base-300/50 bg-base-200/30 hover:bg-base-200/50 hover:border-base-300/70"
+                        }`}
+                      >
+                        <div className="flex items-center gap-1.5 text-sm font-medium">
+                          <span className="text-base-content/50">Cruce con</span>
+                          {otherPid && (
+                            <span className="font-mono text-xs bg-base-100 border border-base-300/50 px-1.5 py-0.5 rounded">
+                              {otherPid}
+                            </span>
+                          )}
+                          <span className="truncate text-base-content/80">{otherLabel}</span>
+                        </div>
+
+                        {!hasThickness ? (
+                          <p className="mt-2 text-xs text-base-content/55 px-2.5 py-2 rounded-lg bg-base-100/80 border border-base-300/40">
+                            Sin ajuste necesario — no se detectó espesor en ninguna de las dos.
+                          </p>
+                        ) : (
+                          <div className="mt-2.5 flex flex-col gap-1.5">
+                            <p className="text-xs font-medium text-base-content/55">¿Cuál se acorta?</p>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleWallWallDecision(ww.jointIndex, survivorId);
+                              }}
+                              className={`flex items-center gap-2 w-full text-left rounded-lg border px-3 py-2 transition-colors ${
+                                effYielder === survivorId
+                                  ? "border-primary bg-primary/10"
+                                  : "border-base-300/50 bg-base-100 hover:bg-base-200/60"
+                              }`}
+                            >
+                              <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: "#f59e0b" }} />
+                              <span className="flex-1 text-sm">
+                                Esta pared{" "}
+                                {selPid && <span className="font-mono text-xs text-base-content/60">({selPid})</span>}
+                              </span>
+                              {effYielder === survivorId ? (
+                                <span className="text-xs font-semibold text-primary tabular-nums">−{cm(trimIfSel)}</span>
+                              ) : (
+                                suggested === survivorId && (
+                                  <span className="text-[11px] font-medium text-base-content/45">Sugerida</span>
+                                )
+                              )}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleWallWallDecision(ww.jointIndex, otherId);
+                              }}
+                              className={`flex items-center gap-2 w-full text-left rounded-lg border px-3 py-2 transition-colors ${
+                                effYielder === otherId
+                                  ? "border-primary bg-primary/10"
+                                  : "border-base-300/50 bg-base-100 hover:bg-base-200/60"
+                              }`}
+                            >
+                              <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: "#3b82f6" }} />
+                              <span className="flex-1 text-sm">
+                                La otra{" "}
+                                {otherPid && <span className="font-mono text-xs text-base-content/60">({otherPid})</span>}
+                              </span>
+                              {effYielder === otherId ? (
+                                <span className="text-xs font-semibold text-primary tabular-nums">−{cm(trimIfOther)}</span>
+                              ) : (
+                                suggested === otherId && (
+                                  <span className="text-[11px] font-medium text-base-content/45">Sugerida</span>
+                                )
+                              )}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
+
           {selectedGroupIds.size === 0 && (
             <div className="flex flex-col items-center justify-center h-full text-center px-6 gap-2 text-base-content/50">
               <ScanSearch size={26} className="text-base-content/25" />
@@ -1547,49 +1806,7 @@ export default function ReviewScreen({
             </div>
           )}
 
-          {/* Grupo fusionado: dividir solo aquí, una sola vez */}
-          {selectedGroupIds.size === 1 && selectedMergeCluster && (() => {
-            const selId = Array.from(selectedGroupIds)[0];
-            return (
-              <div className="px-4 py-3 border-b border-base-300/30 bg-primary/5 space-y-2">
-                <p className="text-[11px] font-semibold uppercase tracking-widest text-primary/60">
-                  Fusionada · {selectedMergeCluster.length} paredes
-                </p>
-                <div className="flex flex-col gap-1">
-                  {selectedMergeCluster.map((id) => {
-                    const g = phase1.groups.find((gr) => gr.id === id);
-                    const isSurvivor = id === selId;
-                    return (
-                      <div
-                        key={id}
-                        className={`flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs ${
-                          isSurvivor
-                            ? "bg-primary/10 border border-primary/20 text-primary font-medium"
-                            : "bg-base-200/50 text-base-content/70"
-                        }`}
-                      >
-                        <Link2 size={10} className="shrink-0 opacity-60" />
-                        <span className="flex-1 truncate">{g?.label ?? `Grupo ${id}`}</span>
-                        {isSurvivor && (
-                          <span className="text-[10px] opacity-60">fusión</span>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-                {selectedMergeIndex >= 0 && (
-                  <button
-                    type="button"
-                    className="btn btn-outline btn-sm w-full rounded-xl gap-2 border-warning/40 text-base-content/80 hover:border-warning"
-                    onClick={handleDivideMerged}
-                  >
-                    <SquareSplitHorizontal size={14} />
-                    Dividir en componentes · D
-                  </button>
-                )}
-              </div>
-            );
-          })()}
+
 
         {selectedGroupIds.size === 1 && cutsForSelectedGroup.length > 0 && (
           <div className="px-4 py-3 border-b border-base-300/30 bg-warning/5">
@@ -1706,9 +1923,15 @@ export default function ReviewScreen({
             {mergeCardOpen && (
               <div className="px-4 pb-3 flex flex-col gap-1.5">
                 {merges.map((ids, i) => {
-                  const labels = ids.map((id) => {
+                  const members = filterTrueMergeMembers(
+                    ids,
+                    phase1.groups,
+                    phase1.wallWallJoints,
+                  );
+                  const labels = members.map((id) => {
                     const g = phase1.groups.find((gr) => gr.id === id);
-                    return g?.label ?? `Grupo ${id}`;
+                    const pid = panelIdByGroup.get(id);
+                    return g?.label ?? (pid ? `Panel ${pid}` : `Grupo ${id}`);
                   });
                   return (
                     <div
@@ -1739,11 +1962,7 @@ export default function ReviewScreen({
             </p>
           )}
 
-          {wallWallList.length > 0 && (
-            <p className="text-[11px] leading-relaxed text-base-content/45 mb-3 px-2.5 py-2 rounded-lg bg-base-200/50 border border-base-300/25">
-              Las uniones entre paredes se resolvieron automáticamente. Revisá cada pared en el visor 3D.
-            </p>
-          )}
+         
 
           <div className="flex gap-2">
             <button

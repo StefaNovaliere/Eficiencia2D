@@ -129,6 +129,14 @@ export default function ReviewPage() {
     [savedMerges, setSavedMerges, runRecompute],
   );
 
+  const handleReplaceMerges = useCallback(
+    (next: number[][]) => {
+      setSavedMerges(next);
+      void runRecompute({ merges: next });
+    },
+    [setSavedMerges, runRecompute],
+  );
+
   const handleAddSplit = useCallback(
     (groupId: number, mode: "components" | "panels") => {
       const next = [...savedSplits, { groupId, mode }];
@@ -213,6 +221,7 @@ export default function ReviewPage() {
       onRotateAxis={handleRotateAxis}
       onAddMerge={handleAddMerge}
       onRemoveMerge={handleRemoveMerge}
+      onReplaceMerges={handleReplaceMerges}
       onAddSplit={handleAddSplit}
       minAreaM2={minAreaM2}
       onMinAreaChange={handleMinAreaChange}

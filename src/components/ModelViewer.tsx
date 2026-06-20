@@ -707,6 +707,7 @@ interface SceneProps {
   panelRaycastRef: React.MutableRefObject<PanelRaycastContext>;
   palette: ViewerPalette;
   materials: ViewerMaterials;
+  mergeMemberFaceIndices?: number[] | null;
 }
 
 export interface PanelRaycastContext {
@@ -741,6 +742,7 @@ function Scene({
   panelRaycastRef,
   palette,
   materials,
+  mergeMemberFaceIndices = null,
 }: SceneProps) {
   const selectedGroups = groups.filter((g) => selectedGroupIds.has(g.id));
 
@@ -789,15 +791,18 @@ function Scene({
     };
   }, [mergedMeshes]);
 
-  // Highlight geometry for all selected groups combined.
+  // Highlight geometry for selected groups, or a focused merge member subset.
   const selectedGeometry = useMemo(() => {
+    if (mergeMemberFaceIndices && mergeMemberFaceIndices.length > 0) {
+      return buildSelectedGeometry(faces, mergeMemberFaceIndices);
+    }
     if (selectedGroups.length === 0) return null;
     const allFaceIndices: number[] = [];
     for (const g of selectedGroups) {
       allFaceIndices.push(...g.faceIndices);
     }
     return buildSelectedGeometry(faces, allFaceIndices);
-  }, [faces, selectedGroups]);
+  }, [faces, selectedGroups, mergeMemberFaceIndices]);
 
   useEffect(() => {
     return () => {
@@ -945,7 +950,7 @@ function Scene({
           );
         })}
 
-        {selectedGeometry && selectedGroups.length > 0 && (
+        {(selectedGeometry && (selectedGroups.length > 0 || (mergeMemberFaceIndices?.length ?? 0) > 0)) && (
           <>
             <mesh geometry={selectedGeometry} material={materials.highlight} />
             <lineSegments>
@@ -1374,6 +1379,8 @@ export interface ModelViewerProps {
   userCuts?: UserCut[];
   cutDraft?: CutDragState | null;
   movingCutId?: string | null;
+  /** Face indices to highlight for a focused merge member (subset of merged group). */
+  mergeMemberFaceIndices?: number[] | null;
 }
 
 export default function ModelViewer({
@@ -1396,6 +1403,7 @@ export default function ModelViewer({
   userCuts = [],
   cutDraft = null,
   movingCutId = null,
+  mergeMemberFaceIndices = null,
 }: ModelViewerProps) {
   const palette = useViewerPalette();
   const materials = useMemo(() => createViewerMaterials(palette), [palette]);
@@ -1481,6 +1489,7 @@ export default function ModelViewer({
         panelRaycastRef={panelRaycastRef}
         palette={palette}
         materials={materials}
+        mergeMemberFaceIndices={mergeMemberFaceIndices}
       />
 
       {viewerRef && (
