@@ -8,7 +8,12 @@ import * as THREE from "three";
 import type { Face3D, Vec3 } from "@/core/types";
 import type { FaceCategory, GeometryGroup } from "@/core/group-classifier";
 import { computeMarkedOpeningGroups3D, type MarkOpeningGroupLines } from "@/core/mark-preview";
-import { computeCutPreviewSegments, type CutPreviewSegment } from "@/core/cut-preview";
+import {
+  computeCutPreviewSegments,
+  computeDerivedPanelOutlineSegments,
+  panelUVToWorldOnSurface,
+  type CutPreviewSegment,
+} from "@/core/cut-preview";
 import { computeMeasurePreviewSegments, computeMeasureLabelPlacements } from "@/core/measure-preview";
 import type { MeasureDragState, UserMeasure, MeasureLabelOptions } from "@/core/measure-tool";
 import { DEFAULT_MEASURE_LABEL_OPTIONS } from "@/core/measure-tool";
@@ -16,11 +21,17 @@ import {
   worldPointToPanelUV,
   getGroupPanelSize,
   getGroupProjection,
+  panelUVToWorldPoint,
   type PanelProjection,
 } from "@/core/cut-preview";
 import type { UserCut } from "@/core/user-cuts";
 import type { CutDragState } from "@/core/user-cuts";
-import { cutGroupOwnerId, type DerivedTriangleRef } from "@/core/cut-derived-groups";
+import {
+  cutGroupOwnerId,
+  cutDerivedParentId,
+  type DerivedPanelPoly,
+  type DerivedTriangleRef,
+} from "@/core/cut-derived-groups";
 import { useViewerPalette, type ViewerPalette } from "@/context/ThemeContext";
 
 // A floating reference label (panel id) anchored to a component in 3D, drawn
@@ -249,12 +260,73 @@ function pushTriangleToBucket(
   bucket.groupIds.push(groupId);
 }
 
+function closedRingToContour(ring: [number, number][]): THREE.Vector2[] {
+  const n =
+    ring.length > 1 &&
+    ring[0][0] === ring[ring.length - 1][0] &&
+    ring[0][1] === ring[ring.length - 1][1]
+      ? ring.length - 1
+      : ring.length;
+  const out: THREE.Vector2[] = [];
+  for (let i = 0; i < n; i++) out.push(new THREE.Vector2(ring[i][0], ring[i][1]));
+  return out;
+}
+
+/** Triangulate a panel-local polygon (outer + holes) into UV triangles. */
+function triangulatePanelPoly(poly: DerivedPanelPoly): THREE.Vector2[][] {
+  const contour = closedRingToContour(poly.outer);
+  if (contour.length < 3) return [];
+
+  const holes = poly.holes.map((hole) => closedRingToContour(hole)).filter((h) => h.length >= 3);
+  const indices = THREE.ShapeUtils.triangulateShape(contour, holes);
+  if (indices.length === 0) return [];
+
+  const allVerts = [...contour, ...holes.flat()];
+  const tris: THREE.Vector2[][] = [];
+  for (const t of indices) {
+    tris.push([allVerts[t[0]], allVerts[t[1]], allVerts[t[2]]]);
+  }
+  return tris;
+}
+
+function pushPanelPolyToBucket(
+  bucket: { positions: number[]; groupIds: number[] },
+  groupId: number,
+  poly: DerivedPanelPoly,
+  faces: Face3D[],
+  parentGroup: GeometryGroup,
+  appliedAxis: "Y" | "Z",
+  parentCut?: UserCut,
+): void {
+  const tris = triangulatePanelPoly(poly);
+  for (const [a, b, c] of tris) {
+    const wa = panelUVToWorldOnSurface(
+      a.x, a.y, faces, parentGroup, appliedAxis,
+      parentCut?.surfaceNormal, parentCut?.surfaceOffset,
+    );
+    const wb = panelUVToWorldOnSurface(
+      b.x, b.y, faces, parentGroup, appliedAxis,
+      parentCut?.surfaceNormal, parentCut?.surfaceOffset,
+    );
+    const wc = panelUVToWorldOnSurface(
+      c.x, c.y, faces, parentGroup, appliedAxis,
+      parentCut?.surfaceNormal, parentCut?.surfaceOffset,
+    );
+    if (!wa || !wb || !wc) continue;
+    pushTriangleToBucket(bucket, groupId, wa, wb, wc);
+  }
+}
+
 function buildMergedGeometries(
   faces: Face3D[],
   groups: GeometryGroup[],
   overrides: Map<number, FaceCategory>,
   hiddenGroupIds: Set<number>,
   derivedCutTriangles?: Map<number, DerivedTriangleRef[]>,
+  derivedPanelPolys?: Map<number, DerivedPanelPoly>,
+  projectionGroups?: GeometryGroup[],
+  appliedAxis: "Y" | "Z" = "Y",
+  userCuts: UserCut[] = [],
 ): MergedMeshData[] {
   const byCategory = new Map<
     FaceCategory,
@@ -268,6 +340,28 @@ function buildMergedGeometries(
     if (hiddenGroupIds.has(group.id)) continue;
     const cat = overrides.get(group.id) ?? group.category;
     const bucket = byCategory.get(cat)!;
+
+    const panelPoly = derivedPanelPolys?.get(group.id);
+    if (panelPoly) {
+      const parentId = cutDerivedParentId(group.id);
+      const parentGroup =
+        parentId != null
+          ? projectionGroups?.find((g) => g.id === parentId)
+          : undefined;
+      if (parentGroup) {
+        const parentCut = userCuts.find((c) => c.groupId === parentId);
+        pushPanelPolyToBucket(
+          bucket,
+          group.id,
+          panelPoly,
+          faces,
+          parentGroup,
+          appliedAxis,
+          parentCut,
+        );
+        continue;
+      }
+    }
 
     const triSubset = derivedCutTriangles?.get(group.id);
     if (triSubset) {
@@ -627,8 +721,13 @@ function MarkOpeningOverlays({
 
 const CUT_PREVIEW_MATERIAL = new THREE.LineBasicMaterial({
   color: 0xf97316,
-  depthTest: true,
+  // depthTest:false ensures the preview is always visible on the correct wall
+  // (transparent walls don't write to depth buffer, so depthTest:true could
+  // hide or misplace the preview behind walls).
+  depthTest: false,
   depthWrite: false,
+  transparent: true,
+  opacity: 0.9,
 });
 
 const MEASURE_PREVIEW_MATERIAL = new THREE.LineBasicMaterial({
@@ -637,7 +736,13 @@ const MEASURE_PREVIEW_MATERIAL = new THREE.LineBasicMaterial({
   depthWrite: false,
 });
 
-function buildCutPreviewGeometry(segments: CutPreviewSegment[]): THREE.BufferGeometry {
+function buildCutPreviewGeometry(
+  segments: CutPreviewSegment[],
+): THREE.BufferGeometry {
+  // Segments are in MODEL coords (built from face vertices). They render inside
+  // the <group position={[-bounds.center]}> that centers the whole scene, so we
+  // must NOT subtract the center here — the parent group already does it. Doing
+  // it twice shifts the preview by the center vector (cut floats off the wall).
   const positions = new Float32Array(segments.length * 6);
   let i = 0;
   for (const s of segments) {
@@ -669,17 +774,20 @@ function CutGroupOverlay({
   const lineRef = useRef<THREE.LineSegments>(null);
   const viewDir = useRef(new THREE.Vector3());
   const { camera } = useThree();
-  const geometry = useMemo(() => buildCutPreviewGeometry(segments), [segments]);
+  const geometry = useMemo(
+    () => buildCutPreviewGeometry(segments),
+    [segments],
+  );
 
   useEffect(() => () => geometry.dispose(), [geometry]);
 
   useFrame(() => {
     if (!lineRef.current) return;
     viewDir.current.subVectors(camera.position, anchor);
-    // Show from BOTH sides: representativeNormal can point inward or outward
-    // depending on the model exporter. depthTest:true prevents the lines from
-    // showing through opaque geometry, so only hide when perfectly edge-on.
-    lineRef.current.visible = Math.abs(viewDir.current.dot(normal)) > 0.02;
+    // Hide only when perfectly edge-on (camera perpendicular to the panel).
+    // depthTest:false is now used on the material, so depth culling is not
+    // relied on — this check prevents edge-on rendering artefacts only.
+    lineRef.current.visible = viewDir.current.length() < 1e-4 || Math.abs(viewDir.current.dot(normal)) > 0.02;
   });
 
   return (
@@ -687,19 +795,20 @@ function CutGroupOverlay({
       ref={lineRef}
       geometry={geometry}
       material={material}
-      renderOrder={3}
+      renderOrder={5}
     />
   );
 }
 
 function PreviewOverlays({
   segments,
-  groups,
+  lookupGroups,
   centerOffset,
   material,
 }: {
   segments: CutPreviewSegment[];
-  groups: GeometryGroup[];
+  /** Groups used to resolve anchors (parent panels for cuts). */
+  lookupGroups: GeometryGroup[];
   centerOffset: Vec3;
   material: THREE.LineBasicMaterial;
 }) {
@@ -713,7 +822,10 @@ function PreviewOverlays({
     return map;
   }, [segments]);
 
-  const groupById = useMemo(() => new Map(groups.map((g) => [g.id, g])), [groups]);
+  const groupById = useMemo(
+    () => new Map(lookupGroups.map((g) => [g.id, g])),
+    [lookupGroups],
+  );
 
   return (
     <>
@@ -816,6 +928,8 @@ interface SceneProps {
   projectionGroups?: GeometryGroup[];
   /** Triangle subsets for groups created by user cuts. */
   derivedCutTriangles?: Map<number, DerivedTriangleRef[]>;
+  /** Exact panel polygons for cut-derived groups (circle, rect, split). */
+  derivedPanelPolys?: Map<number, DerivedPanelPoly>;
 }
 
 export interface PanelRaycastContext {
@@ -858,6 +972,7 @@ function Scene({
   mergeMemberFaceIndices = null,
   projectionGroups,
   derivedCutTriangles,
+  derivedPanelPolys,
 }: SceneProps) {
   const selectedGroups = groups.filter((g) => selectedGroupIds.has(g.id));
 
@@ -893,8 +1008,22 @@ function Scene({
         categoryOverrides,
         hiddenGroupIds,
         derivedCutTriangles,
+        derivedPanelPolys,
+        projectionGroups,
+        appliedAxis,
+        userCuts,
       ),
-    [faces, groups, categoryOverrides, hiddenGroupIds, derivedCutTriangles],
+    [
+      faces,
+      groups,
+      categoryOverrides,
+      hiddenGroupIds,
+      derivedCutTriangles,
+      derivedPanelPolys,
+      projectionGroups,
+      appliedAxis,
+      userCuts,
+    ],
   );
 
   const groupAreaById = useMemo(() => {
@@ -922,20 +1051,69 @@ function Scene({
 
     const allTris: DerivedTriangleRef[] = [];
     const allFaceIndices: number[] = [];
+    const panelPositions: number[] = [];
     for (const g of selectedGroups) {
+      const panelPoly = derivedPanelPolys?.get(g.id);
+      if (panelPoly) {
+        const parentId = cutDerivedParentId(g.id);
+        const parentGroup =
+          parentId != null
+            ? projectionGroups?.find((pg) => pg.id === parentId)
+            : undefined;
+        if (parentGroup) {
+          const parentCut = userCuts.find((c) => c.groupId === parentId);
+          for (const tri of triangulatePanelPoly(panelPoly)) {
+            const wa = panelUVToWorldOnSurface(
+              tri[0].x, tri[0].y, faces, parentGroup, appliedAxis,
+              parentCut?.surfaceNormal, parentCut?.surfaceOffset,
+            );
+            const wb = panelUVToWorldOnSurface(
+              tri[1].x, tri[1].y, faces, parentGroup, appliedAxis,
+              parentCut?.surfaceNormal, parentCut?.surfaceOffset,
+            );
+            const wc = panelUVToWorldOnSurface(
+              tri[2].x, tri[2].y, faces, parentGroup, appliedAxis,
+              parentCut?.surfaceNormal, parentCut?.surfaceOffset,
+            );
+            if (!wa || !wb || !wc) continue;
+            panelPositions.push(
+              wa.x,
+              wa.y,
+              wa.z,
+              wb.x,
+              wb.y,
+              wb.z,
+              wc.x,
+              wc.y,
+              wc.z,
+            );
+          }
+          continue;
+        }
+      }
+
       const triSubset = derivedCutTriangles?.get(g.id);
       if (triSubset) allTris.push(...triSubset);
       else allFaceIndices.push(...g.faceIndices);
     }
 
-    if (allTris.length > 0 && allFaceIndices.length === 0) {
+    if (panelPositions.length > 0 && allTris.length === 0 && allFaceIndices.length === 0) {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute(
+        "position",
+        new THREE.Float32BufferAttribute(panelPositions, 3),
+      );
+      return geo;
+    }
+
+    if (allTris.length > 0 && allFaceIndices.length === 0 && panelPositions.length === 0) {
       return buildSelectedGeometryFromTriangles(faces, allTris);
     }
-    if (allTris.length === 0) {
+    if (allTris.length === 0 && panelPositions.length === 0) {
       return buildSelectedGeometry(faces, allFaceIndices);
     }
 
-    const positions: number[] = [];
+    const positions: number[] = [...panelPositions];
     for (const { faceIndex, i0, i1, i2 } of allTris) {
       const face = faces[faceIndex];
       if (!face) continue;
@@ -958,7 +1136,16 @@ function Scene({
     const geo = new THREE.BufferGeometry();
     geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
     return geo;
-  }, [faces, selectedGroups, mergeMemberFaceIndices, derivedCutTriangles]);
+  }, [
+    faces,
+    selectedGroups,
+    mergeMemberFaceIndices,
+    derivedCutTriangles,
+    derivedPanelPolys,
+    projectionGroups,
+    appliedAxis,
+    userCuts,
+  ]);
 
   useEffect(() => {
     return () => {
@@ -1056,18 +1243,39 @@ function Scene({
     [faces, groups, markGroupIds, appliedAxis, hiddenGroupIds],
   );
 
-  const cutPreviewSegments = useMemo(
-    () =>
-      computeCutPreviewSegments(
-        faces,
-        projectionGroups ?? groups,
-        userCuts,
-        cutDraft,
-        appliedAxis,
-        movingCutId,
-      ),
-    [faces, groups, projectionGroups, userCuts, cutDraft, appliedAxis, movingCutId],
-  );
+  const cutPreviewSegments = useMemo(() => {
+    const parentGroups = projectionGroups ?? groups;
+    const fromCuts = computeCutPreviewSegments(
+      faces,
+      parentGroups,
+      userCuts,
+      cutDraft,
+      appliedAxis,
+      movingCutId,
+    );
+    const fromDerived =
+      derivedPanelPolys && derivedPanelPolys.size > 0
+        ? computeDerivedPanelOutlineSegments(
+            faces,
+            parentGroups,
+            derivedPanelPolys,
+            appliedAxis,
+            userCuts,
+          )
+        : [];
+    return [...fromCuts, ...fromDerived];
+  }, [
+    faces,
+    groups,
+    projectionGroups,
+    userCuts,
+    cutDraft,
+    appliedAxis,
+    movingCutId,
+    derivedPanelPolys,
+  ]);
+
+  const cutPreviewLookupGroups = projectionGroups ?? groups;
 
   const measurePreviewSegments = useMemo(
     () =>
@@ -1168,7 +1376,7 @@ function Scene({
         {cutPreviewSegments.length > 0 && (
           <PreviewOverlays
             segments={cutPreviewSegments}
-            groups={groups}
+            lookupGroups={cutPreviewLookupGroups}
             centerOffset={bounds.center}
             material={CUT_PREVIEW_MATERIAL}
           />
@@ -1177,7 +1385,7 @@ function Scene({
         {measurePreviewSegments.length > 0 && (
           <PreviewOverlays
             segments={measurePreviewSegments}
-            groups={groups}
+            lookupGroups={groups}
             centerOffset={bounds.center}
             material={MEASURE_PREVIEW_MATERIAL}
           />
@@ -1235,7 +1443,6 @@ function Scene({
             </Html>
           </group>
         ))}
-
       </group>
     </>
   );
@@ -1280,6 +1487,10 @@ export interface ModelViewerHandle {
     /** 3-D hit point in scene (shifted) coords — use as the plane anchor. */
     scenePoint: { x: number; y: number; z: number };
     projection: PanelProjection;
+    /** Unit normal of the clicked triangle face (toward camera). */
+    surfaceNormal: { x: number; y: number; z: number };
+    /** Signed distance from projection plane to clicked face along `surfaceNormal` (m). */
+    surfaceOffset: number;
   } | null;
   /**
    * O(1) ray-plane intersection — no scene traversal.
@@ -1290,8 +1501,10 @@ export interface ModelViewerHandle {
     clientY: number,
     sceneAnchor: { x: number; y: number; z: number },
     projection: PanelProjection,
+    surfaceNormal?: { x: number; y: number; z: number },
   ): { u: number; v: number } | null;
-  /** Panel bounding size in metres (same frame as raycastPanelUV). */
+  /** Panel bounding size for the owner group (same frame as raycastPanelFull). */
+  getPanelSize(groupId: number): { widthM: number; heightM: number } | null;
   /** Panel size for display groups (measure tool). */
   getDisplayPanelSize(groupId: number): { widthM: number; heightM: number } | null;
   /** Raycast for measure tool — uses visible group id + its panel frame. */
@@ -1307,66 +1520,92 @@ export interface ModelViewerHandle {
 /**
  * Pick the best group from a set of raycast hits.
  *
- * Strategy — priority order:
- *  1. Nearest hit whose triangle face-normal opposes the ray (front face).
- *     Uses a 5 mm "same-surface" window so both sides of a zero-thickness
- *     panel are considered ties and the front face wins.
- *  2. Nearest hit at the same surface distance regardless of face direction
- *     (handles models with flipped/missing face normals).
- *  3. Nearest non-hidden hit up to 5 cm away (thick walls / layered meshes).
- *
- * NOTE: group representativeNormal is intentionally NOT used here. It is not
- * reliable for choosing the correct surface because the model exporter can
- * set it to point in any direction. Nearest-hit = visible surface is the
- * only safe rule.
+ * Scores every valid merged-mesh hit by how directly its face normal aligns
+ * with the ray (visible surface), with distance as tie-breaker. Does not
+ * walk past the closest hit into unrelated walls at corners or openings.
  */
+function faceNormalWorld(hit: THREE.Intersection, rayDir: THREE.Vector3): THREE.Vector3 {
+  if (!hit.face) return new THREE.Vector3(0, 0, 1);
+  const n = hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
+  // Ensure normal points toward the camera (front face of the clicked surface).
+  if (n.dot(rayDir) > 0) n.negate();
+  return n;
+}
+
+function resolvePanelRaycastGroup(
+  ctx: PanelRaycastContext,
+  pickedGroupId: number,
+): {
+  hitGroup: GeometryGroup;
+  ownerId: number;
+  projGroup: GeometryGroup;
+} | null {
+  const hitGroup = ctx.groups.find((g) => g.id === pickedGroupId);
+  // Only allow cuts on vertical walls; reject floors, ceilings and unknowns
+  // that happen to be categorised as "wall" by the exporter.
+  if (!hitGroup || hitGroup.category !== "wall" || hitGroup.orientation === "horizontal") {
+    return null;
+  }
+
+  const ownerId = cutGroupOwnerId(pickedGroupId);
+  const projGroup =
+    ctx.projectionGroups.find((g) => g.id === ownerId) ?? hitGroup;
+  return { hitGroup, ownerId, projGroup };
+}
+
 function pickGroupFromRaycast(
   raycaster: THREE.Raycaster,
   hits: THREE.Intersection[],
   hiddenGroupIds: Set<number>,
-): { groupId: number; point: THREE.Vector3 } | null {
+): {
+  groupId: number;
+  point: THREE.Vector3;
+  faceNormal: THREE.Vector3;
+} | null {
   if (hits.length === 0) return null;
   const rayDir = raycaster.ray.direction;
-  const closestDist = hits[0].distance;
 
-  function tryHit(hit: THREE.Intersection): { groupId: number; point: THREE.Vector3 } | null {
+  function tryHit(hit: THREE.Intersection): {
+    groupId: number;
+    point: THREE.Vector3;
+    faceNormal: THREE.Vector3;
+  } | null {
     const data = hit.object.userData?.mergedMeshData as { groupIds: number[] } | undefined;
     if (!data || hit.faceIndex == null || hit.faceIndex < 0) return null;
     if (hit.faceIndex >= data.groupIds.length) return null;
     const groupId = data.groupIds[hit.faceIndex];
     if (hiddenGroupIds.has(groupId)) return null;
-    return { groupId, point: hit.point.clone() };
+    return { groupId, point: hit.point.clone(), faceNormal: faceNormalWorld(hit, rayDir) };
   }
 
-  function isFrontFace(hit: THREE.Intersection): boolean {
-    if (!hit.face) return true;
-    const wn = hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
-    return wn.dot(rayDir) <= 0;
-  }
+  // Prefer the NEAREST wall hit; only use face-facing as tie-breaker within
+  // ~3 mm (double-sided / coplanar triangles). Weighting facing over distance
+  // picked interior back-faces seen through the transparent shell.
+  const COPLANAR_TOL = 0.003;
+  let closestDist = Infinity;
+  let best: ReturnType<typeof tryHit> = null;
+  let bestFacing = -Infinity;
 
-  // Pass 1: same-surface window (5 mm), front-face triangles only
   for (const hit of hits) {
-    if (hit.distance - closestDist > 0.005) break;
-    if (!isFrontFace(hit)) continue;
     const r = tryHit(hit);
-    if (r) return r;
+    if (!r) continue;
+    const facing = -r.faceNormal.dot(rayDir);
+
+    if (hit.distance < closestDist - COPLANAR_TOL) {
+      closestDist = hit.distance;
+      best = r;
+      bestFacing = facing;
+      continue;
+    }
+
+    if (hit.distance <= closestDist + COPLANAR_TOL && facing > bestFacing) {
+      closestDist = Math.min(closestDist, hit.distance);
+      bestFacing = facing;
+      best = r;
+    }
   }
 
-  // Pass 2: same-surface window, any triangle winding
-  for (const hit of hits) {
-    if (hit.distance - closestDist > 0.005) break;
-    const r = tryHit(hit);
-    if (r) return r;
-  }
-
-  // Pass 3: up to 5 cm — handles thick walls / layered surfaces
-  for (const hit of hits) {
-    if (hit.distance - closestDist > 0.05) break;
-    const r = tryHit(hit);
-    if (r) return r;
-  }
-
-  return null;
+  return best;
 }
 
 function SceneBridge({
@@ -1458,19 +1697,22 @@ function SceneBridge({
         const picked = pickGroupFromRaycast(raycaster, hits, ctx.hiddenGroupIds);
         if (!picked) return null;
 
-        const group = ctx.groups.find((g) => g.id === picked.groupId);
-        if (!group) return null;
-
-        const ownerId = cutGroupOwnerId(picked.groupId);
-        const projGroup =
-          ctx.projectionGroups.find((g) => g.id === ownerId) ?? group;
+        const resolved = resolvePanelRaycastGroup(ctx, picked.groupId);
+        if (!resolved) return null;
+        const { ownerId, projGroup } = resolved;
 
         const modelPoint = {
           x: picked.point.x + ctx.modelCenter.x,
           y: picked.point.y + ctx.modelCenter.y,
           z: picked.point.z + ctx.modelCenter.z,
         };
-        const uv = worldPointToPanelUV(modelPoint, ctx.faces, projGroup, ctx.appliedAxis);
+        const uv = worldPointToPanelUV(
+          modelPoint,
+          ctx.faces,
+          projGroup,
+          ctx.appliedAxis,
+          picked.faceNormal,
+        );
         if (!uv) return null;
         return { groupId: ownerId, u: uv.u, v: uv.v };
       },
@@ -1490,23 +1732,48 @@ function SceneBridge({
         const picked = pickGroupFromRaycast(raycaster, hits, ctx.hiddenGroupIds);
         if (!picked) return null;
 
-        const group = ctx.groups.find((g) => g.id === picked.groupId);
-        if (!group) return null;
-
-        const ownerId = cutGroupOwnerId(picked.groupId);
-        const projGroup =
-          ctx.projectionGroups.find((g) => g.id === ownerId) ?? group;
+        const resolved = resolvePanelRaycastGroup(ctx, picked.groupId);
+        if (!resolved) return null;
+        const { ownerId, projGroup } = resolved;
 
         const modelPoint = {
           x: picked.point.x + ctx.modelCenter.x,
           y: picked.point.y + ctx.modelCenter.y,
           z: picked.point.z + ctx.modelCenter.z,
         };
-        const uv = worldPointToPanelUV(modelPoint, ctx.faces, projGroup, ctx.appliedAxis);
+        const uv = worldPointToPanelUV(
+          modelPoint,
+          ctx.faces,
+          projGroup,
+          ctx.appliedAxis,
+          picked.faceNormal,
+        );
         if (!uv) return null;
 
-        const projection = getGroupProjection(ctx.faces, projGroup, ctx.appliedAxis);
+        const projection = getGroupProjection(
+          ctx.faces,
+          projGroup,
+          ctx.appliedAxis,
+          picked.faceNormal,
+        );
         if (!projection) return null;
+
+        const baseOnPlane = panelUVToWorldPoint(
+          uv.u,
+          uv.v,
+          ctx.faces,
+          projGroup,
+          ctx.appliedAxis,
+          picked.faceNormal,
+        );
+        let surfaceOffset = 0;
+        if (baseOnPlane) {
+          const dx = modelPoint.x - baseOnPlane.x;
+          const dy = modelPoint.y - baseOnPlane.y;
+          const dz = modelPoint.z - baseOnPlane.z;
+          const fn = picked.faceNormal;
+          surfaceOffset = dx * fn.x + dy * fn.y + dz * fn.z;
+        }
 
         return {
           groupId: ownerId,
@@ -1514,10 +1781,16 @@ function SceneBridge({
           v: uv.v,
           scenePoint: { x: picked.point.x, y: picked.point.y, z: picked.point.z },
           projection,
+          surfaceNormal: {
+            x: picked.faceNormal.x,
+            y: picked.faceNormal.y,
+            z: picked.faceNormal.z,
+          },
+          surfaceOffset,
         };
       },
 
-      getUVFromMouseOnPlane(clientX, clientY, sceneAnchor, projection) {
+      getUVFromMouseOnPlane(clientX, clientY, sceneAnchor, projection, surfaceNormal) {
         const canvas = gl.domElement;
         const canvasRect = canvas.getBoundingClientRect();
         if (canvasRect.width === 0 || canvasRect.height === 0) return null;
@@ -1532,12 +1805,14 @@ function SceneBridge({
           .sub(rayOrigin)
           .normalize();
 
-        // Ray-plane intersection: n · (P - anchor) = 0, P = origin + t*dir
-        const n = new THREE.Vector3(
-          projection.normal.x,
-          projection.normal.y,
-          projection.normal.z,
-        );
+        // Ray-plane intersection on the clicked face (not the abstract mid-plane).
+        const n = surfaceNormal
+          ? new THREE.Vector3(surfaceNormal.x, surfaceNormal.y, surfaceNormal.z)
+          : new THREE.Vector3(
+              projection.normal.x,
+              projection.normal.y,
+              projection.normal.z,
+            );
         const anchor = new THREE.Vector3(sceneAnchor.x, sceneAnchor.y, sceneAnchor.z);
 
         const denom = n.dot(rayDir);
@@ -1600,10 +1875,21 @@ function SceneBridge({
           y: picked.point.y + ctx.modelCenter.y,
           z: picked.point.z + ctx.modelCenter.z,
         };
-        const uv = worldPointToPanelUV(modelPoint, ctx.faces, group, ctx.appliedAxis);
+        const uv = worldPointToPanelUV(
+          modelPoint,
+          ctx.faces,
+          group,
+          ctx.appliedAxis,
+          picked.faceNormal,
+        );
         if (!uv) return null;
 
-        const projection = getGroupProjection(ctx.faces, group, ctx.appliedAxis);
+        const projection = getGroupProjection(
+          ctx.faces,
+          group,
+          ctx.appliedAxis,
+          picked.faceNormal,
+        );
         if (!projection) return null;
 
         return {
@@ -1658,6 +1944,8 @@ export interface ModelViewerProps {
   projectionGroups?: GeometryGroup[];
   /** Triangle subsets for groups created by user cuts. */
   derivedCutTriangles?: Map<number, DerivedTriangleRef[]>;
+  /** Exact panel polygons for cut-derived groups (circle, rect, split). */
+  derivedPanelPolys?: Map<number, DerivedPanelPoly>;
 }
 
 export default function ModelViewer({
@@ -1687,6 +1975,7 @@ export default function ModelViewer({
   mergeMemberFaceIndices = null,
   projectionGroups,
   derivedCutTriangles,
+  derivedPanelPolys,
 }: ModelViewerProps) {
   const palette = useViewerPalette();
   const materials = useMemo(() => createViewerMaterials(palette), [palette]);
@@ -1780,6 +2069,7 @@ export default function ModelViewer({
         mergeMemberFaceIndices={mergeMemberFaceIndices}
         projectionGroups={projectionGroups}
         derivedCutTriangles={derivedCutTriangles}
+        derivedPanelPolys={derivedPanelPolys}
       />
 
       {viewerRef && (

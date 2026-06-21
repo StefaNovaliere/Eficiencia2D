@@ -89,6 +89,9 @@ interface PiecePoly {
   holes: [number, number][][];
 }
 
+/** 2D panel polygon for a cut-derived component (world lift happens in the viewer). */
+export type DerivedPanelPoly = PiecePoly;
+
 function pointInRing(u: number, v: number, ring: [number, number][]): boolean {
   let inside = false;
   const n = ring.length;
@@ -130,22 +133,6 @@ function vertexToUV(v: Vec3, frame: PanelFrame): { u: number; v: number } {
     u: dot(v, frame.uAxis) - frame.originU,
     v: dot(v, frame.vAxis) - frame.originV,
   };
-}
-
-function triangleCentroidUV(
-  face: Face3D,
-  i0: number,
-  i1: number,
-  i2: number,
-  frame: PanelFrame,
-): { u: number; v: number } {
-  const a = face.vertices[i0];
-  const b = face.vertices[i1];
-  const c = face.vertices[i2];
-  const cx = (a.x + b.x + c.x) / 3;
-  const cy = (a.y + b.y + c.y) / 3;
-  const cz = (a.z + b.z + c.z) / 3;
-  return vertexToUV({ x: cx, y: cy, z: cz }, frame);
 }
 
 function fanTriangles(vertexCount: number): [number, number, number][] {
@@ -213,32 +200,115 @@ function buildGroupFromTriangles(
   };
 }
 
+type UV = { u: number; v: number };
+
+function pointInTriangle(u: number, v: number, a: UV, b: UV, c: UV): boolean {
+  const sign = (p1: UV, p2: UV, p3: UV) =>
+    (p1.u - p3.u) * (p2.v - p3.v) - (p2.u - p3.u) * (p1.v - p3.v);
+  const p = { u, v };
+  const d1 = sign(p, a, b);
+  const d2 = sign(p, b, c);
+  const d3 = sign(p, c, a);
+  const hasNeg = d1 < 0 || d2 < 0 || d3 < 0;
+  const hasPos = d1 > 0 || d2 > 0 || d3 > 0;
+  return !(hasNeg && hasPos);
+}
+
+function triangleSamplePoints(a: UV, b: UV, c: UV): UV[] {
+  const out: UV[] = [
+    { u: (a.u + b.u + c.u) / 3, v: (a.v + b.v + c.v) / 3 },
+    a,
+    b,
+    c,
+    { u: (a.u + b.u) / 2, v: (a.v + b.v) / 2 },
+    { u: (b.u + c.u) / 2, v: (b.v + c.v) / 2 },
+    { u: (c.u + a.u) / 2, v: (c.v + a.v) / 2 },
+  ];
+
+  for (let i = 1; i <= 4; i++) {
+    for (let j = 1; j <= 4 - i; j++) {
+      const k = 4 - i - j;
+      out.push({
+        u: (i * a.u + j * b.u + k * c.u) / 4,
+        v: (i * a.v + j * b.v + k * c.v) / 4,
+      });
+    }
+  }
+
+  return out;
+}
+
+function countSamplesInRing(samples: UV[], ring: [number, number][]): number {
+  return samples.filter((s) => pointInRing(s.u, s.v, ring)).length;
+}
+
+function countSamplesInPiece(samples: UV[], piece: PiecePoly): number {
+  return samples.filter((s) => pointInPiece(s.u, s.v, piece)).length;
+}
+
+function ringHasPointInsideTriangle(
+  ring: [number, number][],
+  a: UV,
+  b: UV,
+  c: UV,
+): boolean {
+  for (const [ru, rv] of ring) {
+    if (pointInTriangle(ru, rv, a, b, c)) return true;
+  }
+  return false;
+}
+
 function assignTriangleOwner(
-  u: number,
-  v: number,
+  a: UV,
+  b: UV,
+  c: UV,
   remainPieces: PiecePoly[],
   extractPieces: { ring: [number, number][]; cutIndex: number }[],
   pieceCentroids: { u: number; v: number }[],
 ): { kind: "split"; index: number } | { kind: "extract"; index: number } | null {
-  for (let pi = 0; pi < remainPieces.length; pi++) {
-    if (pointInPiece(u, v, remainPieces[pi])) {
-      return { kind: "split", index: pi };
+  const samples = triangleSamplePoints(a, b, c);
+
+  let bestExtractIndex = -1;
+  let bestExtractCount = 0;
+  for (const ex of extractPieces) {
+    const count = countSamplesInRing(samples, ex.ring);
+    if (count > bestExtractCount) {
+      bestExtractCount = count;
+      bestExtractIndex = ex.cutIndex;
     }
   }
 
+  let bestSplitIndex = 0;
+  let bestSplitCount = 0;
+  for (let pi = 0; pi < remainPieces.length; pi++) {
+    const count = countSamplesInPiece(samples, remainPieces[pi]);
+    if (count > bestSplitCount) {
+      bestSplitCount = count;
+      bestSplitIndex = pi;
+    }
+  }
+
+  if (bestExtractCount > bestSplitCount && bestExtractIndex >= 0) {
+    return { kind: "extract", index: bestExtractIndex };
+  }
+  if (bestSplitCount > 0) {
+    return { kind: "split", index: bestSplitIndex };
+  }
+
   for (const ex of extractPieces) {
-    if (pointInRing(u, v, ex.ring)) {
+    if (ringHasPointInsideTriangle(ex.ring, a, b, c)) {
       return { kind: "extract", index: ex.cutIndex };
     }
   }
 
   if (remainPieces.length === 0) return null;
 
+  const centroid = samples[0];
   let best = 0;
   let bestD = Infinity;
   for (let pi = 0; pi < pieceCentroids.length; pi++) {
-    const c = pieceCentroids[pi];
-    const d = (u - c.u) ** 2 + (v - c.v) ** 2;
+    const pc = pieceCentroids[pi];
+    const d = (centroid.u - pc.u) ** 2 + (centroid.v - pc.v) ** 2;
     if (d < bestD) {
       bestD = d;
       best = pi;
@@ -247,12 +317,22 @@ function assignTriangleOwner(
   return { kind: "split", index: best };
 }
 
+function triangleMatchesSurface(
+  face: Face3D,
+  surfaceNormal?: Vec3,
+): boolean {
+  if (!surfaceNormal) return true;
+  const d = dot(face.normal, surfaceNormal);
+  return d > 0.25;
+}
+
 function assignTrianglesToPieces(
   parent: GeometryGroup,
   faces: Face3D[],
   frame: PanelFrame,
   remainPieces: PiecePoly[],
   extractPieces: { ring: [number, number][]; cutIndex: number }[],
+  surfaceNormal?: Vec3,
 ): {
   splitAssignments: DerivedTriangleRef[][];
   extractAssignments: Map<number, DerivedTriangleRef[]>;
@@ -262,23 +342,73 @@ function assignTrianglesToPieces(
   for (const e of extractPieces) extractAssignments.set(e.cutIndex, []);
 
   const pieceCentroids = remainPieces.map(pieceCentroid);
+  const extractOverlapByTri = new Map<string, Map<number, number>>();
+
+  const triKey = (ref: DerivedTriangleRef) =>
+    `${ref.faceIndex}:${ref.i0}:${ref.i1}:${ref.i2}`;
 
   for (const fi of parent.faceIndices) {
     const face = faces[fi];
     if (!face || face.vertices.length < 3) continue;
+    if (!triangleMatchesSurface(face, surfaceNormal)) continue;
 
     for (const [i0, i1, i2] of fanTriangles(face.vertices.length)) {
-      const { u, v } = triangleCentroidUV(face, i0, i1, i2, frame);
-      const owner = assignTriangleOwner(u, v, remainPieces, extractPieces, pieceCentroids);
+      const uv0 = vertexToUV(face.vertices[i0], frame);
+      const uv1 = vertexToUV(face.vertices[i1], frame);
+      const uv2 = vertexToUV(face.vertices[i2], frame);
+      const ref: DerivedTriangleRef = { faceIndex: fi, i0, i1, i2 };
+      const samples = triangleSamplePoints(uv0, uv1, uv2);
+
+      const overlap = new Map<number, number>();
+      for (const ex of extractPieces) {
+        const count = countSamplesInRing(samples, ex.ring);
+        if (count > 0) overlap.set(ex.cutIndex, count);
+      }
+      if (overlap.size > 0) extractOverlapByTri.set(triKey(ref), overlap);
+
+      const owner = assignTriangleOwner(
+        uv0,
+        uv1,
+        uv2,
+        remainPieces,
+        extractPieces,
+        pieceCentroids,
+      );
       if (!owner) continue;
 
-      const ref: DerivedTriangleRef = { faceIndex: fi, i0, i1, i2 };
       if (owner.kind === "split") {
         splitAssignments[owner.index].push(ref);
       } else {
         extractAssignments.get(owner.index)!.push(ref);
       }
     }
+  }
+
+  for (const ex of extractPieces) {
+    if ((extractAssignments.get(ex.cutIndex)?.length ?? 0) > 0) continue;
+
+    let bestRef: DerivedTriangleRef | null = null;
+    let bestCount = 0;
+    for (const [key, overlap] of extractOverlapByTri.entries()) {
+      const count = overlap.get(ex.cutIndex) ?? 0;
+      if (count <= bestCount) continue;
+      bestCount = count;
+      const [faceIndex, i0, i1, i2] = key.split(":").map(Number);
+      bestRef = { faceIndex, i0, i1, i2 };
+    }
+    if (!bestRef) continue;
+
+    for (const bucket of splitAssignments) {
+      const idx = bucket.findIndex(
+        (t) =>
+          t.faceIndex === bestRef!.faceIndex &&
+          t.i0 === bestRef!.i0 &&
+          t.i1 === bestRef!.i1 &&
+          t.i2 === bestRef!.i2,
+      );
+      if (idx >= 0) bucket.splice(idx, 1);
+    }
+    extractAssignments.get(ex.cutIndex)!.push(bestRef);
   }
 
   return { splitAssignments, extractAssignments };
@@ -289,6 +419,8 @@ export interface CutDerivedGroupsResult {
   splitParentIds: Set<number>;
   /** Explicit triangle subsets for derived groups (mesh + highlight). */
   derivedTriangles: Map<number, DerivedTriangleRef[]>;
+  /** Exact 2D panel shape per derived group (circle, rect, split piece). */
+  derivedPanelPolys: Map<number, DerivedPanelPoly>;
 }
 
 const CUT_KIND_LABEL: Record<string, string> = {
@@ -298,6 +430,7 @@ const CUT_KIND_LABEL: Record<string, string> = {
 };
 
 const EMPTY_TRIANGLES = new Map<number, DerivedTriangleRef[]>();
+const EMPTY_PANEL_POLYS = new Map<number, DerivedPanelPoly>();
 
 export function buildDisplayGroupsFromCuts(
   groups: GeometryGroup[],
@@ -306,7 +439,12 @@ export function buildDisplayGroupsFromCuts(
   up: UpAxis,
 ): CutDerivedGroupsResult {
   if (userCuts.length === 0) {
-    return { displayGroups: groups, splitParentIds: new Set(), derivedTriangles: EMPTY_TRIANGLES };
+    return {
+      displayGroups: groups,
+      splitParentIds: new Set(),
+      derivedTriangles: EMPTY_TRIANGLES,
+      derivedPanelPolys: EMPTY_PANEL_POLYS,
+    };
   }
 
   const allCutsByParent = new Map<number, UserCut[]>();
@@ -318,6 +456,7 @@ export function buildDisplayGroupsFromCuts(
 
   const derivedByParent = new Map<number, GeometryGroup[]>();
   const derivedTriangles = new Map<number, DerivedTriangleRef[]>();
+  const derivedPanelPolys = new Map<number, DerivedPanelPoly>();
   const splitParentIds = new Set<number>();
 
   for (const parent of groups) {
@@ -347,6 +486,7 @@ export function buildDisplayGroupsFromCuts(
     }
 
     const subtractiveCuts = cuts.filter((c) => c.kind !== "line");
+    const dominantSurface = cuts.find((c) => c.surfaceNormal)?.surfaceNormal;
     const extractPieces: { ring: [number, number][]; cutIndex: number }[] = [];
     subtractiveCuts.forEach((cut, cutIndex) => {
       const ring = cutShapePolygon(cut, proj.widthM, proj.heightM);
@@ -362,12 +502,13 @@ export function buildDisplayGroupsFromCuts(
       frame,
       remainPolys,
       extractPieces,
+      dominantSurface,
     );
 
     const derived: GeometryGroup[] = [];
 
     if (remainPolys.length > 1) {
-      remainPolys.forEach((_, pi) => {
+      remainPolys.forEach((poly, pi) => {
         const tris = splitAssignments[pi];
         const id = toSplitPieceGroupId(parent.id, pi);
         const g = buildGroupFromTriangles(
@@ -380,6 +521,7 @@ export function buildDisplayGroupsFromCuts(
         if (g) {
           derived.push(g);
           derivedTriangles.set(id, tris);
+          derivedPanelPolys.set(id, poly);
         }
       });
     } else if (remainPolys.length === 1) {
@@ -395,6 +537,7 @@ export function buildDisplayGroupsFromCuts(
       if (g) {
         derived.push(g);
         derivedTriangles.set(id, tris);
+        derivedPanelPolys.set(id, remainPolys[0]);
       }
     }
 
@@ -410,9 +553,11 @@ export function buildDisplayGroupsFromCuts(
         tris,
         faces,
       );
-      if (g) {
+      const ring = cutShapePolygon(cut, proj.widthM, proj.heightM);
+      if (g && ring) {
         derived.push(g);
         derivedTriangles.set(id, tris);
+        derivedPanelPolys.set(id, { outer: ring, holes: [] });
       }
     });
 
@@ -423,7 +568,12 @@ export function buildDisplayGroupsFromCuts(
   }
 
   if (splitParentIds.size === 0) {
-    return { displayGroups: groups, splitParentIds, derivedTriangles: EMPTY_TRIANGLES };
+    return {
+      displayGroups: groups,
+      splitParentIds,
+      derivedTriangles: EMPTY_TRIANGLES,
+      derivedPanelPolys: EMPTY_PANEL_POLYS,
+    };
   }
 
   const displayGroups: GeometryGroup[] = [];
@@ -435,5 +585,5 @@ export function buildDisplayGroupsFromCuts(
     }
   }
 
-  return { displayGroups, splitParentIds, derivedTriangles };
+  return { displayGroups, splitParentIds, derivedTriangles, derivedPanelPolys };
 }

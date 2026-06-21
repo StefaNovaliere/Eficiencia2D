@@ -7,6 +7,9 @@
 import { difference } from "polyclip-ts";
 import type { PanelEdge } from "@/core/panel-projection";
 
+/** Segments used to approximate circles/ellipses in cuts and previews. */
+export const CUT_CIRCLE_SEGMENTS = 64;
+
 export type CutShapeKind = "rect" | "circle" | "line" | "square";
 
 /** @deprecated "square" is legacy; new cuts use rect + Shift. */
@@ -24,6 +27,10 @@ export interface UserCut {
   v1: number;
   /** Line cuts: keep material on the positive side of the directed line. */
   keepPositive?: boolean;
+  /** Unit normal of the clicked face (scene coords, toward camera) — anchors cut to visible surface. */
+  surfaceNormal?: { x: number; y: number; z: number };
+  /** Signed distance from projection plane to clicked face along `surfaceNormal` (m). */
+  surfaceOffset?: number;
 }
 
 export interface CutDragState {
@@ -34,6 +41,8 @@ export interface CutDragState {
   u1: number;
   v1: number;
   shiftKey: boolean;
+  surfaceNormal?: { x: number; y: number; z: number };
+  surfaceOffset?: number;
 }
 
 const SNAP = 1e4;
@@ -314,7 +323,7 @@ export function cutShapePolygon(
   if (kind === "circle") {
     const { cx, cy, rx, ry } = cutEllipseRadii({ ...cut, ...resolved });
     if (rx < 0.02 || ry < 0.02) return null;
-    const steps = 32;
+    const steps = CUT_CIRCLE_SEGMENTS;
     const ring: [number, number][] = [];
     for (let i = 0; i <= steps; i++) {
       const t = (i / steps) * Math.PI * 2;
@@ -401,7 +410,48 @@ function applySingleCut(
   cut: UserCut,
 ): { widthM: number; heightM: number; minU: number; minV: number; edges: PanelEdge[] }[] {
   if (cut.kind === "line") {
-    return [{ widthM, heightM, minU: 0, minV: 0, edges }];
+    const resolved = resolveCutDrag({
+      groupId: cut.groupId,
+      kind: cut.kind,
+      u0: cut.u0,
+      v0: cut.v0,
+      u1: cut.u1,
+      v1: cut.v1,
+      shiftKey: false,
+    });
+    const pieces: {
+      widthM: number;
+      heightM: number;
+      minU: number;
+      minV: number;
+      edges: PanelEdge[];
+    }[] = [];
+
+    for (const keepPositive of [true, false]) {
+      const clipped = clipPanelByLine(
+        edges,
+        resolved.u0,
+        resolved.v0,
+        resolved.u1,
+        resolved.v1,
+        keepPositive,
+      );
+      if (!clipped) continue;
+      const norm = normalizeEdges(clipped);
+      if (norm && norm.widthM * norm.heightM >= 0.0001) {
+        pieces.push({
+          widthM: norm.widthM,
+          heightM: norm.heightM,
+          minU: norm.minU,
+          minV: norm.minV,
+          edges: norm.edges,
+        });
+      }
+    }
+
+    return pieces.length > 0
+      ? pieces
+      : [{ widthM, heightM, minU: 0, minV: 0, edges }];
   }
 
   const cutRing = cutShapePolygon(cut, widthM, heightM);
@@ -647,6 +697,16 @@ export function serializeUserCutsForApi(cuts: UserCut[]): Record<string, unknown
     u1: c.u1,
     v1: c.v1,
     ...(c.keepPositive != null ? { keep_positive: c.keepPositive } : {}),
+    ...(c.surfaceNormal
+      ? {
+          surface_normal: {
+            x: c.surfaceNormal.x,
+            y: c.surfaceNormal.y,
+            z: c.surfaceNormal.z,
+          },
+        }
+      : {}),
+    ...(c.surfaceOffset != null ? { surface_offset: c.surfaceOffset } : {}),
   }));
 }
 
@@ -666,6 +726,16 @@ export function parseUserCutsFromApi(raw: unknown): UserCut[] {
       u1: Number(o.u1),
       v1: Number(o.v1),
       keepPositive: o.keep_positive != null ? Boolean(o.keep_positive) : undefined,
+      ...(o.surface_normal && typeof o.surface_normal === "object"
+        ? {
+            surfaceNormal: {
+              x: Number((o.surface_normal as Record<string, unknown>).x),
+              y: Number((o.surface_normal as Record<string, unknown>).y),
+              z: Number((o.surface_normal as Record<string, unknown>).z),
+            },
+          }
+        : {}),
+      ...(o.surface_offset != null ? { surfaceOffset: Number(o.surface_offset) } : {}),
     });
   }
   return out;
