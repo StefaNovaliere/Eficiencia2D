@@ -7,12 +7,13 @@ import {
   type UserCut,
   createUserCutId,
   cutDimensionsLabel,
-  hitTestCut,
+  findCutAtPoint,
   panelEdgeSnapHints,
   resolveCutDrag,
   snapCutDragToPanelEdges,
   snapPointToPanelEdges,
   translateCut,
+  MIN_CUT_COMMIT_SIZE_M,
 } from "@/core/user-cuts";
 import type { PanelProjection } from "@/core/cut-preview";
 import type { ModelViewerHandle } from "@/components/ModelViewer";
@@ -35,6 +36,8 @@ interface CutToolOverlayProps {
   /** Sticky snap to panel edges (full-width / full-height cuts). Alt temporarily disables. */
   edgeSnapEnabled: boolean;
   userCuts: UserCut[];
+  selectedCutId: string | null;
+  onSelectedCutIdChange: (id: string | null) => void;
   viewerRef: React.RefObject<ModelViewerHandle | null>;
   /** Throttled (rAF) — drives the 3D preview for both create and move. */
   onDraftChange: (draft: CutDragState | null) => void;
@@ -70,6 +73,8 @@ function minSize(
   return Math.min(Math.abs(r.u1 - r.u0), Math.abs(r.v1 - r.v0));
 }
 
+const MIN_COMMIT_SIZE_M = MIN_CUT_COMMIT_SIZE_M;
+
 // ── component ──────────────────────────────────────────────────────────────
 
 export default function CutToolOverlay({
@@ -77,6 +82,8 @@ export default function CutToolOverlay({
   shapeKind,
   edgeSnapEnabled,
   userCuts,
+  selectedCutId,
+  onSelectedCutIdChange,
   viewerRef,
   onDraftChange,
   onMovingCutId,
@@ -97,11 +104,13 @@ export default function CutToolOverlay({
     x: number;
     y: number;
     isMove: boolean;
+    hoverOnly: boolean;
     snapActive: boolean;
     edgeHints: { left: boolean; right: boolean; bottom: boolean; top: boolean } | null;
   } | null>(null);
 
   const [altHeld, setAltHeld] = useState(false);
+  const [hoverCutId, setHoverCutId] = useState<string | null>(null);
   const hoverRafRef = useRef<number | null>(null);
 
   const snapActive = edgeSnapEnabled && !altHeld;
@@ -172,21 +181,20 @@ export default function CutToolOverlay({
       scheduleDraft(null);
       onMovingCutId(null);
       setLabelInfo(null);
+      setHoverCutId(null);
     }
   }, [active, scheduleDraft, onMovingCutId]);
 
-  // Hit-test existing cuts
   const findCutAt = useCallback(
-    (groupId: number, u: number, v: number): UserCut | null => {
+    (groupId: number, u: number, v: number, forceCreate: boolean): UserCut | null => {
       const ps = viewerRef.current?.getPanelSize(groupId);
       if (!ps) return null;
-      const onGroup = userCuts.filter((c) => c.groupId === groupId);
-      for (let i = onGroup.length - 1; i >= 0; i--) {
-        if (hitTestCut(onGroup[i], u, v, ps.widthM, ps.heightM)) return onGroup[i];
-      }
-      return null;
+      return findCutAtPoint(userCuts, groupId, u, v, ps.widthM, ps.heightM, {
+        forceCreate,
+        preferredId: selectedCutId,
+      });
     },
-    [userCuts, viewerRef],
+    [userCuts, viewerRef, selectedCutId],
   );
 
   // ── middle mouse: forward to canvas so CameraControls can pan/dolly ──────
@@ -251,7 +259,8 @@ export default function CutToolOverlay({
         surfaceOffset: hit.surfaceOffset,
       };
 
-      const existing = findCutAt(hit.groupId, hit.u, hit.v);
+      const forceCreate = altHeld;
+      const existing = findCutAt(hit.groupId, hit.u, hit.v, forceCreate);
 
       const panelSize = viewerRef.current?.getPanelSize(hit.groupId);
       const startUv =
@@ -261,6 +270,7 @@ export default function CutToolOverlay({
 
       if (existing) {
         // START MOVE — hide original, show draft at same position
+        onSelectedCutIdChange(existing.id);
         onMovingCutId(existing.id);
         scheduleDraft(userCutToDraft(existing));
         dragRef.current = {
@@ -284,6 +294,7 @@ export default function CutToolOverlay({
           x: e.clientX,
           y: e.clientY,
           isMove: true,
+          hoverOnly: false,
           snapActive,
           edgeHints: panelSize ? panelEdgeSnapHints(startUv.u, startUv.v, panelSize) : null,
         });
@@ -291,6 +302,7 @@ export default function CutToolOverlay({
       }
 
       // START CREATE
+      onSelectedCutIdChange(null);
       const initDraft: CutDragState = snapDraft({
         groupId: hit.groupId,
         kind: shapeKind,
@@ -312,11 +324,12 @@ export default function CutToolOverlay({
         x: e.clientX,
         y: e.clientY,
         isMove: false,
+        hoverOnly: false,
         snapActive,
         edgeHints: panelSize ? panelEdgeSnapHints(startUv.u, startUv.v, panelSize) : null,
       });
     },
-    [active, shapeKind, viewerRef, findCutAt, scheduleDraft, onMovingCutId, handleMiddleMouse, snapActive, snapDraft],
+    [active, shapeKind, viewerRef, findCutAt, scheduleDraft, onMovingCutId, onSelectedCutIdChange, handleMiddleMouse, snapActive, snapDraft, altHeld],
   );
 
   // ── pointer move ──────────────────────────────────────────────────────────
@@ -334,14 +347,32 @@ export default function CutToolOverlay({
           const hit = viewerRef.current?.raycastPanelFull(e.clientX, e.clientY);
           if (!hit) {
             setLabelInfo(null);
+            setHoverCutId(null);
             return;
           }
           const ps = viewerRef.current?.getPanelSize(hit.groupId);
           if (!ps) {
             setLabelInfo(null);
+            setHoverCutId(null);
             return;
           }
           const snapped = snapPointToPanelEdges(hit.u, hit.v, ps, snapActive);
+          const hoverCut = findCutAt(hit.groupId, snapped.u, snapped.v, altHeld);
+          setHoverCutId(hoverCut?.id ?? null);
+
+          if (hoverCut) {
+            setLabelInfo({
+              cut: hoverCut,
+              x: e.clientX,
+              y: e.clientY,
+              isMove: true,
+              hoverOnly: true,
+              snapActive,
+              edgeHints: null,
+            });
+            return;
+          }
+
           const hints = panelEdgeSnapHints(snapped.u, snapped.v, ps);
           const nearEdge = hints.left || hints.right || hints.bottom || hints.top;
           if (!nearEdge && !snapActive) {
@@ -360,6 +391,7 @@ export default function CutToolOverlay({
             x: e.clientX,
             y: e.clientY,
             isMove: false,
+            hoverOnly: true,
             snapActive,
             edgeHints: nearEdge ? hints : null,
           });
@@ -394,6 +426,7 @@ export default function CutToolOverlay({
           x: e.clientX,
           y: e.clientY,
           isMove: true,
+          hoverOnly: false,
           snapActive,
           edgeHints: ps ? panelEdgeSnapHints(snapped.u0, snapped.v0, ps) : null,
         });
@@ -428,13 +461,14 @@ export default function CutToolOverlay({
         x: e.clientX,
         y: e.clientY,
         isMove: false,
+        hoverOnly: false,
         snapActive,
         edgeHints: ps
           ? panelEdgeSnapHints(resolved.u1, resolved.v1, ps)
           : null,
       });
     },
-    [active, shapeKind, viewerRef, scheduleDraft, snapActive, snapDraft],
+    [active, shapeKind, viewerRef, scheduleDraft, snapActive, snapDraft, findCutAt, altHeld],
   );
 
   // ── pointer up ────────────────────────────────────────────────────────────
@@ -452,7 +486,17 @@ export default function CutToolOverlay({
 
       if (mode.type === "move") {
         onMovingCutId(null);
-        onCommitMove(mode.latest);
+        const orig = mode.original;
+        const latest = mode.latest;
+        const moved =
+          latest.u0 !== orig.u0 ||
+          latest.v0 !== orig.v0 ||
+          latest.u1 !== orig.u1 ||
+          latest.v1 !== orig.v1;
+        if (moved) {
+          onCommitMove(latest);
+        }
+        onSelectedCutIdChange(latest.id);
         return;
       }
 
@@ -461,7 +505,7 @@ export default function CutToolOverlay({
 
       const snapped = snapDraft({ ...committedDraft, shiftKey: e.shiftKey });
       const resolved = resolveCutDrag({ ...snapped, shiftKey: e.shiftKey });
-      if (minSize(shapeKind, resolved) < 0.05) return;
+      if (minSize(shapeKind, resolved) < MIN_COMMIT_SIZE_M) return;
 
       onCommitCut({
         id: createUserCutId(),
@@ -472,10 +516,11 @@ export default function CutToolOverlay({
         surfaceOffset: snapped.surfaceOffset,
       });
     },
-    [shapeKind, onCommitCut, onCommitMove, onMovingCutId, scheduleDraft, snapDraft],
+    [shapeKind, onCommitCut, onCommitMove, onMovingCutId, onSelectedCutIdChange, scheduleDraft, snapDraft],
   );
 
   const isDraggingMove = dragRef.current?.active && dragRef.current.mode.type === "move";
+  const isHoveringCut = hoverCutId != null && !isDraggingMove;
   const nearEdgeHover =
     labelInfo?.edgeHints != null &&
     (labelInfo.edgeHints.left ||
@@ -491,11 +536,7 @@ export default function CutToolOverlay({
       : undefined;
 
   const label = labelInfo ? cutDimensionsLabel(labelInfo.cut, panelSize) : null;
-  const isHoverOnly =
-    labelInfo != null &&
-    !dragRef.current?.active &&
-    labelInfo.cut.u0 === labelInfo.cut.u1 &&
-    labelInfo.cut.v0 === labelInfo.cut.v1;
+  const isHoverOnly = labelInfo != null && labelInfo.hoverOnly;
 
   const edgeHintLabel = (() => {
     const h = labelInfo?.edgeHints;
@@ -516,17 +557,20 @@ export default function CutToolOverlay({
         style={{
           cursor: isDraggingMove
             ? "grabbing"
-            : nearEdgeHover && snapActive
-              ? "cell"
-              : altHeld
-                ? "crosshair"
+            : isHoveringCut
+              ? "grab"
+              : nearEdgeHover && snapActive
+                ? "cell"
                 : "crosshair",
         }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerLeave={() => {
-          if (!dragRef.current?.active) setLabelInfo(null);
+          if (!dragRef.current?.active) {
+            setLabelInfo(null);
+            setHoverCutId(null);
+          }
         }}
       />
       {label && labelInfo && (
@@ -538,18 +582,20 @@ export default function CutToolOverlay({
         >
           {isHoverOnly ? (
             <span className="text-[11px] font-sans text-base-content/70">
-              {snapActive
-                ? edgeHintLabel
-                  ? `Borde ${edgeHintLabel} — soltá acá para cortar completo`
-                  : "Acercate a un borde para guiar el corte"
-                : "Modo libre — el corte no pegará a los bordes"}
+              {labelInfo.isMove
+                ? "Arrastrá para mover el corte · Alt+clic para dibujar encima"
+                : snapActive
+                  ? edgeHintLabel
+                    ? `Borde ${edgeHintLabel} — soltá acá para cortar completo`
+                    : "Acercate a un borde para guiar el corte"
+                  : "Modo libre — el corte no pegará a los bordes"}
             </span>
           ) : (
             label
           )}
-          {labelInfo.isMove && (
+          {labelInfo.isMove && !isHoverOnly && (
             <span className="block text-[11px] text-base-content/50 mt-0.5 font-sans">
-              Soltá para confirmar · Ctrl+Z deshace
+              Soltá para confirmar · Alt+clic dibuja encima · Ctrl+Z deshace
             </span>
           )}
           {!labelInfo.isMove && !isHoverOnly && snapActive && edgeHintLabel && (

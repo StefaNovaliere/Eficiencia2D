@@ -489,6 +489,7 @@ export default function ReviewScreen({
   const [cutEdgeSnap, setCutEdgeSnap] = useState(true);
   const [cutDraft, setCutDraft] = useState<CutDragState | null>(null);
   const [movingCutId, setMovingCutId] = useState<string | null>(null);
+  const [selectedCutId, setSelectedCutId] = useState<string | null>(null);
   const [measureToolMode, setMeasureToolMode] = useState(false);
   const [measureShapeKind, setMeasureShapeKind] =
     useState<MeasureShapeKind>("line");
@@ -1124,6 +1125,7 @@ export default function ReviewScreen({
     (cutId: string) => {
       pushHistory();
       setUserCuts((prev) => prev.filter((c) => c.id !== cutId));
+      setSelectedCutId((prev) => (prev === cutId ? null : prev));
     },
     [pushHistory],
   );
@@ -1664,6 +1666,8 @@ export default function ReviewScreen({
           shapeKind={cutShapeKind}
           edgeSnapEnabled={cutEdgeSnap}
           userCuts={userCuts}
+          selectedCutId={selectedCutId}
+          onSelectedCutIdChange={setSelectedCutId}
           viewerRef={viewerRef}
           onDraftChange={setCutDraft}
           onMovingCutId={setMovingCutId}
@@ -2963,7 +2967,20 @@ export default function ReviewScreen({
                   {cutsForSelectedGroup.map((cut) => (
                     <div
                       key={cut.id}
-                      className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-base-100/80 border border-warning/20 text-xs"
+                      role="button"
+                      tabIndex={0}
+                      className={`flex items-center gap-2 px-2 py-1.5 rounded-lg border text-xs cursor-pointer transition-colors ${
+                        selectedCutId === cut.id
+                          ? "bg-warning/15 border-warning/50 ring-1 ring-warning/30"
+                          : "bg-base-100/80 border-warning/20 hover:bg-warning/10"
+                      }`}
+                      onClick={() => setSelectedCutId(cut.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          setSelectedCutId(cut.id);
+                        }
+                      }}
                     >
                       <Scissors size={10} className="text-warning shrink-0" />
                       <span className="flex-1 font-mono text-[11px] text-base-content/70">
@@ -2972,7 +2989,10 @@ export default function ReviewScreen({
                       <button
                         type="button"
                         className="btn btn-ghost btn-xs btn-circle opacity-50 hover:opacity-100 hover:text-error"
-                        onClick={() => handleRemoveCut(cut.id)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleRemoveCut(cut.id);
+                        }}
                         aria-label="Eliminar corte"
                       >
                         <X size={10} />
