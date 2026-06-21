@@ -91,6 +91,15 @@ function createViewerMaterials(palette: ViewerPalette): ViewerMaterials {
     dimmed[cat] = makeMaterial(hex, cat === "discard" ? 0.08 : 0.14);
   }
 
+  // El piso tiene caras coplanares con la base de los muros → z-fighting.
+  // polygonOffset positivo empuja el piso levemente "detrás" del muro para
+  // que el muro siempre gane cuando compiten en la misma posición.
+  for (const m of [normal.floor, solid.floor, dimmed.floor]) {
+    m.polygonOffset = true;
+    m.polygonOffsetFactor = 2;
+    m.polygonOffsetUnits = 4;
+  }
+
   return {
     normal,
     solid,
