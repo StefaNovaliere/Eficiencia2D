@@ -657,6 +657,7 @@ export default function ReviewScreen({
   );
   const displayGroups = cutGroupsResult.displayGroups;
   const derivedCutTriangles = cutGroupsResult.derivedTriangles;
+  const derivedPanelPolys = cutGroupsResult.derivedPanelPolys;
 
   const displayGroupIds = useMemo(
     () => new Set(displayGroups.map((g) => g.id)),
@@ -1633,6 +1634,7 @@ export default function ReviewScreen({
           groups={displayGroups}
           projectionGroups={phase1.groups}
           derivedCutTriangles={derivedCutTriangles}
+          derivedPanelPolys={derivedPanelPolys}
           selectedGroupIds={selectedGroupIds}
           mergeMemberFaceIndices={mergeMemberHighlightFaceIndices}
           categoryOverrides={overrides}

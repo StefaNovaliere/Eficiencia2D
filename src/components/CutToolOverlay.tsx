@@ -21,6 +21,8 @@ import type { ModelViewerHandle } from "@/components/ModelViewer";
 interface PlaneCache {
   scenePoint: { x: number; y: number; z: number };
   projection: PanelProjection;
+  surfaceNormal: { x: number; y: number; z: number };
+  surfaceOffset: number;
 }
 
 type DragMode =
@@ -55,6 +57,8 @@ function userCutToDraft(cut: UserCut): CutDragState {
     u1: cut.u1,
     v1: cut.v1,
     shiftKey: false,
+    surfaceNormal: cut.surfaceNormal,
+    surfaceOffset: cut.surfaceOffset,
   };
 }
 
@@ -243,6 +247,8 @@ export default function CutToolOverlay({
       const plane: PlaneCache = {
         scenePoint: hit.scenePoint,
         projection: hit.projection,
+        surfaceNormal: hit.surfaceNormal,
+        surfaceOffset: hit.surfaceOffset,
       };
 
       const existing = findCutAt(hit.groupId, hit.u, hit.v);
@@ -265,7 +271,12 @@ export default function CutToolOverlay({
             startV: startUv.v,
             original: existing,
             latest: existing,
-            plane,
+            plane: {
+              scenePoint: hit.scenePoint,
+              projection: hit.projection,
+              surfaceNormal: existing.surfaceNormal ?? hit.surfaceNormal,
+              surfaceOffset: existing.surfaceOffset ?? hit.surfaceOffset,
+            },
           },
         };
         setLabelInfo({
@@ -288,6 +299,8 @@ export default function CutToolOverlay({
         u1: startUv.u,
         v1: startUv.v,
         shiftKey: e.shiftKey,
+        surfaceNormal: hit.surfaceNormal,
+        surfaceOffset: hit.surfaceOffset,
       });
       dragRef.current = {
         active: true,
@@ -362,6 +375,7 @@ export default function CutToolOverlay({
         e.clientY,
         mode.plane.scenePoint,
         mode.plane.projection,
+        mode.plane.surfaceNormal,
       );
 
       const ps = viewerRef.current?.getPanelSize(
@@ -404,6 +418,8 @@ export default function CutToolOverlay({
         u1,
         v1,
         shiftKey: e.shiftKey,
+        surfaceNormal: mode.plane.surfaceNormal,
+        surfaceOffset: mode.plane.surfaceOffset,
       });
       scheduleDraft(draft);
       const resolved = resolveCutDrag(draft);
@@ -452,6 +468,8 @@ export default function CutToolOverlay({
         groupId: snapped.groupId,
         kind: shapeKind,
         ...resolved,
+        surfaceNormal: snapped.surfaceNormal,
+        surfaceOffset: snapped.surfaceOffset,
       });
     },
     [shapeKind, onCommitCut, onCommitMove, onMovingCutId, scheduleDraft, snapDraft],
