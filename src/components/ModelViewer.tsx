@@ -10,7 +10,6 @@ import type { FaceCategory, GeometryGroup } from "@/core/group-classifier";
 import { computeMarkedOpeningGroups3D, type MarkOpeningGroupLines } from "@/core/mark-preview";
 import {
   computeCutPreviewSegments,
-  computeDerivedPanelOutlineSegments,
   panelUVToWorldOnSurface,
   type CutPreviewSegment,
 } from "@/core/cut-preview";
@@ -28,6 +27,7 @@ import type { UserCut } from "@/core/user-cuts";
 import type { CutDragState } from "@/core/user-cuts";
 import {
   cutGroupOwnerId,
+  cutDerivedExtractIndex,
   cutDerivedParentId,
   type DerivedPanelPoly,
   type DerivedTriangleRef,
@@ -272,21 +272,60 @@ function closedRingToContour(ring: [number, number][]): THREE.Vector2[] {
   return out;
 }
 
-/** Triangulate a panel-local polygon (outer + holes) into UV triangles. */
+/** Triangulate a panel-local polygon (outer + holes) into UV triangles.
+ *
+ * THREE.ShapeUtils.triangulateShape requires:
+ *   outer contour → CCW (positive signed area in standard math / Y-up)
+ *   holes         → CW  (negative signed area)
+ *
+ * The rings from edgesToPolygons can arrive in either winding, so we correct
+ * them here. We also wrap in try/catch because the Earcut library inside THREE
+ * will throw on degenerate or self-intersecting input.
+ */
 function triangulatePanelPoly(poly: DerivedPanelPoly): THREE.Vector2[][] {
-  const contour = closedRingToContour(poly.outer);
-  if (contour.length < 3) return [];
+  const outer = closedRingToContour(poly.outer);
+  if (outer.length < 3) return [];
 
-  const holes = poly.holes.map((hole) => closedRingToContour(hole)).filter((h) => h.length >= 3);
-  const indices = THREE.ShapeUtils.triangulateShape(contour, holes);
-  if (indices.length === 0) return [];
+  // Positive area = CCW in Y-up (standard math). THREE wants CCW for outer.
+  if (THREE.ShapeUtils.area(outer) < 0) outer.reverse();
 
-  const allVerts = [...contour, ...holes.flat()];
-  const tris: THREE.Vector2[][] = [];
-  for (const t of indices) {
-    tris.push([allVerts[t[0]], allVerts[t[1]], allVerts[t[2]]]);
+  const holes = poly.holes
+    .map((hole) => closedRingToContour(hole))
+    .filter((h) => h.length >= 3)
+    .map((h) => {
+      // THREE wants CW (negative area) for holes.
+      if (THREE.ShapeUtils.area(h) > 0) h.reverse();
+      return h;
+    });
+
+  try {
+    const indices = THREE.ShapeUtils.triangulateShape(outer, holes);
+    if (indices.length === 0) return [];
+    const allVerts = [...outer, ...holes.flat()];
+    const tris: THREE.Vector2[][] = [];
+    for (const t of indices) {
+      tris.push([allVerts[t[0]], allVerts[t[1]], allVerts[t[2]]]);
+    }
+    return tris;
+  } catch {
+    return [];
   }
-  return tris;
+}
+
+function surfaceCutForDerivedGroup(
+  derivedGroupId: number,
+  parentId: number | null,
+  userCuts: UserCut[],
+): UserCut | undefined {
+  if (parentId == null) return undefined;
+  const extractIdx = cutDerivedExtractIndex(derivedGroupId);
+  if (extractIdx != null) {
+    const subtractive = userCuts.filter(
+      (c) => c.groupId === parentId && c.kind !== "line",
+    );
+    return subtractive[extractIdx];
+  }
+  return userCuts.find((c) => c.groupId === parentId);
 }
 
 function pushPanelPolyToBucket(
@@ -342,14 +381,29 @@ function buildMergedGeometries(
     const bucket = byCategory.get(cat)!;
 
     const panelPoly = derivedPanelPolys?.get(group.id);
-    if (panelPoly) {
+    const triSubset = derivedCutTriangles?.get(group.id);
+    const isExtractPiece = cutDerivedExtractIndex(group.id) != null;
+    const isDerivedPiece = panelPoly != null || (triSubset != null);
+
+    // All derived cut pieces (both "resto/split" and "extract") render via the
+    // panel poly (2D triangulation with holes). This is the only approach that
+    // can produce a clean visual hole in the wall surface. The triangle-subset
+    // fallback is kept only as a last resort so the wall never disappears.
+    //
+    // Extract pieces pass their cut's surfaceNormal/Offset so they sit slightly
+    // in front of the wall. Resto/split pieces pass no offset — they ARE the wall.
+    if (isDerivedPiece && panelPoly) {
       const parentId = cutDerivedParentId(group.id);
       const parentGroup =
         parentId != null
           ? projectionGroups?.find((g) => g.id === parentId)
           : undefined;
       if (parentGroup) {
-        const parentCut = userCuts.find((c) => c.groupId === parentId);
+        // Only extract pieces need a surface offset; resto pieces sit on the wall itself.
+        const surfaceCut = isExtractPiece
+          ? (surfaceCutForDerivedGroup(group.id, parentId, userCuts) ??
+             userCuts.find((c) => c.groupId === parentId))
+          : undefined;
         pushPanelPolyToBucket(
           bucket,
           group.id,
@@ -357,14 +411,15 @@ function buildMergedGeometries(
           faces,
           parentGroup,
           appliedAxis,
-          parentCut,
+          surfaceCut,
         );
         continue;
       }
     }
 
-    const triSubset = derivedCutTriangles?.get(group.id);
-    if (triSubset) {
+    // Fallback: render the triangle subset. This does NOT create clean holes but
+    // prevents the wall from going completely invisible when panel-poly fails.
+    if (triSubset && triSubset.length > 0) {
       for (const { faceIndex, i0, i1, i2 } of triSubset) {
         const face = faces[faceIndex];
         if (!face) continue;
@@ -376,6 +431,15 @@ function buildMergedGeometries(
           face.vertices[i2],
         );
       }
+      const parentId = cutDerivedParentId(group.id);
+      const thicknessSource =
+        parentId != null
+          ? projectionGroups?.find((g) => g.id === parentId) ?? group
+          : group;
+      pushThicknessSides(faces, thicknessSource, (p0, p1, p2) => {
+        bucket.positions.push(p0.x, p0.y, p0.z, p1.x, p1.y, p1.z, p2.x, p2.y, p2.z);
+        bucket.groupIds.push(group.id);
+      });
       continue;
     }
 
@@ -1061,19 +1125,21 @@ function Scene({
             ? projectionGroups?.find((pg) => pg.id === parentId)
             : undefined;
         if (parentGroup) {
-          const parentCut = userCuts.find((c) => c.groupId === parentId);
+          const surfaceCut =
+            surfaceCutForDerivedGroup(g.id, parentId, userCuts) ??
+            userCuts.find((c) => c.groupId === parentId);
           for (const tri of triangulatePanelPoly(panelPoly)) {
             const wa = panelUVToWorldOnSurface(
               tri[0].x, tri[0].y, faces, parentGroup, appliedAxis,
-              parentCut?.surfaceNormal, parentCut?.surfaceOffset,
+              surfaceCut?.surfaceNormal, surfaceCut?.surfaceOffset,
             );
             const wb = panelUVToWorldOnSurface(
               tri[1].x, tri[1].y, faces, parentGroup, appliedAxis,
-              parentCut?.surfaceNormal, parentCut?.surfaceOffset,
+              surfaceCut?.surfaceNormal, surfaceCut?.surfaceOffset,
             );
             const wc = panelUVToWorldOnSurface(
               tri[2].x, tri[2].y, faces, parentGroup, appliedAxis,
-              parentCut?.surfaceNormal, parentCut?.surfaceOffset,
+              surfaceCut?.surfaceNormal, surfaceCut?.surfaceOffset,
             );
             if (!wa || !wb || !wc) continue;
             panelPositions.push(
@@ -1253,17 +1319,8 @@ function Scene({
       appliedAxis,
       movingCutId,
     );
-    const fromDerived =
-      derivedPanelPolys && derivedPanelPolys.size > 0
-        ? computeDerivedPanelOutlineSegments(
-            faces,
-            parentGroups,
-            derivedPanelPolys,
-            appliedAxis,
-            userCuts,
-          )
-        : [];
-    return [...fromCuts, ...fromDerived];
+    // userCuts already draw every cut outline; derived polys duplicate and drift.
+    return fromCuts;
   }, [
     faces,
     groups,
@@ -1272,7 +1329,6 @@ function Scene({
     cutDraft,
     appliedAxis,
     movingCutId,
-    derivedPanelPolys,
   ]);
 
   const cutPreviewLookupGroups = projectionGroups ?? groups;
@@ -1711,7 +1767,6 @@ function SceneBridge({
           ctx.faces,
           projGroup,
           ctx.appliedAxis,
-          picked.faceNormal,
         );
         if (!uv) return null;
         return { groupId: ownerId, u: uv.u, v: uv.v };
@@ -1746,7 +1801,6 @@ function SceneBridge({
           ctx.faces,
           projGroup,
           ctx.appliedAxis,
-          picked.faceNormal,
         );
         if (!uv) return null;
 
@@ -1754,7 +1808,6 @@ function SceneBridge({
           ctx.faces,
           projGroup,
           ctx.appliedAxis,
-          picked.faceNormal,
         );
         if (!projection) return null;
 
@@ -1764,22 +1817,32 @@ function SceneBridge({
           ctx.faces,
           projGroup,
           ctx.appliedAxis,
-          picked.faceNormal,
         );
         let surfaceOffset = 0;
+        let scenePoint = {
+          x: picked.point.x,
+          y: picked.point.y,
+          z: picked.point.z,
+        };
         if (baseOnPlane) {
           const dx = modelPoint.x - baseOnPlane.x;
           const dy = modelPoint.y - baseOnPlane.y;
           const dz = modelPoint.z - baseOnPlane.z;
           const fn = picked.faceNormal;
           surfaceOffset = dx * fn.x + dy * fn.y + dz * fn.z;
+          // Anchor drag plane on the projection frame, not the raw mesh hit.
+          scenePoint = {
+            x: baseOnPlane.x - ctx.modelCenter.x,
+            y: baseOnPlane.y - ctx.modelCenter.y,
+            z: baseOnPlane.z - ctx.modelCenter.z,
+          };
         }
 
         return {
           groupId: ownerId,
           u: uv.u,
           v: uv.v,
-          scenePoint: { x: picked.point.x, y: picked.point.y, z: picked.point.z },
+          scenePoint,
           projection,
           surfaceNormal: {
             x: picked.faceNormal.x,
@@ -1790,7 +1853,7 @@ function SceneBridge({
         };
       },
 
-      getUVFromMouseOnPlane(clientX, clientY, sceneAnchor, projection, surfaceNormal) {
+      getUVFromMouseOnPlane(clientX, clientY, sceneAnchor, projection, _surfaceNormal) {
         const canvas = gl.domElement;
         const canvasRect = canvas.getBoundingClientRect();
         if (canvasRect.width === 0 || canvasRect.height === 0) return null;
@@ -1798,37 +1861,34 @@ function SceneBridge({
         const ndcX = ((clientX - canvasRect.left) / canvasRect.width) * 2 - 1;
         const ndcY = -((clientY - canvasRect.top) / canvasRect.height) * 2 + 1;
 
-        // Build ray from camera through pixel
         const rayOrigin = camera.position.clone();
         const rayDir = new THREE.Vector3(ndcX, ndcY, 0.5)
           .unproject(camera)
           .sub(rayOrigin)
           .normalize();
 
-        // Ray-plane intersection on the clicked face (not the abstract mid-plane).
-        const n = surfaceNormal
-          ? new THREE.Vector3(surfaceNormal.x, surfaceNormal.y, surfaceNormal.z)
-          : new THREE.Vector3(
-              projection.normal.x,
-              projection.normal.y,
-              projection.normal.z,
-            );
+        // Must intersect the SAME projection plane used for UV axes (representativeNormal),
+        // not the clicked face normal — mixing the two skews UV during drag and makes
+        // cut outlines float off the wall.
+        const n = new THREE.Vector3(
+          projection.normal.x,
+          projection.normal.y,
+          projection.normal.z,
+        );
         const anchor = new THREE.Vector3(sceneAnchor.x, sceneAnchor.y, sceneAnchor.z);
 
         const denom = n.dot(rayDir);
-        if (Math.abs(denom) < 1e-6) return null; // ray parallel to plane
+        if (Math.abs(denom) < 1e-6) return null;
         const t = n.dot(anchor.clone().sub(rayOrigin)) / denom;
-        if (t < 0) return null; // behind camera
+        if (t < 0) return null;
 
         const scenePoint = rayOrigin.clone().addScaledVector(rayDir, t);
 
-        // Scene coords → model coords (undo the centering shift)
         const ctx = panelRaycastRef.current;
         const mx = scenePoint.x + ctx.modelCenter.x;
         const my = scenePoint.y + ctx.modelCenter.y;
         const mz = scenePoint.z + ctx.modelCenter.z;
 
-        // Project onto UV axes
         const { uAxis, vAxis, originU, originV } = projection;
         const u = mx * uAxis.x + my * uAxis.y + mz * uAxis.z - originU;
         const v = mx * vAxis.x + my * vAxis.y + mz * vAxis.z - originV;

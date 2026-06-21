@@ -5,11 +5,13 @@
  */
 import type { Face3D, Vec3 } from "@/core/types";
 import { dot } from "@/core/types";
-import type { GeometryGroup } from "@/core/group-classifier";
+import type { FaceCategory, GeometryGroup } from "@/core/group-classifier";
 import { projectFacesTo2D, type UpAxis } from "@/core/panel-projection";
 import {
   applyUserCutsToPanel,
+  cutPanelAreaM2,
   cutShapePolygon,
+  MIN_EXTRACT_PIECE_AREA_M2,
   panelPiecePolygons,
   type UserCut,
 } from "@/core/user-cuts";
@@ -39,6 +41,13 @@ export function toSplitPieceGroupId(parentId: number, pieceIndex: number): numbe
 
 export function toExtractedCutGroupId(parentId: number, cutIndex: number): number {
   return -(parentId * 1000 + EXTRACT_SLOT + cutIndex + 1);
+}
+
+export function cutDerivedExtractIndex(derivedId: number): number | null {
+  if (derivedId >= 0) return null;
+  const slot = (-derivedId - 1) % 1000;
+  if (slot < EXTRACT_SLOT) return null;
+  return slot - EXTRACT_SLOT - 1;
 }
 
 /** Map derived or parent id → parent id used in `user_cuts`. */
@@ -139,6 +148,47 @@ function fanTriangles(vertexCount: number): [number, number, number][] {
   const out: [number, number, number][] = [];
   for (let i = 1; i + 1 < vertexCount; i++) out.push([0, i, i + 1]);
   return out;
+}
+
+function piecePolyArea(poly: PiecePoly): number {
+  let area = Math.abs(ringArea2D(poly.outer));
+  for (const hole of poly.holes) {
+    area -= Math.abs(ringArea2D(hole));
+  }
+  return Math.max(0, area);
+}
+
+function ringArea2D(ring: [number, number][]): number {
+  let a = 0;
+  for (let i = 0; i + 1 < ring.length; i++) {
+    a += ring[i][0] * ring[i + 1][1] - ring[i + 1][0] * ring[i][1];
+  }
+  return a / 2;
+}
+
+function buildGroupFromPanelPoly(
+  id: number,
+  label: string,
+  parent: GeometryGroup,
+  poly: PiecePoly,
+  category?: FaceCategory,
+): GeometryGroup | null {
+  const area = piecePolyArea(poly);
+  if (area < 1e-6) return null;
+  return {
+    id,
+    label,
+    category: category ?? parent.category,
+    faceIndices: [...parent.faceIndices],
+    totalArea: area,
+    centroid: { ...parent.centroid },
+    orientation: parent.orientation,
+    representativeNormal: parent.representativeNormal,
+    thickness: parent.thickness,
+    minY: parent.minY,
+    maxY: parent.maxY,
+    originalCategory: parent.originalCategory,
+  };
 }
 
 function buildGroupFromTriangles(
@@ -487,14 +537,35 @@ export function buildDisplayGroupsFromCuts(
 
     const subtractiveCuts = cuts.filter((c) => c.kind !== "line");
     const dominantSurface = cuts.find((c) => c.surfaceNormal)?.surfaceNormal;
-    const extractPieces: { ring: [number, number][]; cutIndex: number }[] = [];
+
+    // Large cut-outs become separate selectable pieces; tiny ones stay as holes only.
+    const significantExtracts: { cut: UserCut; cutIndex: number; ring: [number, number][] }[] = [];
+    const extractPiecesForAssignment: { ring: [number, number][]; cutIndex: number }[] = [];
     subtractiveCuts.forEach((cut, cutIndex) => {
       const ring = cutShapePolygon(cut, proj.widthM, proj.heightM);
-      if (ring) extractPieces.push({ ring, cutIndex });
+      if (!ring) return;
+      extractPiecesForAssignment.push({ ring, cutIndex });
+      const area = cutPanelAreaM2(cut, proj.widthM, proj.heightM);
+      if (area >= MIN_EXTRACT_PIECE_AREA_M2) {
+        significantExtracts.push({ cut, cutIndex, ring });
+      }
     });
 
-    const multiPiece = remainPolys.length > 1 || extractPieces.length > 0;
-    if (!multiPiece) continue;
+    const extractPieces = extractPiecesForAssignment;
+
+    const hasSubtractiveCuts = subtractiveCuts.length > 0;
+    const shouldDerive =
+      remainPolys.length > 1 ||
+      (remainPolys.length >= 1 && (hasSubtractiveCuts || extractPieces.length > 0));
+
+    // Never hide the parent if boolean ops consumed the whole panel — that would
+    // erase the wall entirely and leave only floating cut-out shards.
+    if (!shouldDerive || remainPolys.length === 0) continue;
+
+    const hasOppositeFaces = groupFaces.some(
+      (f) => dot(f.normal, parent.representativeNormal) < -0.5,
+    );
+    const surfaceFilter = hasOppositeFaces ? dominantSurface : undefined;
 
     const { splitAssignments, extractAssignments } = assignTrianglesToPieces(
       parent,
@@ -502,66 +573,88 @@ export function buildDisplayGroupsFromCuts(
       frame,
       remainPolys,
       extractPieces,
-      dominantSurface,
+      surfaceFilter,
     );
 
     const derived: GeometryGroup[] = [];
 
+    const addSplitPiece = (
+      poly: PiecePoly,
+      pi: number,
+      label: string,
+      tris: DerivedTriangleRef[],
+    ) => {
+      const id = toSplitPieceGroupId(parent.id, pi);
+      // Build a group. We need it for category/centroid/id even when we render
+      // via the panel poly, so fall back to buildGroupFromPanelPoly if no tris.
+      const g =
+        buildGroupFromTriangles(id, label, parent, tris, faces) ??
+        buildGroupFromPanelPoly(id, label, parent, poly, parent.category);
+      if (!g) return;
+      derived.push(g);
+      derivedTriangles.set(id, tris);
+      // Always set the panel poly so the viewer can triangulate it with proper
+      // holes (the triangle subset alone cannot carve clean holes from a wall).
+      derivedPanelPolys.set(id, { outer: poly.outer, holes: poly.holes });
+    };
+
     if (remainPolys.length > 1) {
       remainPolys.forEach((poly, pi) => {
-        const tris = splitAssignments[pi];
-        const id = toSplitPieceGroupId(parent.id, pi);
-        const g = buildGroupFromTriangles(
-          id,
+        addSplitPiece(
+          poly,
+          pi,
           `${parent.label} · ${pi + 1}/${remainPolys.length}`,
+          splitAssignments[pi] ?? [],
+        );
+      });
+    } else if (remainPolys.length === 1) {
+      addSplitPiece(
+        remainPolys[0],
+        0,
+        `${parent.label} · resto`,
+        splitAssignments[0] ?? [],
+      );
+    }
+
+    significantExtracts.forEach(({ cut, cutIndex, ring }) => {
+      const tris = extractAssignments.get(cutIndex) ?? [];
+      const id = toExtractedCutGroupId(parent.id, cutIndex);
+      const kindLabel = CUT_KIND_LABEL[cut.kind] ?? "recorte";
+      const area = cutPanelAreaM2(cut, proj.widthM, proj.heightM);
+      const category: FaceCategory =
+        area < MIN_EXTRACT_PIECE_AREA_M2 ? "discard" : parent.category;
+      const g =
+        buildGroupFromTriangles(
+          id,
+          `${parent.label} · ${kindLabel}`,
           parent,
           tris,
           faces,
+        ) ??
+        buildGroupFromPanelPoly(
+          id,
+          `${parent.label} · ${kindLabel}`,
+          parent,
+          { outer: ring, holes: [] },
+          category,
         );
-        if (g) {
-          derived.push(g);
-          derivedTriangles.set(id, tris);
-          derivedPanelPolys.set(id, poly);
-        }
-      });
-    } else if (remainPolys.length === 1) {
-      const tris = splitAssignments[0];
-      const id = toSplitPieceGroupId(parent.id, 0);
-      const g = buildGroupFromTriangles(
-        id,
-        `${parent.label} · resto`,
-        parent,
-        tris,
-        faces,
-      );
-      if (g) {
-        derived.push(g);
-        derivedTriangles.set(id, tris);
-        derivedPanelPolys.set(id, remainPolys[0]);
-      }
-    }
-
-    subtractiveCuts.forEach((cut, cutIndex) => {
-      const tris = extractAssignments.get(cutIndex) ?? [];
-      if (tris.length === 0) return;
-      const id = toExtractedCutGroupId(parent.id, cutIndex);
-      const kindLabel = CUT_KIND_LABEL[cut.kind] ?? "recorte";
-      const g = buildGroupFromTriangles(
-        id,
-        `${parent.label} · ${kindLabel}`,
-        parent,
-        tris,
-        faces,
-      );
-      const ring = cutShapePolygon(cut, proj.widthM, proj.heightM);
-      if (g && ring) {
-        derived.push(g);
-        derivedTriangles.set(id, tris);
-        derivedPanelPolys.set(id, { outer: ring, holes: [] });
-      }
+      if (!g) return;
+      if (category === "discard") g.category = "discard";
+      derived.push(g);
+      derivedTriangles.set(id, tris);
+      derivedPanelPolys.set(id, { outer: ring, holes: [] });
     });
 
-    if (derived.length < 2) continue;
+    if (derived.length < 1) continue;
+
+    // Never hide the parent unless the resto piece has a renderable panel poly.
+    // (Triangle subsets alone can't carve clean holes, so we gate on the poly.)
+    const restoPieces = derived.filter((g) => cutDerivedExtractIndex(g.id) === null);
+    const restoHasPoly = restoPieces.some((g) => {
+      const poly = derivedPanelPolys.get(g.id);
+      return poly != null && piecePolyArea(poly) > 1e-6;
+    });
+    if (!restoHasPoly) continue;
 
     splitParentIds.add(parent.id);
     derivedByParent.set(parent.id, derived);

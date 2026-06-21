@@ -58,6 +58,27 @@ function ringArea(ring: [number, number][]): number {
   return a / 2;
 }
 
+/** Minimum drag size (m) to commit a new cut — ~12 cm side. */
+export const MIN_CUT_COMMIT_SIZE_M = 0.12;
+
+/**
+ * Cut-outs smaller than this (m²) stay as holes in the parent panel only.
+ * If they must become a separate piece, they are tagged as discard (~25 cm²).
+ */
+export const MIN_EXTRACT_PIECE_AREA_M2 = 0.025;
+
+/** Panel area covered by a subtractive cut shape (m²). */
+export function cutPanelAreaM2(
+  cut: UserCut,
+  panelWidthM: number,
+  panelHeightM: number,
+): number {
+  if (cut.kind === "line") return 0;
+  const ring = cutShapePolygon(cut, panelWidthM, panelHeightM);
+  if (!ring || ring.length < 3) return 0;
+  return Math.abs(ringArea(ring));
+}
+
 /** Build polygon rings from contour edges (outer + holes). */
 function edgesToPolygons(edges: PanelEdge[]): [number, number][][] {
   type Key = string;
@@ -245,9 +266,21 @@ function distToSegment(
   return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
 }
 
+function resolvedCutGeometry(cut: UserCut) {
+  return resolveCutDrag({
+    groupId: cut.groupId,
+    kind: cut.kind,
+    u0: cut.u0,
+    v0: cut.v0,
+    u1: cut.u1,
+    v1: cut.v1,
+    shiftKey: false,
+  });
+}
+
 /**
- * True when (u,v) is on the **perimeter** of an existing cut (for move tool).
- * Interior clicks intentionally miss so you can draw new cuts inside existing ones.
+ * True when (u,v) is on the **perimeter** of an existing cut.
+ * Used when Alt forces a new cut on top of an existing shape.
  */
 export function hitTestCut(
   cut: UserCut,
@@ -259,15 +292,7 @@ export function hitTestCut(
 ): boolean {
   void panelWidthM;
   void panelHeightM;
-  const resolved = resolveCutDrag({
-    groupId: cut.groupId,
-    kind: cut.kind,
-    u0: cut.u0,
-    v0: cut.v0,
-    u1: cut.u1,
-    v1: cut.v1,
-    shiftKey: false,
-  });
+  const resolved = resolvedCutGeometry(cut);
 
   if (cut.kind === "line") {
     return (
@@ -278,16 +303,13 @@ export function hitTestCut(
   if (cut.kind === "circle") {
     const { cx, cy, rx, ry } = cutEllipseRadii({ ...cut, ...resolved });
     if (rx < 0.01 || ry < 0.01) return false;
-    // Distance to ellipse perimeter in normalised space
     const nx = (u - cx) / rx;
     const ny = (v - cy) / ry;
     const dist = Math.sqrt(nx * nx + ny * ny);
-    // Hit only the ring itself, not the interior
     const tolN = tolerance / Math.min(rx, ry);
     return Math.abs(dist - 1) <= tolN;
   }
 
-  // Rect: hit only the four edges, not the interior
   const { minU, maxU, minV, maxV } = cutBbox({ ...cut, ...resolved });
   const onHEdge =
     u >= minU - tolerance &&
@@ -297,9 +319,74 @@ export function hitTestCut(
     v >= minV - tolerance &&
     v <= maxV + tolerance &&
     (Math.abs(u - minU) <= tolerance || Math.abs(u - maxU) <= tolerance);
+  return onHEdge || onVEdge;
+}
+
+/**
+ * True when (u,v) is inside or near an existing cut — used to grab and move it.
+ * Hold Alt while clicking to skip this and draw a new cut on top instead.
+ */
+export function hitTestCutForMove(
+  cut: UserCut,
+  u: number,
+  v: number,
+  panelWidthM: number,
+  panelHeightM: number,
+  tolerance = 0.08,
+): boolean {
+  void panelWidthM;
+  void panelHeightM;
+  const resolved = resolvedCutGeometry(cut);
+
+  if (cut.kind === "line") {
+    return (
+      distToSegment(u, v, resolved.u0, resolved.v0, resolved.u1, resolved.v1) <= tolerance
+    );
+  }
+
+  if (cut.kind === "circle") {
+    const { cx, cy, rx, ry } = cutEllipseRadii({ ...cut, ...resolved });
+    if (rx < 0.01 || ry < 0.01) return false;
+    const nx = (u - cx) / rx;
+    const ny = (v - cy) / ry;
+    const dist = Math.sqrt(nx * nx + ny * ny);
+    const tolN = tolerance / Math.min(rx, ry);
+    return dist <= 1 + tolN;
+  }
+
+  const { minU, maxU, minV, maxV } = cutBbox({ ...cut, ...resolved });
   return (
-    onHEdge || onVEdge
+    u >= minU - tolerance &&
+    u <= maxU + tolerance &&
+    v >= minV - tolerance &&
+    v <= maxV + tolerance
   );
+}
+
+/** Find the topmost cut on a panel at (u,v), or null. */
+export function findCutAtPoint(
+  cuts: UserCut[],
+  groupId: number,
+  u: number,
+  v: number,
+  panelWidthM: number,
+  panelHeightM: number,
+  options?: { forceCreate?: boolean; preferredId?: string | null },
+): UserCut | null {
+  const onGroup = cuts.filter((c) => c.groupId === groupId);
+  const hit = options?.forceCreate ? hitTestCut : hitTestCutForMove;
+
+  if (options?.preferredId) {
+    const preferred = onGroup.find((c) => c.id === options.preferredId);
+    if (preferred && hit(preferred, u, v, panelWidthM, panelHeightM)) {
+      return preferred;
+    }
+  }
+
+  for (let i = onGroup.length - 1; i >= 0; i--) {
+    if (hit(onGroup[i], u, v, panelWidthM, panelHeightM)) return onGroup[i];
+  }
+  return null;
 }
 /** Closed ring for a cut shape in panel-local metres (preview / derived groups). */
 export function cutShapePolygon(

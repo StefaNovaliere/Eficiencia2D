@@ -143,9 +143,8 @@ describe("cut-derived-groups", () => {
     expect(displayGroups.some((g) => g.label.includes("resto"))).toBe(true);
     const circleGroup = displayGroups.find((g) => g.label.includes("círculo"));
     expect(circleGroup).toBeDefined();
-    const circlePoly = derivedTriangles.has(circleGroup!.id);
-    expect(circlePoly).toBe(true);
-    expect(derivedPanelPolys.size).toBeGreaterThanOrEqual(2);
+    expect(derivedPanelPolys.size).toBeGreaterThanOrEqual(1);
+    expect(derivedPanelPolys.has(circleGroup!.id)).toBe(true);
   });
 
   it("sin cortes devuelve los grupos originales", () => {
@@ -158,6 +157,58 @@ describe("cut-derived-groups", () => {
     );
     expect(splitParentIds.size).toBe(0);
     expect(displayGroups).toEqual([parent]);
+  });
+
+  it("corte pequeño mantiene la pared (resto con triángulos, sin pieza extraída)", () => {
+    const parent = wallGroup(5, 0);
+    const cuts: UserCut[] = [
+      {
+        id: "cut-tiny",
+        groupId: 5,
+        kind: "rect",
+        u0: 1.0,
+        v0: 1.5,
+        u1: 1.1,
+        v1: 1.6,
+      },
+    ];
+
+    const { displayGroups, splitParentIds, derivedTriangles, derivedPanelPolys } =
+      buildDisplayGroupsFromCuts([parent], [face], cuts, "Y");
+
+    expect(splitParentIds.has(5)).toBe(true);
+    expect(displayGroups.some((g) => g.label.includes("resto"))).toBe(true);
+    expect(displayGroups.some((g) => g.label.includes("recorte"))).toBe(false);
+    const resto = displayGroups.find((g) => g.label.includes("resto"));
+    expect(resto).toBeDefined();
+    expect((derivedTriangles.get(resto!.id)?.length ?? 0)).toBeGreaterThan(0);
+    // resto always gets a panel poly now so the viewer can triangulate clean holes
+    expect(derivedPanelPolys.has(resto!.id)).toBe(true);
+  });
+
+  it("muchos cortes pequeños no eliminan la pared — resto conserva malla", () => {
+    const parent = wallGroup(5, 0);
+    const cuts: UserCut[] = Array.from({ length: 12 }, (_, i) => ({
+      id: `cut-${i}`,
+      groupId: 5,
+      kind: "rect" as const,
+      u0: 0.2 + (i % 4) * 0.4,
+      v0: 0.3 + Math.floor(i / 4) * 0.7,
+      u1: 0.35 + (i % 4) * 0.4,
+      v1: 0.45 + Math.floor(i / 4) * 0.7,
+    }));
+
+    const { displayGroups, splitParentIds, derivedTriangles } = buildDisplayGroupsFromCuts(
+      [parent],
+      [face],
+      cuts,
+      "Y",
+    );
+
+    expect(splitParentIds.has(5)).toBe(true);
+    const resto = displayGroups.find((g) => g.label.includes("resto"));
+    expect(resto).toBeDefined();
+    expect((derivedTriangles.get(resto!.id)?.length ?? 0)).toBeGreaterThan(0);
   });
 
   it("con surfaceNormal solo asigna triángulos de la cara clickeada", () => {
