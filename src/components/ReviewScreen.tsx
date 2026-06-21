@@ -1148,14 +1148,11 @@ export default function ReviewScreen({
   const handleSelectMeasure = useCallback(
     (id: string) => {
       setSelectedMeasureId(id);
-      const measure = measures.find((m) => m.id === id);
-      if (measure) {
-        setSelectedGroupIds(new Set([measure.groupId]));
-        setSelectedJointIndex(null);
-        setSidebarTab("capas");
-      }
+      // Stay on "Componentes" tab — don't change the group selection, which
+      // would trigger the useEffect that auto-switches to "Selección".
+      setSidebarTab("capas");
     },
-    [measures],
+    [],
   );
 
   const handleMeasureScaleChange = useCallback(

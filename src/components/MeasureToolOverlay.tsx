@@ -206,28 +206,30 @@ export default function MeasureToolOverlay({
       if (!dragRef.current?.active) return;
 
       const drag = dragRef.current;
-      const uv = viewerRef.current?.getUVFromMouseOnPlane(
+      // snapMeasureEndpoint handles both:
+      //   • Free-space projection (in air, across walls on the same plane)
+      //   • Cross-panel edge snap (sticky borders of nearby panels)
+      const uv = viewerRef.current?.snapMeasureEndpoint(
         e.clientX,
         e.clientY,
         drag.plane.scenePoint,
         drag.plane.projection,
+        snapActive,
       );
       const u1 = uv ? uv.u : (latestDraftRef.current?.u1 ?? drag.u0);
       const v1 = uv ? uv.v : (latestDraftRef.current?.v1 ?? drag.v0);
 
-      scheduleDraft(
-        snapMeasure({
-          groupId: drag.groupId,
-          kind: shapeKind,
-          u0: drag.u0,
-          v0: drag.v0,
-          u1,
-          v1,
-          shiftKey: e.shiftKey,
-        }),
-      );
+      scheduleDraft({
+        groupId: drag.groupId,
+        kind: shapeKind,
+        u0: drag.u0,
+        v0: drag.v0,
+        u1,
+        v1,
+        shiftKey: e.shiftKey,
+      });
     },
-    [shapeKind, viewerRef, scheduleDraft, snapMeasure],
+    [shapeKind, viewerRef, scheduleDraft, snapActive],
   );
 
   const handlePointerUp = useCallback(
