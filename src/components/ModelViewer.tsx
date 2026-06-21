@@ -1580,6 +1580,25 @@ export interface ModelViewerHandle {
     scenePoint: { x: number; y: number; z: number };
     projection: PanelProjection;
   } | null;
+  /**
+   * Combined plane-projection + cross-panel edge snap for the measure endpoint.
+   *
+   * Internals:
+   *  1. Project the ray onto the anchor plane (free-space — works in air and
+   *     across walls that share the same plane) → baseUV
+   *  2. If snapEnabled: also raycast into the scene. If a panel is hit and the
+   *     hit UV is within snap tolerance of one of that panel's edges, snap the
+   *     world position to that edge and re-express it in the anchor frame.
+   *
+   * Returns null only if the plane projection fails (ray parallel to plane).
+   */
+  snapMeasureEndpoint(
+    clientX: number,
+    clientY: number,
+    sceneAnchor: { x: number; y: number; z: number },
+    anchorProjection: PanelProjection,
+    snapEnabled: boolean,
+  ): { u: number; v: number } | null;
 }
 
 /**
@@ -1968,6 +1987,94 @@ function SceneBridge({
           scenePoint: { x: picked.point.x, y: picked.point.y, z: picked.point.z },
           projection,
         };
+      },
+
+      snapMeasureEndpoint(clientX, clientY, sceneAnchor, anchorProjection, snapEnabled) {
+        const ctx = panelRaycastRef.current;
+        const canvas = gl.domElement;
+        const canvasRect = canvas.getBoundingClientRect();
+        if (canvasRect.width === 0 || canvasRect.height === 0) return null;
+
+        const ndcX = ((clientX - canvasRect.left) / canvasRect.width) * 2 - 1;
+        const ndcY = -((clientY - canvasRect.top) / canvasRect.height) * 2 + 1;
+
+        const rayOrigin = camera.position.clone();
+        const rayDir = new THREE.Vector3(ndcX, ndcY, 0.5)
+          .unproject(camera)
+          .sub(rayOrigin)
+          .normalize();
+
+        // Step 1 — project ray onto the anchor panel's plane (works in air and
+        // across walls that share the same normal plane).
+        const planeN = new THREE.Vector3(
+          anchorProjection.normal.x,
+          anchorProjection.normal.y,
+          anchorProjection.normal.z,
+        );
+        const anchorPt = new THREE.Vector3(sceneAnchor.x, sceneAnchor.y, sceneAnchor.z);
+        const denom = planeN.dot(rayDir);
+        if (Math.abs(denom) < 1e-6) return null;
+        const t = planeN.dot(anchorPt.clone().sub(rayOrigin)) / denom;
+        if (t < 0) return null;
+
+        const planePt = rayOrigin.clone().addScaledVector(rayDir, t);
+        // Convert scene → model space → anchor UV frame.
+        const sceneToAnchorUV = (sx: number, sy: number, sz: number) => {
+          const mx = sx + ctx.modelCenter.x;
+          const my = sy + ctx.modelCenter.y;
+          const mz = sz + ctx.modelCenter.z;
+          return {
+            u: mx * anchorProjection.uAxis.x + my * anchorProjection.uAxis.y + mz * anchorProjection.uAxis.z - anchorProjection.originU,
+            v: mx * anchorProjection.vAxis.x + my * anchorProjection.vAxis.y + mz * anchorProjection.vAxis.z - anchorProjection.originV,
+          };
+        };
+        const baseUV = sceneToAnchorUV(planePt.x, planePt.y, planePt.z);
+
+        if (!snapEnabled) return baseUV;
+
+        // Step 2 — raycast to find if we're hovering a panel, and snap to its
+        // nearest edge when close enough.
+        const raycaster = new THREE.Raycaster();
+        raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
+        const hits = raycaster.intersectObjects(scene.children, true);
+        const picked = pickGroupFromRaycast(raycaster, hits, ctx.hiddenGroupIds);
+        if (!picked) return baseUV;
+
+        const hitGroup = ctx.groups.find((g) => g.id === picked.groupId);
+        if (!hitGroup) return baseUV;
+
+        const hitModelPt = {
+          x: picked.point.x + ctx.modelCenter.x,
+          y: picked.point.y + ctx.modelCenter.y,
+          z: picked.point.z + ctx.modelCenter.z,
+        };
+        const hitUV = worldPointToPanelUV(hitModelPt, ctx.faces, hitGroup, ctx.appliedAxis);
+        const hitSize = getGroupPanelSize(ctx.faces, hitGroup, ctx.appliedAxis);
+        if (!hitUV || !hitSize) return baseUV;
+
+        // Snap within 8 cm OR 6% of the shorter dimension (whichever is larger).
+        const snapTol = Math.max(0.08, Math.min(hitSize.widthM, hitSize.heightM) * 0.06);
+        let { u: hu, v: hv } = hitUV;
+        let snapped = false;
+
+        if (hu <= snapTol) { hu = 0; snapped = true; }
+        else if (hu >= hitSize.widthM - snapTol) { hu = hitSize.widthM; snapped = true; }
+
+        if (hv <= snapTol) { hv = 0; snapped = true; }
+        else if (hv >= hitSize.heightM - snapTol) { hv = hitSize.heightM; snapped = true; }
+
+        if (!snapped) return baseUV;
+
+        // Re-express the snapped world point in the anchor frame.
+        const snappedWorld = panelUVToWorldPoint(hu, hv, ctx.faces, hitGroup, ctx.appliedAxis);
+        if (!snappedWorld) return baseUV;
+
+        // snappedWorld is in model space (panelUVToWorldPoint returns model coords).
+        const snappedUV = {
+          u: snappedWorld.x * anchorProjection.uAxis.x + snappedWorld.y * anchorProjection.uAxis.y + snappedWorld.z * anchorProjection.uAxis.z - anchorProjection.originU,
+          v: snappedWorld.x * anchorProjection.vAxis.x + snappedWorld.y * anchorProjection.vAxis.y + snappedWorld.z * anchorProjection.vAxis.z - anchorProjection.originV,
+        };
+        return snappedUV;
       },
     };
     return () => {

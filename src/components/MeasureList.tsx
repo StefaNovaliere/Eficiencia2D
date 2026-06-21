@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   ChevronDown,
   ChevronRight,
+  GripHorizontal,
   Minus,
   RectangleHorizontal,
   Ruler,
@@ -42,6 +43,10 @@ export interface MeasureListProps {
   onClearMeasures: () => void;
 }
 
+const MIN_HEIGHT = 80;
+const MAX_HEIGHT = 600;
+const DEFAULT_HEIGHT = 200;
+
 export default function MeasureList({
   measures,
   groups,
@@ -54,6 +59,26 @@ export default function MeasureList({
   onClearMeasures,
 }: MeasureListProps) {
   const [collapsed, setCollapsed] = useState(false);
+  const [height, setHeight] = useState(DEFAULT_HEIGHT);
+  const dragRef = useRef<{ startY: number; startH: number } | null>(null);
+
+  const onResizePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    dragRef.current = { startY: e.clientY, startH: height };
+  }, [height]);
+
+  const onResizePointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragRef.current) return;
+    const delta = e.clientY - dragRef.current.startY;
+    setHeight(Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, dragRef.current.startH + delta)));
+  }, []);
+
+  const onResizePointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    dragRef.current = null;
+    e.currentTarget.releasePointerCapture(e.pointerId);
+  }, []);
 
   if (measures.length === 0) return null;
 
@@ -62,9 +87,8 @@ export default function MeasureList({
 
   return (
     <div
-      className={`flex flex-col shrink-0 min-h-0 border-b border-base-300/30 bg-sky-500/[0.03] ${
-        collapsed ? "" : "max-h-[min(42%,14rem)]"
-      }`}
+      className="flex flex-col shrink-0 min-h-0 border-b border-base-300/30 bg-base-200"
+      style={collapsed ? undefined : { height, minHeight: MIN_HEIGHT }}
     >
       <div className="flex items-center gap-2 px-3 py-2 shrink-0">
         <button
@@ -78,12 +102,15 @@ export default function MeasureList({
           {collapsed ? <ChevronRight size={15} /> : <ChevronDown size={15} />}
         </button>
 
-        <Ruler size={14} className="text-sky-600 dark:text-sky-400 shrink-0" />
+        <Ruler size={14} className="text-primary shrink-0" />
 
         <button
           type="button"
           className="flex-1 min-w-0 text-left"
           onClick={() => setCollapsed((c) => !c)}
+          aria-expanded={!collapsed}
+          aria-label={collapsed ? "Expandir medidas" : "Contraer medidas"}
+          title={collapsed ? "Expandir" : "Contraer"}
         >
           <h3 className="font-semibold text-sm tracking-tight text-base-content leading-tight">
             Medidas
@@ -115,7 +142,7 @@ export default function MeasureList({
       </div>
 
       {!collapsed && (
-        <div className="flex-1 min-h-0 overflow-y-auto px-3 pb-3 space-y-1 custom-scrollbar">
+        <div className="flex-1 min-h-0 overflow-y-auto px-3 pb-1 space-y-1 custom-scrollbar">
           {measures.map((measure, index) => {
             const group = groupById.get(measure.groupId);
             const Icon = KIND_ICONS[measure.kind];
@@ -127,21 +154,25 @@ export default function MeasureList({
                 key={measure.id}
                 className={`group flex items-start gap-2 p-2 rounded-xl cursor-pointer transition-all border ${
                   isSelected
-                    ? "bg-sky-500/15 border-sky-400/40 shadow-sm ring-1 ring-sky-400/25"
-                    : "bg-base-100/80 border-base-300/30 hover:border-sky-400/30 hover:bg-sky-500/5"
+                    ? "bg-primary/8 border-primary/30 shadow-sm ring-1 ring-primary/20"
+                    : "bg-base-100/80 border-base-300/30 hover:border-base-300/40 hover:bg-base-200/40"
                 }`}
                 onClick={() => onSelectMeasure(measure.id)}
                 title="Clic para resaltar en el visor"
               >
-                <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-sky-500/10 text-sky-600 dark:text-sky-300 shrink-0 mt-0.5">
+                <div className={`flex items-center justify-center w-7 h-7 rounded-lg shrink-0 mt-0.5 ${
+                  isSelected ? "bg-primary/15 text-primary" : "bg-base-100/80 text-base-content/60"
+                }`}>
                   <Icon size={14} />
                 </div>
 
                 <div className="flex-1 min-w-0">
-                  <span className="text-[10px] font-semibold uppercase tracking-wide text-base-content/45">
+                  <span className={`text-[10px] font-semibold uppercase tracking-wide ${
+                    isSelected ? "text-primary/70" : "text-base-content/45"
+                  }`}>
                     #{index + 1} · {KIND_LABELS[measure.kind]}
                   </span>
-                  <p className="text-sm font-mono font-semibold text-sky-700 dark:text-sky-300 mt-0.5 truncate">
+                  <p className="text-sm font-mono font-semibold text-base-content mt-0.5 truncate">
                     {valueLabel}
                   </p>
                   <p className="text-[11px] text-base-content/45 mt-0.5 truncate">
@@ -164,6 +195,20 @@ export default function MeasureList({
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Drag handle — arrastrá hacia abajo para ampliar el panel */}
+      {!collapsed && (
+        <div
+          className="shrink-0 flex items-center justify-center h-3 cursor-row-resize select-none group/resize hover:bg-base-300/40 transition-colors"
+          title="Arrastrá para redimensionar"
+          onPointerDown={onResizePointerDown}
+          onPointerMove={onResizePointerMove}
+          onPointerUp={onResizePointerUp}
+          onPointerCancel={onResizePointerUp}
+        >
+          <GripHorizontal size={12} className="text-base-content/25 group-hover/resize:text-base-content/50 transition-colors" />
         </div>
       )}
     </div>
