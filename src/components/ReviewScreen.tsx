@@ -44,10 +44,12 @@ import {
   RectangleHorizontal,
   Magnet,
   Ruler,
+  BookOpen,
 } from "lucide-react";
 import { useReviewHistory } from "@/hooks/useReviewHistory";
 import type { ModelViewerHandle } from "@/components/ModelViewer";
 import CutToolOverlay from "@/components/CutToolOverlay";
+import AssemblyWindow from "@/components/AssemblyWindow";
 import MeasureToolOverlay from "@/components/MeasureToolOverlay";
 import type {
   CutDragState,
@@ -120,6 +122,12 @@ export interface ReviewScreenProps {
   isGenerating?: boolean;
   /** Escala de impresión del proyecto (1:N), compartida con nesting/PDF. */
   onPrintScaleChange: (scale: number) => void;
+  /** Fetches assembly guide using the current in-memory review state (not saved session). */
+  onRequestAssemblyPreview?: (
+    request: import("@/services/api").AssemblyPreviewRequest,
+  ) => Promise<import("@/services/api").AssemblyPreviewData>;
+  /** Abre la ventana del instructivo al montar (p. ej. desde la pantalla de descarga). */
+  openAssemblyInstructivo?: boolean;
 }
 
 const MIN_AREA_OPTIONS = [0, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0];
@@ -437,6 +445,8 @@ export default function ReviewScreen({
   isRecomputing = false,
   isGenerating = false,
   onPrintScaleChange,
+  onRequestAssemblyPreview,
+  openAssemblyInstructivo = false,
 }: ReviewScreenProps) {
   const [selectedGroupIds, setSelectedGroupIds] = useState<Set<number>>(
     () => new Set(),
@@ -520,6 +530,12 @@ export default function ReviewScreen({
   const [bulkActionNotice, setBulkActionNotice] = useState<string | null>(null);
   // Pestaña activa del panel derecho: lista de capas vs acciones de la selección.
   const [sidebarTab, setSidebarTab] = useState<"capas" | "seleccion">("capas");
+
+  // Assembly guide — solo en ventana flotante (botón de la barra superior).
+  const [assemblyData, setAssemblyData] = useState<import("@/services/api").AssemblyPreviewData | null>(null);
+  const [assemblyLoading, setAssemblyLoading] = useState(false);
+  const [assemblyError, setAssemblyError] = useState<string | null>(null);
+  const [assemblyWindowOpen, setAssemblyWindowOpen] = useState(false);
   const [bulkSimilarModal, setBulkSimilarModal] = useState<{
     reference: GeometryGroup;
     matches: GeometryGroup[];
@@ -1464,6 +1480,52 @@ export default function ReviewScreen({
     wallIdAliasMap,
   ]);
 
+  // ---------------------------------------------------------------------------
+  // Assembly guide
+  // ---------------------------------------------------------------------------
+
+  const loadAssemblyPreview = useCallback(async () => {
+    if (!onRequestAssemblyPreview) return;
+    setAssemblyLoading(true);
+    setAssemblyError(null);
+    try {
+      const overrideList: ClassificationOverride[] = [];
+      for (const [groupId, newCategory] of overrides.entries()) {
+        overrideList.push({ groupId, newCategory });
+      }
+      const data = await onRequestAssemblyPreview({
+        overrides: overrideList,
+        wallWallDecisions,
+        marks: [...markGroupIds],
+        userCuts,
+      });
+      setAssemblyData(data);
+    } catch (err: unknown) {
+      setAssemblyError(err instanceof Error ? err.message : "Error desconocido");
+    } finally {
+      setAssemblyLoading(false);
+    }
+  }, [
+    onRequestAssemblyPreview,
+    overrides,
+    wallWallDecisions,
+    markGroupIds,
+    userCuts,
+  ]);
+
+  const assemblyAutoOpenRef = useRef(false);
+  useEffect(() => {
+    if (!openAssemblyInstructivo || assemblyAutoOpenRef.current) return;
+    assemblyAutoOpenRef.current = true;
+    setAssemblyWindowOpen(true);
+  }, [openAssemblyInstructivo]);
+
+  // Recargar siempre al abrir la ventana — refleja overrides, cortes y fusiones actuales.
+  useEffect(() => {
+    if (!assemblyWindowOpen || !onRequestAssemblyPreview) return;
+    void loadAssemblyPreview();
+  }, [assemblyWindowOpen, onRequestAssemblyPreview, loadAssemblyPreview]);
+
   const viewToolBtn =
     "btn btn-sm btn-ghost h-9 min-h-9 w-9 px-0 rounded-lg hover:bg-base-200/80";
 
@@ -2255,9 +2317,39 @@ export default function ReviewScreen({
                 ))}
               </select>
             </div>
+
+            {/* Instructivo de armado button */}
+            {onRequestAssemblyPreview && (
+              <>
+                <div className="hidden sm:block w-px h-7 bg-base-300/50" />
+                <div className="tooltip tooltip-bottom" data-tip="Ver instructivo de armado">
+                  <button
+                    type="button"
+                    className={`btn btn-sm gap-1.5 rounded-lg ${assemblyWindowOpen ? "btn-primary" : "btn-ghost"}`}
+                    onClick={() => setAssemblyWindowOpen(true)}
+                  >
+                    <BookOpen size={15} />
+                    <span className="text-sm font-medium hidden sm:inline">Instructivo</span>
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>
+
+      {/* Assembly window overlay */}
+      {assemblyWindowOpen && onRequestAssemblyPreview && (
+        <AssemblyWindow
+          data={assemblyData}
+          loading={assemblyLoading}
+          error={assemblyError}
+          phase1={phase1}
+          categoryOverrides={overrides}
+          onClose={() => setAssemblyWindowOpen(false)}
+          onReload={loadAssemblyPreview}
+        />
+      )}
 
       {!hideSidebar && (
         <aside className="w-full md:w-[21rem] lg:w-[24rem] flex flex-col border-t md:border-t-0 md:border-l border-base-300/40 bg-base-100 shrink-0 h-[42vh] md:h-full z-20 shadow-2xl shadow-base-content/5">
@@ -2281,7 +2373,7 @@ export default function ReviewScreen({
             <button
               type="button"
               role="tab"
-              className={`tab gap-1.5 ${sidebarTab === "capas" ? "tab-active" : ""}`}
+              className={`tab gap-1.5 text-xs ${sidebarTab === "capas" ? "tab-active" : ""}`}
               onClick={() => setSidebarTab("capas")}
             >
               Componentes
@@ -2290,14 +2382,14 @@ export default function ReviewScreen({
               </span>
               {measures.length > 0 && (
                 <span className="badge badge-xs badge-info font-mono">
-                  {measures.length} med.
+                  {measures.length}
                 </span>
               )}
             </button>
             <button
               type="button"
               role="tab"
-              className={`tab gap-1.5 ${sidebarTab === "seleccion" ? "tab-active" : ""}`}
+              className={`tab gap-1.5 text-xs ${sidebarTab === "seleccion" ? "tab-active" : ""}`}
               onClick={() => setSidebarTab("seleccion")}
             >
               Selección

@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { BookOpen } from "lucide-react";
 import { useProjectContext } from "@/context/ProjectContext";
 import PaymentScreen from "@/components/PaymentScreen";
 import {
@@ -48,6 +49,7 @@ export default function PaymentPage() {
 
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState("");
+  const [guidePdfMissing, setGuidePdfMissing] = useState(false);
   // ZIP generado y listo para (re)descargar. Reemplaza el window.alert de éxito.
   const [download, setDownload] = useState<{ url: string; name: string } | null>(null);
 
@@ -82,11 +84,16 @@ export default function PaymentPage() {
     router.push("/");
   }, [download, resetProject, router]);
 
+  const handleGoToAssembly = useCallback(() => {
+    router.push("/review?assembly=1");
+  }, [router]);
+
   const proceedToGeneration = useCallback(async () => {
     if (!phase1Result || !fileId) return;
 
     setIsGenerating(true);
     setError("");
+    setGuidePdfMissing(false);
 
     const stem =
       file?.name.replace(/\.[^.]+$/, "") ??
@@ -116,6 +123,11 @@ export default function PaymentPage() {
       if (!backendRes.zip_base64) {
         throw new Error("El backend no devolvió el archivo ZIP.");
       }
+
+      const hasAssemblyGuide = backendRes.generated_files.some((name) =>
+        name.toLowerCase().includes("guia_ensamble"),
+      );
+      setGuidePdfMissing(!hasAssemblyGuide);
 
       triggerDownload(
         base64ToBlob(backendRes.zip_base64),
@@ -181,9 +193,27 @@ export default function PaymentPage() {
             <div className="text-success text-5xl">✓</div>
             <h2 className="text-2xl font-bold">¡Listo! Tus planos se descargaron</h2>
             <p className="text-base-content/70">
-              Si la descarga no comenzó, podés volver a bajarla.
+              Si la descarga no comenzó, podés volver a bajarla. También podés ver
+              el instructivo interactivo de ensamble.
             </p>
-            <div className="flex flex-col sm:flex-row gap-2 w-full mt-2">
+            {guidePdfMissing && (
+              <div className="alert alert-warning text-sm text-left w-full">
+                <span>
+                  El ZIP no incluye <strong>guia_ensamble.pdf</strong>. La guía falló
+                  al generarse — revisá los logs del servidor o usá el instructivo
+                  interactivo.
+                </span>
+              </div>
+            )}
+            <button
+              type="button"
+              className="btn btn-primary w-full gap-2 mt-2"
+              onClick={handleGoToAssembly}
+            >
+              <BookOpen size={18} />
+              Ver instructivo de ensamble
+            </button>
+            <div className="flex flex-col sm:flex-row gap-2 w-full">
               <a
                 href={download.url}
                 download={download.name}
@@ -191,7 +221,7 @@ export default function PaymentPage() {
               >
                 Descargar de nuevo
               </a>
-              <button className="btn btn-primary flex-1" onClick={handleFinish}>
+              <button type="button" className="btn btn-ghost flex-1" onClick={handleFinish}>
                 Volver al inicio
               </button>
             </div>

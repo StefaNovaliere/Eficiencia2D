@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useThree, useFrame } from "@react-three/fiber";
 import { OrbitControls, GizmoHelper, GizmoViewport, Line, Html } from "@react-three/drei";
 import type React from "react";
@@ -41,6 +41,18 @@ export interface LeaderMarker {
   anchor: Vec3;     // component centroid, in pre-offset model space
   label: string;    // panel id, e.g. "A2"
   primary: boolean; // the selected wall (true) vs the joined "other" wall
+}
+
+// A floating panel-id badge shown in the 3D viewer when the assembly guide
+// tab is active. centroid is in pre-offset model space (same convention as
+// LeaderMarker.anchor).
+export interface AssemblyPanelLabel {
+  groupId: number;
+  panelId: string;
+  centroid: Vec3;
+  /** Outward-facing normal — used to hide labels on walls turned away from camera. */
+  normal: Vec3;
+  isSelected: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -987,6 +999,109 @@ function MeasureHtmlLabels({
   );
 }
 
+// Assembly guide labels — visible only when the panel is unobstructed from camera.
+function AssemblyLabels({
+  labels,
+  centerOffset,
+  hiddenGroupIds,
+}: {
+  labels: AssemblyPanelLabel[];
+  centerOffset: Vec3;
+  hiddenGroupIds: Set<number>;
+}) {
+  const { camera, scene } = useThree();
+  const raycaster = useMemo(() => new THREE.Raycaster(), []);
+  const labelWorld = useRef(new THREE.Vector3());
+  const ndc = useRef(new THREE.Vector3());
+  const ndcScreen = useMemo(() => new THREE.Vector2(), []);
+  const lastCamPos = useRef(new THREE.Vector3());
+  const lastCamQuat = useRef(new THREE.Quaternion());
+  const labelsKey = useMemo(
+    () => labels.map((l) => `${l.panelId}:${l.groupId}`).join("|"),
+    [labels],
+  );
+  const lastLabelsKey = useRef("");
+  const [visiblePanelIds, setVisiblePanelIds] = useState<Set<string>>(() => new Set());
+
+  useFrame(() => {
+    if (labels.length === 0) {
+      if (visiblePanelIds.size > 0) setVisiblePanelIds(new Set());
+      return;
+    }
+
+    const labelsChanged = labelsKey !== lastLabelsKey.current;
+    const posDelta = lastCamPos.current.distanceToSquared(camera.position);
+    const quatDelta = lastCamQuat.current.angleTo(camera.quaternion);
+    if (
+      !labelsChanged &&
+      posDelta < 1e-10 &&
+      quatDelta < 1e-8 &&
+      visiblePanelIds.size > 0
+    ) {
+      return;
+    }
+    lastLabelsKey.current = labelsKey;
+    lastCamPos.current.copy(camera.position);
+    lastCamQuat.current.copy(camera.quaternion);
+
+    const next = new Set<string>();
+
+    for (const lbl of labels) {
+      labelWorld.current.set(
+        lbl.centroid.x - centerOffset.x,
+        lbl.centroid.y - centerOffset.y,
+        lbl.centroid.z - centerOffset.z,
+      );
+
+      ndc.current.copy(labelWorld.current).project(camera);
+      if (ndc.current.z > 1) continue;
+
+      ndcScreen.set(ndc.current.x, ndc.current.y);
+      raycaster.setFromCamera(ndcScreen, camera);
+      const hits = raycaster.intersectObjects(scene.children, true);
+      const picked = pickGroupFromRaycast(raycaster, hits, hiddenGroupIds);
+      if (picked?.groupId === lbl.groupId) {
+        next.add(lbl.panelId);
+      }
+    }
+
+    setVisiblePanelIds((prev) => {
+      if (prev.size === next.size && [...prev].every((id) => next.has(id))) return prev;
+      return next;
+    });
+  });
+
+  if (labels.length === 0) return null;
+
+  return (
+    <>
+      {labels.map((lbl) => {
+        if (!visiblePanelIds.has(lbl.panelId)) return null;
+        return (
+          <Html
+            key={lbl.panelId}
+            position={[lbl.centroid.x, lbl.centroid.y, lbl.centroid.z]}
+            center
+            occlude={false}
+            zIndexRange={[200, 0]}
+            style={{ pointerEvents: "none" }}
+          >
+            <div
+              className={`px-1.5 py-0.5 rounded-md font-mono text-[11px] font-bold shadow-lg border select-none ${
+                lbl.isSelected
+                  ? "bg-primary text-primary-content border-primary/50 ring-2 ring-primary/40 scale-110"
+                  : "bg-base-100/95 text-base-content border-base-300/60"
+              }`}
+            >
+              {lbl.panelId}
+            </div>
+          </Html>
+        );
+      })}
+    </>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Scene
 // ---------------------------------------------------------------------------
@@ -1024,6 +1139,8 @@ interface SceneProps {
   derivedCutTriangles?: Map<number, DerivedTriangleRef[]>;
   /** Exact panel polygons for cut-derived groups (circle, rect, split). */
   derivedPanelPolys?: Map<number, DerivedPanelPoly>;
+  /** Assembly guide: floating panel-id labels shown on all components. */
+  assemblyPanelLabels?: AssemblyPanelLabel[];
 }
 
 export interface PanelRaycastContext {
@@ -1067,6 +1184,7 @@ function Scene({
   projectionGroups,
   derivedCutTriangles,
   derivedPanelPolys,
+  assemblyPanelLabels = [],
 }: SceneProps) {
   const selectedGroups = groups.filter((g) => selectedGroupIds.has(g.id));
 
@@ -1484,6 +1602,15 @@ function Scene({
           placements={measureLabelPlacements}
           highlightMeasureId={highlightMeasureId}
         />
+
+        {/* Assembly guide: panel-id badges centered on each component */}
+        {assemblyPanelLabels.length > 0 && (
+          <AssemblyLabels
+            labels={assemblyPanelLabels}
+            centerOffset={bounds.center}
+            hiddenGroupIds={hiddenGroupIds}
+          />
+        )}
 
         {/* Leader lines + floating reference tags for the selected joint */}
         {leaders.map((m) => (
@@ -2146,6 +2273,8 @@ export interface ModelViewerProps {
   derivedCutTriangles?: Map<number, DerivedTriangleRef[]>;
   /** Exact panel polygons for cut-derived groups (circle, rect, split). */
   derivedPanelPolys?: Map<number, DerivedPanelPoly>;
+  /** Assembly guide: floating panel-id labels shown on all components. */
+  assemblyPanelLabels?: AssemblyPanelLabel[];
 }
 
 export default function ModelViewer({
@@ -2176,6 +2305,7 @@ export default function ModelViewer({
   projectionGroups,
   derivedCutTriangles,
   derivedPanelPolys,
+  assemblyPanelLabels = [],
 }: ModelViewerProps) {
   const palette = useViewerPalette();
   const materials = useMemo(() => createViewerMaterials(palette), [palette]);
@@ -2270,6 +2400,7 @@ export default function ModelViewer({
         projectionGroups={projectionGroups}
         derivedCutTriangles={derivedCutTriangles}
         derivedPanelPolys={derivedPanelPolys}
+        assemblyPanelLabels={assemblyPanelLabels}
       />
 
       {viewerRef && (

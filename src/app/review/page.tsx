@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useCallback, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useProjectContext } from "@/context/ProjectContext";
 import ReviewScreen from "@/components/ReviewScreen";
 import type { ClassificationOverride } from "@/core/pipeline";
@@ -9,7 +9,9 @@ import type { UserCut } from "@/core/user-cuts";
 import {
   recomputeTopology,
   fetchNestingPreview,
+  fetchAssemblyPreview,
   userCutsForApi,
+  type AssemblyPreviewRequest,
   type RecomputePayload,
   type SplitOperation,
 } from "@/services/api";
@@ -30,6 +32,8 @@ function decisionsToRecord(decisions: Map<number, number>): Record<number, numbe
 
 export default function ReviewPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const openAssemblyInstructivo = searchParams.get("assembly") === "1";
   const {
     phase1Result,
     setPhase1Result,
@@ -210,6 +214,24 @@ export default function ReviewPage() {
     router.replace("/");
   }, [resetProject, router]);
 
+  const handleRequestAssemblyPreview = useCallback(
+    async (request: AssemblyPreviewRequest) => {
+      if (!phase1Result || !fileId) throw new Error("Proyecto no cargado");
+      return fetchAssemblyPreview({
+        file_id: fileId,
+        axis: phase1Result.appliedAxis,
+        min_area_m2: minAreaM2,
+        merges: savedMerges,
+        splits: savedSplits.map((s): SplitOperation => ({ group_id: s.groupId, mode: s.mode })),
+        overrides: overridesToRecord(request.overrides),
+        wall_wall_decisions: decisionsToRecord(request.wallWallDecisions),
+        marks: request.marks,
+        user_cuts: userCutsForApi(request.userCuts),
+      });
+    },
+    [fileId, phase1Result, minAreaM2, savedMerges, savedSplits],
+  );
+
   if (isLoadingSession) return null;
   if (!phase1Result) return null;
 
@@ -233,6 +255,8 @@ export default function ReviewPage() {
       isRecomputing={isRecomputing}
       isGenerating={isGenerating}
       onPrintScaleChange={setScale}
+      onRequestAssemblyPreview={handleRequestAssemblyPreview}
+      openAssemblyInstructivo={openAssemblyInstructivo}
     />
   );
 }
