@@ -664,14 +664,29 @@ interface CameraControlsProps {
 
 function CameraControls({ target, maxDistance, minDistance, enabled = true }: CameraControlsProps) {
   const controlsRef = useRef<any>(null);
-  const targetVec = useMemo(
-    () => (target ? new THREE.Vector3(target.x, target.y, target.z) : null),
-    [target],
-  );
+  // Destination for one-shot focus animation. Set when selection changes;
+  // cleared once the lerp finishes so the user can pan freely afterward.
+  const destRef = useRef<THREE.Vector3 | null>(null);
+  const prevKeyRef = useRef<string>("");
+
+  // Only trigger a focus animation when the target actually changes (selection
+  // changed). We do NOT re-trigger when target becomes null (deselect) so the
+  // camera stays where the user left it.
+  const targetKey = target ? `${target.x.toFixed(3)},${target.y.toFixed(3)},${target.z.toFixed(3)}` : "";
+  if (target && targetKey !== prevKeyRef.current) {
+    prevKeyRef.current = targetKey;
+    destRef.current = new THREE.Vector3(target.x, target.y, target.z);
+  }
 
   useFrame(() => {
-    if (!targetVec || !controlsRef.current) return;
-    controlsRef.current.target.lerp(targetVec, 0.08);
+    if (!controlsRef.current || !destRef.current) return;
+    const dist = controlsRef.current.target.distanceTo(destRef.current);
+    if (dist < 0.008) {
+      // Arrived — stop lerping. User can now pan freely without interference.
+      destRef.current = null;
+      return;
+    }
+    controlsRef.current.target.lerp(destRef.current, 0.1);
     controlsRef.current.update();
   });
 
@@ -681,12 +696,18 @@ function CameraControls({ target, maxDistance, minDistance, enabled = true }: Ca
       makeDefault
       enabled={enabled}
       enableDamping
-      dampingFactor={0.1}
-      minPolarAngle={0.05}
-      maxPolarAngle={Math.PI / 2 + 0.2}
+      dampingFactor={0.12}
+      // Full vertical orbit: 0 = directly above, π = directly below.
+      // Small margin at poles avoids gimbal-lock artefacts.
+      minPolarAngle={0.02}
+      maxPolarAngle={Math.PI - 0.02}
       maxDistance={maxDistance}
       minDistance={minDistance}
-      screenSpacePanning={false}
+      // Screen-space panning: the camera pans along its own screen plane,
+      // not along the world floor. This makes panning intuitive at any angle
+      // and lets the user reach corners and low sections without fighting the
+      // orbit center.
+      screenSpacePanning={true}
     />
   );
 }
@@ -1271,13 +1292,16 @@ function Scene({
   }, [secondaryEncounterMaterial]);
 
   // Centred target: average centroid of selected groups, or model centre.
-  const focusTarget: Vec3 = selectedGroups.length > 0
+  // Only produce a focus target when the user has actually selected something.
+  // Returning null on deselect prevents the camera from snapping back to
+  // the model centre every time the user clicks on empty space.
+  const focusTarget: Vec3 | null = selectedGroups.length > 0
     ? {
         x: selectedGroups.reduce((s, g) => s + g.centroid.x, 0) / selectedGroups.length - bounds.center.x,
         y: selectedGroups.reduce((s, g) => s + g.centroid.y, 0) / selectedGroups.length - bounds.center.y,
         z: selectedGroups.reduce((s, g) => s + g.centroid.z, 0) / selectedGroups.length - bounds.center.z,
       }
-    : { x: 0, y: 0, z: 0 };
+    : null;
 
   const maxDist = bounds.diag * 3;
   const minDist = bounds.diag * 0.05;
