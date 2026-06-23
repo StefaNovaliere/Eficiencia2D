@@ -1,5 +1,5 @@
 import { decodePackedFaces } from "@/core/packed-faces";
-import type { Phase1Result, NestingPreviewData } from "@/core/pipeline";
+import type { Phase1Result, NestingPreviewData, ClassificationOverride } from "@/core/pipeline";
 import type { UserCut } from "@/core/user-cuts";
 import { serializeUserCutsForApi } from "@/core/user-cuts";
 import {
@@ -215,6 +215,77 @@ export async function fetchNestingPreview(
   }
 
   return toCamelCase(await res.json()) as NestingPreviewData;
+}
+
+// ---------------------------------------------------------------------------
+// Assembly preview — POST /api/assembly-preview
+// ---------------------------------------------------------------------------
+
+/** A single physical panel in the assembly guide. */
+export interface AssemblyPanel {
+  id: string;
+  category: "wall" | "floor" | string;
+  source_group_id: number;
+  width_m: number;
+  height_m: number;
+  area_m2: number;
+  centroid: { x: number; y: number; z: number };
+  normal: { x: number; y: number; z: number };
+  label: string;
+}
+
+/** Assembly guide response from the backend. */
+export interface AssemblyPreviewData {
+  panels: AssemblyPanel[];
+  /** Keyed by elevation name (front/back/right/left/top). */
+  elevations: Record<string, { label: string; panel_ids: string[] }>;
+  totals: {
+    wall_count: number;
+    floor_count: number;
+    total_panels: number;
+  };
+}
+
+/**
+ * Same params as nesting-preview (sheet_config / scale_denom excluded —
+ * the backend ignores them for this endpoint).
+ */
+export interface AssemblyPreviewPayload {
+  file_id: string;
+  axis: "Y" | "Z";
+  min_area_m2: number;
+  merges: number[][];
+  splits: SplitOperation[];
+  overrides: Record<number, string>;
+  wall_wall_decisions: Record<number, number>;
+  marks: number[];
+  user_cuts?: Record<string, unknown>[];
+}
+
+/** Estado actual de la revisión enviado al pedir el instructivo interactivo. */
+export interface AssemblyPreviewRequest {
+  overrides: ClassificationOverride[];
+  wallWallDecisions: Map<number, number>;
+  marks: number[];
+  userCuts: UserCut[];
+}
+
+/** Fetches the interactive assembly guide data (JSON, no PDF generation). */
+export async function fetchAssemblyPreview(
+  payload: AssemblyPreviewPayload,
+): Promise<AssemblyPreviewData> {
+  const res = await apiFetch("/api/assembly-preview", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => null);
+    throw new Error(errorData?.detail || `Error al cargar instructivo: ${res.statusText}`);
+  }
+
+  return res.json() as Promise<AssemblyPreviewData>;
 }
 
 export async function uploadDemoObj(textContent: string, filename: string = "demo.obj"): Promise<UploadResponse> {
