@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useCallback, useState } from "react";
+import { Suspense, useEffect, useCallback, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useProjectContext } from "@/context/ProjectContext";
 import ReviewScreen from "@/components/ReviewScreen";
@@ -30,7 +30,7 @@ function decisionsToRecord(decisions: Map<number, number>): Record<number, numbe
   return out;
 }
 
-export default function ReviewPage() {
+function ReviewPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const openAssemblyInstructivo = searchParams.get("assembly") === "1";
@@ -258,5 +258,13 @@ export default function ReviewPage() {
       onRequestAssemblyPreview={handleRequestAssemblyPreview}
       openAssemblyInstructivo={openAssemblyInstructivo}
     />
+  );
+}
+
+export default function ReviewPage() {
+  return (
+    <Suspense fallback={null}>
+      <ReviewPageContent />
+    </Suspense>
   );
 }
