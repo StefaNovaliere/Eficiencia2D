@@ -50,6 +50,8 @@ export default function ReviewPage() {
     fileId,
     scale,
     sheetConfig,
+    paper,
+    pdfPageMode,
     setNestingData,
     isLoadingSession,
     resetProject,
@@ -169,6 +171,8 @@ export default function ReviewPage() {
             gap_m: sheetConfig.gapM,
           },
           scale_denom: scale,
+          paper,
+          page_mode: pdfPageMode,
           user_cuts: userCutsForApi(userCuts),
         });
         setNestingData(nesting);
@@ -187,6 +191,8 @@ export default function ReviewPage() {
       savedSplits,
       sheetConfig,
       scale,
+      paper,
+      pdfPageMode,
       setSavedOverrides,
       setSavedWallWallDecisions,
       setSavedMarks,
