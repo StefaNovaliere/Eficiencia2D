@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 
 export type ThemeId =
+  | "neon"
   | "light"
   | "dark"
   | "aqua"
@@ -120,6 +121,12 @@ export const THEMES: {
   preview: { bg: string; wall: string; floor: string };
 }[] = [
   {
+    id: "neon",
+    label: "Neón",
+    swatch: "#22d3ee",
+    preview: { bg: "#070709", wall: ARCH_ON_DARK_BG.wall, floor: ARCH_ON_DARK_BG.floor },
+  },
+  {
     id: "light",
     label: "Claro",
     swatch: "#ffffff",
@@ -160,14 +167,15 @@ export const THEMES: {
 const VALID_THEMES = new Set<string>(THEMES.map((t) => t.id));
 
 export function getStoredThemeId(): ThemeId {
-  if (typeof window === "undefined") return "light";
+  if (typeof window === "undefined") return "neon";
   try {
     const saved = localStorage.getItem("theme");
     if (saved && VALID_THEMES.has(saved)) return saved as ThemeId;
   } catch {
     /* ignore */
   }
-  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  // Sin tema guardado: el predeterminado de la marca es Neón.
+  return "neon";
 }
 
 interface ThemeContextValue {
@@ -194,7 +202,7 @@ function applyTheme(theme: ThemeId) {
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setThemeState] = useState<ThemeId>("light");
+  const [theme, setThemeState] = useState<ThemeId>("neon");
 
   useEffect(() => {
     const initial = resolveInitialTheme();
@@ -252,6 +260,11 @@ export function getNestingCanvasColors(theme: ThemeId) {
 }
 
 const VIEWER_PALETTES: Record<ThemeId, ViewerPalette> = {
+  neon: {
+    background: "#070709",
+    isDark: true,
+    ...modelOnDark({ highlight: "#22d3ee", leaderPrimary: "#22d3ee" }),
+  },
   light: {
     background: "#eef0f4",
     isDark: false,

@@ -82,7 +82,7 @@ function buildPlacements(count: number): Placed[] {
       delay: -rand() * 30,
       driftX: (rand() - 0.5) * 80,
       driftY: -40 - rand() * 80,
-      opacity: 0.05 + rand() * 0.05,
+      opacity: 0.1 + rand() * 0.08,
     });
   }
   return result;
@@ -92,12 +92,16 @@ export default function BackgroundSymbols() {
   const placements = useMemo(() => buildPlacements(48), []);
 
   return (
-    <div className="fixed inset-0 pointer-events-none overflow-hidden z-0" aria-hidden="true">
+    <div className="fixed inset-0 pointer-events-none overflow-hidden z-0 text-base-content" aria-hidden="true">
       {placements.map((p, i) => (
         <span
           key={i}
-          className="absolute font-mono whitespace-nowrap select-none text-base-content animate-[bgDrift_linear_infinite]"
+          className="absolute font-mono whitespace-nowrap select-none animate-[bgDrift_linear_infinite]"
           style={{
+            // En el tema neón estas vars dan un tono frío tipo satélite + glow;
+            // en otros temas caen a `currentColor` (text-base-content del padre).
+            color: "var(--bg-symbol-color, currentColor)",
+            filter: "var(--bg-symbol-glow, none)",
             left: `${p.left}%`,
             top: `${p.top}%`,
             fontSize: `${p.size}rem`,

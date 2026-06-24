@@ -20,16 +20,16 @@ export const metadata: Metadata = {
 
 const themeInitScript = `
 (function () {
-  var valid = ["light","dark","aqua","valentine","sunset","halloween"];
+  var valid = ["neon","light","dark","aqua","valentine","sunset","halloween"];
   try {
     var saved = localStorage.getItem("theme");
     if (saved && valid.indexOf(saved) !== -1) {
       document.documentElement.setAttribute("data-theme", saved);
       return;
     }
-    var dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
   } catch (e) {}
+  // Sin tema guardado: el predeterminado de la marca es Neón.
+  document.documentElement.setAttribute("data-theme", "neon");
 })();
 `;
 
