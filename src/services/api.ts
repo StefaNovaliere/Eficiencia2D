@@ -123,6 +123,8 @@ export interface GenerateRequestPayload {
   original_filename: string;
   scale_denom?: number;
   paper?: string;
+  /** Paginación del PDF de planchas: una plancha por página o todas en una. */
+  page_mode?: "one_per_sheet" | "single_page";
   min_area_m2?: number;
   sheet_config?: {
     width_m: number;

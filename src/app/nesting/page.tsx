@@ -29,6 +29,10 @@ export default function NestingPage() {
     phase1Result,
     scale,
     setScale,
+    paper,
+    setPaper,
+    pdfPageMode,
+    setPdfPageMode,
     minAreaM2,
     sheetConfig,
     setSheetConfig,
@@ -118,6 +122,10 @@ export default function NestingPage() {
       onSheetConfigChange={handleSheetConfigChange}
       scaleDenom={scale}
       onScaleChange={handleScaleChange}
+      paper={paper}
+      onPaperChange={setPaper}
+      pageMode={pdfPageMode}
+      onPageModeChange={setPdfPageMode}
       isRecomputing={isRecomputing}
     />
   );

@@ -41,6 +41,7 @@ export default function PaymentPage() {
     savedUserCuts,
     scale,
     paper,
+    pdfPageMode,
     minAreaM2,
     sheetConfig,
     isLoadingSession,
@@ -106,6 +107,7 @@ export default function PaymentPage() {
         original_filename: file?.name ?? projectFileName ?? "model.obj",
         scale_denom: scale,
         paper,
+        page_mode: pdfPageMode,
         min_area_m2: minAreaM2,
         sheet_config: {
           width_m: sheetConfig.widthM,
@@ -149,6 +151,7 @@ export default function PaymentPage() {
     projectFileName,
     scale,
     paper,
+    pdfPageMode,
     minAreaM2,
     sheetConfig,
     savedOverrides,
