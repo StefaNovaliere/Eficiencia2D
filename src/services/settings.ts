@@ -18,6 +18,7 @@ export interface UserSettings {
 export type SettingsPatch = Partial<UserSettings>;
 
 export const VALID_THEME_IDS = new Set<string>([
+  "neon",
   "light",
   "dark",
   "aqua",
@@ -27,7 +28,7 @@ export const VALID_THEME_IDS = new Set<string>([
 ]);
 
 export const DEFAULT_USER_SETTINGS: UserSettings = {
-  tema_color: "dark",
+  tema_color: "neon",
   idioma: "es",
   notificaciones_email: true,
   preferencias_interfaz: null,
@@ -81,9 +82,9 @@ export function parseTemaColorToThemeId(value: string): ThemeId {
       if (typeof window !== "undefined") {
         return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
       }
-      return "dark";
+      return "neon";
     default:
-      return "dark";
+      return "neon";
   }
 }
 
