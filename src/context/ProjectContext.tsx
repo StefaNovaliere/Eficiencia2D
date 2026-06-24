@@ -26,9 +26,13 @@ interface PersistedSession {
   splits?: SplitOp[];
   marks?: number[];
   userCuts?: UserCut[];
+  pageMode?: PdfPageMode;
 }
 
 const SESSION_KEY = "e2d_pending_session";
+
+/** Paginación del PDF de planchas de corte (sólo afecta el PDF descargado). */
+export type PdfPageMode = "one_per_sheet" | "single_page";
 
 
 interface ProjectContextType {
@@ -44,6 +48,8 @@ interface ProjectContextType {
   setScale: (scale: number) => void;
   paper: string;
   setPaper: (paper: string) => void;
+  pdfPageMode: PdfPageMode;
+  setPdfPageMode: (mode: PdfPageMode) => void;
   minAreaM2: number;
   setMinAreaM2: (area: number) => void;
   phase1Result: Phase1Result | null;
@@ -77,6 +83,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const [previewObj, setPreviewObj] = useState<string | null>(null);
   const [scale, setScale] = useState(100);
   const [paper, setPaper] = useState("A4");
+  const [pdfPageMode, setPdfPageMode] = useState<PdfPageMode>("one_per_sheet");
   const [minAreaM2, setMinAreaM2] = useState(1.0);
   const [phase1Result, setPhase1Result] = useState<Phase1Result | null>(null);
   const [nestingData, setNestingData] = useState<NestingPreviewData | null>(null);
@@ -107,6 +114,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       setPhase1Result(parsed.phase1Result ?? null);
       setScale(parsed.scale);
       setPaper(parsed.paper);
+      setPdfPageMode(parsed.pageMode ?? "one_per_sheet");
       setMinAreaM2(parsed.minAreaM2);
       setSheetConfig(parsed.sheetConfig);
       setSavedOverrides(parsed.overrides);
@@ -145,6 +153,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         paper,
         minAreaM2,
         sheetConfig,
+        pageMode: pdfPageMode,
         overrides: savedOverrides,
         wallWallDecisions: Array.from(savedWallWallDecisions.entries()),
         merges: savedMerges,
@@ -156,7 +165,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     } catch {
       // Storage full
     }
-  }, [file, fileId, previewObj, phase1Result, projectFileName, scale, paper, minAreaM2, sheetConfig, savedOverrides, savedWallWallDecisions, savedMerges, savedSplits, savedMarks, savedUserCuts]);
+  }, [file, fileId, previewObj, phase1Result, projectFileName, scale, paper, pdfPageMode, minAreaM2, sheetConfig, savedOverrides, savedWallWallDecisions, savedMerges, savedSplits, savedMarks, savedUserCuts]);
 
   const resetProject = useCallback(() => {
     setFile(null);
@@ -165,6 +174,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     setPreviewObj(null);
     setScale(100);
     setPaper("A4");
+    setPdfPageMode("one_per_sheet");
     setMinAreaM2(1.0);
     setPhase1Result(null);
     setNestingData(null);
@@ -188,6 +198,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         previewObj, setPreviewObj,
         scale, setScale,
         paper, setPaper,
+        pdfPageMode, setPdfPageMode,
         minAreaM2, setMinAreaM2,
         phase1Result, setPhase1Result,
         nestingData, setNestingData,

@@ -7,6 +7,7 @@ import { rotateEdges } from "@/core/sheet-nester";
 import type { SheetConfig } from "@/core/types";
 import { PRINT_SCALE_OPTIONS } from "@/core/print-scale";
 import { getNestingCanvasColors, useTheme } from "@/context/ThemeContext";
+import type { PdfPageMode } from "@/context/ProjectContext";
 import StepIndicator from "./StepIndicator";
 
 export interface NestingPreviewProps {
@@ -17,9 +18,22 @@ export interface NestingPreviewProps {
   onSheetConfigChange: (config: SheetConfig) => void;
   scaleDenom: number;
   onScaleChange: (scale: number) => void;
+  /** Tamaño de hoja del PDF de planchas (sólo afecta el PDF descargado). */
+  paper: string;
+  onPaperChange: (paper: string) => void;
+  /** Paginación del PDF de planchas (sólo afecta el PDF descargado). */
+  pageMode: PdfPageMode;
+  onPageModeChange: (mode: PdfPageMode) => void;
   /** True mientras se recalcula el nesting (cambio de escala/plancha). */
   isRecomputing?: boolean;
 }
+
+const PAPER_OPTIONS = ["A4", "A3", "A2", "A1"];
+
+const PAGE_MODE_OPTIONS: { value: PdfPageMode; label: string }[] = [
+  { value: "one_per_sheet", label: "Una plancha por hoja" },
+  { value: "single_page", label: "Todo en una hoja" },
+];
 
 function SheetCanvas({
   sheets,
@@ -193,6 +207,10 @@ export default function NestingPreview({
   onSheetConfigChange,
   scaleDenom,
   onScaleChange,
+  paper,
+  onPaperChange,
+  pageMode,
+  onPageModeChange,
   isRecomputing = false,
 }: NestingPreviewProps) {
   const { theme } = useTheme();
@@ -299,6 +317,35 @@ export default function NestingPreview({
             </span>
           )}
         </div>
+      </div>
+
+      {/* Opciones del PDF descargado (no afectan la vista previa) */}
+      <div className="flex flex-wrap items-center gap-2 px-4 py-2.5 border-b border-base-300 bg-base-100 text-sm shrink-0">
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-base-content/40">PDF</span>
+        <label className="font-medium text-base-content/70">Papel:</label>
+        <select
+          className="select select-bordered select-sm w-20 bg-base-100"
+          value={paper}
+          onChange={(e) => onPaperChange(e.target.value)}
+        >
+          {PAPER_OPTIONS.map((p) => (
+            <option key={p} value={p}>{p}</option>
+          ))}
+        </select>
+        <span className="text-base-content/40 mx-1">&middot;</span>
+        <label className="font-medium text-base-content/70">Páginas:</label>
+        <select
+          className="select select-bordered select-sm bg-base-100"
+          value={pageMode}
+          onChange={(e) => onPageModeChange(e.target.value as PdfPageMode)}
+        >
+          {PAGE_MODE_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
+        </select>
+        <span className="text-xs text-base-content/40 ml-1">
+          Sólo afecta el PDF descargado, no la vista previa.
+        </span>
       </div>
 
       {unplacedCount > 0 && (
