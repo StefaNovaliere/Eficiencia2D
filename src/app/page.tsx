@@ -13,9 +13,9 @@ export default function Home() {
           alt="Eficiencia2D"
           width={128}
           height={128}
-          className="mx-auto mb-6 w-24 h-24 md:w-32 md:h-32 drop-shadow-md"
+          className="mx-auto mb-6 w-24 h-24 md:w-32 md:h-32 e2d-logo-glow"
         />
-        <h1 className="text-4xl md:text-6xl font-extrabold tracking-tight mb-4 text-base-content">
+        <h1 className="text-4xl md:text-6xl font-extrabold tracking-tight mb-4 text-base-content e2d-title-glow">
           Eficiencia2D
         </h1>
         <p className="text-lg md:text-xl text-base-content/70 max-w-xl mx-auto font-medium">

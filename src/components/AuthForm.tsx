@@ -65,7 +65,7 @@ export default function AuthForm({ mode }: AuthFormProps) {
             alt="Eficiencia2D"
             width={96}
             height={96}
-            className="mx-auto mb-4 w-20 h-20 md:w-24 md:h-24 drop-shadow-md"
+            className="mx-auto mb-4 w-20 h-20 md:w-24 md:h-24 e2d-logo-glow"
           />
         </div>
 
@@ -128,7 +128,7 @@ export default function AuthForm({ mode }: AuthFormProps) {
           alt="Eficiencia2D"
           width={96}
           height={96}
-          className="mx-auto mb-4 w-20 h-20 md:w-24 md:h-24 drop-shadow-md"
+          className="mx-auto mb-4 w-20 h-20 md:w-24 md:h-24 e2d-logo-glow"
         />
         <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight mb-2 text-base-content">
           {isRegister ? "Crear cuenta" : "Iniciar sesión"}

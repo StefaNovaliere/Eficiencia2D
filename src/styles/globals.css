@@ -1,6 +1,40 @@
 @import "tailwindcss";
 @plugin "daisyui" {
-  themes: light --default, dark --prefersdark, aqua, valentine, sunset, halloween;
+  themes: light, dark --prefersdark, aqua, valentine, sunset, halloween;
+}
+
+/* Tema "Neón": fondo negro espacial + acentos cian/magenta. Es el predeterminado. */
+@plugin "daisyui/theme" {
+  name: "neon";
+  default: true;
+  color-scheme: dark;
+
+  --color-base-100: oklch(13% 0.012 270);   /* negro espacial (superficie principal) */
+  --color-base-200: oklch(17% 0.014 270);   /* paneles/cards (legibles) */
+  --color-base-300: oklch(22% 0.016 270);   /* bordes/realces sutiles */
+  --color-base-content: oklch(93% 0.015 250); /* blanco frío */
+
+  --color-primary: oklch(78% 0.16 200);      /* cian neón */
+  --color-primary-content: oklch(16% 0.02 240);
+  --color-secondary: oklch(70% 0.27 340);    /* magenta/rosa neón */
+  --color-secondary-content: oklch(98% 0.01 340);
+  --color-accent: oklch(70% 0.27 340);       /* rosa neón (acento) */
+  --color-accent-content: oklch(98% 0.01 340);
+  --color-neutral: oklch(24% 0.02 270);
+  --color-neutral-content: oklch(92% 0.01 250);
+
+  --color-info: oklch(78% 0.16 200);
+  --color-info-content: oklch(16% 0.02 240);
+  --color-success: oklch(80% 0.20 150);
+  --color-success-content: oklch(16% 0.02 150);
+  --color-warning: oklch(85% 0.17 85);
+  --color-warning-content: oklch(20% 0.03 85);
+  --color-error: oklch(68% 0.24 20);
+  --color-error-content: oklch(98% 0.01 20);
+
+  --radius-selector: 0.75rem;
+  --radius-field: 0.75rem;
+  --radius-box: 1rem;
 }
 
 /*
@@ -24,6 +58,41 @@
   --viewer-discard: #434c57;
   --viewer-edge: #0f1419;
   --viewer-highlight: #d97706;
+}
+
+/*
+ * Tema Neón: fondo negro espacial "casi infinito" (radial sutil hacia el negro
+ * en los bordes) y símbolos flotantes en tono frío tipo satélite/artefacto
+ * espacial, con un leve glow. Otros temas no overridean estas vars.
+ */
+[data-theme="neon"] body {
+  background-color: #000;
+  background-image:
+    radial-gradient(120% 90% at 50% 18%, #0c0c18 0%, #07070d 42%, #000 100%);
+  background-attachment: fixed;
+}
+
+[data-theme="neon"] {
+  --bg-symbol-color: #9fb3c8;
+  --bg-symbol-glow: drop-shadow(0 0 6px rgba(120, 180, 220, 0.35));
+}
+
+/* Branding E2D: sombra suave por defecto; glow neón solo en el tema neón. */
+.e2d-logo-glow {
+  filter: drop-shadow(0 1px 2px rgb(0 0 0 / 0.18));
+}
+[data-theme="neon"] .e2d-logo-glow {
+  filter:
+    drop-shadow(0 0 6px rgba(34, 211, 238, 0.55))
+    drop-shadow(0 0 16px rgba(34, 211, 238, 0.35))
+    drop-shadow(0 0 6px rgba(255, 43, 214, 0.30));
+}
+[data-theme="neon"] .e2d-title-glow {
+  color: #e8fbff;
+  text-shadow:
+    0 0 8px rgba(34, 211, 238, 0.65),
+    0 0 22px rgba(34, 211, 238, 0.40),
+    0 0 30px rgba(255, 43, 214, 0.30);
 }
 
 @keyframes bgDrift {
