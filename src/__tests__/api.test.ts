@@ -100,6 +100,8 @@ describe("fetchNestingPreview", () => {
       marks: [],
       sheet_config: { width_m: 1, height_m: 0.6, gap_m: 0.003 },
       scale_denom: 50,
+      paper: "A4",
+      page_mode: "one_per_sheet",
     });
 
     expect(result.wallNesting.scaleDenom).toBe(50);

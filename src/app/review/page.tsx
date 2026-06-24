@@ -55,6 +55,8 @@ function ReviewPageContent() {
     scale,
     setScale,
     sheetConfig,
+    paper,
+    pdfPageMode,
     setNestingData,
     isLoadingSession,
     resetProject,
@@ -182,6 +184,8 @@ function ReviewPageContent() {
             gap_m: sheetConfig.gapM,
           },
           scale_denom: scale,
+          paper,
+          page_mode: pdfPageMode,
           user_cuts: userCutsForApi(userCuts),
         });
         setNestingData(nesting);
@@ -200,6 +204,8 @@ function ReviewPageContent() {
       savedSplits,
       sheetConfig,
       scale,
+      paper,
+      pdfPageMode,
       setSavedOverrides,
       setSavedWallWallDecisions,
       setSavedMarks,

@@ -2,7 +2,7 @@
 
 import { useEffect, useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useProjectContext } from "@/context/ProjectContext";
+import { useProjectContext, type PdfPageMode } from "@/context/ProjectContext";
 import NestingPreview from "@/components/NestingPreview";
 import { fetchNestingPreview, userCutsForApi, type SplitOperation } from "@/services/api";
 import type { SheetConfig } from "@/core/types";
@@ -68,7 +68,7 @@ export default function NestingPage() {
   // El nesting lo calcula el backend; el front sólo le pide el layout con la
   // nueva escala / configuración de plancha.
   const recompute = useCallback(
-    async (newScale: number, newConfig: SheetConfig) => {
+    async (newScale: number, newConfig: SheetConfig, newPaper: string, newMode: PdfPageMode) => {
       if (!phase1Result || !fileId) return;
       setIsRecomputing(true);
       try {
@@ -87,6 +87,8 @@ export default function NestingPage() {
             gap_m: newConfig.gapM,
           },
           scale_denom: newScale,
+          paper: newPaper,
+          page_mode: newMode,
           user_cuts: userCutsForApi(savedUserCuts),
         });
         setNestingData(nesting);
@@ -102,13 +104,25 @@ export default function NestingPage() {
 
   const handleSheetConfigChange = useCallback((newConfig: SheetConfig) => {
     setSheetConfig(newConfig);
-    void recompute(scale, newConfig);
-  }, [recompute, scale, setSheetConfig]);
+    void recompute(scale, newConfig, paper, pdfPageMode);
+  }, [recompute, scale, paper, pdfPageMode, setSheetConfig]);
 
   const handleScaleChange = useCallback((newScale: number) => {
     setScale(newScale);
-    void recompute(newScale, sheetConfig);
-  }, [recompute, sheetConfig, setScale]);
+    void recompute(newScale, sheetConfig, paper, pdfPageMode);
+  }, [recompute, sheetConfig, paper, pdfPageMode, setScale]);
+
+  // En modo cartón (one_per_sheet) la plancha = papel, así que cambiar el papel
+  // o el modo cambia el preview → hay que recalcular.
+  const handlePaperChange = useCallback((newPaper: string) => {
+    setPaper(newPaper);
+    void recompute(scale, sheetConfig, newPaper, pdfPageMode);
+  }, [recompute, scale, sheetConfig, pdfPageMode, setPaper]);
+
+  const handlePageModeChange = useCallback((newMode: PdfPageMode) => {
+    setPdfPageMode(newMode);
+    void recompute(scale, sheetConfig, paper, newMode);
+  }, [recompute, scale, sheetConfig, paper, setPdfPageMode]);
 
   if (isLoadingSession) return null;
   if (!nestingData) return null;
@@ -123,9 +137,9 @@ export default function NestingPage() {
       scaleDenom={scale}
       onScaleChange={handleScaleChange}
       paper={paper}
-      onPaperChange={setPaper}
+      onPaperChange={handlePaperChange}
       pageMode={pdfPageMode}
-      onPageModeChange={setPdfPageMode}
+      onPageModeChange={handlePageModeChange}
       isRecomputing={isRecomputing}
     />
   );

@@ -113,6 +113,12 @@ export interface NestingPreviewPayload {
     gap_m: number;
   };
   scale_denom: number;
+  /** Tamaño de papel del PDF. En modo cartón (`page_mode = one_per_sheet`) el
+   *  backend deriva la plancha de este papel, así que afecta el preview. */
+  paper: string;
+  /** Paginación del PDF. En `one_per_sheet` la plancha = papel − margen
+   *  (auto-orientada); en `single_page` se usa `sheet_config` tal cual. */
+  page_mode: "one_per_sheet" | "single_page";
   /** Cortes manuales del usuario (panel-local, metros). Para previsualizar las
    *  planchas con los recortes aplicados. */
   user_cuts?: Record<string, unknown>[];
