@@ -220,6 +220,14 @@ export default function NestingPreview({
   const [localHeight, setLocalHeight] = useState(String(sheetConfig.heightM));
   const [showConfirm, setShowConfirm] = useState(false);
 
+  // En modo cartón (una plancha por hoja) el backend deriva la plancha del
+  // papel; los inputs manuales se ocultan. En modo láser (todo en una hoja) la
+  // plancha es el material editable a mano.
+  const isCardboard = pageMode === "one_per_sheet";
+  // La plancha efectiva es siempre la que usó el backend (`nesting.config`):
+  // en cartón es la derivada del papel, en láser coincide con `sheetConfig`.
+  const plancha = nesting.config;
+
   // Validación visible del tamaño de plancha (en vez de ignorar en silencio).
   const sizeInvalid = !(parseFloat(localWidth) > 0.1 && parseFloat(localHeight) > 0.1);
 
@@ -252,8 +260,8 @@ export default function NestingPreview({
     // Largest side must fit in the largest sheet side (rotation allowed).
     const pieceMax = Math.max(p.widthM, p.heightM);
     const pieceMin = Math.min(p.widthM, p.heightM);
-    const sheetMax = Math.max(sheetConfig.widthM, sheetConfig.heightM);
-    const sheetMin = Math.min(sheetConfig.widthM, sheetConfig.heightM);
+    const sheetMax = Math.max(plancha.widthM, plancha.heightM);
+    const sheetMin = Math.min(plancha.widthM, plancha.heightM);
     const factor = Math.max(pieceMax / sheetMax, pieceMin / sheetMin);
     if (factor > 1) {
       const needed = Math.ceil(scaleDenom * factor);
@@ -284,37 +292,48 @@ export default function NestingPreview({
           </select>
           <span className="text-base-content/40 mx-2">&middot;</span>
           <label className="font-medium text-base-content/70">Plancha:</label>
-          <input
-            className={`input input-bordered input-sm w-20 bg-base-100 ${sizeInvalid ? "input-error" : ""}`}
-            type="number"
-            step="0.01"
-            min="0.1"
-            value={localWidth}
-            onChange={(e) => setLocalWidth(e.target.value)}
-            onBlur={handleApplySize}
-          />
-          <span className="text-base-content/40">&times;</span>
-          <input
-            className={`input input-bordered input-sm w-20 bg-base-100 ${sizeInvalid ? "input-error" : ""}`}
-            type="number"
-            step="0.01"
-            min="0.1"
-            value={localHeight}
-            onChange={(e) => setLocalHeight(e.target.value)}
-            onBlur={handleApplySize}
-          />
-          <span className="text-base-content/60 font-medium">m</span>
-          <button
-            className="btn btn-primary btn-sm ml-2"
-            onClick={handleApplySize}
-            disabled={sizeInvalid}
-          >
-            Aplicar
-          </button>
-          {sizeInvalid && (
-            <span className="text-error text-xs w-full sm:w-auto sm:ml-2">
-              El alto y ancho deben ser mayores a 0,1 m.
+          {isCardboard ? (
+            // En cartón la plancha la define el papel (auto-orientada, con
+            // margen): se muestra de sólo lectura, sin inputs editables.
+            <span className="text-base-content/80 font-semibold tabular-nums">
+              {plancha.widthM.toFixed(2)} &times; {plancha.heightM.toFixed(2)} m
+              <span className="text-base-content/50 font-normal ml-1">({paper}, auto)</span>
             </span>
+          ) : (
+            <>
+              <input
+                className={`input input-bordered input-sm w-20 bg-base-100 ${sizeInvalid ? "input-error" : ""}`}
+                type="number"
+                step="0.01"
+                min="0.1"
+                value={localWidth}
+                onChange={(e) => setLocalWidth(e.target.value)}
+                onBlur={handleApplySize}
+              />
+              <span className="text-base-content/40">&times;</span>
+              <input
+                className={`input input-bordered input-sm w-20 bg-base-100 ${sizeInvalid ? "input-error" : ""}`}
+                type="number"
+                step="0.01"
+                min="0.1"
+                value={localHeight}
+                onChange={(e) => setLocalHeight(e.target.value)}
+                onBlur={handleApplySize}
+              />
+              <span className="text-base-content/60 font-medium">m</span>
+              <button
+                className="btn btn-primary btn-sm ml-2"
+                onClick={handleApplySize}
+                disabled={sizeInvalid}
+              >
+                Aplicar
+              </button>
+              {sizeInvalid && (
+                <span className="text-error text-xs w-full sm:w-auto sm:ml-2">
+                  El alto y ancho deben ser mayores a 0,1 m.
+                </span>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -344,7 +363,9 @@ export default function NestingPreview({
           ))}
         </select>
         <span className="text-xs text-base-content/40 ml-1">
-          Sólo afecta el PDF descargado, no la vista previa.
+          {isCardboard
+            ? "El papel define el tamaño de la plancha (auto-orientada, con margen)."
+            : "Sólo afecta el PDF descargado, no la vista previa."}
         </span>
       </div>
 
@@ -354,7 +375,7 @@ export default function NestingPreview({
           <span className="text-sm">
             <strong>{unplacedCount} componente{unplacedCount !== 1 ? "s" : ""}</strong> no
             {unplacedCount === 1 ? " entra" : " entran"} entero{unplacedCount !== 1 ? "s" : ""} en la
-            plancha ({sheetConfig.widthM.toFixed(2)} &times; {sheetConfig.heightM.toFixed(2)} m).{" "}
+            plancha ({plancha.widthM.toFixed(2)} &times; {plancha.heightM.toFixed(2)} m).{" "}
             {nextScaleOption > scaleDenom
               ? <>Reducí la escala a <strong>1:{nextScaleOption}</strong> para que quepan.</>
               : <>Usá una plancha más grande o reducí la escala.</>}
@@ -397,7 +418,7 @@ export default function NestingPreview({
       <div className="mt-auto border-t border-base-300 p-4 bg-base-200/30 flex flex-col sm:flex-row items-center justify-between gap-4 shrink-0">
         <div className="flex flex-wrap items-center justify-center sm:justify-start gap-x-5 gap-y-1 text-xs">
           <span className="text-base-content/55">
-            Plancha <b className="text-base-content/80 font-semibold tabular-nums">{sheetConfig.widthM.toFixed(2)}×{sheetConfig.heightM.toFixed(2)} m</b>
+            Plancha <b className="text-base-content/80 font-semibold tabular-nums">{plancha.widthM.toFixed(2)}×{plancha.heightM.toFixed(2)} m</b>
           </span>
           <span className="text-base-content/55">
             Escala <b className="text-base-content/80 font-semibold tabular-nums">1:{displayScale}</b>
