@@ -2,7 +2,7 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Canvas } from "@react-three/fiber";
-import { Bounds, Grid, OrbitControls } from "@react-three/drei";
+import { Grid, OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
 import gsap from "gsap";
 import { ChevronLeft, ChevronRight } from "lucide-react";
@@ -36,18 +36,38 @@ function pieceCategoryColor(piece: AssemblySequencePiece): number {
   return piece.color ? hexToNumber(piece.color) : PAST_COLOR;
 }
 
+function sanitizePositions(positions: number[]): number[] {
+  const out: number[] = [];
+  for (let i = 0; i + 2 < positions.length; i += 3) {
+    const x = positions[i];
+    const y = positions[i + 1];
+    const z = positions[i + 2];
+    if (Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)) {
+      out.push(x, y, z);
+    }
+  }
+  return out;
+}
+
 function buildMeshGeometry(positions: number[]): THREE.BufferGeometry | null {
-  if (!positions || positions.length < 9) return null;
+  const clean = sanitizePositions(positions);
+  if (clean.length < 9) return null;
   const g = new THREE.BufferGeometry();
-  g.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-  g.computeVertexNormals();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(clean, 3));
+  try {
+    g.computeVertexNormals();
+  } catch {
+    g.dispose();
+    return null;
+  }
   return g;
 }
 
 function buildLineGeometry(segments: number[]): THREE.BufferGeometry | null {
-  if (!segments || segments.length < 6) return null;
+  const clean = sanitizePositions(segments);
+  if (clean.length < 6) return null;
   const g = new THREE.BufferGeometry();
-  g.setAttribute("position", new THREE.Float32BufferAttribute(segments, 3));
+  g.setAttribute("position", new THREE.Float32BufferAttribute(clean, 3));
   return g;
 }
 
@@ -132,7 +152,8 @@ function DroppingPiece({
     mesh.position.set(x, y + dropHeight, z);
     mesh.rotation.set(rot[0], rot[1], rot[2]);
 
-    const mat = mesh.material as THREE.MeshStandardMaterial;
+    const mat = mesh.material as THREE.MeshStandardMaterial | undefined;
+    if (!mat) return;
     mat.color.setHex(HIGHLIGHT_COLOR);
     mat.emissive.setHex(HIGHLIGHT_EMISSIVE);
     mat.emissiveIntensity = 0.45;
@@ -197,7 +218,6 @@ function StaticLiftedPiece({ piece }: { piece: AssemblySequencePiece }) {
         : null,
     [lifted],
   );
-  useEffect(() => () => { geom?.dispose(); lineGeom?.dispose(); }, [geom, lineGeom]);
 
   if (!geom) return <StaticPiece piece={piece} />;
 
@@ -244,8 +264,6 @@ function DroppingLiftedPiece({
     [lifted],
   );
   const baseColor = pieceCategoryColor(piece);
-
-  useEffect(() => () => { geom?.dispose(); lineGeom?.dispose(); }, [geom, lineGeom]);
 
   useLayoutEffect(() => {
     if (!geom) return;
@@ -422,12 +440,19 @@ export default function InteractiveAssemblyViewer({
     () => Math.max(computeSequenceDiag(visiblePieces.length > 0 ? visiblePieces : renderPieces), 3),
     [visiblePieces, renderPieces],
   );
+  const camDist = diag * 1.35;
 
   const step = steps[currentStep];
   const focus = step?.camera_focus;
   const orbitTarget = useMemo((): [number, number, number] => {
     if (!focus) return [0, 0, 0];
-    return [focus.x - center.x, focus.y - center.y, focus.z - center.z];
+    const x = focus.x - center.x;
+    const y = focus.y - center.y;
+    const z = focus.z - center.z;
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+      return [0, 0, 0];
+    }
+    return [x, y, z];
   }, [focus, center.x, center.y, center.z]);
 
   const atStart = currentStep === 0;
@@ -449,7 +474,12 @@ export default function InteractiveAssemblyViewer({
       <Canvas
         className="absolute inset-0"
         shadows
-        camera={{ fov: 42, near: 0.05, far: 2000 }}
+        camera={{
+          position: [camDist * 0.75, camDist * 0.65, camDist * 0.75],
+          fov: 42,
+          near: 0.05,
+          far: Math.max(camDist * 30, 500),
+        }}
         dpr={[1, 2]}
       >
         <color attach="background" args={["#1a1d24"]} />
@@ -457,14 +487,12 @@ export default function InteractiveAssemblyViewer({
         <directionalLight position={[diag * 2, diag * 3, diag]} intensity={1.4} castShadow />
         <directionalLight position={[-diag, diag * 0.5, -diag]} intensity={0.5} />
 
-        <Bounds fit clip observe margin={1.25}>
-          <AssemblyScene
-            pieces={renderPieces}
-            currentStep={currentStep}
-            centerOffset={centerVec}
-            diag={diag}
-          />
-        </Bounds>
+        <AssemblyScene
+          pieces={visiblePieces.length > 0 ? visiblePieces : renderPieces}
+          currentStep={currentStep}
+          centerOffset={centerVec}
+          diag={diag}
+        />
 
         <OrbitControls
           makeDefault
