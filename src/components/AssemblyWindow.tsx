@@ -25,6 +25,7 @@ import {
   resolveAssemblySteps,
   type AssemblyLiftContext,
 } from "@/core/assembly-sequence";
+import { groupLabel } from "@/core/assembly-guide-build";
 import { useProjectContext } from "@/context/ProjectContext";
 import InteractiveAssemblyViewer from "@/components/InteractiveAssemblyViewer";
 
@@ -368,11 +369,14 @@ export default function AssemblyWindow({
   // Contexto para liftear cada pieza a su pose 3D real (instructivo #2): pose
   // desde `placements` (topology) + contorno de corte desde los paneles de
   // nesting. Si falta cualquiera, buildAssemblyPieces cae al render de cajas.
-  const liftContext = useMemo<AssemblyLiftContext | undefined>(() => {
-    if (!phase1.placements || !phase1.panelIdByGroup) return undefined;
+  const liftContext = useMemo<AssemblyLiftContext>(() => {
+    // Mapas por etiqueta (misma `groupLabel` que el builder → join consistente).
     const labelToGroupId = new Map<string, number>();
-    for (const [gid, label] of Object.entries(phase1.panelIdByGroup)) {
-      labelToGroupId.set(String(label).trim(), Number(gid));
+    const faceIndicesByLabel = new Map<string, number[]>();
+    for (const g of phase1.groups) {
+      const label = groupLabel(g, phase1.panelIdByGroup);
+      labelToGroupId.set(label, g.id);
+      faceIndicesByLabel.set(label, g.faceIndices);
     }
     const nestingPanelById = new Map<string, NestingPanel>();
     if (nestingData) {
@@ -384,8 +388,14 @@ export default function AssemblyWindow({
         }
       }
     }
-    return { placements: phase1.placements, labelToGroupId, nestingPanelById };
-  }, [phase1.placements, phase1.panelIdByGroup, nestingData]);
+    return {
+      placements: phase1.placements ?? {},
+      labelToGroupId,
+      nestingPanelById,
+      faces: phase1.faces,
+      faceIndicesByLabel,
+    };
+  }, [phase1, nestingData]);
 
   const assemblyPieces = useMemo(
     () => (displayData ? buildAssemblyPieces(displayData, assemblySteps, liftContext) : []),

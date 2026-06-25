@@ -1,7 +1,7 @@
-import type { Vec3 } from "./types";
+import type { Face3D, Vec3 } from "./types";
 import type { Placement } from "./pipeline";
 import type { NestingPanel } from "./sheet-nester";
-import { liftPiece, type LiftedPieceGeometry } from "./assembly-lift";
+import { liftPiece, liftFaces, type LiftedPieceGeometry } from "./assembly-lift";
 import type {
   AssemblyPanel,
   AssemblyPreviewData,
@@ -19,6 +19,10 @@ export interface AssemblyLiftContext {
   labelToGroupId: Map<string, number>;
   /** etiqueta de panel → panel de nesting (contorno de corte con aberturas). */
   nestingPanelById: Map<string, NestingPanel>;
+  /** Fallback #1: caras originales del modelo + índices de cara por etiqueta.
+   *  Si no hay `placement` para la pieza, se renderiza su geometría original. */
+  faces?: Face3D[];
+  faceIndicesByLabel?: Map<string, number[]>;
 }
 
 /** One assembly step from the backend JSON. */
@@ -114,16 +118,24 @@ function applyLift(
   lift: AssemblyLiftContext | undefined,
 ): AssemblySequencePiece {
   if (!lift) return piece;
-  const groupId = lift.labelToGroupId.get(piece.id.trim());
-  if (groupId === undefined) return piece;
-  const placement = lift.placements[groupId];
-  if (!placement) return piece;
-  const panel = lift.nestingPanelById.get(piece.id.trim()) ?? null;
-  return {
-    ...piece,
-    lifted: liftPiece(placement, panel),
-    isMark: panel?.isMark === true,
-  };
+  const label = piece.id.trim();
+  const groupId = lift.labelToGroupId.get(label);
+  const placement = groupId === undefined ? undefined : lift.placements[groupId];
+
+  // #2: piezas de corte (pose por placement + contorno de nesting con aberturas).
+  if (placement) {
+    const panel = lift.nestingPanelById.get(label) ?? null;
+    return { ...piece, lifted: liftPiece(placement, panel), isMark: panel?.isMark === true };
+  }
+
+  // #1 (fallback): geometría original del grupo (pose exacta, sin huecos).
+  const faceIndices = lift.faceIndicesByLabel?.get(label);
+  if (lift.faces && faceIndices && faceIndices.length > 0) {
+    const faces = faceIndices.map((i) => lift.faces![i]).filter(Boolean);
+    if (faces.length > 0) return { ...piece, lifted: liftFaces(faces) };
+  }
+
+  return piece;
 }
 
 export function buildAssemblyPieces(

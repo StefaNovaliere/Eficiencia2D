@@ -15,7 +15,7 @@
 // ============================================================================
 
 import * as THREE from "three";
-import type { Vec2 } from "./types";
+import type { Face3D, Vec2 } from "./types";
 import type { Placement } from "./pipeline";
 import type { NestingPanel } from "./sheet-nester";
 
@@ -202,6 +202,79 @@ function triangulateRingWithHoles(
 
 function pushTri(out: number[], a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3): void {
   out.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
+}
+
+/**
+ * Fallback #1 (contrato): geometría ORIGINAL de la pieza, renderizando las caras
+ * del grupo tal cual (coordenadas de mundo, pose exacta). No necesita
+ * `placements`. Triangula cada cara como el visor de /review
+ * (`ModelViewer.triangulateFace`): proyecta al plano que descarta el eje
+ * dominante de la normal y usa earcut.
+ */
+export function liftFaces(faces: Face3D[]): LiftedPieceGeometry {
+  const positions: number[] = [];
+  for (const face of faces) {
+    triangulateFaceWorld(face, positions);
+  }
+  return { positions, openings: [], hasHoles: false };
+}
+
+function triangulateFaceWorld(face: Face3D, out: number[]): void {
+  const vs = face.vertices;
+  if (vs.length < 3) return;
+  if (vs.length === 3) {
+    pushTri(
+      out,
+      new THREE.Vector3(vs[0].x, vs[0].y, vs[0].z),
+      new THREE.Vector3(vs[1].x, vs[1].y, vs[1].z),
+      new THREE.Vector3(vs[2].x, vs[2].y, vs[2].z),
+    );
+    return;
+  }
+
+  const nx = Math.abs(face.normal.x);
+  const ny = Math.abs(face.normal.y);
+  const nz = Math.abs(face.normal.z);
+
+  const contour: THREE.Vector2[] = [];
+  if (nx >= ny && nx >= nz) {
+    for (const v of vs) contour.push(new THREE.Vector2(v.y, v.z));
+  } else if (ny >= nx && ny >= nz) {
+    for (const v of vs) contour.push(new THREE.Vector2(v.x, v.z));
+  } else {
+    for (const v of vs) contour.push(new THREE.Vector2(v.x, v.y));
+  }
+
+  let tris: number[][];
+  try {
+    tris = THREE.ShapeUtils.triangulateShape(contour, []);
+  } catch {
+    tris = [];
+  }
+
+  if (tris.length === 0) {
+    for (let i = 1; i < vs.length - 1; i++) {
+      pushTri(
+        out,
+        new THREE.Vector3(vs[0].x, vs[0].y, vs[0].z),
+        new THREE.Vector3(vs[i].x, vs[i].y, vs[i].z),
+        new THREE.Vector3(vs[i + 1].x, vs[i + 1].y, vs[i + 1].z),
+      );
+    }
+    return;
+  }
+
+  for (const t of tris) {
+    const a = vs[t[0]];
+    const b = vs[t[1]];
+    const c = vs[t[2]];
+    pushTri(
+      out,
+      new THREE.Vector3(a.x, a.y, a.z),
+      new THREE.Vector3(b.x, b.y, b.z),
+      new THREE.Vector3(c.x, c.y, c.z),
+    );
+  }
 }
 
 function pushRingSegments(ring: Ring, placement: Placement, out: number[]): void {
