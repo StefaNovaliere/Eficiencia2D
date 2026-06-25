@@ -20,6 +20,34 @@ const DROP_HEIGHT_FACTOR = 0.35;
 const PAST_COLOR = 0x94a3b8;
 const HIGHLIGHT_COLOR = 0xfbbf24;
 const HIGHLIGHT_EMISSIVE = 0xf59e0b;
+// Colores neón por categoría para las piezas de corte lifteadas.
+const WALL_COLOR = 0x22d3ee; // cian
+const FLOOR_COLOR = 0xff2bd6; // rosa
+const OPENING_COLOR = 0x0f172a; // aberturas (corte)
+const MARK_COLOR = 0xdc2626; // aberturas grabadas (marca, rojo)
+
+function isLifted(piece: AssemblySequencePiece): boolean {
+  return !!piece.lifted && piece.lifted.positions.length > 0;
+}
+
+function pieceCategoryColor(piece: AssemblySequencePiece): number {
+  if (piece.category === "floor") return FLOOR_COLOR;
+  if (piece.category === "wall") return WALL_COLOR;
+  return piece.color ? hexToNumber(piece.color) : PAST_COLOR;
+}
+
+function buildMeshGeometry(positions: number[]): THREE.BufferGeometry {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  g.computeVertexNormals();
+  return g;
+}
+
+function buildLineGeometry(segments: number[]): THREE.BufferGeometry {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(segments, 3));
+  return g;
+}
 
 function hexToNumber(hex: string): number {
   const cleaned = hex.replace("#", "");
@@ -153,6 +181,113 @@ function DroppingPiece({
   );
 }
 
+/** Pieza de corte ya colocada — contorno real (con aberturas) lifteado a 3D. */
+function StaticLiftedPiece({ piece }: { piece: AssemblySequencePiece }) {
+  const lifted = piece.lifted!;
+  const geom = useMemo(() => buildMeshGeometry(lifted.positions), [lifted]);
+  const lineGeom = useMemo(
+    () => (lifted.openings.length > 0 ? buildLineGeometry(lifted.openings) : null),
+    [lifted],
+  );
+  useEffect(() => () => { geom.dispose(); lineGeom?.dispose(); }, [geom, lineGeom]);
+
+  return (
+    <group>
+      <mesh geometry={geom} frustumCulled={false} castShadow receiveShadow>
+        <meshStandardMaterial
+          color={pieceCategoryColor(piece)}
+          roughness={0.55}
+          metalness={0.1}
+          side={THREE.DoubleSide}
+        />
+      </mesh>
+      {lineGeom && (
+        <lineSegments geometry={lineGeom}>
+          <lineBasicMaterial color={piece.isMark ? MARK_COLOR : OPENING_COLOR} />
+        </lineSegments>
+      )}
+    </group>
+  );
+}
+
+/** Pieza de corte del paso actual — cae a su pose final lifteada. */
+function DroppingLiftedPiece({
+  piece,
+  dropHeight,
+}: {
+  piece: AssemblySequencePiece;
+  dropHeight: number;
+}) {
+  const lifted = piece.lifted!;
+  const groupRef = useRef<THREE.Group>(null);
+  const matRef = useRef<THREE.MeshStandardMaterial>(null);
+  const fadeTweenRef = useRef<gsap.core.Tween | null>(null);
+  const geom = useMemo(() => buildMeshGeometry(lifted.positions), [lifted]);
+  const lineGeom = useMemo(
+    () => (lifted.openings.length > 0 ? buildLineGeometry(lifted.openings) : null),
+    [lifted],
+  );
+  const baseColor = pieceCategoryColor(piece);
+
+  useEffect(() => () => { geom.dispose(); lineGeom?.dispose(); }, [geom, lineGeom]);
+
+  useLayoutEffect(() => {
+    const grp = groupRef.current;
+    const mat = matRef.current;
+    if (!grp || !mat) return;
+
+    grp.position.set(0, dropHeight, 0);
+    mat.color.setHex(HIGHLIGHT_COLOR);
+    mat.emissive.setHex(HIGHLIGHT_EMISSIVE);
+    mat.emissiveIntensity = 0.45;
+
+    fadeTweenRef.current?.kill();
+
+    const dropTween = gsap.to(grp.position, {
+      y: 0,
+      duration: 0.85,
+      ease: "power2.out",
+      onComplete: () => {
+        fadeTweenRef.current = gsap.to(mat, {
+          emissiveIntensity: 0,
+          duration: 0.55,
+          ease: "power1.out",
+          onUpdate: () => {
+            mat.color.lerp(new THREE.Color(baseColor), 0.1);
+            mat.emissive.lerp(new THREE.Color(0x000000), 0.12);
+          },
+        });
+      },
+    });
+
+    return () => {
+      dropTween.kill();
+      fadeTweenRef.current?.kill();
+    };
+  }, [dropHeight, baseColor, geom]);
+
+  return (
+    <group ref={groupRef}>
+      <mesh geometry={geom} frustumCulled={false} castShadow receiveShadow>
+        <meshStandardMaterial
+          ref={matRef}
+          color={HIGHLIGHT_COLOR}
+          emissive={HIGHLIGHT_EMISSIVE}
+          emissiveIntensity={0.45}
+          roughness={0.55}
+          metalness={0.1}
+          side={THREE.DoubleSide}
+        />
+      </mesh>
+      {lineGeom && (
+        <lineSegments geometry={lineGeom}>
+          <lineBasicMaterial color={piece.isMark ? MARK_COLOR : OPENING_COLOR} />
+        </lineSegments>
+      )}
+    </group>
+  );
+}
+
 function AssemblyPiece({
   piece,
   currentStep,
@@ -163,8 +298,17 @@ function AssemblyPiece({
   dropHeight: number;
 }) {
   if (piece.stepIndex > currentStep) return null;
-  if (piece.stepIndex < currentStep) return <StaticPiece piece={piece} />;
-  return (
+  const lifted = isLifted(piece);
+  if (piece.stepIndex < currentStep) {
+    return lifted ? <StaticLiftedPiece piece={piece} /> : <StaticPiece piece={piece} />;
+  }
+  return lifted ? (
+    <DroppingLiftedPiece
+      key={`${piece.id}-step-${currentStep}`}
+      piece={piece}
+      dropHeight={dropHeight}
+    />
+  ) : (
     <DroppingPiece
       key={`${piece.id}-step-${currentStep}`}
       piece={piece}

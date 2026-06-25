@@ -8,11 +8,31 @@
 // recolectar las decisiones del usuario. No hay cálculo geométrico acá.
 // ============================================================================
 
-import type { Face3D } from "./types";
+import type { Face3D, Vec3 } from "./types";
 import type { GeometryGroup } from "./group-classifier";
 import type { Joint } from "./joint-detector";
 import type { DimensionAdjustment, WallWallJoint } from "./assembly-adjuster";
 import type { NestingResult, SheetConfig } from "./sheet-nester";
+
+/**
+ * Pose 3D de una pieza (grupo) provista por el backend en `topology.placements`.
+ * Marco ortonormal en el MISMO espacio 3D que `faces` (eje Y). Permite "liftear"
+ * el contorno 2D de corte de la pieza a su pose real:
+ *   `world = origin + u_local·uAxis + v·vAxis`  (con `u_local = widthM − u` si `mirrored`).
+ * El backend cameliza `u_axis→uAxis`, `v_axis→vAxis`, `width_m→widthM`, etc.
+ */
+export interface Placement {
+  origin: Vec3;
+  uAxis: Vec3;
+  vAxis: Vec3;
+  normal: Vec3;
+  /** Ancho del panel en su marco local, en metros reales (sin escalar). */
+  widthM: number;
+  /** Alto del panel en su marco local, en metros reales (sin escalar). */
+  heightM: number;
+  /** Si true, el contorno de corte viene espejado horizontalmente. */
+  mirrored: boolean;
+}
 
 /**
  * Topología que devuelve el backend (`/api/upload` y `/api/recompute`). El
@@ -36,6 +56,11 @@ export interface Phase1Result {
    * simplemente no muestra las etiquetas.
    */
   panelIdByGroup?: Record<number, string>;
+  /**
+   * Pose 3D por id de grupo (no descartado) para el instructivo de armado.
+   * Opcional: si el backend no la manda, el instructivo cae al render de cajas.
+   */
+  placements?: Record<number, Placement>;
 }
 
 export interface ClassificationOverride {
