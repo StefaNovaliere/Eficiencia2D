@@ -9,12 +9,13 @@ import type { UserCut } from "@/core/user-cuts";
 import {
   recomputeTopology,
   fetchNestingPreview,
-  fetchAssemblyPreview,
   userCutsForApi,
   type AssemblyPreviewRequest,
   type RecomputePayload,
   type SplitOperation,
 } from "@/services/api";
+import { buildAssemblyGuideFromTopology } from "@/core/assembly-guide-build";
+import type { FaceCategory } from "@/core/group-classifier";
 
 function overridesToRecord(
   overrides: { groupId: number; newCategory: string }[],
@@ -220,22 +221,20 @@ function ReviewPageContent() {
     router.replace("/");
   }, [resetProject, router]);
 
+  // El instructivo se construye en el FRONT desde la topología (el backend no
+  // tiene endpoint de preview; sólo genera la guía dentro del ZIP). La geometría
+  // 3D la resuelve el lift: piezas de corte (#2) con placements+nesting, o la
+  // geometría original por grupo (#1) como fallback.
   const handleRequestAssemblyPreview = useCallback(
     async (request: AssemblyPreviewRequest) => {
-      if (!phase1Result || !fileId) throw new Error("Proyecto no cargado");
-      return fetchAssemblyPreview({
-        file_id: fileId,
-        axis: phase1Result.appliedAxis,
-        min_area_m2: minAreaM2,
-        merges: savedMerges,
-        splits: savedSplits.map((s): SplitOperation => ({ group_id: s.groupId, mode: s.mode })),
-        overrides: overridesToRecord(request.overrides),
-        wall_wall_decisions: decisionsToRecord(request.wallWallDecisions),
-        marks: request.marks,
-        user_cuts: userCutsForApi(request.userCuts),
-      });
+      if (!phase1Result) throw new Error("Proyecto no cargado");
+      const overridesMap = new Map<number, FaceCategory>();
+      for (const o of request.overrides) {
+        overridesMap.set(o.groupId, o.newCategory as FaceCategory);
+      }
+      return buildAssemblyGuideFromTopology(phase1Result, { overrides: overridesMap });
     },
-    [fileId, phase1Result, minAreaM2, savedMerges, savedSplits],
+    [phase1Result],
   );
 
   if (isLoadingSession) return null;
