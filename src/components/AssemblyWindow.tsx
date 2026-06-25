@@ -18,11 +18,14 @@ import {
 } from "@/services/api";
 import type { Phase1Result } from "@/core/pipeline";
 import type { FaceCategory } from "@/core/group-classifier";
+import type { NestingPanel } from "@/core/sheet-nester";
 import { getEffectiveCategory } from "@/core/discard-by-area";
 import {
   buildAssemblyPieces,
   resolveAssemblySteps,
+  type AssemblyLiftContext,
 } from "@/core/assembly-sequence";
+import { useProjectContext } from "@/context/ProjectContext";
 import InteractiveAssemblyViewer from "@/components/InteractiveAssemblyViewer";
 
 // ---------------------------------------------------------------------------
@@ -336,6 +339,7 @@ export default function AssemblyWindow({
 }: AssemblyWindowProps) {
   const [selectedPanelId, setSelectedPanelId] = useState<string | null>(null);
   const [view, setView] = useState<"elevations" | "table">("elevations");
+  const { nestingData } = useProjectContext();
 
   // Close on Escape
   useEffect(() => {
@@ -361,9 +365,31 @@ export default function AssemblyWindow({
     [displayData],
   );
 
+  // Contexto para liftear cada pieza a su pose 3D real (instructivo #2): pose
+  // desde `placements` (topology) + contorno de corte desde los paneles de
+  // nesting. Si falta cualquiera, buildAssemblyPieces cae al render de cajas.
+  const liftContext = useMemo<AssemblyLiftContext | undefined>(() => {
+    if (!phase1.placements || !phase1.panelIdByGroup) return undefined;
+    const labelToGroupId = new Map<string, number>();
+    for (const [gid, label] of Object.entries(phase1.panelIdByGroup)) {
+      labelToGroupId.set(String(label).trim(), Number(gid));
+    }
+    const nestingPanelById = new Map<string, NestingPanel>();
+    if (nestingData) {
+      for (const result of [nestingData.wallNesting, nestingData.floorNesting]) {
+        for (const sheet of result.sheets) {
+          for (const placed of sheet.panels) {
+            nestingPanelById.set(placed.panel.id.trim(), placed.panel);
+          }
+        }
+      }
+    }
+    return { placements: phase1.placements, labelToGroupId, nestingPanelById };
+  }, [phase1.placements, phase1.panelIdByGroup, nestingData]);
+
   const assemblyPieces = useMemo(
-    () => (displayData ? buildAssemblyPieces(displayData, assemblySteps) : []),
-    [displayData, assemblySteps],
+    () => (displayData ? buildAssemblyPieces(displayData, assemblySteps, liftContext) : []),
+    [displayData, assemblySteps, liftContext],
   );
 
   const handleSelectPanel = useCallback((id: string | null) => {
