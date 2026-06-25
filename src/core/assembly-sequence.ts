@@ -1,9 +1,25 @@
 import type { Vec3 } from "./types";
+import type { Placement } from "./pipeline";
+import type { NestingPanel } from "./sheet-nester";
+import { liftPiece, type LiftedPieceGeometry } from "./assembly-lift";
 import type {
   AssemblyPanel,
   AssemblyPreviewData,
   AssemblySequencePiecePayload,
 } from "@/services/api";
+
+/**
+ * Contexto para "liftear" cada pieza a su pose 3D real (instructivo #2):
+ * pose desde `placements` (por id de grupo) y contorno de corte desde los
+ * paneles de nesting (por etiqueta). Si falta, se cae al render de cajas.
+ */
+export interface AssemblyLiftContext {
+  placements: Record<number, Placement>;
+  /** etiqueta de panel (A1, B2…) → id de grupo. Inverso de `panelIdByGroup`. */
+  labelToGroupId: Map<string, number>;
+  /** etiqueta de panel → panel de nesting (contorno de corte con aberturas). */
+  nestingPanelById: Map<string, NestingPanel>;
+}
 
 /** One assembly step from the backend JSON. */
 export interface AssemblySequenceStep {
@@ -27,6 +43,11 @@ export interface AssemblySequencePiece {
   depth_m: number;
   category: string;
   color?: string;
+  /** Geometría de corte lifteada a 3D (instructivo #2). Si está, el visor la
+   *  dibuja en lugar de una caja. Coordenadas de mundo (metros). */
+  lifted?: LiftedPieceGeometry;
+  /** La pieza graba sus aberturas (rojo) en vez de cortarlas. */
+  isMark?: boolean;
 }
 
 /** Prefer backend `pasos` / `steps`; fall back to elevations. */
@@ -87,7 +108,33 @@ function payloadToPiece(
  * Maps piezas to 3D pieces using the ordered pasos/steps as source of truth
  * for stepIndex (drives progressive assembly animation).
  */
+/** Adjunta la geometría de corte lifteada (pose 3D real) si hay placement. */
+function applyLift(
+  piece: AssemblySequencePiece,
+  lift: AssemblyLiftContext | undefined,
+): AssemblySequencePiece {
+  if (!lift) return piece;
+  const groupId = lift.labelToGroupId.get(piece.id.trim());
+  if (groupId === undefined) return piece;
+  const placement = lift.placements[groupId];
+  if (!placement) return piece;
+  const panel = lift.nestingPanelById.get(piece.id.trim()) ?? null;
+  return {
+    ...piece,
+    lifted: liftPiece(placement, panel),
+    isMark: panel?.isMark === true,
+  };
+}
+
 export function buildAssemblyPieces(
+  data: AssemblyPreviewData,
+  steps: AssemblySequenceStep[],
+  lift?: AssemblyLiftContext,
+): AssemblySequencePiece[] {
+  return buildAssemblyPiecesRaw(data, steps).map((p) => applyLift(p, lift));
+}
+
+function buildAssemblyPiecesRaw(
   data: AssemblyPreviewData,
   steps: AssemblySequenceStep[],
 ): AssemblySequencePiece[] {
@@ -190,7 +237,10 @@ export function prepareAssemblyPiecesForRender(
   if (pieces.length === 0) return pieces;
 
   const isOrientedBoxV1 = options?.viewerSchema === "oriented_box_v1";
-  const scale = isOrientedBoxV1 ? 1 : detectMetreScale(pieces);
+  // Las piezas lifteadas ya vienen en metros de mundo (desde `placements`); no
+  // se reescalan, y su `position` (para centrado/cámara) tampoco.
+  const hasLift = pieces.some((p) => p.lifted);
+  const scale = hasLift || isOrientedBoxV1 ? 1 : detectMetreScale(pieces);
 
   return pieces.map((p) => ({
     ...p,
