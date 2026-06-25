@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { edgesToRings, liftPiece } from "@/core/assembly-lift";
+import { edgesToRings, liftPiece, liftFaces } from "@/core/assembly-lift";
 import type { Placement } from "@/core/pipeline";
 import type { NestingPanel } from "@/core/sheet-nester";
+import type { Face3D } from "@/core/types";
 
 // Marco identidad: u→+X, v→+Y, origin en cero. Liftear == coords (u,v,0).
 const IDENTITY: Placement = {
@@ -93,6 +94,27 @@ describe("liftPiece", () => {
     // Sin espejo el ancho ocupa [0,0.5]; con espejo ocupa [1.5,2].
     expect(maxXof(normal)).toBeCloseTo(0.5, 5);
     expect(maxXof(mirrored)).toBeCloseTo(2, 5);
+  });
+
+  it("liftFaces (fallback #1) triangulates faces in world coords", () => {
+    const quad: Face3D = {
+      vertices: [
+        { x: 0, y: 0, z: 1 },
+        { x: 2, y: 0, z: 1 },
+        { x: 2, y: 1, z: 1 },
+        { x: 0, y: 1, z: 1 },
+      ],
+      normal: { x: 0, y: 0, z: 1 },
+      vertexIndices: [0, 1, 2, 3],
+      innerLoops: [],
+    };
+    const g = liftFaces([quad]);
+    expect(g.positions.length).toBe(18); // 2 triángulos × 3 × 3
+    expect(g.hasHoles).toBe(false);
+    // Coordenadas de mundo sin transformar: z constante = 1, x∈[0,2], y∈[0,1].
+    for (let i = 0; i < g.positions.length; i += 3) {
+      expect(g.positions[i + 2]).toBeCloseTo(1);
+    }
   });
 
   it("emits opening segments for holes", () => {
