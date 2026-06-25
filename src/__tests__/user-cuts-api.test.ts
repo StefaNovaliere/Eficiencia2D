@@ -12,7 +12,17 @@ import type { Face3D } from "@/core/types";
 describe("user-cuts API serialization", () => {
   it("serializa a snake_case según el contrato del backend", () => {
     const cuts: UserCut[] = [
-      { id: "cut-1", groupId: 12, kind: "rect", u0: 0.1, v0: 0.05, u1: 0.4, v1: 0.35 },
+      {
+        id: "cut-1",
+        groupId: 12,
+        kind: "rect",
+        u0: 0.1,
+        v0: 0.05,
+        u1: 0.4,
+        v1: 0.35,
+        surfaceNormal: { x: 0, y: 0, z: 1 },
+        surfaceOffset: 0.02,
+      },
       { id: "cut-2", groupId: 3, kind: "line", u0: 0, v0: 0, u1: 1, v1: 0, keepPositive: true },
     ];
     const wire = serializeUserCutsForApi(cuts);
@@ -22,6 +32,8 @@ describe("user-cuts API serialization", () => {
       kind: "rect",
       u0: 0.1, v0: 0.05, u1: 0.4, v1: 0.35,
     });
+    expect(wire[0]).not.toHaveProperty("surface_normal");
+    expect(wire[0]).not.toHaveProperty("surface_offset");
     expect(wire[0]).not.toHaveProperty("keep_positive"); // sólo cuando está definido
     expect(wire[1]).toMatchObject({ group_id: 3, kind: "line", keep_positive: true });
   });

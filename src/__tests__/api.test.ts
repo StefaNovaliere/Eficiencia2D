@@ -39,8 +39,13 @@ function onePackedTriangle() {
   };
 }
 
-function jsonResponse(data: unknown) {
-  return { ok: true, json: async () => data } as unknown as Response;
+function jsonResponse(data: unknown, status = 200) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    statusText: status === 200 ? "OK" : "Internal Server Error",
+    json: async () => data,
+  } as unknown as Response;
 }
 
 describe("recomputeTopology", () => {
@@ -106,6 +111,44 @@ describe("fetchNestingPreview", () => {
 
     expect(result.wallNesting.scaleDenom).toBe(50);
     expect(result.floorNesting).toBeDefined();
+    expect(result.config.widthM).toBe(1);
+  });
+
+  it("reintenta sin paper/page_mode si el backend falla al desempaquetar", async () => {
+    mockFetch
+      .mockResolvedValueOnce(
+        jsonResponse(
+          { detail: "Error en nesting-preview: too many values to unpack (expected 5)" },
+          500,
+        ),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          wall_nesting: { sheets: [], config: {}, scale_denom: 50, unplaced: [] },
+          floor_nesting: { sheets: [], config: {}, scale_denom: 50, unplaced: [] },
+          config: { width_m: 1, height_m: 0.6, gap_m: 0.003 },
+        }),
+      );
+
+    const result = await fetchNestingPreview({
+      file_id: "abc",
+      axis: "Y",
+      min_area_m2: 1,
+      merges: [],
+      splits: [],
+      overrides: {},
+      wall_wall_decisions: {},
+      marks: [],
+      sheet_config: { width_m: 1, height_m: 0.6, gap_m: 0.003 },
+      scale_denom: 50,
+      paper: "A4",
+      page_mode: "one_per_sheet",
+    });
+
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    const retryBody = JSON.parse(String(mockFetch.mock.calls[1][1]?.body));
+    expect(retryBody).not.toHaveProperty("paper");
+    expect(retryBody).not.toHaveProperty("page_mode");
     expect(result.config.widthM).toBe(1);
   });
 });
