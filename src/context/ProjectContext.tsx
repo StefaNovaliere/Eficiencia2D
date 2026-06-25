@@ -10,6 +10,7 @@ import type {
 import { DEFAULT_SHEET } from "@/core/sheet-nester";
 import type { SheetConfig } from "@/core/types";
 import type { UserCut } from "@/core/user-cuts";
+import type { AssemblyPreviewData } from "@/services/api";
 
 interface PersistedSession {
   fileName: string;
@@ -70,6 +71,9 @@ interface ProjectContextType {
   setSavedMarks: (marks: number[]) => void;
   savedUserCuts: UserCut[];
   setSavedUserCuts: (cuts: UserCut[]) => void;
+  /** Parsed `guia_ensamble.json` from the last generate ZIP (in-memory). */
+  assemblyGuideData: AssemblyPreviewData | null;
+  setAssemblyGuideData: (data: AssemblyPreviewData | null) => void;
   resetProject: () => void;
   persistSession: () => Promise<void>;
   isLoadingSession: boolean;
@@ -93,6 +97,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const [savedSplits, setSavedSplits] = useState<SplitOp[]>([]);
   const [savedMarks, setSavedMarks] = useState<number[]>([]);
   const [savedUserCuts, setSavedUserCuts] = useState<UserCut[]>([]);
+  const [assemblyGuideData, setAssemblyGuideData] = useState<AssemblyPreviewData | null>(null);
   const [sheetConfig, setSheetConfig] = useState<SheetConfig>({ ...DEFAULT_SHEET });
   const [projectFileName, setProjectFileName] = useState<string | null>(null);
   const [isLoadingSession, setIsLoadingSession] = useState(true);
@@ -184,6 +189,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     setSavedSplits([]);
     setSavedMarks([]);
     setSavedUserCuts([]);
+    setAssemblyGuideData(null);
     setSheetConfig({ ...DEFAULT_SHEET });
     sessionStorage.removeItem(SESSION_KEY);
   }, []);
@@ -209,6 +215,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         savedSplits, setSavedSplits,
         savedMarks, setSavedMarks,
         savedUserCuts, setSavedUserCuts,
+        assemblyGuideData, setAssemblyGuideData,
         resetProject,
         persistSession,
         isLoadingSession

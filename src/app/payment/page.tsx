@@ -11,6 +11,7 @@ import {
   userCutsForApi,
   type SplitOperation,
 } from "@/services/api";
+import { extractAssemblyGuideFromZip } from "@/core/assembly-guide";
 
 function overridesToRecord(
   overrides: { groupId: number; newCategory: string }[],
@@ -46,6 +47,7 @@ export default function PaymentPage() {
     sheetConfig,
     isLoadingSession,
     resetProject,
+    setAssemblyGuideData,
   } = useProjectContext();
 
   const [isGenerating, setIsGenerating] = useState(false);
@@ -131,6 +133,9 @@ export default function PaymentPage() {
       );
       setGuidePdfMissing(!hasAssemblyGuide);
 
+      const guideJson = await extractAssemblyGuideFromZip(backendRes.zip_base64);
+      setAssemblyGuideData(guideJson);
+
       triggerDownload(
         base64ToBlob(backendRes.zip_base64),
         backendRes.zip_filename ?? `${stem}_planos.zip`,
@@ -161,6 +166,7 @@ export default function PaymentPage() {
     savedMarks,
     savedUserCuts,
     triggerDownload,
+    setAssemblyGuideData,
   ]);
 
   const handlePaymentApproved = useCallback(async (paymentId: string) => {
