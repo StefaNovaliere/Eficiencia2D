@@ -112,6 +112,21 @@ function payloadToPiece(
  * Maps piezas to 3D pieces using the ordered pasos/steps as source of truth
  * for stepIndex (drives progressive assembly animation).
  */
+function isValidPlacement(placement: Placement | undefined): placement is Placement {
+  if (!placement) return false;
+  const { origin, uAxis, vAxis, widthM, heightM } = placement;
+  return (
+    origin != null &&
+    uAxis != null &&
+    vAxis != null &&
+    Number.isFinite(widthM) &&
+    Number.isFinite(heightM) &&
+    Number.isFinite(origin.x) &&
+    Number.isFinite(uAxis.x) &&
+    Number.isFinite(vAxis.x)
+  );
+}
+
 /** Adjunta la geometría de corte lifteada (pose 3D real) si hay placement. */
 function applyLift(
   piece: AssemblySequencePiece,
@@ -123,16 +138,40 @@ function applyLift(
   const placement = groupId === undefined ? undefined : lift.placements[groupId];
 
   // #2: piezas de corte (pose por placement + contorno de nesting con aberturas).
-  if (placement) {
-    const panel = lift.nestingPanelById.get(label) ?? null;
-    return { ...piece, lifted: liftPiece(placement, panel), isMark: panel?.isMark === true };
+  if (isValidPlacement(placement)) {
+    try {
+      const panel = lift.nestingPanelById.get(label) ?? null;
+      const lifted = liftPiece(placement, panel);
+      if ((lifted.positions?.length ?? 0) >= 9) {
+        return {
+          ...piece,
+          lifted: {
+            positions: lifted.positions,
+            openings: lifted.openings ?? [],
+            hasHoles: lifted.hasHoles,
+          },
+          isMark: panel?.isMark === true,
+        };
+      }
+    } catch {
+      // Caer al render de caja / caras originales.
+    }
   }
 
   // #1 (fallback): geometría original del grupo (pose exacta, sin huecos).
   const faceIndices = lift.faceIndicesByLabel?.get(label);
   if (lift.faces && faceIndices && faceIndices.length > 0) {
-    const faces = faceIndices.map((i) => lift.faces![i]).filter(Boolean);
-    if (faces.length > 0) return { ...piece, lifted: liftFaces(faces) };
+    try {
+      const faces = faceIndices.map((i) => lift.faces![i]).filter(Boolean);
+      if (faces.length > 0) {
+        const lifted = liftFaces(faces);
+        if ((lifted.positions?.length ?? 0) >= 9) {
+          return { ...piece, lifted: { ...lifted, openings: lifted.openings ?? [] } };
+        }
+      }
+    } catch {
+      // Caer al render de caja.
+    }
   }
 
   return piece;
