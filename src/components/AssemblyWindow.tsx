@@ -381,6 +381,7 @@ export default function AssemblyWindow({
     const nestingPanelById = new Map<string, NestingPanel>();
     if (nestingData) {
       for (const result of [nestingData.wallNesting, nestingData.floorNesting]) {
+        if (!result?.sheets) continue;
         for (const sheet of result.sheets) {
           for (const placed of sheet.panels) {
             nestingPanelById.set(placed.panel.id.trim(), placed.panel);

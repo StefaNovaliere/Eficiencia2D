@@ -27,7 +27,7 @@ const OPENING_COLOR = 0x0f172a; // aberturas (corte)
 const MARK_COLOR = 0xdc2626; // aberturas grabadas (marca, rojo)
 
 function isLifted(piece: AssemblySequencePiece): boolean {
-  return !!piece.lifted && piece.lifted.positions.length > 0;
+  return (piece.lifted?.positions?.length ?? 0) >= 9;
 }
 
 function pieceCategoryColor(piece: AssemblySequencePiece): number {
@@ -36,14 +36,16 @@ function pieceCategoryColor(piece: AssemblySequencePiece): number {
   return piece.color ? hexToNumber(piece.color) : PAST_COLOR;
 }
 
-function buildMeshGeometry(positions: number[]): THREE.BufferGeometry {
+function buildMeshGeometry(positions: number[]): THREE.BufferGeometry | null {
+  if (!positions || positions.length < 9) return null;
   const g = new THREE.BufferGeometry();
   g.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
   g.computeVertexNormals();
   return g;
 }
 
-function buildLineGeometry(segments: number[]): THREE.BufferGeometry {
+function buildLineGeometry(segments: number[]): THREE.BufferGeometry | null {
+  if (!segments || segments.length < 6) return null;
   const g = new THREE.BufferGeometry();
   g.setAttribute("position", new THREE.Float32BufferAttribute(segments, 3));
   return g;
@@ -183,13 +185,21 @@ function DroppingPiece({
 
 /** Pieza de corte ya colocada — contorno real (con aberturas) lifteado a 3D. */
 function StaticLiftedPiece({ piece }: { piece: AssemblySequencePiece }) {
-  const lifted = piece.lifted!;
-  const geom = useMemo(() => buildMeshGeometry(lifted.positions), [lifted]);
-  const lineGeom = useMemo(
-    () => (lifted.openings.length > 0 ? buildLineGeometry(lifted.openings) : null),
+  const lifted = piece.lifted;
+  const geom = useMemo(
+    () => (lifted ? buildMeshGeometry(lifted.positions) : null),
     [lifted],
   );
-  useEffect(() => () => { geom.dispose(); lineGeom?.dispose(); }, [geom, lineGeom]);
+  const lineGeom = useMemo(
+    () =>
+      lifted && (lifted.openings?.length ?? 0) >= 6
+        ? buildLineGeometry(lifted.openings)
+        : null,
+    [lifted],
+  );
+  useEffect(() => () => { geom?.dispose(); lineGeom?.dispose(); }, [geom, lineGeom]);
+
+  if (!geom) return <StaticPiece piece={piece} />;
 
   return (
     <group>
@@ -218,20 +228,27 @@ function DroppingLiftedPiece({
   piece: AssemblySequencePiece;
   dropHeight: number;
 }) {
-  const lifted = piece.lifted!;
+  const lifted = piece.lifted;
   const groupRef = useRef<THREE.Group>(null);
   const matRef = useRef<THREE.MeshStandardMaterial>(null);
   const fadeTweenRef = useRef<gsap.core.Tween | null>(null);
-  const geom = useMemo(() => buildMeshGeometry(lifted.positions), [lifted]);
+  const geom = useMemo(
+    () => (lifted ? buildMeshGeometry(lifted.positions) : null),
+    [lifted],
+  );
   const lineGeom = useMemo(
-    () => (lifted.openings.length > 0 ? buildLineGeometry(lifted.openings) : null),
+    () =>
+      lifted && (lifted.openings?.length ?? 0) >= 6
+        ? buildLineGeometry(lifted.openings)
+        : null,
     [lifted],
   );
   const baseColor = pieceCategoryColor(piece);
 
-  useEffect(() => () => { geom.dispose(); lineGeom?.dispose(); }, [geom, lineGeom]);
+  useEffect(() => () => { geom?.dispose(); lineGeom?.dispose(); }, [geom, lineGeom]);
 
   useLayoutEffect(() => {
+    if (!geom) return;
     const grp = groupRef.current;
     const mat = matRef.current;
     if (!grp || !mat) return;
@@ -265,6 +282,8 @@ function DroppingLiftedPiece({
       fadeTweenRef.current?.kill();
     };
   }, [dropHeight, baseColor, geom]);
+
+  if (!geom) return <DroppingPiece piece={piece} dropHeight={dropHeight} />;
 
   return (
     <group ref={groupRef}>
@@ -302,13 +321,16 @@ function AssemblyPiece({
   if (piece.stepIndex < currentStep) {
     return lifted ? <StaticLiftedPiece piece={piece} /> : <StaticPiece piece={piece} />;
   }
-  return lifted ? (
-    <DroppingLiftedPiece
-      key={`${piece.id}-step-${currentStep}`}
-      piece={piece}
-      dropHeight={dropHeight}
-    />
-  ) : (
+  if (lifted) {
+    return (
+      <DroppingLiftedPiece
+        key={`${piece.id}-step-${currentStep}`}
+        piece={piece}
+        dropHeight={dropHeight}
+      />
+    );
+  }
+  return (
     <DroppingPiece
       key={`${piece.id}-step-${currentStep}`}
       piece={piece}
