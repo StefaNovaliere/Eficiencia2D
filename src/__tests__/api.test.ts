@@ -210,4 +210,22 @@ describe("normalizeAssemblyGuide", () => {
     expect(result.steps?.[0].panel_ids).toContain("P41");
     expect(result.totals.total_panels).toBe(41);
   });
+
+  it("does not crash when nested fields are undefined during camelCase conversion", () => {
+    expect(() =>
+      normalizeAssemblyGuide({
+        pasos: [{ titulo: "Paso 1", descripcion: "Test", camera_focus: undefined }],
+        piezas: [
+          {
+            id: "A1",
+            position: [0, 0, 0],
+            size: [1, 2, 0.02],
+            rotation: undefined,
+            color: "#475569",
+          },
+        ],
+        meta: { piece_count: 1, step_count: 1, viewer_schema: "oriented_box_v1" },
+      }),
+    ).not.toThrow();
+  });
 });
