@@ -773,7 +773,7 @@ export function createUserCutId(): string {
   return `cut-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-/** API / backend serialisation (snake_case). */
+/** Serializa cortes para el backend (solo campos del contrato; sin metadata de UI). */
 export function serializeUserCutsForApi(cuts: UserCut[]): Record<string, unknown>[] {
   return cuts.map((c) => ({
     id: c.id,
@@ -784,16 +784,6 @@ export function serializeUserCutsForApi(cuts: UserCut[]): Record<string, unknown
     u1: c.u1,
     v1: c.v1,
     ...(c.keepPositive != null ? { keep_positive: c.keepPositive } : {}),
-    ...(c.surfaceNormal
-      ? {
-          surface_normal: {
-            x: c.surfaceNormal.x,
-            y: c.surfaceNormal.y,
-            z: c.surfaceNormal.z,
-          },
-        }
-      : {}),
-    ...(c.surfaceOffset != null ? { surface_offset: c.surfaceOffset } : {}),
   }));
 }
 

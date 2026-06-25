@@ -116,10 +116,10 @@ export interface NestingPreviewPayload {
   scale_denom: number;
   /** Tamaño de papel del PDF. En modo cartón (`page_mode = one_per_sheet`) el
    *  backend deriva la plancha de este papel, así que afecta el preview. */
-  paper: string;
+  paper?: string;
   /** Paginación del PDF. En `one_per_sheet` la plancha = papel − margen
    *  (auto-orientada); en `single_page` se usa `sheet_config` tal cual. */
-  page_mode: "one_per_sheet" | "single_page";
+  page_mode?: "one_per_sheet" | "single_page";
   /** Cortes manuales del usuario (panel-local, metros). Para previsualizar las
    *  planchas con los recortes aplicados. */
   user_cuts?: Record<string, unknown>[];
@@ -212,18 +212,44 @@ export async function recomputeTopology(payload: RecomputePayload): Promise<Phas
 export async function fetchNestingPreview(
   payload: NestingPreviewPayload,
 ): Promise<NestingPreviewData> {
-  const res = await apiFetch("/api/nesting-preview", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
+  const attempts: NestingPreviewPayload[] = [
+    payload,
+    { ...payload, paper: undefined, page_mode: undefined },
+    { ...payload, paper: undefined, page_mode: undefined, user_cuts: undefined },
+  ];
 
-  if (!res.ok) {
+  let lastDetail: string | undefined;
+
+  for (let i = 0; i < attempts.length; i++) {
+    const body = attempts[i];
+    const res = await apiFetch("/api/nesting-preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body, (_k, v) => (v === undefined ? undefined : v)),
+    });
+
+    if (res.ok) {
+      return toCamelCase(await res.json()) as NestingPreviewData;
+    }
+
     const errorData = await res.json().catch(() => null);
-    throw new Error(errorData?.detail || `Error al previsualizar nesting: ${res.statusText}`);
+    const detail =
+      typeof errorData?.detail === "string"
+        ? errorData.detail
+        : `Error al previsualizar nesting: ${res.statusText}`;
+    lastDetail = detail;
+
+    const retryable =
+      res.status === 500 &&
+      i < attempts.length - 1 &&
+      /unpack|expected \d+/i.test(detail);
+
+    if (!retryable) {
+      throw new Error(detail);
+    }
   }
 
-  return toCamelCase(await res.json()) as NestingPreviewData;
+  throw new Error(lastDetail ?? "Error al previsualizar nesting");
 }
 
 // ---------------------------------------------------------------------------
