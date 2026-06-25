@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useCallback, useEffect, useMemo } from "react";
-import dynamic from "next/dynamic";
 import {
   X,
   Printer,
@@ -12,30 +11,23 @@ import {
   ChevronRight,
   RefreshCw,
 } from "lucide-react";
-import type { AssemblyPreviewData, AssemblyPanel } from "@/services/api";
+import {
+  normalizeAssemblyPreviewData,
+  type AssemblyPreviewData,
+  type AssemblyPanel,
+} from "@/services/api";
 import type { Phase1Result } from "@/core/pipeline";
 import type { FaceCategory } from "@/core/group-classifier";
 import { getEffectiveCategory } from "@/core/discard-by-area";
-import type { AssemblyPanelLabel } from "@/components/ModelViewer";
-
-// ---------------------------------------------------------------------------
-// Lazy-load ModelViewer (Three.js — client only)
-// ---------------------------------------------------------------------------
-const ModelViewer = dynamic(() => import("@/components/ModelViewer"), {
-  ssr: false,
-  loading: () => (
-    <div className="absolute inset-0 flex items-center justify-center text-base-content/40">
-      <span className="loading loading-spinner loading-md" />
-    </div>
-  ),
-});
+import {
+  buildAssemblyPieces,
+  resolveAssemblySteps,
+} from "@/core/assembly-sequence";
+import InteractiveAssemblyViewer from "@/components/InteractiveAssemblyViewer";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-const EMPTY_SET = new Set<number>();
-const VISIBLE_CATEGORIES = new Set<FaceCategory>(["wall", "floor"]);
 
 function fmt(m: number, dec = 2) {
   return (m * 100).toFixed(dec);
@@ -47,22 +39,64 @@ function filterAssemblyData(
   phase1: Phase1Result,
   categoryOverrides: Map<number, FaceCategory>,
 ): AssemblyPreviewData {
+  const normalized = normalizeAssemblyPreviewData(data);
+
+  // Guía interactiva bbox: usar piezas tal cual; no filtrar por descartes locales.
+  if ((normalized.sequencePieces?.length ?? 0) > 0) {
+    const pieces = normalized.sequencePieces!;
+    const steps = normalized.steps ?? [];
+    return {
+      panels: normalized.panels.length > 0 ? normalized.panels : pieces.map((p) => ({
+        id: p.id,
+        category: p.category,
+        source_group_id: 0,
+        width_m: p.width_m,
+        height_m: p.height_m,
+        area_m2: p.width_m * p.height_m,
+        centroid: p.position,
+        normal: p.normal,
+        label: p.id,
+      })),
+      elevations: normalized.elevations,
+      steps,
+      sequencePieces: pieces,
+      viewerSchema: normalized.viewerSchema,
+      totals: {
+        wall_count: pieces.filter((p) => p.category === "wall").length,
+        floor_count: pieces.filter((p) => p.category === "floor").length,
+        total_panels: pieces.length,
+      },
+    };
+  }
+
   const groupById = new Map(phase1.groups.map((g) => [g.id, g]));
-  const panels = data.panels.filter((p) => {
+  const sourcePanels = normalized.panels;
+  const panels = sourcePanels.filter((p) => {
+    if (p.source_group_id <= 0) return true;
     const group = groupById.get(p.source_group_id);
-    if (!group) return false;
+    if (!group) return true;
     return getEffectiveCategory(group, categoryOverrides) !== "discard";
   });
   const visibleIds = new Set(panels.map((p) => p.id));
+  const steps = (normalized.steps ?? []).map((step) => ({
+    ...step,
+    panel_ids: step.panel_ids.filter((id) => visibleIds.has(id)),
+  }));
+  const sequencePieces = (normalized.sequencePieces ?? []).filter((p) =>
+    visibleIds.has(p.id),
+  );
   const elevations = Object.fromEntries(
-    Object.entries(data.elevations).map(([key, elev]) => [
+    Object.entries(normalized.elevations).map(([key, elev]) => [
       key,
-      { ...elev, panel_ids: elev.panel_ids.filter((id) => visibleIds.has(id)) },
+      { ...elev, panel_ids: (elev.panel_ids ?? []).filter((id) => visibleIds.has(id)) },
     ]),
   );
   return {
     panels,
     elevations,
+    steps: steps.length > 0 ? steps : undefined,
+    sequencePieces: sequencePieces.length > 0 ? sequencePieces : undefined,
+    viewerSchema: normalized.viewerSchema,
     totals: {
       wall_count: panels.filter((p) => p.category === "wall").length,
       floor_count: panels.filter((p) => p.category === "floor").length,
@@ -302,7 +336,6 @@ export default function AssemblyWindow({
 }: AssemblyWindowProps) {
   const [selectedPanelId, setSelectedPanelId] = useState<string | null>(null);
   const [view, setView] = useState<"elevations" | "table">("elevations");
-  const [selectedGroupIds, setSelectedGroupIds] = useState<Set<number>>(EMPTY_SET);
 
   // Close on Escape
   useEffect(() => {
@@ -323,57 +356,19 @@ export default function AssemblyWindow({
     [displayData],
   );
 
-  // Sync selected group in viewer when a panel is picked from the list
-  const handleSelectPanel = useCallback(
-    (id: string | null) => {
-      setSelectedPanelId(id);
-      if (id === null) {
-        setSelectedGroupIds(EMPTY_SET);
-        return;
-      }
-      const panel = displayData?.panels.find((p) => p.id === id);
-      if (panel) setSelectedGroupIds(new Set([panel.source_group_id]));
-    },
+  const assemblySteps = useMemo(
+    () => (displayData ? resolveAssemblySteps(displayData) : []),
     [displayData],
   );
 
-  // Toggle from 3D viewer click
-  const handleSelectGroup = useCallback(
-    (groupId: number) => {
-      if (groupId === -1) {
-        setSelectedGroupIds(EMPTY_SET);
-        setSelectedPanelId(null);
-        return;
-      }
-      const panel = displayData?.panels.find((p) => p.source_group_id === groupId);
-      if (panel) {
-        setSelectedPanelId((cur) => (cur === panel.id ? null : panel.id));
-        setSelectedGroupIds((cur) => {
-          const next = new Set(cur);
-          if (next.has(groupId)) {
-            next.delete(groupId);
-          } else {
-            next.clear();
-            next.add(groupId);
-          }
-          return next;
-        });
-      }
-    },
-    [displayData],
+  const assemblyPieces = useMemo(
+    () => (displayData ? buildAssemblyPieces(displayData, assemblySteps) : []),
+    [displayData, assemblySteps],
   );
 
-  // Etiquetas en el centroide de cada pieza (backend), no del grupo completo.
-  const assemblyPanelLabels = useMemo<AssemblyPanelLabel[]>(() => {
-    if (!displayData) return [];
-    return displayData.panels.map((p) => ({
-      groupId: p.source_group_id,
-      panelId: p.id,
-      centroid: p.centroid,
-      normal: p.normal,
-      isSelected: selectedPanelId === p.id,
-    }));
-  }, [displayData, selectedPanelId]);
+  const handleSelectPanel = useCallback((id: string | null) => {
+    setSelectedPanelId(id);
+  }, []);
 
   // ---------------------------------------------------------------------------
   // Render
@@ -487,39 +482,13 @@ export default function AssemblyWindow({
             </div>
           )}
 
-          <ModelViewer
-            faces={phase1.faces}
-            groups={phase1.groups}
-            selectedGroupIds={selectedGroupIds}
-            categoryOverrides={categoryOverrides}
-            visibleCategories={VISIBLE_CATEGORIES}
-            hiddenGroupIds={EMPTY_SET}
-            onSelectGroup={handleSelectGroup}
-            onToggleGroup={() => undefined}
-            appliedAxis={phase1.appliedAxis}
-            showCenterAxes={false}
-            isSolid={false}
-            assemblyPanelLabels={assemblyPanelLabels}
-          />
-
-          {/* Selected panel info tooltip */}
-          {selectedPanelId && (
-            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 pointer-events-none">
-              <div className="bg-base-100/95 border border-base-300/60 rounded-xl px-4 py-2 shadow-xl backdrop-blur-sm text-center">
-                {(() => {
-                  const p = panelMap.get(selectedPanelId);
-                  if (!p) return null;
-                  return (
-                    <>
-                      <p className="font-mono font-bold text-primary text-lg">{p.id}</p>
-                      <p className="text-xs text-base-content/60 font-mono">
-                        {fmt(p.width_m)} × {fmt(p.height_m)} cm &nbsp;·&nbsp; {p.area_m2.toFixed(3)} m²
-                      </p>
-                    </>
-                  );
-                })()}
-              </div>
-            </div>
+          {displayData && !loading && !error && (
+            <InteractiveAssemblyViewer
+              className="absolute inset-0"
+              steps={assemblySteps}
+              pieces={assemblyPieces}
+              viewerSchema={displayData.viewerSchema}
+            />
           )}
         </div>
 
@@ -603,7 +572,7 @@ export default function AssemblyWindow({
             {displayData && view === "table" && (
               <div className="assembly-no-print">
                 <DimensionsTable
-                  panels={displayData.panels}
+                  panels={displayData.panels ?? []}
                   selectedId={selectedPanelId}
                   onSelect={(id) => handleSelectPanel(selectedPanelId === id ? null : id)}
                 />
@@ -627,7 +596,7 @@ export default function AssemblyWindow({
                     </tr>
                   </thead>
                   <tbody>
-                    {displayData.panels.map((p, i) => (
+                    {(displayData.panels ?? []).map((p, i) => (
                       <tr
                         key={p.id}
                         className={`border-b border-base-200 ${i % 2 === 0 ? "" : "bg-gray-50"}`}

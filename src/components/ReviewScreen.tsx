@@ -49,7 +49,6 @@ import {
 import { useReviewHistory } from "@/hooks/useReviewHistory";
 import type { ModelViewerHandle } from "@/components/ModelViewer";
 import CutToolOverlay from "@/components/CutToolOverlay";
-import AssemblyWindow from "@/components/AssemblyWindow";
 import MeasureToolOverlay from "@/components/MeasureToolOverlay";
 import type {
   CutDragState,
@@ -70,6 +69,7 @@ import {
   MEASURE_SCALE_ORIGINAL,
   isOriginalMeasureScale,
 } from "@/core/print-scale";
+import { useProjectContext } from "@/context/ProjectContext";
 
 export type WallWallDecisions = Map<number, number>;
 
@@ -81,6 +81,10 @@ const ModelViewer = dynamic(() => import("./ModelViewer"), {
       <p className="text-sm font-medium">Cargando vista 3D…</p>
     </div>
   ),
+});
+
+const AssemblyWindow = dynamic(() => import("./AssemblyWindow"), {
+  ssr: false,
 });
 
 const ALL_CATEGORIES: FaceCategory[] = ["floor", "wall", "discard"];
@@ -448,6 +452,7 @@ export default function ReviewScreen({
   onRequestAssemblyPreview,
   openAssemblyInstructivo = false,
 }: ReviewScreenProps) {
+  const { assemblyGuideData, setAssemblyGuideData } = useProjectContext();
   const [selectedGroupIds, setSelectedGroupIds] = useState<Set<number>>(
     () => new Set(),
   );
@@ -1484,11 +1489,15 @@ export default function ReviewScreen({
   // Assembly guide
   // ---------------------------------------------------------------------------
 
-  const loadAssemblyPreview = useCallback(async () => {
-    if (!onRequestAssemblyPreview) return;
+  const loadAssemblyPreview = useCallback(async (forceApi = false) => {
     setAssemblyLoading(true);
     setAssemblyError(null);
     try {
+      if (!forceApi && assemblyGuideData) {
+        setAssemblyData(assemblyGuideData);
+        return;
+      }
+      if (!onRequestAssemblyPreview) return;
       const overrideList: ClassificationOverride[] = [];
       for (const [groupId, newCategory] of overrides.entries()) {
         overrideList.push({ groupId, newCategory });
@@ -1500,17 +1509,20 @@ export default function ReviewScreen({
         userCuts,
       });
       setAssemblyData(data);
+      setAssemblyGuideData(data);
     } catch (err: unknown) {
       setAssemblyError(err instanceof Error ? err.message : "Error desconocido");
     } finally {
       setAssemblyLoading(false);
     }
   }, [
+    assemblyGuideData,
     onRequestAssemblyPreview,
     overrides,
     wallWallDecisions,
     markGroupIds,
     userCuts,
+    setAssemblyGuideData,
   ]);
 
   const assemblyAutoOpenRef = useRef(false);
@@ -1522,9 +1534,10 @@ export default function ReviewScreen({
 
   // Recargar siempre al abrir la ventana — refleja overrides, cortes y fusiones actuales.
   useEffect(() => {
-    if (!assemblyWindowOpen || !onRequestAssemblyPreview) return;
+    if (!assemblyWindowOpen) return;
+    if (!onRequestAssemblyPreview && !assemblyGuideData) return;
     void loadAssemblyPreview();
-  }, [assemblyWindowOpen, onRequestAssemblyPreview, loadAssemblyPreview]);
+  }, [assemblyWindowOpen, onRequestAssemblyPreview, assemblyGuideData, loadAssemblyPreview]);
 
   const viewToolBtn =
     "btn btn-sm btn-ghost h-9 min-h-9 w-9 px-0 rounded-lg hover:bg-base-200/80";
@@ -2339,7 +2352,7 @@ export default function ReviewScreen({
       </div>
 
       {/* Assembly window overlay */}
-      {assemblyWindowOpen && onRequestAssemblyPreview && (
+      {(assemblyWindowOpen && (onRequestAssemblyPreview || assemblyGuideData)) && (
         <AssemblyWindow
           data={assemblyData}
           loading={assemblyLoading}
@@ -2347,7 +2360,7 @@ export default function ReviewScreen({
           phase1={phase1}
           categoryOverrides={overrides}
           onClose={() => setAssemblyWindowOpen(false)}
-          onReload={loadAssemblyPreview}
+          onReload={() => void loadAssemblyPreview(true)}
         />
       )}
 
