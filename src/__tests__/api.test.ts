@@ -128,8 +128,6 @@ describe("recomputeTopology", () => {
       original_filename: "modelo.stl",
       axis: "Z",
       min_area_m2: 1,
-      merges: [],
-      splits: [],
     });
   });
 });
@@ -165,7 +163,7 @@ describe("fetchNestingPreview", () => {
     expect(result.config.widthM).toBe(1);
   });
 
-  it("reintenta sin paper/page_mode si el backend falla al desempaquetar", async () => {
+  it("reintenta con paper/page_mode si el backend falla al desempaquetar", async () => {
     mockFetch
       .mockResolvedValueOnce(
         jsonResponse(
@@ -198,9 +196,12 @@ describe("fetchNestingPreview", () => {
     });
 
     expect(mockFetch).toHaveBeenCalledTimes(2);
+    const firstBody = JSON.parse(String(mockFetch.mock.calls[0][1]?.body));
     const retryBody = JSON.parse(String(mockFetch.mock.calls[1][1]?.body));
-    expect(retryBody).not.toHaveProperty("paper");
-    expect(retryBody).not.toHaveProperty("page_mode");
+    expect(firstBody).not.toHaveProperty("paper");
+    expect(firstBody).not.toHaveProperty("page_mode");
+    expect(retryBody.paper).toBe("A4");
+    expect(retryBody.page_mode).toBe("one_per_sheet");
     expect(result.config.widthM).toBe(1);
   });
 });
