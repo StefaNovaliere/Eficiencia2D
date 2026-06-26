@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useCallback, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useProjectContext } from "@/context/ProjectContext";
+import { useAuth } from "@/context/AuthContext";
 import ReviewScreen from "@/components/ReviewScreen";
 import type { ClassificationOverride } from "@/core/pipeline";
 import type { UserCut } from "@/core/user-cuts";
@@ -10,6 +11,7 @@ import {
   recomputeTopology,
   fetchNestingPreview,
   userCutsForApi,
+  resolveOriginalFilename,
   type AssemblyPreviewRequest,
   type RecomputePayload,
   type SplitOperation,
@@ -34,6 +36,7 @@ function decisionsToRecord(decisions: Map<number, number>): Record<number, numbe
 function ReviewPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { token } = useAuth();
   const openAssemblyInstructivo = searchParams.get("assembly") === "1";
   const {
     phase1Result,
@@ -53,6 +56,7 @@ function ReviewPageContent() {
     savedUserCuts,
     setSavedUserCuts,
     fileId,
+    projectFileName,
     scale,
     setScale,
     sheetConfig,
@@ -78,8 +82,10 @@ function ReviewPageContent() {
   const runRecompute = useCallback(
     async (next: Partial<Pick<RecomputePayload, "axis" | "min_area_m2" | "merges" | "splits">>) => {
       if (!fileId || !phase1Result) return;
+      const originalFilename = resolveOriginalFilename(projectFileName, phase1Result.stem);
       const payload: RecomputePayload = {
         file_id: fileId,
+        original_filename: originalFilename,
         axis: next.axis ?? phase1Result.appliedAxis,
         min_area_m2: next.min_area_m2 ?? minAreaM2,
         merges: next.merges ?? savedMerges,
@@ -87,7 +93,7 @@ function ReviewPageContent() {
       };
       setIsRecomputing(true);
       try {
-        const updated = await recomputeTopology(payload);
+        const updated = await recomputeTopology(payload, token);
         setPhase1Result(updated);
       } catch (err: unknown) {
         console.error(err);
@@ -100,7 +106,7 @@ function ReviewPageContent() {
         setIsRecomputing(false);
       }
     },
-    [fileId, phase1Result, minAreaM2, savedMerges, savedSplits, setPhase1Result],
+    [fileId, projectFileName, phase1Result, minAreaM2, savedMerges, savedSplits, setPhase1Result, token],
   );
 
   const handleRotateAxis = useCallback(() => {
@@ -170,8 +176,10 @@ function ReviewPageContent() {
       setIsGenerating(true);
 
       try {
+        const originalFilename = resolveOriginalFilename(projectFileName, phase1Result.stem);
         const nesting = await fetchNestingPreview({
           file_id: fileId,
+          original_filename: originalFilename,
           axis: phase1Result.appliedAxis,
           min_area_m2: minAreaM2,
           merges: savedMerges,
@@ -188,7 +196,7 @@ function ReviewPageContent() {
           paper,
           page_mode: pdfPageMode,
           user_cuts: userCutsForApi(userCuts),
-        });
+        }, token);
         setNestingData(nesting);
         router.push("/nesting");
       } catch (err: unknown) {
@@ -199,6 +207,7 @@ function ReviewPageContent() {
     },
     [
       fileId,
+      projectFileName,
       phase1Result,
       minAreaM2,
       savedMerges,
@@ -213,6 +222,7 @@ function ReviewPageContent() {
       setSavedUserCuts,
       setNestingData,
       router,
+      token,
     ],
   );
 

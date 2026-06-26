@@ -5,10 +5,12 @@ import { useRouter } from "next/navigation";
 import { ArrowRight, FileBox, RotateCcw, Trash2 } from "lucide-react";
 import { uploadModelFile, uploadDemoObj } from "@/services/api";
 import DemoButton from "./DemoButton";
+import { useAuth } from "@/context/AuthContext";
 import { useProjectContext } from "@/context/ProjectContext";
 
 export default function UploadForm() {
   const router = useRouter();
+  const { token } = useAuth();
   const {
     file,
     setFile,
@@ -99,7 +101,7 @@ export default function UploadForm() {
       }
       const textContent = await res.text();
       
-      const backendRes = await uploadDemoObj(textContent, "demo.obj");
+      const backendRes = await uploadDemoObj(textContent, "demo.obj", token);
       
       setFile(new File([textContent], "demo.obj", { type: "text/plain" }));
       setProjectFileName("demo.obj");
@@ -132,13 +134,13 @@ export default function UploadForm() {
     setError("");
 
     try {
-      const backendRes = await uploadModelFile(file);
+      const backendRes = await uploadModelFile(file, token);
 
       if (!backendRes.topology || backendRes.topology.faces.length === 0) {
         throw new Error("El modelo fue procesado pero no contiene caras válidas.");
       }
 
-      setProjectFileName(file.name);
+      setProjectFileName(backendRes.nombre ?? backendRes.original_filename ?? file.name);
       setFileId(backendRes.file_id);
       setPhase1Result(backendRes.topology);
       setPreviewObj(backendRes.preview_obj);

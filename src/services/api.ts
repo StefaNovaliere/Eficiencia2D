@@ -3,45 +3,49 @@ import type { Phase1Result, NestingPreviewData, ClassificationOverride } from "@
 import type { UserCut } from "@/core/user-cuts";
 import { serializeUserCutsForApi } from "@/core/user-cuts";
 import {
-  invalidateApiBaseUrl,
-  resolveApiBaseUrl,
+  fetchWithApiFallback,
+  type ApiFetchOptions,
 } from "@/services/api-base";
+import { parseApiError } from "@/services/api-errors";
+
+export type { ApiFetchOptions };
 
 /** Serializa los cortes manuales del usuario al formato snake_case del backend. */
 export function userCutsForApi(cuts: UserCut[]): Record<string, unknown>[] {
   return serializeUserCutsForApi(cuts);
 }
 
-export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
-  let baseUrl = await resolveApiBaseUrl();
-
-  try {
-    const res = await fetch(`${baseUrl}${path}`, init);
-    return res;
-  } catch (error) {
-    invalidateApiBaseUrl();
-    baseUrl = await resolveApiBaseUrl(true);
-
-    try {
-      return await fetch(`${baseUrl}${path}`, init);
-    } catch (retryError) {
-      throw retryError ?? error;
-    }
-  }
+export async function apiFetch(
+  path: string,
+  init?: RequestInit,
+  options?: ApiFetchOptions,
+): Promise<Response> {
+  return fetchWithApiFallback(path, init, options);
 }
 
 export interface UploadResponse {
   message: string;
   file_id: string;
+  proyecto_id?: string;
+  id?: string;
+  nombre?: string;
   original_filename: string;
+  formato?: string;
+  tamano_bytes?: number;
+  file_size_mb?: number;
+  fecha_creacion?: string;
+  metadata_impresion?: Record<string, unknown>;
   summary: {
     walls: number;
     floors: number;
     discards: number;
     total_groups: number;
+    total_faces?: number;
+    total_joints?: number;
   };
-  topology: Phase1Result; // Mapped from backend snake_case + packed faces
+  topology: Phase1Result;
   preview_obj: string;
+  timing?: Record<string, unknown>;
 }
 
 // Helper to convert snake_case keys to camelCase for the frontend TS interfaces
@@ -84,14 +88,105 @@ function mapTopology(topo: any, originalFilename?: string): Phase1Result {
   return camel as Phase1Result;
 }
 
+/** Normaliza la respuesta de `/api/upload` o `/api/users/me/projects`. */
+export function normalizeUploadResponse(data: Record<string, unknown>): UploadResponse {
+  const savedId = data.proyecto_id ?? data.id;
+  if (savedId != null && savedId !== "") {
+    const id = String(savedId);
+    data.proyecto_id = id;
+    data.id = id;
+    data.file_id = id;
+  } else if (data.file_id != null && data.file_id !== "") {
+    data.file_id = String(data.file_id);
+  }
+
+  const filename = String(data.original_filename ?? data.nombre ?? "");
+  if (data.original_filename == null && filename) {
+    data.original_filename = filename;
+  }
+
+  if (data.topology) {
+    data.topology = mapTopology(data.topology, filename || undefined);
+  }
+
+  return data as UploadResponse;
+}
+
 export interface SplitOperation {
   group_id: number;
   mode: "components" | "panels";
 }
 
+/**
+ * Referencia al modelo en endpoints del pipeline.
+ * Con JWT → `proyecto_id` (proyecto guardado). Sin auth → `file_id` temporal de /upload.
+ */
+export type PipelineModelRef =
+  | { proyecto_id: string; file_id?: never }
+  | { file_id: string; proyecto_id?: never };
+
+/** Convierte payload interno al JSON que espera el backend. */
+export function toWirePipelinePayload(
+  payload: Record<string, unknown>,
+  token?: string | null,
+): Record<string, unknown> {
+  const modelId = String(payload.proyecto_id ?? payload.file_id ?? "");
+  if (!modelId) {
+    throw new Error("Falta identificador del modelo (file_id / proyecto_id)");
+  }
+
+  const { file_id, proyecto_id, overrides, wall_wall_decisions, ...rest } = payload;
+  const ref: PipelineModelRef = token
+    ? { proyecto_id: modelId }
+    : { file_id: modelId };
+
+  const wire: Record<string, unknown> = { ...rest, ...ref };
+
+  if (overrides != null && typeof overrides === "object") {
+    wire.overrides = Object.fromEntries(
+      Object.entries(overrides as Record<string, unknown>).map(([k, v]) => [String(k), v]),
+    );
+  }
+  if (wall_wall_decisions != null && typeof wall_wall_decisions === "object") {
+    wire.wall_wall_decisions = Object.fromEntries(
+      Object.entries(wall_wall_decisions as Record<string, unknown>).map(([k, v]) => [
+        String(k),
+        v,
+      ]),
+    );
+  }
+
+  return wire;
+}
+
+function serializePipelineBody(
+  payload: Record<string, unknown>,
+  token?: string | null,
+): string {
+  return JSON.stringify(toWirePipelinePayload(payload), (_k, v) =>
+    v === undefined ? undefined : v,
+  );
+}
+
+/** Nombre de archivo original para payloads del pipeline. */
+export function resolveOriginalFilename(
+  projectFileName: string | null | undefined,
+  phase1Stem: string | undefined,
+  fallback = "model.obj",
+): string {
+  if (projectFileName?.trim()) return projectFileName.trim();
+  if (phase1Stem?.trim()) {
+    const stem = phase1Stem.trim();
+    return /\.(obj|stl)$/i.test(stem) ? stem : `${stem}.obj`;
+  }
+  return fallback;
+}
+
 /** Payload para `POST /api/recompute` (re-deriva la topología en el backend). */
 export interface RecomputePayload {
+  /** ID interno — se serializa como `proyecto_id` o `file_id` según auth. */
   file_id: string;
+  original_filename: string;
   axis: "Y" | "Z";
   min_area_m2: number;
   merges: number[][];
@@ -101,6 +196,7 @@ export interface RecomputePayload {
 /** Payload para `POST /api/nesting-preview`. */
 export interface NestingPreviewPayload {
   file_id: string;
+  original_filename: string;
   axis: "Y" | "Z";
   min_area_m2: number;
   merges: number[][];
@@ -128,6 +224,7 @@ export interface NestingPreviewPayload {
 export interface GenerateRequestPayload {
   file_id: string;
   original_filename: string;
+  axis?: "Y" | "Z";
   scale_denom?: number;
   paper?: string;
   /** Paginación del PDF de planchas: una plancha por página o todas en una. */
@@ -156,6 +253,7 @@ export interface GenerateResponse {
   generated_files: string[];
   zip_base64?: string;
   zip_filename?: string;
+  timing?: Record<string, unknown>;
 }
 
 export function base64ToBlob(base64: string, mime = "application/zip"): Blob {
@@ -165,7 +263,21 @@ export function base64ToBlob(base64: string, mime = "application/zip"): Blob {
   return new Blob([bytes], { type: mime });
 }
 
-export async function uploadModelFile(file: File): Promise<UploadResponse> {
+/**
+ * Sube un modelo al backend.
+ * Sin sesión: `POST /api/upload` (temporal).
+ * Con JWT: `POST /api/users/me/projects` (R2 + PostgreSQL).
+ */
+export async function uploadModelFile(
+  file: File,
+  token?: string | null,
+  nombre?: string,
+): Promise<UploadResponse> {
+  if (token) {
+    const { createUserProject } = await import("@/services/projects");
+    return createUserProject(token, file, nombre);
+  }
+
   const formData = new FormData();
   formData.append("file", file);
 
@@ -175,15 +287,10 @@ export async function uploadModelFile(file: File): Promise<UploadResponse> {
   });
 
   if (!res.ok) {
-    const errorData = await res.json().catch(() => null);
-    throw new Error(errorData?.detail || `Error del servidor: ${res.statusText}`);
+    await parseApiError(res, `Error del servidor: ${res.statusText}`);
   }
 
-  const data = await res.json();
-  if (data.topology) {
-    data.topology = mapTopology(data.topology, data.original_filename);
-  }
-  return data;
+  return normalizeUploadResponse(await res.json());
 }
 
 /**
@@ -191,16 +298,22 @@ export async function uploadModelFile(file: File): Promise<UploadResponse> {
  * eje, área mínima, fusión o división). El backend es la fuente de verdad: el
  * front reemplaza su `phase1Result` con lo que devuelve esta llamada.
  */
-export async function recomputeTopology(payload: RecomputePayload): Promise<Phase1Result> {
-  const res = await apiFetch("/api/recompute", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
+export async function recomputeTopology(
+  payload: RecomputePayload,
+  token?: string | null,
+): Promise<Phase1Result> {
+  const res = await apiFetch(
+    "/api/recompute",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: serializePipelineBody(payload as unknown as Record<string, unknown>, token),
+    },
+    token ? { token } : undefined,
+  );
 
   if (!res.ok) {
-    const errorData = await res.json().catch(() => null);
-    throw new Error(errorData?.detail || `Error al recalcular: ${res.statusText}`);
+    await parseApiError(res, `Error al recalcular: ${res.statusText}`);
   }
 
   const data = await res.json();
@@ -211,6 +324,7 @@ export async function recomputeTopology(payload: RecomputePayload): Promise<Phas
 /** Pide al backend el layout de planchas (nesting) para previsualizar. */
 export async function fetchNestingPreview(
   payload: NestingPreviewPayload,
+  token?: string | null,
 ): Promise<NestingPreviewData> {
   const attempts: NestingPreviewPayload[] = [
     payload,
@@ -222,11 +336,15 @@ export async function fetchNestingPreview(
 
   for (let i = 0; i < attempts.length; i++) {
     const body = attempts[i];
-    const res = await apiFetch("/api/nesting-preview", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body, (_k, v) => (v === undefined ? undefined : v)),
-    });
+    const res = await apiFetch(
+      "/api/nesting-preview",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: serializePipelineBody(body as unknown as Record<string, unknown>, token),
+      },
+      token ? { token } : undefined,
+    );
 
     if (res.ok) {
       return toCamelCase(await res.json()) as NestingPreviewData;
@@ -840,16 +958,20 @@ export const normalizeAssemblyGuide = normalizeAssemblyPreviewData;
 /** Fetches the interactive assembly guide (`/api/assembly-guide`, alias of assembly-preview). */
 export async function fetchAssemblyGuide(
   payload: AssemblyPreviewPayload,
+  token?: string | null,
 ): Promise<AssemblyPreviewData> {
-  const res = await apiFetch("/api/assembly-guide", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
+  const res = await apiFetch(
+    "/api/assembly-guide",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+    token ? { token } : undefined,
+  );
 
   if (!res.ok) {
-    const errorData = await res.json().catch(() => null);
-    throw new Error(errorData?.detail || `Error al cargar instructivo: ${res.statusText}`);
+    await parseApiError(res, `Error al cargar instructivo: ${res.statusText}`);
   }
 
   const raw = await res.json();
@@ -859,19 +981,23 @@ export async function fetchAssemblyGuide(
 /** @deprecated Use fetchAssemblyGuide — kept for existing call sites. */
 export async function fetchAssemblyPreview(
   payload: AssemblyPreviewPayload,
+  token?: string | null,
 ): Promise<AssemblyPreviewData> {
   try {
-    return await fetchAssemblyGuide(payload);
+    return await fetchAssemblyGuide(payload, token);
   } catch {
-    const res = await apiFetch("/api/assembly-preview", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
+    const res = await apiFetch(
+      "/api/assembly-preview",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      },
+      token ? { token } : undefined,
+    );
 
     if (!res.ok) {
-      const errorData = await res.json().catch(() => null);
-      throw new Error(errorData?.detail || `Error al cargar instructivo: ${res.statusText}`);
+      await parseApiError(res, `Error al cargar instructivo: ${res.statusText}`);
     }
 
     const raw = await res.json();
@@ -879,25 +1005,33 @@ export async function fetchAssemblyPreview(
   }
 }
 
-export async function uploadDemoObj(textContent: string, filename: string = "demo.obj"): Promise<UploadResponse> {
+export async function uploadDemoObj(
+  textContent: string,
+  filename: string = "demo.obj",
+  token?: string | null,
+): Promise<UploadResponse> {
   const blob = new Blob([textContent], { type: "text/plain" });
   const file = new File([blob], filename, { type: "text/plain" });
-  
-  return uploadModelFile(file);
+
+  return uploadModelFile(file, token);
 }
 
-export async function generateProjectFiles(payload: GenerateRequestPayload): Promise<GenerateResponse> {
-  const res = await apiFetch("/api/generate", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
+export async function generateProjectFiles(
+  payload: GenerateRequestPayload,
+  token?: string | null,
+): Promise<GenerateResponse> {
+  const res = await apiFetch(
+    "/api/generate",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: serializePipelineBody(payload as unknown as Record<string, unknown>, token),
     },
-    body: JSON.stringify(payload),
-  });
+    token ? { token } : undefined,
+  );
 
   if (!res.ok) {
-    const errorData = await res.json().catch(() => null);
-    throw new Error(errorData?.detail || `Error al generar: ${res.statusText}`);
+    await parseApiError(res, `Error al generar: ${res.statusText}`);
   }
 
   return res.json();

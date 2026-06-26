@@ -3,8 +3,8 @@
 import { useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 
-/** Alias legacy → ruta canónica del backend. */
-export default function VerifyEmailTokenPage() {
+/** Soporta links del tipo /verificar-correo/UUID (token en la ruta). */
+export default function VerificarCorreoTokenPage() {
   const router = useRouter();
   const params = useParams();
   const token = typeof params.token === "string" ? params.token : "";
