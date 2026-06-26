@@ -35,6 +35,19 @@ export interface Placement {
 }
 
 /**
+ * Paso de armado provisto por el backend (`topology.assembly_steps`). Define el
+ * ORDEN de revelación del instructivo (piso base → paredes N→E→S→O → siguiente
+ * nivel → …). El backend cameliza `group_id → groupId`.
+ */
+export interface AssemblyStep {
+  step: number;
+  groupId: number;
+  label: string;
+  /** Índice del nivel/piso al que pertenece la pieza (0 = base). */
+  level: number;
+}
+
+/**
  * Topología que devuelve el backend (`/api/upload` y `/api/recompute`). El
  * front la renderiza tal cual; no la recalcula.
  */
@@ -61,6 +74,11 @@ export interface Phase1Result {
    * Opcional: si el backend no la manda, el instructivo cae al render de cajas.
    */
   placements?: Record<number, Placement>;
+  /**
+   * Orden de armado del instructivo (piso base → paredes → siguiente nivel).
+   * Opcional: si no viene, el front sintetiza un orden por orientación.
+   */
+  assemblySteps?: AssemblyStep[];
 }
 
 export interface ClassificationOverride {

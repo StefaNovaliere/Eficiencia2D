@@ -50,6 +50,22 @@ grupo.
    - mapear cada vértice: `world = origin + u_local·u_axis + v·v_axis`.
    Así las piezas cortadas quedan ubicadas en 3D con sus huecos.
 
+## Nuevo en el backend: `topology.assembly_steps`
+`POST /api/upload` y `POST /api/recompute` ahora incluyen en `topology`:
+
+```jsonc
+"assembly_steps": [
+  { "step": 1, "group_id": 5, "label": "B1", "level": 0 },   // piso base
+  { "step": 2, "group_id": 1, "label": "A1", "level": 0 },   // pared norte, nivel 0
+  // ...
+  { "step": 8, "group_id": 6, "label": "B2", "level": 1 },   // piso nivel 1
+]
+```
+- Orden de construcción por nivel: piso base → paredes N→E→S→O → siguiente piso → etc.
+- `level` = índice del piso (0 = base). `step` = secuencial 1..N. `group_id` = `group.id`.
+- El front usa `assembly_steps` para el ORDEN de revelación (NO el orden de `groups[]`).
+  Camelizado: `assembly_steps → assemblySteps`, `group_id → groupId`.
+
 ## Notas
 - `mirrored: true`: el contorno de corte del backend viene espejado horizontalmente; al
   liftear a 3D, deshacer con `width_m − u`.
@@ -79,3 +95,9 @@ grupo.
   de nesting). Sin `placements` → cae al render de cajas (compatibilidad).
 - `src/components/InteractiveAssemblyViewer.tsx`: dibuja la malla real (doble cara) + las
   aberturas como líneas (rojas si la pieza graba la marca), con la misma animación de "drop".
+- `Phase1Result.assemblySteps` + `src/core/assembly-guide-build.ts`: el instructivo se arma en el
+  front desde la topología (no hay endpoint de preview). Si viene `assembly_steps`, define el orden
+  (un paso por pieza); si no, fallback por orientación. Fallback de geometría #1
+  (`liftFaces(faces[group.faceIndices])`) cuando no hay `placements`.
+- Robustez: `applyLift` nunca tira (cae a caja), `ErrorBoundary` envuelve el visor 3D y
+  `src/app/review/error.tsx` evita el "Application error" en pantalla en blanco.

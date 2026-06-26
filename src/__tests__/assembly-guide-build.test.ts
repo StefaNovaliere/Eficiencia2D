@@ -34,7 +34,6 @@ const QUAD: Face3D = {
     { x: 0, y: 2, z: 0 },
   ],
   normal: { x: 0, y: 0, z: 1 },
-  vertexIndices: [0, 1, 2, 3],
   innerLoops: [],
 };
 
@@ -108,6 +107,25 @@ describe("buildAssemblyGuideFromTopology", () => {
     const wall3 = data.panels.find((p) => p.id === "P3")!; // sin placement → bbox QUAD (3×2)
     expect(wall3.width_m).toBeCloseTo(3);
     expect(wall3.height_m).toBeCloseTo(2);
+  });
+
+  it("orders steps from backend assembly_steps (one piece per step, discards excluded)", () => {
+    const data = buildAssemblyGuideFromTopology(
+      phase1({
+        groups,
+        faces: [QUAD],
+        placements,
+        panelIdByGroup: { 1: "A1" },
+        assemblySteps: [
+          { step: 1, groupId: 1, label: "A1", level: 0 },
+          { step: 3, groupId: 2, label: "P2", level: 1 },
+          { step: 2, groupId: 3, label: "P3", level: 0 },
+          { step: 4, groupId: 4, label: "X", level: 1 }, // descartado → se ignora
+        ],
+      }),
+    );
+    // Orden por `step` (1,2,3), una pieza por paso, sin el grupo descartado.
+    expect(data.steps?.map((s) => s.panel_ids)).toEqual([["A1"], ["P3"], ["P2"]]);
   });
 
   it("excludes groups whose effective category is discard (override)", () => {

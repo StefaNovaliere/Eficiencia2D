@@ -118,21 +118,33 @@ function applyLift(
   lift: AssemblyLiftContext | undefined,
 ): AssemblySequencePiece {
   if (!lift) return piece;
-  const label = piece.id.trim();
-  const groupId = lift.labelToGroupId.get(label);
-  const placement = groupId === undefined ? undefined : lift.placements[groupId];
+  // Nunca dejar que un error de geometría tire abajo el render: si algo falla,
+  // la pieza cae al render de caja (sin `lifted`).
+  try {
+    const label = piece.id.trim();
+    const groupId = lift.labelToGroupId.get(label);
+    const placement = groupId === undefined ? undefined : lift.placements[groupId];
 
-  // #2: piezas de corte (pose por placement + contorno de nesting con aberturas).
-  if (placement) {
-    const panel = lift.nestingPanelById.get(label) ?? null;
-    return { ...piece, lifted: liftPiece(placement, panel), isMark: panel?.isMark === true };
-  }
+    // #2: piezas de corte (pose por placement + contorno de nesting con aberturas).
+    if (placement) {
+      const panel = lift.nestingPanelById.get(label) ?? null;
+      const lifted = liftPiece(placement, panel);
+      if (lifted.positions.length > 0) {
+        return { ...piece, lifted, isMark: panel?.isMark === true };
+      }
+    }
 
-  // #1 (fallback): geometría original del grupo (pose exacta, sin huecos).
-  const faceIndices = lift.faceIndicesByLabel?.get(label);
-  if (lift.faces && faceIndices && faceIndices.length > 0) {
-    const faces = faceIndices.map((i) => lift.faces![i]).filter(Boolean);
-    if (faces.length > 0) return { ...piece, lifted: liftFaces(faces) };
+    // #1 (fallback): geometría original del grupo (pose exacta, sin huecos).
+    const faceIndices = lift.faceIndicesByLabel?.get(label);
+    if (lift.faces && faceIndices && faceIndices.length > 0) {
+      const faces = faceIndices.map((i) => lift.faces![i]).filter(Boolean);
+      if (faces.length > 0) {
+        const lifted = liftFaces(faces);
+        if (lifted.positions.length > 0) return { ...piece, lifted };
+      }
+    }
+  } catch (err) {
+    console.error("applyLift falló para la pieza", piece.id, err);
   }
 
   return piece;
