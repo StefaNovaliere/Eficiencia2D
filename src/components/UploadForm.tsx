@@ -5,8 +5,10 @@ import { useRouter } from "next/navigation";
 import { ArrowRight, FileBox, RotateCcw, Trash2 } from "lucide-react";
 import { uploadModelFile, uploadDemoObj } from "@/services/api";
 import DemoButton from "./DemoButton";
+import SavedProjectsPicker from "./SavedProjectsPicker";
 import { useAuth } from "@/context/AuthContext";
 import { useProjectContext } from "@/context/ProjectContext";
+import { openUserProject, type UserProject } from "@/services/projects";
 
 export default function UploadForm() {
   const router = useRouter();
@@ -29,6 +31,7 @@ export default function UploadForm() {
   } = useProjectContext();
 
   const [isParsing, setIsParsing] = useState(false);
+  const [openingProjectId, setOpeningProjectId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [dragActive, setDragActive] = useState(false);
   const dropRef = useRef<HTMLDivElement>(null);
@@ -154,6 +157,49 @@ export default function UploadForm() {
       setIsParsing(false);
     }
   };
+
+  const handleOpenSavedProject = useCallback(
+    async (project: UserProject) => {
+      if (!token) return;
+
+      setError("");
+      setOpeningProjectId(project.id);
+
+      try {
+        if (hasActiveProject) resetProject();
+
+        const backendRes = await openUserProject(token, project.id);
+        const displayName =
+          backendRes.nombre ?? backendRes.original_filename ?? project.nombre;
+
+        setFile(null);
+        clearFileInput();
+        setProjectFileName(displayName);
+        setFileId(backendRes.file_id);
+        setPhase1Result(backendRes.topology);
+        setPreviewObj(backendRes.preview_obj);
+
+        router.push("/review");
+      } catch (err: unknown) {
+        setError(
+          err instanceof Error ? err.message : "No se pudo abrir el proyecto guardado.",
+        );
+      } finally {
+        setOpeningProjectId(null);
+      }
+    },
+    [
+      token,
+      hasActiveProject,
+      resetProject,
+      clearFileInput,
+      setProjectFileName,
+      setFileId,
+      setPhase1Result,
+      setPreviewObj,
+      router,
+    ],
+  );
 
   if (isParsing) {
     return (
@@ -314,6 +360,12 @@ export default function UploadForm() {
           </div>
         </div>
       </div>
+
+      <SavedProjectsPicker
+        onOpenProject={handleOpenSavedProject}
+        openingProjectId={openingProjectId}
+        disabled={isParsing}
+      />
 
       <DemoButton onClick={handleLoadDemo} />
     </>

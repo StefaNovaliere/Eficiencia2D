@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import {
   Calendar,
   FolderOpen,
-  KeyRound,
   Loader2,
   LogOut,
   Mail,
@@ -14,11 +13,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { useUserProfile } from "@/context/UserProfileContext";
-import {
-  NOMBRE_MAX_LENGTH,
-  PASSWORD_MAX_LENGTH,
-  PASSWORD_MIN_LENGTH,
-} from "@/services/users";
+import { NOMBRE_MAX_LENGTH } from "@/services/users";
 
 function formatProfileDate(iso: string | null): string {
   if (!iso) return "—";
@@ -55,7 +50,6 @@ export default function UserAccountSection() {
     isLoadingProfile,
     profileError,
     updateNombre,
-    changePassword,
     clearProfileError,
   } = useUserProfile();
 
@@ -63,13 +57,6 @@ export default function UserAccountSection() {
   const [isSavingNombre, setIsSavingNombre] = useState(false);
   const [nombreNotice, setNombreNotice] = useState<string | null>(null);
   const [nombreError, setNombreError] = useState<string | null>(null);
-
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [isSavingPassword, setIsSavingPassword] = useState(false);
-  const [passwordNotice, setPasswordNotice] = useState<string | null>(null);
-  const [passwordError, setPasswordError] = useState<string | null>(null);
 
   useEffect(() => {
     if (profile) {
@@ -100,50 +87,6 @@ export default function UserAccountSection() {
       setNombreError(err instanceof Error ? err.message : "No se pudo guardar el nombre");
     } finally {
       setIsSavingNombre(false);
-    }
-  }
-
-  async function handlePasswordSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    if (newPassword.length < PASSWORD_MIN_LENGTH) {
-      setPasswordError(
-        `La nueva contraseña debe tener al menos ${PASSWORD_MIN_LENGTH} caracteres.`,
-      );
-      return;
-    }
-    if (newPassword.length > PASSWORD_MAX_LENGTH) {
-      setPasswordError(
-        `La nueva contraseña no puede superar ${PASSWORD_MAX_LENGTH} caracteres.`,
-      );
-      return;
-    }
-    if (newPassword !== confirmPassword) {
-      setPasswordError("Las contraseñas nuevas no coinciden.");
-      return;
-    }
-    if (newPassword === currentPassword) {
-      setPasswordError("La nueva contraseña debe ser distinta a la actual.");
-      return;
-    }
-
-    setIsSavingPassword(true);
-    setPasswordError(null);
-    setPasswordNotice(null);
-    clearProfileError();
-
-    try {
-      const message = await changePassword(currentPassword, newPassword);
-      setPasswordNotice(message);
-      setCurrentPassword("");
-      setNewPassword("");
-      setConfirmPassword("");
-    } catch (err) {
-      setPasswordError(
-        err instanceof Error ? err.message : "No se pudo cambiar la contraseña",
-      );
-    } finally {
-      setIsSavingPassword(false);
     }
   }
 
@@ -182,7 +125,7 @@ export default function UserAccountSection() {
         <div>
           <h2 className="text-sm font-semibold text-base-content">Mi cuenta</h2>
           <p className="text-xs text-base-content/55 mt-1">
-            Datos de tu perfil y seguridad de la cuenta.
+            Datos de tu perfil. Para cambiar la contraseña usá la recuperación desde el login.
           </p>
         </div>
       </div>
@@ -236,9 +179,7 @@ export default function UserAccountSection() {
             disabled={isSavingNombre}
           />
         </label>
-        {nombreError && (
-          <p className="text-sm text-error">{nombreError}</p>
-        )}
+        {nombreError && <p className="text-sm text-error">{nombreError}</p>}
         {nombreNotice && !nombreError && (
           <p className="text-sm text-success">{nombreNotice}</p>
         )}
@@ -251,77 +192,6 @@ export default function UserAccountSection() {
             <Loader2 className="h-4 w-4 animate-spin" />
           ) : (
             "Guardar nombre"
-          )}
-        </button>
-      </form>
-
-      <form onSubmit={handlePasswordSubmit} className="space-y-3 pt-2 border-t border-base-300/40">
-        <div className="flex items-start gap-3">
-          <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-base-200/80 text-base-content/70 shrink-0">
-            <KeyRound size={16} />
-          </div>
-          <div>
-            <h3 className="text-sm font-semibold text-base-content">Cambiar contraseña</h3>
-            <p className="text-xs text-base-content/55 mt-0.5">
-              Mínimo {PASSWORD_MIN_LENGTH} caracteres.
-            </p>
-          </div>
-        </div>
-
-        <label className="form-control w-full">
-          <span className="label-text font-medium mb-1">Contraseña actual</span>
-          <input
-            type="password"
-            className="input input-bordered w-full bg-base-100"
-            value={currentPassword}
-            onChange={(e) => setCurrentPassword(e.target.value)}
-            autoComplete="current-password"
-            required
-            disabled={isSavingPassword}
-          />
-        </label>
-        <label className="form-control w-full">
-          <span className="label-text font-medium mb-1">Nueva contraseña</span>
-          <input
-            type="password"
-            className="input input-bordered w-full bg-base-100"
-            value={newPassword}
-            onChange={(e) => setNewPassword(e.target.value)}
-            autoComplete="new-password"
-            required
-            minLength={PASSWORD_MIN_LENGTH}
-            maxLength={PASSWORD_MAX_LENGTH}
-            disabled={isSavingPassword}
-          />
-        </label>
-        <label className="form-control w-full">
-          <span className="label-text font-medium mb-1">Confirmar nueva contraseña</span>
-          <input
-            type="password"
-            className="input input-bordered w-full bg-base-100"
-            value={confirmPassword}
-            onChange={(e) => setConfirmPassword(e.target.value)}
-            autoComplete="new-password"
-            required
-            minLength={PASSWORD_MIN_LENGTH}
-            disabled={isSavingPassword}
-          />
-        </label>
-        {passwordError && (
-          <p className="text-sm text-error">{passwordError}</p>
-        )}
-        {passwordNotice && !passwordError && (
-          <p className="text-sm text-success">{passwordNotice}</p>
-        )}
-        <button
-          type="submit"
-          className="btn btn-outline btn-sm rounded-xl border-base-300"
-          disabled={isSavingPassword}
-        >
-          {isSavingPassword ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            "Actualizar contraseña"
           )}
         </button>
       </form>
