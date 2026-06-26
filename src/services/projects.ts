@@ -158,12 +158,16 @@ export async function fetchUserProject(token: string, projectId: string): Promis
   return project;
 }
 
-/** Carga un proyecto guardado para continuar editando (topología + preview). */
+/** Reprocesa el archivo desde R2 y devuelve topología + preview (como al subir). */
 export async function openUserProject(
   token: string,
   projectId: string,
 ): Promise<UploadResponse> {
-  const res = await apiFetch(`/api/projects/${projectId}`, { method: "GET" }, { token });
+  const res = await apiFetch(
+    `/api/projects/${projectId}/open`,
+    { method: "POST" },
+    { token },
+  );
 
   if (!res.ok) {
     await parseApiError(res, "No se pudo abrir el proyecto");
@@ -173,11 +177,11 @@ export async function openUserProject(
 
   if (!data.topology || data.topology.faces.length === 0) {
     throw new Error(
-      "Este proyecto no tiene geometría disponible para continuar. Subí el archivo de nuevo.",
+      "El proyecto se procesó pero no contiene caras válidas.",
     );
   }
   if (!data.preview_obj) {
-    throw new Error("Este proyecto no tiene vista previa disponible.");
+    throw new Error("El servidor no devolvió la vista previa del proyecto.");
   }
 
   return data;

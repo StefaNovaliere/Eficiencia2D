@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { ArrowRight, FolderOpen, Loader2 } from "lucide-react";
+import { ArrowRight, FolderOpen, Loader2, Trash2 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import {
+  deleteUserProject,
   formatProjectDate,
   formatProjectSize,
   listUserProjects,
@@ -13,12 +14,14 @@ import {
 
 interface SavedProjectsPickerProps {
   onOpenProject: (project: UserProject) => void | Promise<void>;
+  onProjectDeleted?: (projectId: string) => void;
   openingProjectId?: string | null;
   disabled?: boolean;
 }
 
 export default function SavedProjectsPicker({
   onOpenProject,
+  onProjectDeleted,
   openingProjectId = null,
   disabled = false,
 }: SavedProjectsPickerProps) {
@@ -26,6 +29,9 @@ export default function SavedProjectsPicker({
   const [projects, setProjects] = useState<UserProject[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
+
+  const isBusy = disabled || Boolean(openingProjectId) || Boolean(deletingProjectId);
 
   const loadProjects = useCallback(async () => {
     if (!token) {
@@ -56,6 +62,31 @@ export default function SavedProjectsPicker({
     }
     void loadProjects();
   }, [isLoadingAuth, isAuthenticated, token, loadProjects]);
+
+  const handleDeleteProject = useCallback(
+    async (project: UserProject) => {
+      if (!token || isBusy) return;
+
+      const confirmed = window.confirm(
+        `¿Eliminar "${project.nombre}"? Esta acción no se puede deshacer.`,
+      );
+      if (!confirmed) return;
+
+      setDeletingProjectId(project.id);
+      setError(null);
+
+      try {
+        await deleteUserProject(token, project.id);
+        setProjects((prev) => prev.filter((item) => item.id !== project.id));
+        onProjectDeleted?.(project.id);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "No se pudo eliminar el proyecto");
+      } finally {
+        setDeletingProjectId(null);
+      }
+    },
+    [token, isBusy, onProjectDeleted],
+  );
 
   if (isLoadingAuth) return null;
 
@@ -129,15 +160,16 @@ export default function SavedProjectsPicker({
         <ul className="space-y-2 max-h-64 overflow-y-auto pr-1">
           {projects.map((project) => {
             const isOpening = openingProjectId === project.id;
+            const isDeleting = deletingProjectId === project.id;
             const groups = project.metadata_impresion?.summary?.total_groups;
 
             return (
-              <li key={project.id}>
+              <li key={project.id} className="flex items-stretch gap-2">
                 <button
                   type="button"
-                  disabled={disabled || isOpening || Boolean(openingProjectId)}
+                  disabled={isBusy}
                   onClick={() => void onOpenProject(project)}
-                  className="w-full flex items-center gap-3 rounded-xl border border-base-300/60 bg-base-100/50 px-3 py-3 text-left transition-colors hover:border-primary/30 hover:bg-primary/5 disabled:opacity-60"
+                  className="flex-1 min-w-0 flex items-center gap-3 rounded-xl border border-base-300/60 bg-base-100/50 px-3 py-3 text-left transition-colors hover:border-primary/30 hover:bg-primary/5 disabled:opacity-60"
                 >
                   <div className="min-w-0 flex-1">
                     <p className="font-medium text-sm truncate">{project.nombre}</p>
@@ -159,10 +191,30 @@ export default function SavedProjectsPicker({
                     </span>
                   )}
                 </button>
+                <button
+                  type="button"
+                  disabled={isBusy}
+                  onClick={() => void handleDeleteProject(project)}
+                  className="btn btn-ghost btn-sm rounded-xl text-error hover:bg-error/10 shrink-0 px-2"
+                  aria-label={`Eliminar ${project.nombre}`}
+                  title="Eliminar proyecto"
+                >
+                  {isDeleting ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Trash2 size={16} />
+                  )}
+                </button>
               </li>
             );
           })}
         </ul>
+
+        {error && (
+          <p className="text-sm text-error" role="alert">
+            {error}
+          </p>
+        )}
       </div>
     </div>
   );

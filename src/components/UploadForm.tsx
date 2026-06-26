@@ -170,7 +170,7 @@ export default function UploadForm() {
 
         const backendRes = await openUserProject(token, project.id);
         const displayName =
-          backendRes.nombre ?? backendRes.original_filename ?? project.nombre;
+          backendRes.original_filename ?? backendRes.nombre ?? project.nombre;
 
         setFile(null);
         clearFileInput();
@@ -199,6 +199,16 @@ export default function UploadForm() {
       setPreviewObj,
       router,
     ],
+  );
+
+  const handleProjectDeleted = useCallback(
+    (projectId: string) => {
+      if (fileId === projectId) {
+        resetProject();
+        clearFileInput();
+      }
+    },
+    [fileId, resetProject, clearFileInput],
   );
 
   if (isParsing) {
@@ -363,6 +373,7 @@ export default function UploadForm() {
 
       <SavedProjectsPicker
         onOpenProject={handleOpenSavedProject}
+        onProjectDeleted={handleProjectDeleted}
         openingProjectId={openingProjectId}
         disabled={isParsing}
       />
