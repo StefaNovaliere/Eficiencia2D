@@ -3,6 +3,7 @@ import "@/styles/globals.css";
 import { AuthProvider } from "@/context/AuthContext";
 import { ProjectProvider } from "@/context/ProjectContext";
 import { SettingsProvider, SettingsThemeSync } from "@/context/SettingsContext";
+import { UserProfileProvider } from "@/context/UserProfileContext";
 import { ThemeProvider } from "@/context/ThemeContext";
 import AppShell from "@/components/AppShell";
 
@@ -46,12 +47,14 @@ export default function RootLayout({
       <body className="min-h-screen bg-base-200 text-base-content antialiased font-sans">
         <ThemeProvider>
           <AuthProvider>
-            <SettingsProvider>
-              <SettingsThemeSync />
-              <ProjectProvider>
-                <AppShell>{children}</AppShell>
-              </ProjectProvider>
-            </SettingsProvider>
+            <UserProfileProvider>
+              <SettingsProvider>
+                <SettingsThemeSync />
+                <ProjectProvider>
+                  <AppShell>{children}</AppShell>
+                </ProjectProvider>
+              </SettingsProvider>
+            </UserProfileProvider>
           </AuthProvider>
         </ThemeProvider>
       </body>

@@ -2,7 +2,7 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Canvas } from "@react-three/fiber";
-import { Bounds, Grid, OrbitControls } from "@react-three/drei";
+import { Grid, OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
 import gsap from "gsap";
 import { ChevronLeft, ChevronRight } from "lucide-react";
@@ -27,7 +27,7 @@ const OPENING_COLOR = 0x0f172a; // aberturas (corte)
 const MARK_COLOR = 0xdc2626; // aberturas grabadas (marca, rojo)
 
 function isLifted(piece: AssemblySequencePiece): boolean {
-  return !!piece.lifted && piece.lifted.positions.length > 0;
+  return (piece.lifted?.positions?.length ?? 0) >= 9;
 }
 
 function pieceCategoryColor(piece: AssemblySequencePiece): number {
@@ -36,16 +36,38 @@ function pieceCategoryColor(piece: AssemblySequencePiece): number {
   return piece.color ? hexToNumber(piece.color) : PAST_COLOR;
 }
 
-function buildMeshGeometry(positions: number[]): THREE.BufferGeometry {
+function sanitizePositions(positions: number[]): number[] {
+  const out: number[] = [];
+  for (let i = 0; i + 2 < positions.length; i += 3) {
+    const x = positions[i];
+    const y = positions[i + 1];
+    const z = positions[i + 2];
+    if (Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)) {
+      out.push(x, y, z);
+    }
+  }
+  return out;
+}
+
+function buildMeshGeometry(positions: number[]): THREE.BufferGeometry | null {
+  const clean = sanitizePositions(positions);
+  if (clean.length < 9) return null;
   const g = new THREE.BufferGeometry();
-  g.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-  g.computeVertexNormals();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(clean, 3));
+  try {
+    g.computeVertexNormals();
+  } catch {
+    g.dispose();
+    return null;
+  }
   return g;
 }
 
-function buildLineGeometry(segments: number[]): THREE.BufferGeometry {
+function buildLineGeometry(segments: number[]): THREE.BufferGeometry | null {
+  const clean = sanitizePositions(segments);
+  if (clean.length < 6) return null;
   const g = new THREE.BufferGeometry();
-  g.setAttribute("position", new THREE.Float32BufferAttribute(segments, 3));
+  g.setAttribute("position", new THREE.Float32BufferAttribute(clean, 3));
   return g;
 }
 
@@ -130,7 +152,8 @@ function DroppingPiece({
     mesh.position.set(x, y + dropHeight, z);
     mesh.rotation.set(rot[0], rot[1], rot[2]);
 
-    const mat = mesh.material as THREE.MeshStandardMaterial;
+    const mat = mesh.material as THREE.MeshStandardMaterial | undefined;
+    if (!mat) return;
     mat.color.setHex(HIGHLIGHT_COLOR);
     mat.emissive.setHex(HIGHLIGHT_EMISSIVE);
     mat.emissiveIntensity = 0.45;
@@ -183,13 +206,20 @@ function DroppingPiece({
 
 /** Pieza de corte ya colocada — contorno real (con aberturas) lifteado a 3D. */
 function StaticLiftedPiece({ piece }: { piece: AssemblySequencePiece }) {
-  const lifted = piece.lifted!;
-  const geom = useMemo(() => buildMeshGeometry(lifted.positions), [lifted]);
-  const lineGeom = useMemo(
-    () => (lifted.openings.length > 0 ? buildLineGeometry(lifted.openings) : null),
+  const lifted = piece.lifted;
+  const geom = useMemo(
+    () => (lifted ? buildMeshGeometry(lifted.positions) : null),
     [lifted],
   );
-  useEffect(() => () => { geom.dispose(); lineGeom?.dispose(); }, [geom, lineGeom]);
+  const lineGeom = useMemo(
+    () =>
+      lifted && (lifted.openings?.length ?? 0) >= 6
+        ? buildLineGeometry(lifted.openings)
+        : null,
+    [lifted],
+  );
+
+  if (!geom) return <StaticPiece piece={piece} />;
 
   return (
     <group>
@@ -218,20 +248,25 @@ function DroppingLiftedPiece({
   piece: AssemblySequencePiece;
   dropHeight: number;
 }) {
-  const lifted = piece.lifted!;
+  const lifted = piece.lifted;
   const groupRef = useRef<THREE.Group>(null);
   const matRef = useRef<THREE.MeshStandardMaterial>(null);
   const fadeTweenRef = useRef<gsap.core.Tween | null>(null);
-  const geom = useMemo(() => buildMeshGeometry(lifted.positions), [lifted]);
+  const geom = useMemo(
+    () => (lifted ? buildMeshGeometry(lifted.positions) : null),
+    [lifted],
+  );
   const lineGeom = useMemo(
-    () => (lifted.openings.length > 0 ? buildLineGeometry(lifted.openings) : null),
+    () =>
+      lifted && (lifted.openings?.length ?? 0) >= 6
+        ? buildLineGeometry(lifted.openings)
+        : null,
     [lifted],
   );
   const baseColor = pieceCategoryColor(piece);
 
-  useEffect(() => () => { geom.dispose(); lineGeom?.dispose(); }, [geom, lineGeom]);
-
   useLayoutEffect(() => {
+    if (!geom) return;
     const grp = groupRef.current;
     const mat = matRef.current;
     if (!grp || !mat) return;
@@ -265,6 +300,8 @@ function DroppingLiftedPiece({
       fadeTweenRef.current?.kill();
     };
   }, [dropHeight, baseColor, geom]);
+
+  if (!geom) return <DroppingPiece piece={piece} dropHeight={dropHeight} />;
 
   return (
     <group ref={groupRef}>
@@ -302,13 +339,16 @@ function AssemblyPiece({
   if (piece.stepIndex < currentStep) {
     return lifted ? <StaticLiftedPiece piece={piece} /> : <StaticPiece piece={piece} />;
   }
-  return lifted ? (
-    <DroppingLiftedPiece
-      key={`${piece.id}-step-${currentStep}`}
-      piece={piece}
-      dropHeight={dropHeight}
-    />
-  ) : (
+  if (lifted) {
+    return (
+      <DroppingLiftedPiece
+        key={`${piece.id}-step-${currentStep}`}
+        piece={piece}
+        dropHeight={dropHeight}
+      />
+    );
+  }
+  return (
     <DroppingPiece
       key={`${piece.id}-step-${currentStep}`}
       piece={piece}
@@ -400,12 +440,19 @@ export default function InteractiveAssemblyViewer({
     () => Math.max(computeSequenceDiag(visiblePieces.length > 0 ? visiblePieces : renderPieces), 3),
     [visiblePieces, renderPieces],
   );
+  const camDist = diag * 1.35;
 
   const step = steps[currentStep];
   const focus = step?.camera_focus;
   const orbitTarget = useMemo((): [number, number, number] => {
     if (!focus) return [0, 0, 0];
-    return [focus.x - center.x, focus.y - center.y, focus.z - center.z];
+    const x = focus.x - center.x;
+    const y = focus.y - center.y;
+    const z = focus.z - center.z;
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+      return [0, 0, 0];
+    }
+    return [x, y, z];
   }, [focus, center.x, center.y, center.z]);
 
   const atStart = currentStep === 0;
@@ -427,7 +474,12 @@ export default function InteractiveAssemblyViewer({
       <Canvas
         className="absolute inset-0"
         shadows
-        camera={{ fov: 42, near: 0.05, far: 2000 }}
+        camera={{
+          position: [camDist * 0.75, camDist * 0.65, camDist * 0.75],
+          fov: 42,
+          near: 0.05,
+          far: Math.max(camDist * 30, 500),
+        }}
         dpr={[1, 2]}
       >
         <color attach="background" args={["#1a1d24"]} />
@@ -435,14 +487,12 @@ export default function InteractiveAssemblyViewer({
         <directionalLight position={[diag * 2, diag * 3, diag]} intensity={1.4} castShadow />
         <directionalLight position={[-diag, diag * 0.5, -diag]} intensity={0.5} />
 
-        <Bounds fit clip observe margin={1.25}>
-          <AssemblyScene
-            pieces={renderPieces}
-            currentStep={currentStep}
-            centerOffset={centerVec}
-            diag={diag}
-          />
-        </Bounds>
+        <AssemblyScene
+          pieces={visiblePieces.length > 0 ? visiblePieces : renderPieces}
+          currentStep={currentStep}
+          centerOffset={centerVec}
+          diag={diag}
+        />
 
         <OrbitControls
           makeDefault

@@ -3,18 +3,18 @@
 import { useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 
-/** Alias legacy → ruta canónica del backend. */
-export default function VerifyEmailTokenPage() {
+/** Soporta links del tipo /restablecer-contrasena/UUID (token en la ruta). */
+export default function RestablecerContrasenaTokenPage() {
   const router = useRouter();
   const params = useParams();
   const token = typeof params.token === "string" ? params.token : "";
 
   useEffect(() => {
     if (!token) {
-      router.replace("/verificar-correo");
+      router.replace("/restablecer-contrasena");
       return;
     }
-    router.replace(`/verificar-correo?token=${encodeURIComponent(token)}`);
+    router.replace(`/restablecer-contrasena?token=${encodeURIComponent(token)}`);
   }, [token, router]);
 
   return (

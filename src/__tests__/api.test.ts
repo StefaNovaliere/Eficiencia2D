@@ -5,11 +5,13 @@ import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 // la geometría.
 
 vi.mock("@/services/api-base", () => ({
-  resolveApiBaseUrl: vi.fn(async () => "http://test.local"),
+  fetchWithApiFallback: vi.fn(async (path: string, init?: RequestInit) => {
+    return fetch(`http://test.local${path}`, init);
+  }),
   invalidateApiBaseUrl: vi.fn(),
 }));
 
-import { recomputeTopology, fetchNestingPreview, normalizeAssemblyGuide } from "@/services/api";
+import { recomputeTopology, fetchNestingPreview, normalizeAssemblyGuide, toWirePipelinePayload } from "@/services/api";
 
 const mockFetch = vi.fn();
 
@@ -39,9 +41,53 @@ function onePackedTriangle() {
   };
 }
 
-function jsonResponse(data: unknown) {
-  return { ok: true, json: async () => data } as unknown as Response;
+function jsonResponse(data: unknown, status = 200) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    statusText: status === 200 ? "OK" : "Internal Server Error",
+    json: async () => data,
+  } as unknown as Response;
 }
+
+describe("toWirePipelinePayload", () => {
+  it("usa proyecto_id con JWT y file_id sin auth", () => {
+    expect(
+      toWirePipelinePayload(
+        { file_id: "abc", original_filename: "m.stl", axis: "Y" },
+        "token",
+      ),
+    ).toEqual({
+      original_filename: "m.stl",
+      axis: "Y",
+      proyecto_id: "abc",
+    });
+
+    expect(
+      toWirePipelinePayload({ file_id: "temp", axis: "Y" }, null),
+    ).toEqual({
+      axis: "Y",
+      file_id: "temp",
+    });
+  });
+
+  it("stringifica claves de overrides y wall_wall_decisions", () => {
+    expect(
+      toWirePipelinePayload(
+        {
+          file_id: "abc",
+          overrides: { 1: "wall" },
+          wall_wall_decisions: { 2: 0 },
+        },
+        "token",
+      ),
+    ).toMatchObject({
+      proyecto_id: "abc",
+      overrides: { "1": "wall" },
+      wall_wall_decisions: { "2": 0 },
+    });
+  });
+});
 
 describe("recomputeTopology", () => {
   it("decodes faces_packed and camelizes the topology", async () => {
@@ -59,6 +105,7 @@ describe("recomputeTopology", () => {
 
     const result = await recomputeTopology({
       file_id: "abc",
+      original_filename: "modelo.stl",
       axis: "Z",
       min_area_m2: 1,
       merges: [],
@@ -76,6 +123,12 @@ describe("recomputeTopology", () => {
     const [url, init] = mockFetch.mock.calls[0];
     expect(url).toBe("http://test.local/api/recompute");
     expect(init.method).toBe("POST");
+    expect(JSON.parse(String(init.body))).toEqual({
+      file_id: "abc",
+      original_filename: "modelo.stl",
+      axis: "Z",
+      min_area_m2: 1,
+    });
   });
 });
 
@@ -91,6 +144,7 @@ describe("fetchNestingPreview", () => {
 
     const result = await fetchNestingPreview({
       file_id: "abc",
+      original_filename: "modelo.stl",
       axis: "Y",
       min_area_m2: 1,
       merges: [],
@@ -106,6 +160,48 @@ describe("fetchNestingPreview", () => {
 
     expect(result.wallNesting.scaleDenom).toBe(50);
     expect(result.floorNesting).toBeDefined();
+    expect(result.config.widthM).toBe(1);
+  });
+
+  it("reintenta con paper/page_mode si el backend falla al desempaquetar", async () => {
+    mockFetch
+      .mockResolvedValueOnce(
+        jsonResponse(
+          { detail: "Error en nesting-preview: too many values to unpack (expected 5)" },
+          500,
+        ),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          wall_nesting: { sheets: [], config: {}, scale_denom: 50, unplaced: [] },
+          floor_nesting: { sheets: [], config: {}, scale_denom: 50, unplaced: [] },
+          config: { width_m: 1, height_m: 0.6, gap_m: 0.003 },
+        }),
+      );
+
+    const result = await fetchNestingPreview({
+      file_id: "abc",
+      original_filename: "modelo.stl",
+      axis: "Y",
+      min_area_m2: 1,
+      merges: [],
+      splits: [],
+      overrides: {},
+      wall_wall_decisions: {},
+      marks: [],
+      sheet_config: { width_m: 1, height_m: 0.6, gap_m: 0.003 },
+      scale_denom: 50,
+      paper: "A4",
+      page_mode: "one_per_sheet",
+    });
+
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    const firstBody = JSON.parse(String(mockFetch.mock.calls[0][1]?.body));
+    const retryBody = JSON.parse(String(mockFetch.mock.calls[1][1]?.body));
+    expect(firstBody).not.toHaveProperty("paper");
+    expect(firstBody).not.toHaveProperty("page_mode");
+    expect(retryBody.paper).toBe("A4");
+    expect(retryBody.page_mode).toBe("one_per_sheet");
     expect(result.config.widthM).toBe(1);
   });
 });
@@ -209,5 +305,23 @@ describe("normalizeAssemblyGuide", () => {
     expect(result.sequencePieces?.[40].stepIndex).toBe(0);
     expect(result.steps?.[0].panel_ids).toContain("P41");
     expect(result.totals.total_panels).toBe(41);
+  });
+
+  it("does not crash when nested fields are undefined during camelCase conversion", () => {
+    expect(() =>
+      normalizeAssemblyGuide({
+        pasos: [{ titulo: "Paso 1", descripcion: "Test", camera_focus: undefined }],
+        piezas: [
+          {
+            id: "A1",
+            position: [0, 0, 0],
+            size: [1, 2, 0.02],
+            rotation: undefined,
+            color: "#475569",
+          },
+        ],
+        meta: { piece_count: 1, step_count: 1, viewer_schema: "oriented_box_v1" },
+      }),
+    ).not.toThrow();
   });
 });

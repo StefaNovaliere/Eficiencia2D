@@ -5,20 +5,30 @@ import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 import BackgroundSymbols from "@/components/BackgroundSymbols";
 import { useAuth } from "@/context/AuthContext";
-import { Mail, CheckCircle2, ArrowRight } from "lucide-react";
+import {
+  NOMBRE_MAX_LENGTH,
+  PASSWORD_MAX_LENGTH,
+  PASSWORD_MIN_LENGTH,
+} from "@/services/auth";
+import { Mail, CheckCircle2, ArrowRight, Eye, EyeOff } from "lucide-react";
 
 type AuthMode = "login" | "register";
 
 interface AuthFormProps {
   mode: AuthMode;
+  /** Mensaje tras restablecer contraseña (login). */
+  passwordUpdatedNotice?: boolean;
 }
 
-export default function AuthForm({ mode }: AuthFormProps) {
+export default function AuthForm({ mode, passwordUpdatedNotice }: AuthFormProps) {
   const router = useRouter();
   const { login, register } = useAuth();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [nombre, setNombre] = useState("");
   const [error, setError] = useState("");
   const [unverifiedEmail, setUnverifiedEmail] = useState(false);
@@ -30,19 +40,41 @@ export default function AuthForm({ mode }: AuthFormProps) {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
+    setUnverifiedEmail(false);
+
+    const trimmedEmail = email.trim();
+    if (isRegister) {
+      if (password.length < PASSWORD_MIN_LENGTH) {
+        setError(`La contraseña debe tener al menos ${PASSWORD_MIN_LENGTH} caracteres.`);
+        return;
+      }
+      if (password.length > PASSWORD_MAX_LENGTH) {
+        setError(`La contraseña no puede superar ${PASSWORD_MAX_LENGTH} caracteres.`);
+        return;
+      }
+      if (password !== confirmPassword) {
+        setError("Las contraseñas no coinciden.");
+        return;
+      }
+      const trimmedNombre = nombre.trim();
+      if (trimmedNombre.length > NOMBRE_MAX_LENGTH) {
+        setError(`El nombre no puede superar ${NOMBRE_MAX_LENGTH} caracteres.`);
+        return;
+      }
+    }
+
     setIsLoading(true);
 
     try {
       if (isRegister) {
-        const res = await register(email.trim(), password, nombre.trim() || undefined);
+        const res = await register(trimmedEmail, password, nombre.trim() || undefined);
         setPendingEmail(res.email);
       } else {
-        await login(email.trim(), password);
+        await login(trimmedEmail, password);
         router.push("/");
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Ocurrió un error inesperado";
-      // Detectar cuenta pendiente de verificación (mensaje del backend)
       const isUnverified =
         msg.toLowerCase().includes("verific") ||
         msg.toLowerCase().includes("pendiente");
@@ -144,6 +176,12 @@ export default function AuthForm({ mode }: AuthFormProps) {
         <div className="card bg-base-100 shadow-2xl border border-base-200">
           <div className="card-body p-6 md:p-8">
             <form onSubmit={handleSubmit} className="space-y-4">
+              {passwordUpdatedNotice && !isRegister && (
+                <div className="alert alert-success rounded-xl text-sm">
+                  <span>Contraseña actualizada. Ya podés iniciar sesión.</span>
+                </div>
+              )}
+
               {isRegister && (
                 <label className="form-control w-full">
                   <span className="label-text font-medium mb-1">Nombre</span>
@@ -154,6 +192,7 @@ export default function AuthForm({ mode }: AuthFormProps) {
                     value={nombre}
                     onChange={(e) => setNombre(e.target.value)}
                     autoComplete="name"
+                    maxLength={NOMBRE_MAX_LENGTH}
                   />
                 </label>
               )}
@@ -173,17 +212,68 @@ export default function AuthForm({ mode }: AuthFormProps) {
 
               <label className="form-control w-full">
                 <span className="label-text font-medium mb-1">Contraseña</span>
-                <input
-                  type="password"
-                  className="input input-bordered w-full bg-base-100"
-                  placeholder={isRegister ? "Mínimo 6 caracteres" : "Tu contraseña"}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                  minLength={isRegister ? 6 : 1}
-                  autoComplete={isRegister ? "new-password" : "current-password"}
-                />
+                <div className="relative">
+                  <input
+                    type={isRegister && showPassword ? "text" : "password"}
+                    className="input input-bordered w-full bg-base-100 pr-11"
+                    placeholder={isRegister ? "Mínimo 6 caracteres" : "Tu contraseña"}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                    minLength={isRegister ? PASSWORD_MIN_LENGTH : 1}
+                    maxLength={isRegister ? PASSWORD_MAX_LENGTH : undefined}
+                    autoComplete={isRegister ? "new-password" : "current-password"}
+                  />
+                  {isRegister && (
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm btn-circle absolute right-1 top-1/2 -translate-y-1/2"
+                      onClick={() => setShowPassword((v) => !v)}
+                      aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+                    >
+                      {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                  )}
+                </div>
               </label>
+
+              {!isRegister && (
+                <div className="text-right -mt-1">
+                  <Link
+                    href="/olvide-contrasena"
+                    className="text-sm text-primary font-medium hover:underline"
+                  >
+                    ¿Olvidaste tu contraseña?
+                  </Link>
+                </div>
+              )}
+
+              {isRegister && (
+                <label className="form-control w-full">
+                  <span className="label-text font-medium mb-1">Confirmar contraseña</span>
+                  <div className="relative">
+                    <input
+                      type={showConfirmPassword ? "text" : "password"}
+                      className="input input-bordered w-full bg-base-100 pr-11"
+                      placeholder="Repetí tu contraseña"
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      required
+                      minLength={PASSWORD_MIN_LENGTH}
+                      maxLength={PASSWORD_MAX_LENGTH}
+                      autoComplete="new-password"
+                    />
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm btn-circle absolute right-1 top-1/2 -translate-y-1/2"
+                      onClick={() => setShowConfirmPassword((v) => !v)}
+                      aria-label={showConfirmPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+                    >
+                      {showConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                  </div>
+                </label>
+              )}
 
               {error && (
                 <div className="alert alert-error rounded-xl flex-col items-start gap-1">

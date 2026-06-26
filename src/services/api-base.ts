@@ -5,6 +5,13 @@ const HEALTH_CHECK_TIMEOUT_MS = 1500;
 let cachedBaseUrl: string | null = null;
 let resolvePromise: Promise<string> | null = null;
 
+export interface ApiFetchOptions {
+  /** JWT de sesión — se envía como `Authorization: Bearer …`. */
+  token?: string;
+  /** Solo para flujos basados en cookies (no JWT). */
+  useCookies?: boolean;
+}
+
 function normalizeBaseUrl(url: string): string {
   const trimmed = url.trim().replace(/\/$/, "");
   if (!/^https?:\/\//i.test(trimmed)) {
@@ -67,4 +74,72 @@ export async function resolveApiBaseUrl(force = false): Promise<string> {
 
 export function invalidateApiBaseUrl(): void {
   cachedBaseUrl = null;
+}
+
+function cloneRequestBody(body: BodyInit | null | undefined): BodyInit | null | undefined {
+  if (body instanceof FormData) {
+    const clone = new FormData();
+    for (const [key, value] of body.entries()) {
+      clone.append(key, value);
+    }
+    return clone;
+  }
+  return body;
+}
+
+function buildRequestInit(init: RequestInit | undefined, options?: ApiFetchOptions): RequestInit {
+  const headers = new Headers(init?.headers);
+
+  if (options?.token) {
+    headers.set("Authorization", `Bearer ${options.token}`);
+  }
+
+  return {
+    ...init,
+    headers,
+    ...(options?.useCookies ? { credentials: "include" as RequestCredentials } : {}),
+  };
+}
+
+async function fetchAtBase(
+  baseUrl: string,
+  path: string,
+  init: RequestInit,
+): Promise<Response> {
+  return fetch(`${baseUrl}${path}`, init);
+}
+
+/**
+ * Fetch al backend con fallback local → remoto.
+ * JWT: pasar `options.token` (sin `credentials: "include"`).
+ * Cookies: pasar `options.useCookies: true`.
+ */
+export async function fetchWithApiFallback(
+  path: string,
+  init?: RequestInit,
+  options?: ApiFetchOptions,
+): Promise<Response> {
+  let baseUrl = await resolveApiBaseUrl();
+  const requestInit = buildRequestInit(init, options);
+
+  try {
+    return await fetchAtBase(baseUrl, path, requestInit);
+  } catch (error) {
+    invalidateApiBaseUrl();
+    baseUrl = await resolveApiBaseUrl(true);
+
+    try {
+      const retryInit: RequestInit = {
+        ...requestInit,
+        body: cloneRequestBody(requestInit.body),
+      };
+      return await fetchAtBase(baseUrl, path, retryInit);
+    } catch (retryError) {
+      const message =
+        retryError instanceof TypeError || error instanceof TypeError
+          ? "No se pudo conectar al servidor. Verificá que el backend esté en ejecución."
+          : undefined;
+      throw message ? new Error(message) : retryError ?? error;
+    }
+  }
 }
