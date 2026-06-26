@@ -105,7 +105,6 @@ describe("liftPiece", () => {
         { x: 0, y: 1, z: 1 },
       ],
       normal: { x: 0, y: 0, z: 1 },
-      vertexIndices: [0, 1, 2, 3],
       innerLoops: [],
     };
     const g = liftFaces([quad]);

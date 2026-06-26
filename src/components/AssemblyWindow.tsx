@@ -27,6 +27,7 @@ import {
 } from "@/core/assembly-sequence";
 import { groupLabel } from "@/core/assembly-guide-build";
 import { useProjectContext } from "@/context/ProjectContext";
+import ErrorBoundary from "@/components/ErrorBoundary";
 import InteractiveAssemblyViewer from "@/components/InteractiveAssemblyViewer";
 
 // ---------------------------------------------------------------------------
@@ -519,12 +520,26 @@ export default function AssemblyWindow({
           )}
 
           {displayData && !loading && !error && (
-            <InteractiveAssemblyViewer
-              className="absolute inset-0"
-              steps={assemblySteps}
-              pieces={assemblyPieces}
-              viewerSchema={displayData.viewerSchema}
-            />
+            <ErrorBoundary
+              fallback={(reset) => (
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center px-8">
+                  <p className="text-error font-semibold">No se pudo dibujar el armado 3D</p>
+                  <p className="text-sm text-base-content/50">
+                    Podés seguir usando la lista de piezas a la derecha.
+                  </p>
+                  <button type="button" className="btn btn-outline btn-sm" onClick={reset}>
+                    Reintentar
+                  </button>
+                </div>
+              )}
+            >
+              <InteractiveAssemblyViewer
+                className="absolute inset-0"
+                steps={assemblySteps}
+                pieces={assemblyPieces}
+                viewerSchema={displayData.viewerSchema}
+              />
+            </ErrorBoundary>
           )}
         </div>
 
