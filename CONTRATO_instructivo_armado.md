@@ -66,6 +66,27 @@ grupo.
 - El front usa `assembly_steps` para el ORDEN de revelación (NO el orden de `groups[]`).
   Camelizado: `assembly_steps → assemblySteps`, `group_id → groupId`.
 
+## v2 — Método OBLIGATORIO: malla original + overlay de encastres 3D
+Los bugs (huecos que no se ven + piso "expandido" en la 2da planta) salían de reconstruir la
+pieza desde el panel 2D de corte (silueta proyectada/espejada/escalada). **NO reconstruir desde
+el panel 2D.**
+
+1. **Cuerpo + huecos + pose = malla original.** Renderizar `faces_packed[group.face_indices]` tal
+   cual, por paso de `assembly_steps` (idéntico al visor de `/review`). Los huecos aparecen solos
+   (son gaps reales de la malla). No hace falta `placements`.
+2. **Encastres (ranuras) = overlay desde `plate_joints`** en la respuesta de
+   `POST /api/nesting-preview` (ya en world coords):
+
+```jsonc
+"plate_joints": [
+  { "cut_id": 12, "cutter_id": 7,
+    "a": {"x":..,"y":..,"z":..}, "b": {"x":..,"y":..,"z":..}, "width": 0.018 }
+]
+```
+   - Filtrar por `cut_id == group.id`; al revelar esa pieza, dibujar el slot.
+   - slot = rectángulo `a→b` engrosado `width` sobre el plano de la cara (perp = normal × dir).
+   - No requiere liftear nada. Camelizado: `plate_joints→plateJoints`, `cut_id→cutId`.
+
 ## Notas
 - `mirrored: true`: el contorno de corte del backend viene espejado horizontalmente; al
   liftear a 3D, deshacer con `width_m − u`.
@@ -82,22 +103,17 @@ grupo.
 
 ---
 
-## Implementación en el front (esta app)
-- `Phase1Result.placements` (camelizado: `uAxis`, `vAxis`, `widthM`, `heightM`, `mirrored`)
-  en `src/core/pipeline.ts`.
-- `src/core/assembly-lift.ts`: `edgesToRings` (reconstruye anillos exterior/huecos desde los
-  `edges` del panel) y `liftPiece(placement, panel)` (escala por `placement.widthM /
-  panel.widthM`, deshace espejo, liftea con `origin + u·uAxis + v·vAxis`, triangula con
-  `THREE.ShapeUtils.triangulateShape` admitiendo huecos). Si no hay panel de nesting, usa el
-  rectángulo del placement (pose correcta, sin huecos).
-- `src/core/assembly-sequence.ts`: `buildAssemblyPieces(data, steps, liftContext?)` adjunta la
-  geometría lifteada por pieza (join etiqueta→grupo vía `panelIdByGroup`, contorno vía paneles
-  de nesting). Sin `placements` → cae al render de cajas (compatibilidad).
-- `src/components/InteractiveAssemblyViewer.tsx`: dibuja la malla real (doble cara) + las
-  aberturas como líneas (rojas si la pieza graba la marca), con la misma animación de "drop".
-- `Phase1Result.assemblySteps` + `src/core/assembly-guide-build.ts`: el instructivo se arma en el
-  front desde la topología (no hay endpoint de preview). Si viene `assembly_steps`, define el orden
-  (un paso por pieza); si no, fallback por orientación. Fallback de geometría #1
-  (`liftFaces(faces[group.faceIndices])`) cuando no hay `placements`.
-- Robustez: `applyLift` nunca tira (cae a caja), `ErrorBoundary` envuelve el visor 3D y
+## Implementación en el front (esta app) — v2 vigente
+- **Cuerpo (v2):** `applyLift` (`src/core/assembly-sequence.ts`) arma cada pieza con
+  `liftFaces(faces[group.faceIndices])` (`src/core/assembly-lift.ts`): la malla original del grupo
+  en coords de mundo, igual que `/review`. Los huecos salen como gaps reales. Ya **no** se
+  reconstruye desde el panel 2D (`liftPiece`/`edgesToRings` quedan sin uso en el instructivo).
+- **Encastres (v2):** `PlateJoint` + `NestingPreviewData.plateJoints` (`src/core/pipeline.ts`);
+  `buildSlots(joints, normal)` (`assembly-lift.ts`) engrosa cada `a→b` por `width` sobre el plano de
+  la cara. `AssemblyWindow` agrupa `plateJoints` por `cutId` y pasa `normalByGroupId`.
+- **Orden:** `Phase1Result.assemblySteps` + `assembly-guide-build.ts` (un paso por pieza; aplicado
+  en TODAS las fuentes vía `stepsFromAssemblySteps`). Fallback por orientación si no viene.
+- **Visor:** `InteractiveAssemblyViewer.tsx` dibuja la malla (doble cara) + las ranuras como
+  overlay ámbar, con la animación de "drop".
+- **Robustez:** `applyLift` nunca tira (cae a caja), `ErrorBoundary` envuelve el visor 3D y
   `src/app/review/error.tsx` evita el "Application error" en pantalla en blanco.

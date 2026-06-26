@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { edgesToRings, liftPiece, liftFaces } from "@/core/assembly-lift";
-import type { Placement } from "@/core/pipeline";
+import { edgesToRings, liftPiece, liftFaces, buildSlots } from "@/core/assembly-lift";
+import type { Placement, PlateJoint } from "@/core/pipeline";
 import type { NestingPanel } from "@/core/sheet-nester";
 import type { Face3D } from "@/core/types";
 
@@ -114,6 +114,28 @@ describe("liftPiece", () => {
     for (let i = 0; i < g.positions.length; i += 3) {
       expect(g.positions[i + 2]).toBeCloseTo(1);
     }
+  });
+
+  it("buildSlots (overlay v2) thickens each plate_joint into a quad on the face plane", () => {
+    // Segmento a→b a lo largo de X, normal +Z → la ranura se engrosa en Y.
+    const joints: PlateJoint[] = [
+      { cutId: 1, cutterId: 2, a: { x: 0, y: 1, z: 0 }, b: { x: 1, y: 1, z: 0 }, width: 0.02 },
+    ];
+    const slots = buildSlots(joints, { x: 0, y: 0, z: 1 });
+    // 2 triángulos × 3 × 3 = 18.
+    expect(slots.length).toBe(18);
+    // Engrosado ±0.01 en Y alrededor de y=1 → valores de Y en [0.99, 1.01].
+    for (let i = 0; i < slots.length; i += 3) {
+      expect(slots[i + 1]).toBeGreaterThan(0.985);
+      expect(slots[i + 1]).toBeLessThan(1.015);
+    }
+  });
+
+  it("buildSlots ignora joints degenerados (a==b)", () => {
+    const joints: PlateJoint[] = [
+      { cutId: 1, cutterId: 2, a: { x: 0, y: 0, z: 0 }, b: { x: 0, y: 0, z: 0 }, width: 0.02 },
+    ];
+    expect(buildSlots(joints, { x: 0, y: 0, z: 1 })).toEqual([]);
   });
 
   it("emits opening segments for holes", () => {
