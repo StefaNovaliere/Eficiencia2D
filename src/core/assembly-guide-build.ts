@@ -157,7 +157,7 @@ function pieceStepTitle(category: FaceCategory, label: string, multiLevel: boole
  * en el orden dado (piso base → paredes → siguiente nivel). Devuelve null si no
  * hay `assembly_steps`.
  */
-function stepsFromAssemblySteps(
+export function stepsFromAssemblySteps(
   phase1: Phase1Result,
   overrides: Map<number, FaceCategory> | undefined,
   validLabels: Set<string>,
@@ -185,6 +185,10 @@ function stepsFromAssemblySteps(
       panel_ids: [label],
     });
   }
+
+  // Si ningún paso del backend matcheó con las piezas visibles, no aplica
+  // (evita reordenar por orden de panel). El caller cae a su fallback.
+  if (placed.size === 0) return null;
 
   // Piezas no referenciadas por assembly_steps → un paso cada una al final.
   for (const label of validLabels) {
