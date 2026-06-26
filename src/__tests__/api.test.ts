@@ -5,11 +5,13 @@ import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 // la geometría.
 
 vi.mock("@/services/api-base", () => ({
-  resolveApiBaseUrl: vi.fn(async () => "http://test.local"),
+  fetchWithApiFallback: vi.fn(async (path: string, init?: RequestInit) => {
+    return fetch(`http://test.local${path}`, init);
+  }),
   invalidateApiBaseUrl: vi.fn(),
 }));
 
-import { recomputeTopology, fetchNestingPreview, normalizeAssemblyGuide } from "@/services/api";
+import { recomputeTopology, fetchNestingPreview, normalizeAssemblyGuide, toWirePipelinePayload } from "@/services/api";
 
 const mockFetch = vi.fn();
 
@@ -48,6 +50,45 @@ function jsonResponse(data: unknown, status = 200) {
   } as unknown as Response;
 }
 
+describe("toWirePipelinePayload", () => {
+  it("usa proyecto_id con JWT y file_id sin auth", () => {
+    expect(
+      toWirePipelinePayload(
+        { file_id: "abc", original_filename: "m.stl", axis: "Y" },
+        "token",
+      ),
+    ).toEqual({
+      original_filename: "m.stl",
+      axis: "Y",
+      proyecto_id: "abc",
+    });
+
+    expect(
+      toWirePipelinePayload({ file_id: "temp", axis: "Y" }, null),
+    ).toEqual({
+      axis: "Y",
+      file_id: "temp",
+    });
+  });
+
+  it("stringifica claves de overrides y wall_wall_decisions", () => {
+    expect(
+      toWirePipelinePayload(
+        {
+          file_id: "abc",
+          overrides: { 1: "wall" },
+          wall_wall_decisions: { 2: 0 },
+        },
+        "token",
+      ),
+    ).toMatchObject({
+      proyecto_id: "abc",
+      overrides: { "1": "wall" },
+      wall_wall_decisions: { "2": 0 },
+    });
+  });
+});
+
 describe("recomputeTopology", () => {
   it("decodes faces_packed and camelizes the topology", async () => {
     mockFetch.mockResolvedValueOnce(
@@ -64,6 +105,7 @@ describe("recomputeTopology", () => {
 
     const result = await recomputeTopology({
       file_id: "abc",
+      original_filename: "modelo.stl",
       axis: "Z",
       min_area_m2: 1,
       merges: [],
@@ -81,6 +123,14 @@ describe("recomputeTopology", () => {
     const [url, init] = mockFetch.mock.calls[0];
     expect(url).toBe("http://test.local/api/recompute");
     expect(init.method).toBe("POST");
+    expect(JSON.parse(String(init.body))).toEqual({
+      file_id: "abc",
+      original_filename: "modelo.stl",
+      axis: "Z",
+      min_area_m2: 1,
+      merges: [],
+      splits: [],
+    });
   });
 });
 
@@ -96,6 +146,7 @@ describe("fetchNestingPreview", () => {
 
     const result = await fetchNestingPreview({
       file_id: "abc",
+      original_filename: "modelo.stl",
       axis: "Y",
       min_area_m2: 1,
       merges: [],
@@ -132,6 +183,7 @@ describe("fetchNestingPreview", () => {
 
     const result = await fetchNestingPreview({
       file_id: "abc",
+      original_filename: "modelo.stl",
       axis: "Y",
       min_area_m2: 1,
       merges: [],
