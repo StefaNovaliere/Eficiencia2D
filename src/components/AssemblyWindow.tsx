@@ -25,7 +25,7 @@ import {
   resolveAssemblySteps,
   type AssemblyLiftContext,
 } from "@/core/assembly-sequence";
-import { groupLabel } from "@/core/assembly-guide-build";
+import { groupLabel, stepsFromAssemblySteps } from "@/core/assembly-guide-build";
 import { useProjectContext } from "@/context/ProjectContext";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import InteractiveAssemblyViewer from "@/components/InteractiveAssemblyViewer";
@@ -352,6 +352,20 @@ export default function AssemblyWindow({
     return () => window.removeEventListener("keydown", handler);
   }, [onClose]);
 
+  // Diagnóstico: si el backend no manda `assembly_steps`, el orden de armado
+  // usa un respaldo del front (por eso puede verse "igual que antes").
+  useEffect(() => {
+    if (!data) return;
+    const n = phase1.assemblySteps?.length ?? 0;
+    if (n === 0) {
+      console.warn(
+        "[instructivo] topology.assembly_steps ausente: el backend aún no envía el orden de armado; usando respaldo del front.",
+      );
+    } else {
+      console.info(`[instructivo] usando assembly_steps del backend (${n} pasos).`);
+    }
+  }, [data, phase1.assemblySteps]);
+
   const displayData = useMemo(
     () => (data ? filterAssemblyData(data, phase1, categoryOverrides) : null),
     [data, phase1, categoryOverrides],
@@ -362,10 +376,17 @@ export default function AssemblyWindow({
     [displayData],
   );
 
-  const assemblySteps = useMemo(
-    () => (displayData ? resolveAssemblySteps(displayData) : []),
-    [displayData],
-  );
+  // Orden de revelación: SIEMPRE `assembly_steps` del backend cuando viene
+  // (contrato), sin importar si los datos son del preview o del ZIP. Si no hay
+  // assembly_steps, se usa el orden de la guía (pasos/elevaciones).
+  const assemblySteps = useMemo(() => {
+    if (!displayData) return [];
+    const validLabels = new Set(displayData.panels.map((p) => p.id));
+    return (
+      stepsFromAssemblySteps(phase1, categoryOverrides, validLabels) ??
+      resolveAssemblySteps(displayData)
+    );
+  }, [displayData, phase1, categoryOverrides]);
 
   // Contexto para liftear cada pieza a su pose 3D real (instructivo #2): pose
   // desde `placements` (topology) + contorno de corte desde los paneles de
