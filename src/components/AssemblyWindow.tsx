@@ -16,9 +16,9 @@ import {
   type AssemblyPreviewData,
   type AssemblyPanel,
 } from "@/services/api";
-import type { Phase1Result } from "@/core/pipeline";
+import type { Phase1Result, PlateJoint } from "@/core/pipeline";
 import type { FaceCategory } from "@/core/group-classifier";
-import type { NestingPanel } from "@/core/sheet-nester";
+import type { Vec3 } from "@/core/types";
 import { getEffectiveCategory } from "@/core/discard-by-area";
 import {
   buildAssemblyPieces,
@@ -392,31 +392,29 @@ export default function AssemblyWindow({
   // desde `placements` (topology) + contorno de corte desde los paneles de
   // nesting. Si falta cualquiera, buildAssemblyPieces cae al render de cajas.
   const liftContext = useMemo<AssemblyLiftContext>(() => {
-    // Mapas por etiqueta (misma `groupLabel` que el builder → join consistente).
+    // v2: cuerpo = malla original del grupo; ranuras = plate_joints del nesting.
     const labelToGroupId = new Map<string, number>();
     const faceIndicesByLabel = new Map<string, number[]>();
+    const normalByGroupId = new Map<number, Vec3>();
     for (const g of phase1.groups) {
       const label = groupLabel(g, phase1.panelIdByGroup);
       labelToGroupId.set(label, g.id);
       faceIndicesByLabel.set(label, g.faceIndices);
+      normalByGroupId.set(g.id, g.representativeNormal);
     }
-    const nestingPanelById = new Map<string, NestingPanel>();
-    if (nestingData) {
-      for (const result of [nestingData.wallNesting, nestingData.floorNesting]) {
-        if (!result?.sheets) continue;
-        for (const sheet of result.sheets) {
-          for (const placed of sheet.panels) {
-            nestingPanelById.set(placed.panel.id.trim(), placed.panel);
-          }
-        }
-      }
+    // Encastres por grupo que los recibe (cut_id).
+    const plateJointsByGroupId = new Map<number, PlateJoint[]>();
+    for (const j of nestingData?.plateJoints ?? []) {
+      const arr = plateJointsByGroupId.get(j.cutId);
+      if (arr) arr.push(j);
+      else plateJointsByGroupId.set(j.cutId, [j]);
     }
     return {
-      placements: phase1.placements ?? {},
       labelToGroupId,
-      nestingPanelById,
       faces: phase1.faces,
       faceIndicesByLabel,
+      plateJointsByGroupId,
+      normalByGroupId,
     };
   }, [phase1, nestingData]);
 

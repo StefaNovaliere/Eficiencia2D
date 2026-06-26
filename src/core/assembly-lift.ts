@@ -15,8 +15,8 @@
 // ============================================================================
 
 import * as THREE from "three";
-import type { Face3D, Vec2 } from "./types";
-import type { Placement } from "./pipeline";
+import type { Face3D, Vec2, Vec3 } from "./types";
+import type { Placement, PlateJoint } from "./pipeline";
 import type { NestingPanel } from "./sheet-nester";
 
 export interface LiftedPieceGeometry {
@@ -26,6 +26,8 @@ export interface LiftedPieceGeometry {
   openings: number[];
   /** True si la pieza tiene aberturas (huecos) lifteadas. */
   hasHoles: boolean;
+  /** Triángulos de las ranuras de encastre (overlay v2), en coords de mundo. */
+  slots?: number[];
 }
 
 type Edge = { a: Vec2; b: Vec2; hole?: boolean };
@@ -283,4 +285,45 @@ function pushRingSegments(ring: Ring, placement: Placement, out: number[]): void
     const b = liftUV(ring[(i + 1) % ring.length].x, ring[(i + 1) % ring.length].y, placement);
     out.push(a.x, a.y, a.z, b.x, b.y, b.z);
   }
+}
+
+/**
+ * Overlay v2: ranuras de encastre. Cada `PlateJoint` (segmento a→b en mundo,
+ * con `width`) se dibuja como un rectángulo fino sobre el plano de la cara
+ * (perpendicular = normal × dirección), engrosado `width`. Ya viene en coords
+ * de mundo → no se liftea nada. Devuelve triángulos (x,y,z planos).
+ */
+export function buildSlots(joints: PlateJoint[], normal: Vec3): number[] {
+  const out: number[] = [];
+  const n = new THREE.Vector3(normal.x, normal.y, normal.z);
+  if (n.lengthSq() < EPS) n.set(0, 0, 1);
+  n.normalize();
+
+  for (const j of joints) {
+    if (!j?.a || !j?.b) continue;
+    const a = new THREE.Vector3(j.a.x, j.a.y, j.a.z);
+    const b = new THREE.Vector3(j.b.x, j.b.y, j.b.z);
+    const dir = new THREE.Vector3().subVectors(b, a);
+    if (dir.lengthSq() < EPS) continue;
+    dir.normalize();
+
+    // Perpendicular dentro del plano de la cara.
+    let perp = new THREE.Vector3().crossVectors(n, dir);
+    if (perp.lengthSq() < EPS) continue;
+    perp.normalize();
+    const half = (Number.isFinite(j.width) && j.width > 0 ? j.width : 0.012) / 2;
+    perp = perp.multiplyScalar(half);
+
+    // Pequeño offset sobre la normal para evitar z-fighting con la malla.
+    const off = n.clone().multiplyScalar(0.0015);
+
+    const a1 = a.clone().add(perp).add(off);
+    const a2 = a.clone().sub(perp).add(off);
+    const b1 = b.clone().add(perp).add(off);
+    const b2 = b.clone().sub(perp).add(off);
+
+    pushTri(out, a1, a2, b1);
+    pushTri(out, a2, b2, b1);
+  }
+  return out;
 }

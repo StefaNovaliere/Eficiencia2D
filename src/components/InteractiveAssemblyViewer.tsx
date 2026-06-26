@@ -25,6 +25,7 @@ const WALL_COLOR = 0x22d3ee; // cian
 const FLOOR_COLOR = 0xff2bd6; // rosa
 const OPENING_COLOR = 0x0f172a; // aberturas (corte)
 const MARK_COLOR = 0xdc2626; // aberturas grabadas (marca, rojo)
+const SLOT_COLOR = 0xfacc15; // ranuras de encastre (overlay v2, ámbar)
 
 function isLifted(piece: AssemblySequencePiece): boolean {
   return (piece.lifted?.positions?.length ?? 0) >= 9;
@@ -218,6 +219,10 @@ function StaticLiftedPiece({ piece }: { piece: AssemblySequencePiece }) {
         : null,
     [lifted],
   );
+  const slotGeom = useMemo(
+    () => (lifted && (lifted.slots?.length ?? 0) >= 9 ? buildMeshGeometry(lifted.slots!) : null),
+    [lifted],
+  );
 
   if (!geom) return <StaticPiece piece={piece} />;
 
@@ -231,6 +236,11 @@ function StaticLiftedPiece({ piece }: { piece: AssemblySequencePiece }) {
           side={THREE.DoubleSide}
         />
       </mesh>
+      {slotGeom && (
+        <mesh geometry={slotGeom} frustumCulled={false}>
+          <meshStandardMaterial color={SLOT_COLOR} roughness={0.6} metalness={0.1} side={THREE.DoubleSide} />
+        </mesh>
+      )}
       {lineGeom && (
         <lineSegments geometry={lineGeom}>
           <lineBasicMaterial color={piece.isMark ? MARK_COLOR : OPENING_COLOR} />
@@ -261,6 +271,10 @@ function DroppingLiftedPiece({
       lifted && (lifted.openings?.length ?? 0) >= 6
         ? buildLineGeometry(lifted.openings)
         : null,
+    [lifted],
+  );
+  const slotGeom = useMemo(
+    () => (lifted && (lifted.slots?.length ?? 0) >= 9 ? buildMeshGeometry(lifted.slots!) : null),
     [lifted],
   );
   const baseColor = pieceCategoryColor(piece);
@@ -316,6 +330,11 @@ function DroppingLiftedPiece({
           side={THREE.DoubleSide}
         />
       </mesh>
+      {slotGeom && (
+        <mesh geometry={slotGeom} frustumCulled={false}>
+          <meshStandardMaterial color={SLOT_COLOR} roughness={0.6} metalness={0.1} side={THREE.DoubleSide} />
+        </mesh>
+      )}
       {lineGeom && (
         <lineSegments geometry={lineGeom}>
           <lineBasicMaterial color={piece.isMark ? MARK_COLOR : OPENING_COLOR} />

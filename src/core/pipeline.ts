@@ -96,6 +96,22 @@ export interface SplitOp {
 }
 
 /**
+ * Encastre (ranura) entre dos placas, en coordenadas de mundo (mismo espacio
+ * que `faces`). Lo expone el backend en `/api/nesting-preview` para el overlay
+ * de ranuras del instructivo. El backend cameliza `cut_id→cutId`, etc.
+ */
+export interface PlateJoint {
+  /** Grupo que RECIBE la ranura (la pieza que se revela). */
+  cutId: number;
+  /** Grupo de la placa que corta. */
+  cutterId: number;
+  a: Vec3;
+  b: Vec3;
+  /** Ancho de la ranura (grosor de la placa cortante), en metros. */
+  width: number;
+}
+
+/**
  * Vista previa de nesting que devuelve el backend (`/api/nesting-preview`).
  * Son datos 2D listos para dibujar; el front no corre el algoritmo de nesting.
  */
@@ -103,4 +119,6 @@ export interface NestingPreviewData {
   wallNesting: NestingResult;
   floorNesting: NestingResult;
   config: SheetConfig;
+  /** Encastres en 3D (world coords) para el overlay del instructivo. */
+  plateJoints?: PlateJoint[];
 }
