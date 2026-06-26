@@ -116,28 +116,19 @@ export function buildAssemblyGuideFromTopology(
     }
   }
 
-  // Pasos: base (pisos) primero, luego muros por orientación.
-  const steps: AssemblySequenceStep[] = [];
+  // Elevations (vista "Por cara" del panel lateral): pisos + muros por orientación.
   const elevations: AssemblyPreviewData["elevations"] = {};
-
-  if (floorIds.length > 0) {
-    steps.push({
-      title: "Base / Pisos",
-      description: "Colocá las piezas de piso como base del armado.",
-      panel_ids: floorIds,
-    });
-    elevations["floor"] = { label: "Pisos", panel_ids: floorIds };
-  }
-
+  if (floorIds.length > 0) elevations["floor"] = { label: "Pisos", panel_ids: floorIds };
   for (const [key, bucket] of wallBuckets) {
-    if (bucket.ids.length === 0) continue;
-    steps.push({
-      title: bucket.label,
-      description: `Levantá ${bucket.ids.length} ${bucket.ids.length === 1 ? "muro" : "muros"} de esta cara.`,
-      panel_ids: bucket.ids,
-    });
-    elevations[key] = { label: bucket.label, panel_ids: bucket.ids };
+    if (bucket.ids.length > 0) elevations[key] = { label: bucket.label, panel_ids: bucket.ids };
   }
+
+  // Pasos: orden del backend (`assembly_steps`) si viene; si no, fallback front
+  // (pisos primero, luego muros por orientación).
+  const validLabels = new Set(panels.map((p) => p.id));
+  const steps =
+    stepsFromAssemblySteps(phase1, overrides, validLabels) ??
+    stepsFromBuckets(floorIds, wallBuckets);
 
   const wallCount = panels.filter((p) => p.category === "wall").length;
   const floorCount = panels.filter((p) => p.category === "floor").length;
@@ -154,4 +145,77 @@ export function buildAssemblyGuideFromTopology(
       total_panels: panels.length,
     },
   };
+}
+
+function pieceStepTitle(category: FaceCategory, label: string, multiLevel: boolean, level: number): string {
+  const kind = category === "floor" ? "Piso" : "Muro";
+  return multiLevel ? `Nivel ${level} · ${kind} ${label}` : `${kind} ${label}`;
+}
+
+/**
+ * Pasos a partir del orden del backend (`assembly_steps`): un paso por pieza,
+ * en el orden dado (piso base → paredes → siguiente nivel). Devuelve null si no
+ * hay `assembly_steps`.
+ */
+function stepsFromAssemblySteps(
+  phase1: Phase1Result,
+  overrides: Map<number, FaceCategory> | undefined,
+  validLabels: Set<string>,
+): AssemblySequenceStep[] | null {
+  const entries = phase1.assemblySteps;
+  if (!entries || entries.length === 0) return null;
+
+  const groupById = new Map(phase1.groups.map((g) => [g.id, g]));
+  const sorted = [...entries].sort((a, b) => a.step - b.step);
+  const multiLevel = new Set(entries.map((e) => e.level)).size > 1;
+
+  const steps: AssemblySequenceStep[] = [];
+  const placed = new Set<string>();
+  for (const e of sorted) {
+    const group = groupById.get(e.groupId);
+    if (!group) continue;
+    const category = getEffectiveCategory(group, overrides);
+    if (category === "discard") continue;
+    const label = groupLabel(group, phase1.panelIdByGroup);
+    if (!validLabels.has(label) || placed.has(label)) continue;
+    placed.add(label);
+    steps.push({
+      title: pieceStepTitle(category, label, multiLevel, e.level),
+      description: `Colocá la pieza ${label}.`,
+      panel_ids: [label],
+    });
+  }
+
+  // Piezas no referenciadas por assembly_steps → un paso cada una al final.
+  for (const label of validLabels) {
+    if (placed.has(label)) continue;
+    placed.add(label);
+    steps.push({ title: `Pieza ${label}`, description: `Colocá la pieza ${label}.`, panel_ids: [label] });
+  }
+
+  return steps.length > 0 ? steps : null;
+}
+
+/** Fallback front: pisos primero, luego muros agrupados por orientación. */
+function stepsFromBuckets(
+  floorIds: string[],
+  wallBuckets: Map<string, { label: string; ids: string[] }>,
+): AssemblySequenceStep[] {
+  const steps: AssemblySequenceStep[] = [];
+  if (floorIds.length > 0) {
+    steps.push({
+      title: "Base / Pisos",
+      description: "Colocá las piezas de piso como base del armado.",
+      panel_ids: floorIds,
+    });
+  }
+  for (const bucket of wallBuckets.values()) {
+    if (bucket.ids.length === 0) continue;
+    steps.push({
+      title: bucket.label,
+      description: `Levantá ${bucket.ids.length} ${bucket.ids.length === 1 ? "muro" : "muros"} de esta cara.`,
+      panel_ids: bucket.ids,
+    });
+  }
+  return steps;
 }
