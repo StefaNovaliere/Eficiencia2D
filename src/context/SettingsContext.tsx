@@ -14,6 +14,7 @@ import {
   fetchUserSettings,
   parseTemaColorToThemeId,
   patchUserSettings,
+  themeIdToTemaColor,
   type SettingsPatch,
   type UserSettings,
 } from "@/services/settings";
@@ -65,7 +66,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
 
         setSettings({
           ...DEFAULT_USER_SETTINGS,
-          tema_color: getStoredThemeId(),
+          tema_color: themeIdToTemaColor(getStoredThemeId()),
         });
         setSettingsError(message);
         setSettingsUnavailable(unavailable);

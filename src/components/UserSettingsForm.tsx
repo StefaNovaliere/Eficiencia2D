@@ -1,16 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { Bell, Check, Keyboard, Loader2, LogOut, Palette } from "lucide-react";
+import { Bell, Check, Keyboard, Loader2, Palette } from "lucide-react";
+import UserAccountSection from "@/components/UserAccountSection";
 import { useAuth } from "@/context/AuthContext";
 import { useSettings } from "@/context/SettingsContext";
 import { THEMES, useTheme, type ThemeId } from "@/context/ThemeContext";
-import { parseTemaColorToThemeId } from "@/services/settings";
+import { parseTemaColorToThemeId, themeIdToTemaColor } from "@/services/settings";
 
 export default function UserSettingsForm() {
-  const { isAuthenticated, user, logout } = useAuth();
+  const { isAuthenticated } = useAuth();
   const {
     settings,
     isLoadingSettings,
@@ -20,7 +20,6 @@ export default function UserSettingsForm() {
     clearSettingsError,
   } = useSettings();
   const { theme, setTheme } = useTheme();
-  const router = useRouter();
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveNotice, setSaveNotice] = useState<string | null>(null);
@@ -46,7 +45,7 @@ export default function UserSettingsForm() {
     setIsSaving(true);
 
     try {
-      await updateSettings({ tema_color: next });
+      await updateSettings({ tema_color: themeIdToTemaColor(next) });
       setSaveNotice("Tema guardado en tu cuenta.");
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "No se pudo guardar el tema");
@@ -75,16 +74,13 @@ export default function UserSettingsForm() {
     }
   }
 
-  function handleLogout() {
-    logout();
-    router.push("/");
-  }
-
   const showAccountLoading = isAuthenticated && isLoadingSettings;
   const displayError = saveError || (settingsUnavailable ? null : settingsError);
 
   return (
     <div className="space-y-6">
+      {isAuthenticated && <UserAccountSection />}
+
       {isAuthenticated && settingsUnavailable && settingsError && (
         <div className="alert alert-warning rounded-xl text-sm">
           <span>
@@ -192,25 +188,6 @@ export default function UserSettingsForm() {
               </div>
             </section>
           ) : null}
-
-          <section className="pt-2 border-t border-base-300/40">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-base-content truncate">
-                  {user?.nombre || user?.email}
-                </p>
-                <p className="text-xs text-base-content/50 mt-0.5">Sesión activa</p>
-              </div>
-              <button
-                type="button"
-                onClick={handleLogout}
-                className="btn btn-outline btn-sm rounded-xl border-base-300 gap-2 shrink-0"
-              >
-                <LogOut size={16} />
-                Salir de la sesión
-              </button>
-            </div>
-          </section>
         </>
       )}
 

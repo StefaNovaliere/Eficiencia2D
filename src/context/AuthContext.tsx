@@ -11,6 +11,7 @@ import React, {
 import {
   clearStoredAuth,
   fetchCurrentUser,
+  isActiveUser,
   loadStoredAuth,
   loginUser,
   registerUser,
@@ -31,6 +32,8 @@ interface AuthContextType {
   /** Verifica el email con el token del link y aplica la sesión. */
   verifyEmail: (token: string) => Promise<void>;
   logout: () => void;
+  /** Sincroniza datos básicos del usuario en sesión (p. ej. tras PATCH /users/me). */
+  updateUser: (partial: Partial<AuthUser>) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -51,6 +54,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
     clearStoredAuth();
   }, []);
+
+  const updateUser = useCallback(
+    (partial: Partial<AuthUser>) => {
+      setUser((prev) => {
+        if (!prev) return prev;
+        const next = { ...prev, ...partial };
+        setToken((currentToken) => {
+          if (currentToken) {
+            saveStoredAuth({ token: currentToken, user: next });
+          }
+          return currentToken;
+        });
+        return next;
+      });
+    },
+    [],
+  );
 
   useEffect(() => {
     const stored = loadStoredAuth();
@@ -101,11 +121,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user,
         token,
         isLoadingAuth,
-        isAuthenticated: Boolean(user && token),
+        isAuthenticated: Boolean(user && token && isActiveUser(user)),
         login,
         register,
         verifyEmail,
         logout,
+        updateUser,
       }}
     >
       {children}

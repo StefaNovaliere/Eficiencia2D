@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { BookOpen } from "lucide-react";
 import { useProjectContext } from "@/context/ProjectContext";
+import { useAuth } from "@/context/AuthContext";
 import PaymentScreen from "@/components/PaymentScreen";
 import {
   base64ToBlob,
@@ -29,6 +30,7 @@ function decisionsToRecord(decisions: Map<number, number>): Record<number, numbe
 
 export default function PaymentPage() {
   const router = useRouter();
+  const { token } = useAuth();
   const {
     file,
     fileId,
@@ -107,6 +109,7 @@ export default function PaymentPage() {
       const backendRes = await generateProjectFiles({
         file_id: fileId,
         original_filename: file?.name ?? projectFileName ?? "model.obj",
+        axis: phase1Result.appliedAxis,
         scale_denom: scale,
         paper,
         page_mode: pdfPageMode,
@@ -122,7 +125,7 @@ export default function PaymentPage() {
         splits: savedSplits.map((s): SplitOperation => ({ group_id: s.groupId, mode: s.mode })),
         marks: savedMarks,
         user_cuts: userCutsForApi(savedUserCuts),
-      });
+      }, token);
 
       if (!backendRes.zip_base64) {
         throw new Error("El backend no devolvió el archivo ZIP.");
@@ -167,6 +170,7 @@ export default function PaymentPage() {
     savedUserCuts,
     triggerDownload,
     setAssemblyGuideData,
+    token,
   ]);
 
   const handlePaymentApproved = useCallback(async (paymentId: string) => {

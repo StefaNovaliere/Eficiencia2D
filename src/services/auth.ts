@@ -1,10 +1,13 @@
 import { apiFetch } from "@/services/api";
+import { parseApiError } from "@/services/api-errors";
+
+export type UserEstado = "pendiente_verificacion" | "activo" | "inactivo" | (string & {});
 
 export interface AuthUser {
   id: string;
   email: string;
   nombre: string | null;
-  estado: string;
+  estado: UserEstado;
 }
 
 export interface AuthResponse {
@@ -13,37 +16,53 @@ export interface AuthResponse {
   user: AuthUser;
 }
 
-/** Respuesta del nuevo registro — sin JWT, con estado pendiente_verificacion */
+/** Respuesta de registro — sin JWT, usuario en `pendiente_verificacion`. */
 export interface RegisterResponse {
   message: string;
   email: string;
-  verification_email_sent: boolean;
+  verification_email_scheduled: boolean;
   user: AuthUser;
 }
 
 const AUTH_STORAGE_KEY = "e2d_auth";
+
+export const PASSWORD_MIN_LENGTH = 6;
+export const PASSWORD_MAX_LENGTH = 128;
+export const NOMBRE_MAX_LENGTH = 120;
 
 export interface StoredAuth {
   token: string;
   user: AuthUser;
 }
 
-async function parseApiError(res: Response, fallback: string): Promise<never> {
-  const errorData = await res.json().catch(() => null);
-  const detail = errorData?.detail;
+export function isActiveUser(user: AuthUser | null | undefined): boolean {
+  return user?.estado === "activo";
+}
 
-  if (typeof detail === "string") {
-    throw new Error(detail);
+export function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+function normalizeRegisterResponse(raw: Record<string, unknown>): RegisterResponse {
+  const scheduled =
+    typeof raw.verification_email_scheduled === "boolean"
+      ? raw.verification_email_scheduled
+      : typeof raw.verification_email_sent === "boolean"
+        ? raw.verification_email_sent
+        : false;
+
+  return {
+    message: String(raw.message ?? ""),
+    email: String(raw.email ?? ""),
+    verification_email_scheduled: scheduled,
+    user: raw.user as AuthUser,
+  };
+}
+
+function assertActiveSession(user: AuthUser): void {
+  if (!isActiveUser(user)) {
+    throw new Error("Tu cuenta no está activa. Contactá soporte si el problema persiste.");
   }
-
-  if (Array.isArray(detail) && detail.length > 0) {
-    const first = detail[0];
-    if (typeof first?.msg === "string") {
-      throw new Error(first.msg);
-    }
-  }
-
-  throw new Error(fallback);
 }
 
 export function loadStoredAuth(): StoredAuth | null {
@@ -72,31 +91,48 @@ export async function registerUser(
   password: string,
   nombre?: string,
 ): Promise<RegisterResponse> {
+  const trimmedNombre = nombre?.trim();
+  const body: Record<string, string> = {
+    email: normalizeEmail(email),
+    password,
+  };
+  if (trimmedNombre) {
+    body.nombre = trimmedNombre.slice(0, NOMBRE_MAX_LENGTH);
+  }
+
   const res = await apiFetch("/api/auth/register", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password, nombre: nombre || null }),
+    body: JSON.stringify(body),
   });
 
   if (!res.ok) {
     await parseApiError(res, "No se pudo crear la cuenta");
   }
 
-  return res.json();
+  return normalizeRegisterResponse(await res.json());
 }
 
 export async function loginUser(email: string, password: string): Promise<AuthResponse> {
   const res = await apiFetch("/api/auth/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ email: normalizeEmail(email), password }),
   });
 
   if (!res.ok) {
-    await parseApiError(res, "No se pudo iniciar sesión");
+    const fallback =
+      res.status === 403
+        ? "Debes verificar tu correo electrónico antes de iniciar sesión"
+        : res.status === 401
+          ? "Email o contraseña incorrectos"
+          : "No se pudo iniciar sesión";
+    await parseApiError(res, fallback);
   }
 
-  return res.json();
+  const data = (await res.json()) as AuthResponse;
+  assertActiveSession(data.user);
+  return data;
 }
 
 /** Verifica el email con el token del link y devuelve el JWT. */
@@ -104,23 +140,62 @@ export async function verifyEmailToken(token: string): Promise<AuthResponse> {
   const res = await apiFetch("/api/auth/verify-email", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ token }),
+    body: JSON.stringify({ token: token.trim() }),
   });
 
   if (!res.ok) {
     await parseApiError(res, "El enlace de verificación es inválido o expiró");
   }
 
-  return res.json();
+  const data = (await res.json()) as AuthResponse;
+  assertActiveSession(data.user);
+  return data;
 }
 
 export async function fetchCurrentUser(token: string): Promise<AuthUser> {
-  const res = await apiFetch("/api/auth/me", {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  const res = await apiFetch("/api/auth/me", {}, { token });
 
   if (!res.ok) {
     await parseApiError(res, "Sesión inválida");
+  }
+
+  const user = (await res.json()) as AuthUser;
+  assertActiveSession(user);
+  return user;
+}
+
+export interface AuthMessageResponse {
+  message: string;
+}
+
+/** Solicita enlace de recuperación — respuesta genérica por seguridad. */
+export async function requestPasswordReset(email: string): Promise<AuthMessageResponse> {
+  const res = await apiFetch("/api/auth/forgot-password", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: normalizeEmail(email) }),
+  });
+
+  if (!res.ok) {
+    await parseApiError(res, "No se pudo enviar la solicitud");
+  }
+
+  return res.json();
+}
+
+/** Restablece contraseña con el token del correo (sin JWT). */
+export async function resetPasswordWithToken(
+  token: string,
+  newPassword: string,
+): Promise<AuthMessageResponse> {
+  const res = await apiFetch("/api/auth/reset-password", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token: token.trim(), new_password: newPassword }),
+  });
+
+  if (!res.ok) {
+    await parseApiError(res, "Error al restablecer la contraseña");
   }
 
   return res.json();

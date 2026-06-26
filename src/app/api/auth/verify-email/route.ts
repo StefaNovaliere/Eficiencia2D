@@ -6,7 +6,7 @@ import { NextRequest, NextResponse } from "next/server";
  */
 export function GET(request: NextRequest) {
   const token = request.nextUrl.searchParams.get("token");
-  const target = new URL("/verify-email", request.url);
+  const target = new URL("/verificar-correo", request.url);
 
   if (token) {
     target.searchParams.set("token", token);
