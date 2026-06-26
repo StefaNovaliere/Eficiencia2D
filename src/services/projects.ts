@@ -158,6 +158,31 @@ export async function fetchUserProject(token: string, projectId: string): Promis
   return project;
 }
 
+/** Carga un proyecto guardado para continuar editando (topología + preview). */
+export async function openUserProject(
+  token: string,
+  projectId: string,
+): Promise<UploadResponse> {
+  const res = await apiFetch(`/api/projects/${projectId}`, { method: "GET" }, { token });
+
+  if (!res.ok) {
+    await parseApiError(res, "No se pudo abrir el proyecto");
+  }
+
+  const data = normalizeUploadResponse((await res.json()) as Record<string, unknown>);
+
+  if (!data.topology || data.topology.faces.length === 0) {
+    throw new Error(
+      "Este proyecto no tiene geometría disponible para continuar. Subí el archivo de nuevo.",
+    );
+  }
+  if (!data.preview_obj) {
+    throw new Error("Este proyecto no tiene vista previa disponible.");
+  }
+
+  return data;
+}
+
 /** Obtiene URL firmada (~1 h) para descargar el archivo 3D original. */
 export async function fetchProjectDownloadUrl(
   token: string,

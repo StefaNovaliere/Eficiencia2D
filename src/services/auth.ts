@@ -163,3 +163,40 @@ export async function fetchCurrentUser(token: string): Promise<AuthUser> {
   assertActiveSession(user);
   return user;
 }
+
+export interface AuthMessageResponse {
+  message: string;
+}
+
+/** Solicita enlace de recuperación — respuesta genérica por seguridad. */
+export async function requestPasswordReset(email: string): Promise<AuthMessageResponse> {
+  const res = await apiFetch("/api/auth/forgot-password", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: normalizeEmail(email) }),
+  });
+
+  if (!res.ok) {
+    await parseApiError(res, "No se pudo enviar la solicitud");
+  }
+
+  return res.json();
+}
+
+/** Restablece contraseña con el token del correo (sin JWT). */
+export async function resetPasswordWithToken(
+  token: string,
+  newPassword: string,
+): Promise<AuthMessageResponse> {
+  const res = await apiFetch("/api/auth/reset-password", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token: token.trim(), new_password: newPassword }),
+  });
+
+  if (!res.ok) {
+    await parseApiError(res, "Error al restablecer la contraseña");
+  }
+
+  return res.json();
+}

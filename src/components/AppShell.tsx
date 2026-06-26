@@ -67,7 +67,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     pathname === "/login" ||
     pathname === "/register" ||
     pathname.startsWith("/verificar-correo") ||
-    pathname.startsWith("/verify-email");
+    pathname.startsWith("/verify-email") ||
+    pathname.startsWith("/olvide-contrasena") ||
+    pathname.startsWith("/restablecer-contrasena");
   return (
     <>
       <TopBar isAuthPage={isAuthPage} />

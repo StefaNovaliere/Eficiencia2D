@@ -10,7 +10,6 @@ import React, {
 } from "react";
 import { useAuth } from "@/context/AuthContext";
 import {
-  changeUserPassword,
   fetchUserProfile,
   updateUserProfile,
   type UserProfile,
@@ -22,7 +21,6 @@ interface UserProfileContextType {
   profileError: string | null;
   refreshProfile: () => Promise<void>;
   updateNombre: (nombre: string) => Promise<UserProfile>;
-  changePassword: (currentPassword: string, newPassword: string) => Promise<string>;
   clearProfileError: () => void;
 }
 
@@ -76,19 +74,6 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
     [token, updateUser],
   );
 
-  const changePassword = useCallback(
-    async (currentPassword: string, newPassword: string) => {
-      if (!token) {
-        throw new Error("Tenés que iniciar sesión");
-      }
-
-      setProfileError(null);
-      const res = await changeUserPassword(token, currentPassword, newPassword);
-      return res.message;
-    },
-    [token],
-  );
-
   const clearProfileError = useCallback(() => {
     setProfileError(null);
   }, []);
@@ -101,7 +86,6 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
         profileError,
         refreshProfile: loadProfile,
         updateNombre,
-        changePassword,
         clearProfileError,
       }}
     >

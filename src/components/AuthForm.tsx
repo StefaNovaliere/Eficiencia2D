@@ -16,9 +16,11 @@ type AuthMode = "login" | "register";
 
 interface AuthFormProps {
   mode: AuthMode;
+  /** Mensaje tras restablecer contraseña (login). */
+  passwordUpdatedNotice?: boolean;
 }
 
-export default function AuthForm({ mode }: AuthFormProps) {
+export default function AuthForm({ mode, passwordUpdatedNotice }: AuthFormProps) {
   const router = useRouter();
   const { login, register } = useAuth();
 
@@ -174,6 +176,12 @@ export default function AuthForm({ mode }: AuthFormProps) {
         <div className="card bg-base-100 shadow-2xl border border-base-200">
           <div className="card-body p-6 md:p-8">
             <form onSubmit={handleSubmit} className="space-y-4">
+              {passwordUpdatedNotice && !isRegister && (
+                <div className="alert alert-success rounded-xl text-sm">
+                  <span>Contraseña actualizada. Ya podés iniciar sesión.</span>
+                </div>
+              )}
+
               {isRegister && (
                 <label className="form-control w-full">
                   <span className="label-text font-medium mb-1">Nombre</span>
@@ -228,6 +236,17 @@ export default function AuthForm({ mode }: AuthFormProps) {
                   )}
                 </div>
               </label>
+
+              {!isRegister && (
+                <div className="text-right -mt-1">
+                  <Link
+                    href="/olvide-contrasena"
+                    className="text-sm text-primary font-medium hover:underline"
+                  >
+                    ¿Olvidaste tu contraseña?
+                  </Link>
+                </div>
+              )}
 
               {isRegister && (
                 <label className="form-control w-full">
