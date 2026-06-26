@@ -1,7 +1,6 @@
 import type { Face3D, Vec3 } from "./types";
-import type { Placement } from "./pipeline";
-import type { NestingPanel } from "./sheet-nester";
-import { liftPiece, liftFaces, type LiftedPieceGeometry } from "./assembly-lift";
+import type { PlateJoint } from "./pipeline";
+import { liftFaces, buildSlots, type LiftedPieceGeometry } from "./assembly-lift";
 import type {
   AssemblyPanel,
   AssemblyPreviewData,
@@ -9,20 +8,25 @@ import type {
 } from "@/services/api";
 
 /**
- * Contexto para "liftear" cada pieza a su pose 3D real (instructivo #2):
- * pose desde `placements` (por id de grupo) y contorno de corte desde los
- * paneles de nesting (por etiqueta). Si falta, se cae al render de cajas.
+ * Contexto del instructivo v2 (método obligatorio del contrato):
+ *  - CUERPO + HUECOS + POSE: la malla original del grupo
+ *    (`faces[group.faceIndices]`), idéntica al visor de /review. Los huecos
+ *    aparecen solos (son gaps reales de la malla). NO se reconstruye desde el
+ *    panel 2D de corte (causaba huecos tapados y pisos deformados).
+ *  - ENCASTRES (ranuras): overlay desde `plate_joints` de `/api/nesting-preview`
+ *    (ya en coords de mundo), filtrados por `cut_id == group.id`.
  */
 export interface AssemblyLiftContext {
-  placements: Record<number, Placement>;
-  /** etiqueta de panel (A1, B2…) → id de grupo. Inverso de `panelIdByGroup`. */
+  /** etiqueta de panel (A1, B2…) → id de grupo. */
   labelToGroupId: Map<string, number>;
-  /** etiqueta de panel → panel de nesting (contorno de corte con aberturas). */
-  nestingPanelById: Map<string, NestingPanel>;
-  /** Fallback #1: caras originales del modelo + índices de cara por etiqueta.
-   *  Si no hay `placement` para la pieza, se renderiza su geometría original. */
-  faces?: Face3D[];
-  faceIndicesByLabel?: Map<string, number[]>;
+  /** Caras originales del modelo (mismo espacio que el visor de review). */
+  faces: Face3D[];
+  /** etiqueta → índices de cara del grupo (cuerpo de la pieza). */
+  faceIndicesByLabel: Map<string, number[]>;
+  /** Encastres por id de grupo que los RECIBE (`cut_id`). */
+  plateJointsByGroupId?: Map<number, PlateJoint[]>;
+  /** Normal del plano de cada grupo (para orientar las ranuras). */
+  normalByGroupId?: Map<number, Vec3>;
 }
 
 /** One assembly step from the backend JSON. */
@@ -109,72 +113,37 @@ function payloadToPiece(
 }
 
 /**
- * Maps piezas to 3D pieces using the ordered pasos/steps as source of truth
- * for stepIndex (drives progressive assembly animation).
+ * v2: arma la geometría de la pieza = malla original del grupo (cuerpo + huecos
+ * + pose) + overlay de ranuras de encastre. Nunca tira: ante cualquier error,
+ * la pieza cae al render de caja (sin `lifted`).
  */
-function isValidPlacement(placement: Placement | undefined): placement is Placement {
-  if (!placement) return false;
-  const { origin, uAxis, vAxis, widthM, heightM } = placement;
-  return (
-    origin != null &&
-    uAxis != null &&
-    vAxis != null &&
-    Number.isFinite(widthM) &&
-    Number.isFinite(heightM) &&
-    Number.isFinite(origin.x) &&
-    Number.isFinite(uAxis.x) &&
-    Number.isFinite(vAxis.x)
-  );
-}
-
-/** Adjunta la geometría de corte lifteada (pose 3D real) si hay placement. */
 function applyLift(
   piece: AssemblySequencePiece,
   lift: AssemblyLiftContext | undefined,
 ): AssemblySequencePiece {
   if (!lift) return piece;
   const label = piece.id.trim();
-  const groupId = lift.labelToGroupId.get(label);
-  const placement = groupId === undefined ? undefined : lift.placements[groupId];
+  const faceIndices = lift.faceIndicesByLabel.get(label);
+  if (!faceIndices || faceIndices.length === 0) return piece;
 
-  // #2: piezas de corte (pose por placement + contorno de nesting con aberturas).
-  if (isValidPlacement(placement)) {
-    try {
-      const panel = lift.nestingPanelById.get(label) ?? null;
-      const lifted = liftPiece(placement, panel);
-      if ((lifted.positions?.length ?? 0) >= 9) {
-        return {
-          ...piece,
-          lifted: {
-            positions: lifted.positions,
-            openings: lifted.openings ?? [],
-            hasHoles: lifted.hasHoles,
-          },
-          isMark: panel?.isMark === true,
-        };
-      }
-    } catch {
-      // Caer al render de caja / caras originales.
-    }
+  try {
+    const faces = faceIndices.map((i) => lift.faces[i]).filter(Boolean);
+    if (faces.length === 0) return piece;
+
+    const body = liftFaces(faces);
+    if ((body.positions?.length ?? 0) < 9) return piece;
+
+    // Overlay de ranuras de encastre (plate_joints con cut_id == group.id).
+    const groupId = lift.labelToGroupId.get(label);
+    const joints = groupId === undefined ? undefined : lift.plateJointsByGroupId?.get(groupId);
+    const normal = groupId === undefined ? undefined : lift.normalByGroupId?.get(groupId);
+    const slots = joints && joints.length > 0 && normal ? buildSlots(joints, normal) : [];
+
+    return { ...piece, lifted: { ...body, openings: body.openings ?? [], slots } };
+  } catch {
+    // Caer al render de caja.
+    return piece;
   }
-
-  // #1 (fallback): geometría original del grupo (pose exacta, sin huecos).
-  const faceIndices = lift.faceIndicesByLabel?.get(label);
-  if (lift.faces && faceIndices && faceIndices.length > 0) {
-    try {
-      const faces = faceIndices.map((i) => lift.faces![i]).filter(Boolean);
-      if (faces.length > 0) {
-        const lifted = liftFaces(faces);
-        if ((lifted.positions?.length ?? 0) >= 9) {
-          return { ...piece, lifted: { ...lifted, openings: lifted.openings ?? [] } };
-        }
-      }
-    } catch {
-      // Caer al render de caja.
-    }
-  }
-
-  return piece;
 }
 
 export function buildAssemblyPieces(
