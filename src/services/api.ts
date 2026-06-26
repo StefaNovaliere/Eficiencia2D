@@ -109,7 +109,7 @@ export function normalizeUploadResponse(data: Record<string, unknown>): UploadRe
     data.topology = mapTopology(data.topology, filename || undefined);
   }
 
-  return data as UploadResponse;
+  return data as unknown as UploadResponse;
 }
 
 export interface SplitOperation {
@@ -159,13 +159,35 @@ export function toWirePipelinePayload(
   return wire;
 }
 
+/** Omite arrays/objetos vacíos que pueden romper el backend en nesting/generate. */
+function compactOptionalPipelineFields(
+  wire: Record<string, unknown>,
+): Record<string, unknown> {
+  const out = { ...wire };
+
+  for (const key of ["user_cuts", "marks", "merges", "splits"] as const) {
+    const val = out[key];
+    if (Array.isArray(val) && val.length === 0) {
+      delete out[key];
+    }
+  }
+
+  for (const key of ["overrides", "wall_wall_decisions"] as const) {
+    const val = out[key];
+    if (val && typeof val === "object" && Object.keys(val as object).length === 0) {
+      delete out[key];
+    }
+  }
+
+  return out;
+}
+
 function serializePipelineBody(
   payload: Record<string, unknown>,
   token?: string | null,
 ): string {
-  return JSON.stringify(toWirePipelinePayload(payload), (_k, v) =>
-    v === undefined ? undefined : v,
-  );
+  const wire = compactOptionalPipelineFields(toWirePipelinePayload(payload, token));
+  return JSON.stringify(wire, (_k, v) => (v === undefined ? undefined : v));
 }
 
 /** Nombre de archivo original para payloads del pipeline. */
@@ -196,7 +218,7 @@ export interface RecomputePayload {
 /** Payload para `POST /api/nesting-preview`. */
 export interface NestingPreviewPayload {
   file_id: string;
-  original_filename: string;
+  original_filename?: string;
   axis: "Y" | "Z";
   min_area_m2: number;
   merges: number[][];
@@ -327,9 +349,17 @@ export async function fetchNestingPreview(
   token?: string | null,
 ): Promise<NestingPreviewData> {
   const attempts: NestingPreviewPayload[] = [
-    payload,
+    // Primero sin paper/page_mode — el backend remoto suele fallar al desempaquetar con esos campos.
     { ...payload, paper: undefined, page_mode: undefined },
+    payload,
     { ...payload, paper: undefined, page_mode: undefined, user_cuts: undefined },
+    {
+      ...payload,
+      paper: undefined,
+      page_mode: undefined,
+      user_cuts: undefined,
+      original_filename: undefined,
+    },
   ];
 
   let lastDetail: string | undefined;
@@ -360,7 +390,7 @@ export async function fetchNestingPreview(
     const retryable =
       res.status === 500 &&
       i < attempts.length - 1 &&
-      /unpack|expected \d+/i.test(detail);
+      /unpack|expected \d+|nesting-preview/i.test(detail);
 
     if (!retryable) {
       throw new Error(detail);
