@@ -2,18 +2,15 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Settings, Sun, Moon } from "lucide-react";
+import { Settings } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
-import { useTheme } from "@/context/ThemeContext";
 
 // Rutas inmersivas del flujo: son pantallas full-screen (`fixed inset-0`) con su
 // propio chrome (paso, volver, herramientas). Ahí NO mostramos la barra global.
 const FLOW_ROUTES = ["/review", "/nesting", "/payment"];
 
 function TopBar({ isAuthPage }: { isAuthPage: boolean }) {
-  const { user, isLoadingAuth, isAuthenticated } = useAuth();
-  const { theme, setTheme } = useTheme();
-  const isDark = theme === "dark";
+  const { user, isLoadingAuth, isAuthenticated, isAdmin } = useAuth();
 
   return (
     <header className="sticky top-0 z-40 h-14 shrink-0 flex items-center justify-between gap-3 px-4 md:px-6 border-b border-base-300/50 bg-base-100/80 backdrop-blur-md">
@@ -37,9 +34,19 @@ function TopBar({ isAuthPage }: { isAuthPage: boolean }) {
           isLoadingAuth ? (
             <span className="loading loading-spinner loading-sm text-primary ml-1" />
           ) : isAuthenticated && user ? (
-            <span className="hidden sm:inline text-sm text-base-content/70 ml-1">
-              {user.nombre || user.email}
-            </span>
+            isAdmin ? (
+              <Link
+                href="/admin"
+                className="btn btn-ghost btn-sm ml-1 max-w-[12rem] truncate font-medium text-primary hover:bg-primary/10"
+                title="Panel de administración"
+              >
+                {user.nombre || user.email}
+              </Link>
+            ) : (
+              <span className="hidden sm:inline text-sm text-base-content/70 ml-1 truncate max-w-[12rem]">
+                {user.nombre || user.email}
+              </span>
+            )
           ) : (
             <>
               <Link href="/login" className="btn btn-primary btn-outline btn-sm">Ingresar</Link>

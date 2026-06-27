@@ -5,6 +5,7 @@ import {
   PASSWORD_MAX_LENGTH,
   PASSWORD_MIN_LENGTH,
   type UserEstado,
+  type UserRol,
 } from "@/services/auth";
 
 export interface UserProfile {
@@ -12,6 +13,7 @@ export interface UserProfile {
   email: string;
   nombre: string | null;
   estado: UserEstado;
+  rol?: UserRol;
   fecha_creacion: string;
   email_verified_at: string | null;
   total_proyectos: number;

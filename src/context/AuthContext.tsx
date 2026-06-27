@@ -12,6 +12,7 @@ import {
   clearStoredAuth,
   fetchCurrentUser,
   isActiveUser,
+  isAdminUser,
   loadStoredAuth,
   loginUser,
   registerUser,
@@ -26,6 +27,7 @@ interface AuthContextType {
   token: string | null;
   isLoadingAuth: boolean;
   isAuthenticated: boolean;
+  isAdmin: boolean;
   login: (email: string, password: string) => Promise<void>;
   /** Crea la cuenta. Devuelve la respuesta de registro (sin JWT). */
   register: (email: string, password: string, nombre?: string) => Promise<RegisterResponse>;
@@ -122,6 +124,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         token,
         isLoadingAuth,
         isAuthenticated: Boolean(user && token && isActiveUser(user)),
+        isAdmin: isAdminUser(user),
         login,
         register,
         verifyEmail,
