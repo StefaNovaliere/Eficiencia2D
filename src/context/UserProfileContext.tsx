@@ -45,7 +45,12 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
     try {
       const data = await fetchUserProfile(token);
       setProfile(data);
-      updateUser({ nombre: data.nombre, email: data.email, estado: data.estado });
+      updateUser({
+        nombre: data.nombre,
+        email: data.email,
+        estado: data.estado,
+        ...(data.rol != null ? { rol: data.rol } : {}),
+      });
     } catch (err) {
       setProfile(null);
       setProfileError(err instanceof Error ? err.message : "No se pudo cargar el perfil");

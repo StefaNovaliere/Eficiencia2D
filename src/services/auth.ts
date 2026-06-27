@@ -3,11 +3,14 @@ import { parseApiError } from "@/services/api-errors";
 
 export type UserEstado = "pendiente_verificacion" | "activo" | "inactivo" | (string & {});
 
+export type UserRol = "admin" | "estudiante" | (string & {});
+
 export interface AuthUser {
   id: string;
   email: string;
   nombre: string | null;
   estado: UserEstado;
+  rol: UserRol;
 }
 
 export interface AuthResponse {
@@ -39,6 +42,21 @@ export function isActiveUser(user: AuthUser | null | undefined): boolean {
   return user?.estado === "activo";
 }
 
+export function isAdminUser(user: AuthUser | null | undefined): boolean {
+  return user?.rol === "admin";
+}
+
+export function normalizeAuthUser(raw: unknown): AuthUser {
+  const u = raw as Record<string, unknown>;
+  return {
+    id: String(u.id ?? ""),
+    email: String(u.email ?? ""),
+    nombre: u.nombre != null && u.nombre !== "" ? String(u.nombre) : null,
+    estado: (u.estado as UserEstado) ?? "activo",
+    rol: (u.rol as UserRol) ?? "estudiante",
+  };
+}
+
 export function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
@@ -55,7 +73,7 @@ function normalizeRegisterResponse(raw: Record<string, unknown>): RegisterRespon
     message: String(raw.message ?? ""),
     email: String(raw.email ?? ""),
     verification_email_scheduled: scheduled,
-    user: raw.user as AuthUser,
+    user: normalizeAuthUser(raw.user),
   };
 }
 
@@ -71,7 +89,11 @@ export function loadStoredAuth(): StoredAuth | null {
   try {
     const raw = localStorage.getItem(AUTH_STORAGE_KEY);
     if (!raw) return null;
-    return JSON.parse(raw) as StoredAuth;
+    const parsed = JSON.parse(raw) as StoredAuth;
+    return {
+      ...parsed,
+      user: normalizeAuthUser(parsed.user),
+    };
   } catch {
     return null;
   }
@@ -131,6 +153,7 @@ export async function loginUser(email: string, password: string): Promise<AuthRe
   }
 
   const data = (await res.json()) as AuthResponse;
+  data.user = normalizeAuthUser(data.user);
   assertActiveSession(data.user);
   return data;
 }
@@ -148,6 +171,7 @@ export async function verifyEmailToken(token: string): Promise<AuthResponse> {
   }
 
   const data = (await res.json()) as AuthResponse;
+  data.user = normalizeAuthUser(data.user);
   assertActiveSession(data.user);
   return data;
 }
@@ -159,7 +183,7 @@ export async function fetchCurrentUser(token: string): Promise<AuthUser> {
     await parseApiError(res, "Sesión inválida");
   }
 
-  const user = (await res.json()) as AuthUser;
+  const user = normalizeAuthUser(await res.json());
   assertActiveSession(user);
   return user;
 }
