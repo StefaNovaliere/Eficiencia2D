@@ -28,7 +28,7 @@ export default function VerifyEmailScreen() {
     verifyEmail(token.trim())
       .then(() => {
         setStatus("success");
-        setTimeout(() => router.push("/"), 2000);
+        setTimeout(() => router.push("/home"), 2000);
       })
       .catch((err: unknown) => {
         setStatus("error");

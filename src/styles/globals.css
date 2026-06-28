@@ -118,3 +118,340 @@
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background: color-mix(in oklch, var(--color-base-content) 30%, transparent);
 }
+
+/* Landing de marketing (/) */
+.landing-root {
+  scroll-behavior: smooth;
+}
+
+.landing-scene {
+  will-change: opacity;
+  filter: drop-shadow(0 0 48px color-mix(in oklch, var(--color-primary) 14%, transparent));
+}
+
+.landing-scene canvas {
+  pointer-events: none;
+}
+
+.landing-hero {
+  perspective: 900px;
+}
+
+.landing-hero-dim {
+  background: radial-gradient(
+    ellipse 80% 68% at 50% 44%,
+    color-mix(in oklch, var(--color-base-200) 92%, transparent) 0%,
+    color-mix(in oklch, var(--color-base-200) 78%, transparent) 55%,
+    color-mix(in oklch, var(--color-base-200) 45%, transparent) 100%
+  );
+}
+
+[data-theme="neon"] .landing-hero-dim {
+  background: radial-gradient(
+    ellipse 80% 68% at 50% 44%,
+    rgba(0, 0, 0, 0.86) 0%,
+    rgba(0, 0, 0, 0.68) 55%,
+    rgba(0, 0, 0, 0.35) 100%
+  );
+}
+
+.landing-hero-content {
+  will-change: opacity, transform;
+}
+
+.landing-hero-logo {
+  opacity: 1 !important;
+}
+
+.landing-scroll-progress {
+  box-shadow: 0 0 14px color-mix(in oklch, var(--color-primary) 45%, transparent);
+}
+
+/* —— Recorrido del flujo —— */
+.landing-journey-bg {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 70% 50% at 20% 20%, color-mix(in oklch, var(--color-primary) 10%, transparent), transparent 55%),
+    radial-gradient(ellipse 60% 45% at 80% 70%, color-mix(in oklch, var(--color-secondary) 10%, transparent), transparent 50%);
+  pointer-events: none;
+}
+
+.flow-visual-frame {
+  width: 100%;
+  max-width: 320px;
+  aspect-ratio: 4 / 3;
+  border-radius: 1.25rem;
+  border: 1px solid color-mix(in oklch, var(--color-primary) 25%, transparent);
+  background: color-mix(in oklch, var(--color-base-100) 55%, transparent);
+  backdrop-filter: blur(12px);
+  box-shadow:
+    0 0 40px color-mix(in oklch, var(--color-primary) 12%, transparent),
+    inset 0 1px 0 color-mix(in oklch, var(--color-base-content) 8%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.flow-visual {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.flow-visual-glow {
+  position: absolute;
+  width: 70%;
+  height: 70%;
+  border-radius: 9999px;
+  filter: blur(40px);
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.flow-visual-glow-cyan {
+  background: color-mix(in oklch, var(--color-primary) 50%, transparent);
+}
+
+.flow-visual-glow-magenta {
+  background: color-mix(in oklch, var(--color-secondary) 45%, transparent);
+}
+
+.flow-visual-caption {
+  position: absolute;
+  bottom: 0.75rem;
+  font-size: 10px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: color-mix(in oklch, var(--color-base-content) 45%, transparent);
+}
+
+/* Upload */
+.flow-upload-orbit {
+  position: absolute;
+  width: 140px;
+  height: 140px;
+  border-radius: 9999px;
+  border: 1px dashed color-mix(in oklch, var(--color-primary) 35%, transparent);
+  animation: flowSpin 18s linear infinite;
+}
+
+.flow-upload-file {
+  width: 4.5rem;
+  height: 5rem;
+  border-radius: 0.5rem;
+  border: 2px solid var(--color-primary);
+  background: color-mix(in oklch, var(--color-primary) 12%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 24px color-mix(in oklch, var(--color-primary) 35%, transparent);
+  animation: flowFloat 4s ease-in-out infinite;
+}
+
+.flow-upload-ext {
+  font-family: ui-monospace, monospace;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+.flow-upload-cloud {
+  position: absolute;
+  top: 18%;
+  right: 18%;
+  animation: flowFloat 5s ease-in-out infinite reverse;
+}
+
+.flow-upload-devices {
+  position: absolute;
+  bottom: 22%;
+  display: flex;
+  gap: 0.35rem;
+}
+
+.flow-upload-devices span {
+  width: 0.55rem;
+  height: 0.9rem;
+  border-radius: 2px;
+  border: 1px solid color-mix(in oklch, var(--color-secondary) 50%, transparent);
+  background: color-mix(in oklch, var(--color-secondary) 15%, transparent);
+}
+
+.flow-upload-devices span:nth-child(2) {
+  height: 1.1rem;
+  border-color: var(--color-primary);
+  background: color-mix(in oklch, var(--color-primary) 15%, transparent);
+}
+
+/* Review — cubo 3D */
+.flow-model-scene {
+  perspective: 420px;
+  width: 120px;
+  height: 120px;
+  position: relative;
+}
+
+.flow-model-cube {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  transform-style: preserve-3d;
+  animation: flowCubeSpin 14s ease-in-out infinite;
+}
+
+.flow-model-face {
+  position: absolute;
+  width: 80px;
+  height: 80px;
+  left: 20px;
+  top: 20px;
+  border: 2px solid var(--color-primary);
+  background: color-mix(in oklch, var(--color-primary) 8%, transparent);
+  box-shadow: inset 0 0 20px color-mix(in oklch, var(--color-primary) 20%, transparent);
+}
+
+.flow-model-face-front  { transform: translateZ(40px); }
+.flow-model-face-back   { transform: rotateY(180deg) translateZ(40px); }
+.flow-model-face-right  { transform: rotateY(90deg) translateZ(40px); border-color: var(--color-secondary); }
+.flow-model-face-left   { transform: rotateY(-90deg) translateZ(40px); }
+.flow-model-face-top    { transform: rotateX(90deg) translateZ(40px); opacity: 0.7; }
+.flow-model-face-bottom { transform: rotateX(-90deg) translateZ(40px); opacity: 0.5; }
+
+.flow-cut-line {
+  position: absolute;
+  height: 2px;
+  background: var(--color-secondary);
+  box-shadow: 0 0 8px var(--color-secondary);
+  opacity: 0.85;
+}
+
+.flow-cut-line-a {
+  width: 60px;
+  top: 50%;
+  left: 10%;
+  transform: rotate(-12deg);
+  animation: flowPulse 2s ease-in-out infinite;
+}
+
+.flow-cut-line-b {
+  width: 45px;
+  top: 35%;
+  right: 8%;
+  transform: rotate(20deg);
+  animation: flowPulse 2s ease-in-out infinite 0.5s;
+}
+
+.flow-measure {
+  position: absolute;
+  width: 1px;
+  background: color-mix(in oklch, var(--color-base-content) 40%, transparent);
+}
+
+.flow-measure-a { height: 40px; left: 25%; top: 20%; }
+.flow-measure-b { height: 28px; right: 22%; bottom: 25%; }
+
+.flow-measure-a::after,
+.flow-measure-b::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: -3px;
+  width: 7px;
+  height: 1px;
+  background: inherit;
+}
+
+/* Nest — única plancha */
+.flow-nest-panel {
+  stroke-width: 1;
+}
+
+.flow-nest-wall {
+  fill: color-mix(in oklch, var(--viewer-wall, #9c9c9c) 40%, transparent);
+  stroke: var(--color-primary);
+}
+
+.flow-nest-floor {
+  fill: color-mix(in oklch, var(--viewer-floor, #cf9567) 40%, transparent);
+  stroke: var(--color-primary);
+}
+
+.flow-nest-label {
+  fill: var(--color-primary);
+  font: 600 7px Inter, system-ui, sans-serif;
+  text-anchor: middle;
+}
+
+.flow-nest-sheet {
+  filter: drop-shadow(0 0 12px color-mix(in oklch, var(--color-primary) 30%, transparent));
+}
+
+/* Assembly */
+.flow-stack {
+  position: relative;
+  width: 100px;
+  height: 90px;
+}
+
+.flow-stack-piece {
+  position: absolute;
+  left: 50%;
+  width: 72px;
+  height: 14px;
+  margin-left: -36px;
+  border-radius: 2px;
+  border: 1.5px solid var(--color-primary);
+  background: color-mix(in oklch, var(--color-primary) 20%, transparent);
+  box-shadow: 0 0 12px color-mix(in oklch, var(--color-primary) 25%, transparent);
+}
+
+.flow-stack-1 { bottom: 8px; animation: flowStackUp 3s ease-in-out infinite; }
+.flow-stack-2 { bottom: 28px; opacity: 0.75; animation: flowStackUp 3s ease-in-out infinite 0.4s; }
+.flow-stack-3 { bottom: 48px; opacity: 0.5; animation: flowStackUp 3s ease-in-out infinite 0.8s; }
+
+.flow-stack-arrow {
+  position: absolute;
+  top: 28%;
+  font-size: 1.25rem;
+  color: var(--color-secondary);
+  text-shadow: 0 0 12px var(--color-secondary);
+  animation: flowFloat 2.5s ease-in-out infinite;
+}
+
+@keyframes flowSpin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes flowFloat {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+@keyframes flowCubeSpin {
+  0%, 100% { transform: rotateX(-18deg) rotateY(0deg); }
+  50% { transform: rotateX(-12deg) rotateY(180deg); }
+}
+
+@keyframes flowPulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+@keyframes flowStackUp {
+  0%, 100% { transform: translateY(0); opacity: 0.6; }
+  50% { transform: translateY(-4px); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-root * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

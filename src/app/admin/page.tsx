@@ -15,7 +15,7 @@ export default function AdminPage() {
   useEffect(() => {
     if (isLoadingAuth) return;
     if (!isAdmin) {
-      router.replace("/");
+      router.replace("/home");
     }
   }, [isLoadingAuth, isAdmin, router]);
 
@@ -33,7 +33,7 @@ export default function AdminPage() {
 
       <div className="w-full max-w-3xl z-10 mt-8 md:mt-12">
         <Link
-          href="/"
+          href="/home"
           className="inline-flex items-center gap-1.5 text-sm text-base-content/60 hover:text-base-content mb-6"
         >
           <ArrowLeft size={16} />

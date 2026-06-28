@@ -72,7 +72,7 @@ function ReviewPageContent() {
 
   useEffect(() => {
     if (!isLoadingSession && !phase1Result) {
-      router.replace("/");
+      router.replace("/home");
     }
   }, [isLoadingSession, phase1Result, router]);
 
@@ -228,7 +228,7 @@ function ReviewPageContent() {
 
   const handleReviewCancel = useCallback(() => {
     resetProject();
-    router.replace("/");
+    router.replace("/home");
   }, [resetProject, router]);
 
   // El instructivo se construye en el FRONT desde la topología (el backend no

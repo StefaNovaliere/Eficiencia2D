@@ -54,7 +54,7 @@ export default function NestingPage() {
 
   useEffect(() => {
     if (!isLoadingSession && !nestingData) {
-      router.replace(phase1Result ? "/review" : "/");
+      router.replace(phase1Result ? "/review" : "/home");
     }
   }, [isLoadingSession, nestingData, phase1Result, router]);
 

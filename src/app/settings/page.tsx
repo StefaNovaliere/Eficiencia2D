@@ -15,7 +15,7 @@ export default function SettingsPage() {
 
       <div className="w-full max-w-lg z-10 mt-8 md:mt-12">
         <Link
-          href="/"
+          href="/home"
           className="inline-flex items-center gap-1.5 text-sm text-base-content/60 hover:text-base-content mb-6"
         >
           <ArrowLeft size={16} />

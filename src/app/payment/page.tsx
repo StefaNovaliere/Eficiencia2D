@@ -60,7 +60,7 @@ export default function PaymentPage() {
 
   useEffect(() => {
     if (!isLoadingSession && !phase1Result) {
-      router.replace("/");
+      router.replace("/home");
     }
   }, [isLoadingSession, phase1Result, router]);
 
@@ -86,7 +86,7 @@ export default function PaymentPage() {
   const handleFinish = useCallback(() => {
     if (download) URL.revokeObjectURL(download.url);
     resetProject();
-    router.push("/");
+    router.push("/home");
   }, [download, resetProject, router]);
 
   const handleGoToAssembly = useCallback(() => {
