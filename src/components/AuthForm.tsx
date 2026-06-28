@@ -71,7 +71,7 @@ export default function AuthForm({ mode, passwordUpdatedNotice }: AuthFormProps)
         setPendingEmail(res.email);
       } else {
         await login(trimmedEmail, password);
-        router.push("/");
+        router.push("/home");
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Ocurrió un error inesperado";

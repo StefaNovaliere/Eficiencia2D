@@ -92,7 +92,7 @@ export default function UserAccountSection() {
 
   function handleLogout() {
     logout();
-    router.push("/");
+    router.push("/home");
   }
 
   if (isLoadingProfile) {

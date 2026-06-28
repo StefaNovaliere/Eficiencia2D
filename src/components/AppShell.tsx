@@ -9,12 +9,15 @@ import { useAuth } from "@/context/AuthContext";
 // propio chrome (paso, volver, herramientas). Ahí NO mostramos la barra global.
 const FLOW_ROUTES = ["/review", "/nesting", "/payment"];
 
+// Landing de marketing: navegación propia, sin TopBar global.
+const STANDALONE_ROUTES = ["/"];
+
 function TopBar({ isAuthPage }: { isAuthPage: boolean }) {
   const { user, isLoadingAuth, isAuthenticated, isAdmin } = useAuth();
 
   return (
     <header className="sticky top-0 z-40 h-14 shrink-0 flex items-center justify-between gap-3 px-4 md:px-6 border-b border-base-300/50 bg-base-100/80 backdrop-blur-md">
-      <Link href="/" className="flex items-center gap-2 font-bold tracking-tight" aria-label="Ir al inicio">
+      <Link href="/home" className="flex items-center gap-2 font-bold tracking-tight" aria-label="Ir al inicio">
         <img src="/images/logoFaviconE2d.svg" alt="" width={28} height={28} className="w-7 h-7 e2d-logo-glow" />
         <span className="hidden sm:inline">Eficiencia2D</span>
       </Link>
@@ -67,8 +70,9 @@ function TopBar({ isAuthPage }: { isAuthPage: boolean }) {
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() ?? "/";
   const isFlow = FLOW_ROUTES.some((r) => pathname.startsWith(r));
+  const isStandalone = STANDALONE_ROUTES.includes(pathname);
 
-  if (isFlow) return <>{children}</>;
+  if (isFlow || isStandalone) return <>{children}</>;
 
   const isAuthPage =
     pathname === "/login" ||
