@@ -229,11 +229,15 @@
 }
 
 .casa-explode {
-  width: min(82vw, 880px);
+  display: flex;
+  justify-content: center;
+  width: 100%;
 }
 
+/* Tamaño limitado por ancho Y por alto (≈84vh): entra completo en laptops chicas.
+   El factor vh = alto·(1600/1442) mantiene la relación de aspecto sin letterbox. */
 .casa-explode svg {
-  width: 100%;
+  width: min(82vw, 880px, 93vh);
   height: auto;
   display: block;
   pointer-events: none;
@@ -273,6 +277,29 @@
   font-size: 34px;
   letter-spacing: 1px;
   opacity: 0.85;
+}
+
+/* Paneles 2D planos (resultado del vuelo): contorno + offset de corte. */
+.casa-explode .panel {
+  transition: opacity 0.05s linear;
+}
+
+.casa-explode .panel-outer {
+  fill: color-mix(in oklch, var(--color-primary) 7%, transparent);
+  stroke: var(--color-primary);
+  stroke-width: 2.2;
+}
+
+.casa-explode .panel-inset {
+  fill: none;
+  stroke: var(--color-secondary);
+  stroke-width: 1.5;
+  opacity: 0.5;
+}
+
+/* Polvo neón de las trazas de vuelo. */
+.casa-explode .dust {
+  fill: var(--color-primary);
 }
 
 .casa-explode-copy {
