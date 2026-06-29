@@ -93,15 +93,33 @@ const WALL_PANELS = [
   { w: 256, h: 226 },
 ];
 
-const LEGEND = [
-  "cimiento",
-  "planta baja",
-  "entrepiso",
-  "planta alta",
-  "techo",
-  "carpinterías",
-  "balcón",
-  "acceso",
+// Beats de texto sincronizados con la animación (estilo anime.js). `start` es el
+// progreso del pin donde el panel pasa a estar activo.
+const BEATS = [
+  {
+    start: 0,
+    step: "01 · modelo",
+    title: "Tu casa, en 3D",
+    body: "Subís el .obj y trabajás sobre el modelo real: lo medís, lo revisás y marcás cómo se va a cortar.",
+  },
+  {
+    start: 0.12,
+    step: "02 · componentes",
+    title: "Cada parte, identificada",
+    body: "El modelo se descompone pieza por pieza. Hasta las paredes de cada piso se reparten una por una.",
+  },
+  {
+    start: 0.42,
+    step: "03 · anidado",
+    title: "Vuelan a la plancha",
+    body: "Cada componente se acomoda solo en la lámina de corte, agrupado por tipo y aprovechando el material.",
+  },
+  {
+    start: 0.78,
+    step: "04 · a cortar",
+    title: "Planchas listas",
+    body: "Exportás el PDF de corte y, si querés, el instructivo te guía el armado en 3D.",
+  },
 ];
 
 const FADE = 0.1; // tramo del crossfade armado -> piezas
@@ -191,7 +209,8 @@ function bezier(t: number, p0: number, c: number, p1: number): number {
 export default function CasaExplode() {
   const sectionRef = useRef<HTMLElement>(null);
   const svgHostRef = useRef<HTMLDivElement>(null);
-  const legendRef = useRef<HTMLUListElement>(null);
+  const copyRef = useRef<HTMLDivElement>(null);
+  const tubeFillRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const host = svgHostRef.current;
@@ -410,9 +429,10 @@ export default function CasaExplode() {
     svgEl.insertBefore(panelsG, dustG);
     svgEl.insertBefore(planchasG, panelsG);
 
-    const legendItems = legendRef.current
-      ? [...legendRef.current.querySelectorAll("li")]
+    const panelEls = copyRef.current
+      ? [...copyRef.current.querySelectorAll<HTMLElement>(".casa-explode-panel")]
       : [];
+    const tubeFill = tubeFillRef.current;
 
     let lastKey = "";
 
@@ -517,9 +537,11 @@ export default function CasaExplode() {
       }
       if (assembled && fade < 1) svgEl.appendChild(assembled);
 
-      legendItems.forEach((li, i) =>
-        li.classList.toggle("on", clamp01(p / EXPLODE_END) >= (i / legendItems.length) * 0.9),
-      );
+      // Beat de texto activo (último cuyo `start` ya pasó) + tubo de progreso.
+      let active = 0;
+      for (let i = 0; i < BEATS.length; i++) if (p >= BEATS[i].start) active = i;
+      panelEls.forEach((el, i) => el.classList.toggle("on", i === active));
+      if (tubeFill) tubeFill.style.height = `${(clamp01(p) * 100).toFixed(2)}%`;
     };
 
     gsap.registerPlugin(ScrollTrigger);
@@ -527,7 +549,7 @@ export default function CasaExplode() {
       ScrollTrigger.create({
         trigger: section,
         start: "top top",
-        end: "+=400%",
+        end: "+=560%",
         pin: true,
         scrub: 0.4,
         onUpdate: (self) => render(self.progress),
@@ -543,31 +565,33 @@ export default function CasaExplode() {
   }, []);
 
   return (
-    <section ref={sectionRef} className="casa-explode-section">
-      <div className="casa-explode-copy">
+    <section ref={sectionRef} id="recorrido" className="casa-explode-section">
+      <div ref={copyRef} className="casa-explode-copy">
         <p className="casa-explode-kicker">de la casa a la plancha</p>
-        <h2 className="casa-explode-title">
-          Una casa,
-          <br />
-          pieza por pieza.
-        </h2>
-        <p className="casa-explode-lead">
-          Deslizá para descomponer el modelo: cada parte se separa, vuela a su plancha y se
-          acomoda como panel de corte. Hasta las paredes de cada piso se reparten una por una.
-        </p>
-        <ul ref={legendRef} className="casa-explode-legend">
-          {LEGEND.map((label) => (
-            <li key={label}>
-              <span className="casa-explode-dot" />
-              {label}
-            </li>
+        <div className="casa-explode-panels">
+          {BEATS.map((b, i) => (
+            <div key={b.step} className={`casa-explode-panel${i === 0 ? " on" : ""}`}>
+              <p className="casa-explode-step">{b.step}</p>
+              <h2 className="casa-explode-title">{b.title}</h2>
+              <p className="casa-explode-lead">{b.body}</p>
+            </div>
           ))}
-        </ul>
+        </div>
       </div>
 
       <div className="casa-explode-stage">
         {/* El SVG se inyecta imperativamente en el efecto (ver useEffect). */}
         <div ref={svgHostRef} className="casa-explode" aria-hidden />
+      </div>
+
+      {/* Tubo de vidrio que se llena de líquido neón con el avance del scroll. */}
+      <div className="casa-tube" aria-hidden>
+        <div className="casa-tube-glass">
+          <div ref={tubeFillRef} className="casa-tube-fill" />
+        </div>
+        {BEATS.slice(1).map((b) => (
+          <span key={b.step} className="casa-tube-tick" style={{ bottom: `${b.start * 100}%` }} />
+        ))}
       </div>
 
       <div className="casa-explode-hint">
