@@ -28,9 +28,11 @@ const themeInitScript = `
       document.documentElement.setAttribute("data-theme", saved);
       return;
     }
-  } catch (e) {}
-  // Sin tema guardado: el predeterminado de la marca es Neón.
-  document.documentElement.setAttribute("data-theme", "neon");
+    var dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+  } catch (e) {
+    document.documentElement.setAttribute("data-theme", "dark");
+  }
 })();
 `;
 

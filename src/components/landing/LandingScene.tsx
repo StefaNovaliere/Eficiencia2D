@@ -27,11 +27,36 @@ interface SheetSpec {
   width: number;
   height: number;
   panels: PanelRect[];
+  converge: [number, number, number];
+  convergeRot: [number, number, number];
 }
 
 type Segment = [[number, number, number], [number, number, number]];
 
 const INSET = 0.06;
+const HOUSE_Y = -1.05;
+
+function smoothstep(edge0: number, edge1: number, x: number): number {
+  const t = Math.min(1, Math.max(0, (x - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
+}
+
+function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * t;
+}
+
+function lerp3(a: [number, number, number], b: [number, number, number], t: number): [number, number, number] {
+  return [lerp(a[0], b[0], t), lerp(a[1], b[1], t), lerp(a[2], b[2], t)];
+}
+
+/** Crossfade tipo disolución: las dos capas nunca desaparecen a la vez. */
+function dissolveCrossfade(t: number): { sheets: number; house: number } {
+  const blend = smoothstep(0.14, 0.74, t);
+  return {
+    sheets: Math.cos(blend * Math.PI * 0.5),
+    house: Math.sin(blend * Math.PI * 0.5),
+  };
+}
 
 function panelSegs(x: number, y: number, w: number, h: number, W: number, H: number): Segment[] {
   const map = (nx: number, ny: number): [number, number, number] => [
@@ -66,13 +91,118 @@ function sheetOutline(W: number, H: number): Segment[] {
   ];
 }
 
+function SimpleHouse({
+  houseWeight,
+  blend,
+  primaryColor,
+  secondaryColor,
+}: {
+  houseWeight: number;
+  blend: number;
+  primaryColor: string;
+  secondaryColor: string;
+}) {
+  const { bodyLines, roofLines, doorLines } = useMemo(() => {
+    const hw = 0.58;
+    const hd = 0.44;
+    const y0 = 0;
+    const y1 = 0.72;
+    const peakY = 1.08;
+    const zf = hd;
+    const p = (x: number, y: number, z: number): [number, number, number] => [x, y, z];
+
+    const bl = [p(-hw, y0, -hd), p(hw, y0, -hd), p(hw, y0, hd), p(-hw, y0, hd)];
+    const tl = [p(-hw, y1, -hd), p(hw, y1, -hd), p(hw, y1, hd), p(-hw, y1, hd)];
+    const peak = p(0, peakY, 0);
+
+    const body: Segment[] = [
+      [bl[0], bl[1]],
+      [bl[1], bl[2]],
+      [bl[2], bl[3]],
+      [bl[3], bl[0]],
+      [bl[0], tl[0]],
+      [bl[1], tl[1]],
+      [bl[2], tl[2]],
+      [bl[3], tl[3]],
+      [tl[0], tl[1]],
+      [tl[1], tl[2]],
+      [tl[2], tl[3]],
+      [tl[3], tl[0]],
+    ];
+
+    const roof: Segment[] = [
+      [tl[2], peak],
+      [tl[3], peak],
+      [tl[0], peak],
+      [tl[1], peak],
+    ];
+
+    const dw = 0.16;
+    const dh = 0.34;
+    const door: Segment[] = [
+      [p(-dw / 2, y0, zf), p(dw / 2, y0, zf)],
+      [p(dw / 2, y0, zf), p(dw / 2, y0 + dh, zf)],
+      [p(dw / 2, y0 + dh, zf), p(-dw / 2, y0 + dh, zf)],
+      [p(-dw / 2, y0 + dh, zf), p(-dw / 2, y0, zf)],
+    ];
+
+    return { bodyLines: body, roofLines: roof, doorLines: door };
+  }, []);
+
+  if (houseWeight < 0.02) return null;
+
+  const settle = smoothstep(0.35, 1, blend);
+  const y = lerp(-0.55, HOUSE_Y, settle);
+  const scale = lerp(0.22, 1, houseWeight);
+  const lineW = lerp(1.05, 2.15, houseWeight);
+  const roofW = lerp(1.1, 2.35, houseWeight);
+  const opacity = houseWeight * 0.94;
+
+  return (
+    <group position={[0, y, lerp(0.35, 0.15, settle)]} scale={scale}>
+      {bodyLines.map((pts, i) => (
+        <Line
+          key={`b-${i}`}
+          points={pts}
+          color={primaryColor}
+          lineWidth={lineW}
+          transparent
+          opacity={opacity}
+        />
+      ))}
+      {roofLines.map((pts, i) => (
+        <Line
+          key={`r-${i}`}
+          points={pts}
+          color={secondaryColor}
+          lineWidth={roofW}
+          transparent
+          opacity={opacity * smoothstep(0.25, 0.85, blend)}
+        />
+      ))}
+      {doorLines.map((pts, i) => (
+        <Line
+          key={`d-${i}`}
+          points={pts}
+          color={secondaryColor}
+          lineWidth={lerp(0.9, 1.75, houseWeight)}
+          transparent
+          opacity={opacity * smoothstep(0.45, 1, blend) * 0.88}
+        />
+      ))}
+    </group>
+  );
+}
+
 function AestheticSheet({
   spec,
   primaryColor,
   secondaryColor,
   wallColor,
   floorColor,
-  scrollProgress,
+  convergeT,
+  sheetWeight,
+  blend,
   index,
 }: {
   spec: SheetSpec;
@@ -80,28 +210,43 @@ function AestheticSheet({
   secondaryColor: string;
   wallColor: string;
   floorColor: string;
-  scrollProgress: number;
+  convergeT: number;
+  sheetWeight: number;
+  blend: number;
   index: number;
 }) {
   const groupRef = useRef<Group>(null);
-  const { position, rotation, width: W, height: H, panels } = spec;
+  const { position, rotation, width: W, height: H, panels, converge, convergeRot } = spec;
+
+  const pos = lerp3(position, converge, convergeT);
+  const rot: [number, number, number] = [
+    lerp(rotation[0], convergeRot[0], convergeT),
+    lerp(rotation[1], convergeRot[1], convergeT),
+    lerp(rotation[2], convergeRot[2], convergeT),
+  ];
+  const scale = lerp(1, 0.18, convergeT);
+  const fillAlpha = sheetWeight * (1 - smoothstep(0.08, 0.55, blend));
+  const lineAlpha = sheetWeight * 0.92;
+  const lineW = lerp(1.1, 1.35, 1 - convergeT);
+  const outline = sheetOutline(W, H);
+  const useDashed = blend < 0.22;
 
   useFrame((state) => {
-    if (!groupRef.current) return;
+    if (!groupRef.current || sheetWeight < 0.04) return;
     const t = state.clock.elapsedTime;
-    groupRef.current.rotation.z =
-      rotation[2] + scrollProgress * 0.1 + Math.sin(t * 0.32 + index) * 0.018;
+    const wobble = (1 - convergeT * 0.85) * sheetWeight;
+    groupRef.current.rotation.x = rot[0] + Math.sin(t * 0.28 + index) * 0.035 * wobble;
+    groupRef.current.rotation.y = rot[1] + Math.cos(t * 0.22 + index * 0.7) * 0.04 * wobble;
+    groupRef.current.rotation.z = rot[2] + Math.sin(t * 0.32 + index) * 0.018 * wobble;
+    groupRef.current.position.x = pos[0] + Math.sin(t * 0.4 + index) * 0.045 * wobble;
+    groupRef.current.position.y = pos[1] + Math.cos(t * 0.35 + index) * 0.03 * wobble;
+    groupRef.current.position.z = pos[2];
   });
 
-  const outline = sheetOutline(W, H);
+  if (sheetWeight < 0.03) return null;
 
   return (
-    <group ref={groupRef} position={position} rotation={rotation}>
-      <mesh position={[0, 0, -0.01]}>
-        <planeGeometry args={[W * 1.02, H * 1.02]} />
-        <meshBasicMaterial color={primaryColor} transparent opacity={0.07} />
-      </mesh>
-
+    <group ref={groupRef} scale={scale}>
       {panels.map((p, i) => {
         const fill =
           p.kind === "floor" ? floorColor : p.kind === "accent" ? secondaryColor : wallColor;
@@ -116,18 +261,20 @@ function AestheticSheet({
 
         return (
           <group key={i}>
-            <mesh position={[px, py, 0.001]}>
-              <planeGeometry args={[pw, ph]} />
-              <meshBasicMaterial color={fill} transparent opacity={0.38} />
-            </mesh>
+            {fillAlpha > 0.04 && (
+              <mesh position={[px, py, 0.001]}>
+                <planeGeometry args={[pw, ph]} />
+                <meshBasicMaterial color={fill} transparent opacity={0.38 * fillAlpha} />
+              </mesh>
+            )}
             {segs.map((pts, j) => (
               <Line
                 key={j}
                 points={pts}
                 color={stroke}
-                lineWidth={1.1}
+                lineWidth={lineW}
                 transparent
-                opacity={0.88}
+                opacity={lineAlpha}
               />
             ))}
           </group>
@@ -139,10 +286,10 @@ function AestheticSheet({
           key={`o-${i}`}
           points={pts}
           color={primaryColor}
-          lineWidth={1.4}
+          lineWidth={lineW + 0.15}
           transparent
-          opacity={0.92}
-          dashed
+          opacity={lineAlpha}
+          dashed={useDashed}
           dashSize={0.08}
           gapSize={0.05}
         />
@@ -158,16 +305,23 @@ function SceneCore({
   wallColor,
   floorColor,
 }: LandingSceneProps) {
-  const coreRef = useRef<Group>(null);
+  const morphRef = useRef<Group>(null);
   const particlesRef = useRef<Group>(null);
+
+  const blend = smoothstep(0.1, 0.76, scrollProgress);
+  const { sheets: sheetWeight, house: houseWeight } = dissolveCrossfade(scrollProgress);
+  const convergeT = smoothstep(0.08, 0.72, scrollProgress);
+  const floatIntensity = (1 - blend) * sheetWeight;
 
   const sheets: SheetSpec[] = useMemo(
     () => [
       {
-        position: [0, 0.08, 0],
+        position: [0, 0.35, 0],
         rotation: [0.06, 0.14, 0.02],
         width: 2.7,
         height: 1.85,
+        converge: [0, -0.42, 0.22],
+        convergeRot: [-Math.PI / 2, 0.05, 0],
         panels: [
           { x: 0.02, y: 0.04, w: 0.38, h: 0.42, kind: "wall" },
           { x: 0.42, y: 0.04, w: 0.22, h: 0.28, kind: "wall" },
@@ -177,10 +331,12 @@ function SceneCore({
         ],
       },
       {
-        position: [-1.85, -0.38, 0.28],
+        position: [-1.85, 0.05, 0.28],
         rotation: [-0.04, -0.2, 0.14],
         width: 1.75,
         height: 1.25,
+        converge: [-0.38, -0.18, 0.08],
+        convergeRot: [0, Math.PI / 2, 0.02],
         panels: [
           { x: 0.03, y: 0.05, w: 0.5, h: 0.35, kind: "floor" },
           { x: 0.55, y: 0.05, w: 0.4, h: 0.22, kind: "wall" },
@@ -189,10 +345,12 @@ function SceneCore({
         ],
       },
       {
-        position: [1.82, -0.12, -0.18],
+        position: [1.82, 0.22, -0.18],
         rotation: [0.05, 0.24, -0.1],
         width: 1.55,
         height: 1.15,
+        converge: [0.38, -0.18, 0.08],
+        convergeRot: [0, -Math.PI / 2, -0.02],
         panels: [
           { x: 0.04, y: 0.04, w: 0.18, h: 0.88, kind: "wall" },
           { x: 0.24, y: 0.04, w: 0.18, h: 0.88, kind: "wall" },
@@ -202,10 +360,12 @@ function SceneCore({
         ],
       },
       {
-        position: [0.15, 1.02, -0.48],
+        position: [0.15, 1.15, -0.48],
         rotation: [-0.1, 0.08, 0.2],
         width: 1.35,
         height: 0.95,
+        converge: [0.05, -0.05, -0.28],
+        convergeRot: [-Math.PI / 2, 0.02, 0],
         panels: [
           { x: 0.05, y: 0.08, w: 0.4, h: 0.82, kind: "wall" },
           { x: 0.48, y: 0.08, w: 0.47, h: 0.35, kind: "floor" },
@@ -214,10 +374,12 @@ function SceneCore({
         ],
       },
       {
-        position: [-0.95, 0.78, 0.55],
+        position: [-0.95, 0.95, 0.55],
         rotation: [0.05, -0.32, 0.08],
         width: 1.1,
         height: 0.82,
+        converge: [0, 0.28, 0.05],
+        convergeRot: [-Math.PI / 2.1, 0.4, 0.05],
         panels: [
           { x: 0.06, y: 0.1, w: 0.88, h: 0.28, kind: "floor" },
           { x: 0.06, y: 0.42, w: 0.4, h: 0.48, kind: "wall" },
@@ -242,12 +404,13 @@ function SceneCore({
 
   useFrame((state) => {
     const t = state.clock.elapsedTime;
-    if (coreRef.current) {
-      coreRef.current.rotation.y = scrollProgress * Math.PI * 0.42 + t * 0.035;
-      coreRef.current.rotation.x = 0.15 + scrollProgress * 0.1;
+    if (morphRef.current) {
+      const spin = (1 - blend * 0.92) * 0.038;
+      morphRef.current.rotation.y = scrollProgress * Math.PI * 0.32 + t * spin;
+      morphRef.current.rotation.x = lerp(0.12, 0.04, blend);
     }
     if (particlesRef.current) {
-      particlesRef.current.rotation.y = t * 0.018;
+      particlesRef.current.rotation.y = t * 0.018 * (1 - blend * 0.85);
     }
   });
 
@@ -266,14 +429,24 @@ function SceneCore({
             size={0.032}
             color={primaryColor}
             transparent
-            opacity={0.5}
+            opacity={0.5 * sheetWeight * (1 - blend * 0.5)}
             sizeAttenuation
           />
         </points>
       </group>
 
-      <Float speed={0.9} rotationIntensity={0.08} floatIntensity={0.22}>
-        <group ref={coreRef}>
+      <Float
+        speed={0.85 * floatIntensity + 0.12}
+        rotationIntensity={0.08 * floatIntensity + 0.02}
+        floatIntensity={0.22 * floatIntensity + 0.04}
+      >
+        <group ref={morphRef}>
+          <SimpleHouse
+            houseWeight={houseWeight}
+            blend={blend}
+            primaryColor={primaryColor}
+            secondaryColor={secondaryColor}
+          />
           {sheets.map((sheet, i) => (
             <AestheticSheet
               key={i}
@@ -282,7 +455,9 @@ function SceneCore({
               secondaryColor={secondaryColor}
               wallColor={wallColor}
               floorColor={floorColor}
-              scrollProgress={scrollProgress}
+              convergeT={convergeT}
+              sheetWeight={sheetWeight}
+              blend={blend}
               index={i}
             />
           ))}
@@ -302,7 +477,7 @@ export default function LandingScene({
   return (
     <div className="landing-scene absolute inset-0 -z-10">
       <Canvas
-        camera={{ position: [0, 0, 5.9], fov: 42 }}
+        camera={{ position: [0, -0.12, 5.9], fov: 42 }}
         dpr={[1, 1.75]}
         gl={{ antialias: true, alpha: true }}
         style={{ background: "transparent" }}

@@ -1,12 +1,11 @@
 @import "tailwindcss";
 @plugin "daisyui" {
-  themes: light, dark --prefersdark, aqua, valentine, sunset, halloween;
+  themes: dark --default, light --prefersdark, neon, aqua, valentine, sunset, halloween;
 }
 
-/* Tema "Neón": fondo negro espacial + acentos cian/magenta. Es el predeterminado. */
+/* Tema "Neón" (IdeasHaus): emblema del estudio, no reemplaza al tema oscuro base. */
 @plugin "daisyui/theme" {
   name: "neon";
-  default: true;
   color-scheme: dark;
 
   --color-base-100: oklch(13% 0.012 270);   /* negro espacial (superficie principal) */
@@ -93,6 +92,49 @@
     0 0 8px rgba(34, 211, 238, 0.65),
     0 0 22px rgba(34, 211, 238, 0.40),
     0 0 30px rgba(255, 43, 214, 0.30);
+}
+
+/* Pantalla de inicio de la app (/home) — cards y pasos con el mismo lenguaje neón */
+[data-theme="neon"] .e2d-app-home .card {
+  border-color: color-mix(in oklch, var(--color-primary) 22%, var(--color-base-300));
+  box-shadow:
+    0 0 32px color-mix(in oklch, var(--color-primary) 10%, transparent),
+    0 25px 50px -12px rgb(0 0 0 / 0.45);
+}
+
+[data-theme="neon"] .e2d-app-home .steps .step-primary {
+  color: var(--color-primary);
+}
+
+[data-theme="neon"] .e2d-app-home .steps .step-primary::before,
+[data-theme="neon"] .e2d-app-home .steps .step-primary::after {
+  background-color: var(--color-primary);
+}
+
+[data-theme="neon"] .e2d-app-home .btn-primary {
+  box-shadow: 0 0 24px color-mix(in oklch, var(--color-primary) 35%, transparent);
+}
+
+/* Switch Neón (landing) — visible en oscuro y en neón */
+.e2d-neon-switch-input {
+  flex-shrink: 0;
+  border: 1px solid color-mix(in oklch, var(--color-base-content) 32%, transparent) !important;
+  background-color: color-mix(in oklch, var(--color-base-300) 90%, var(--color-neutral)) !important;
+}
+
+.e2d-neon-switch-input::before {
+  background-color: var(--color-base-content) !important;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.45) !important;
+}
+
+.e2d-neon-switch-input:checked {
+  background: linear-gradient(90deg, #22d3ee, #e879f9) !important;
+  border-color: #22d3ee !important;
+}
+
+.e2d-neon-switch-input:checked::before {
+  background-color: #fff !important;
+  box-shadow: 0 0 10px rgba(34, 211, 238, 0.65) !important;
 }
 
 @keyframes bgDrift {

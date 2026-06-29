@@ -4,7 +4,7 @@ import StepIndicator from "@/components/StepIndicator";
 
 export default function AppHomePage() {
   return (
-    <main className="flex flex-col min-h-screen items-center py-12 px-4 md:px-8 relative">
+    <main className="e2d-app-home flex flex-col min-h-screen items-center py-12 px-4 md:px-8 relative">
       <BackgroundSymbols />
 
       <div className="text-center mb-8 mt-4 md:mt-8 z-10">
@@ -33,7 +33,7 @@ export default function AppHomePage() {
       <footer className="mt-auto pt-12 pb-6 text-center z-10 space-y-1.5">
         <p className="text-sm text-base-content/60 leading-relaxed">
           Formato soportado: <code className="bg-base-300 px-1.5 py-0.5 rounded text-xs">.obj</code> &mdash;
-          Tu archivo se procesa localmente en tu navegador.
+          Subí una vez y seguí desde cualquier dispositivo con tu cuenta.
         </p>
         <p className="text-xs text-base-content/45">
           No necesitás cuenta para generar tus planos. Creá una solo si querés guardar tus proyectos y preferencias.
