@@ -209,6 +209,160 @@
   box-shadow: 0 0 14px color-mix(in oklch, var(--color-primary) 45%, transparent);
 }
 
+/* —— Explode SVG de la casa (sección sticky propia) —— */
+.casa-explode-section {
+  position: relative;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  /* Fondo sólido: las máscaras ocluyen pintando con este mismo color. */
+  background: var(--color-base-100);
+}
+
+.casa-explode-stage {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.casa-explode {
+  width: min(92vw, 1100px);
+}
+
+.casa-explode svg {
+  width: 100%;
+  height: auto;
+  display: block;
+  pointer-events: none;
+  filter: drop-shadow(0 0 26px color-mix(in oklch, var(--color-primary) 20%, transparent));
+}
+
+/* CSS gana a los presentation attributes crema/tinta del SVG generado. */
+.casa-explode .mask {
+  fill: var(--color-base-100);
+}
+
+.casa-explode .lines,
+.casa-explode #assembled path {
+  stroke: var(--color-primary);
+}
+
+.casa-explode [id^="piece-"] {
+  transition: transform 0.05s linear;
+}
+
+.casa-explode-copy {
+  position: absolute;
+  left: 6vw;
+  top: 16vh;
+  max-width: 340px;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.casa-explode-kicker {
+  font-family: ui-monospace, "JetBrains Mono", Menlo, monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--color-primary);
+  margin: 0 0 0.85rem;
+}
+
+.casa-explode-title {
+  font-size: clamp(1.9rem, 4vw, 2.6rem);
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  font-weight: 800;
+  margin: 0 0 0.9rem;
+}
+
+.casa-explode-lead {
+  font-size: 0.9rem;
+  line-height: 1.55;
+  color: color-mix(in oklch, var(--color-base-content) 70%, transparent);
+  margin: 0;
+}
+
+.casa-explode-legend {
+  list-style: none;
+  margin: 1.4rem 0 0;
+  padding: 0;
+  font-size: 0.8rem;
+}
+
+.casa-explode-legend li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0;
+  opacity: 0.28;
+  transition: opacity 0.35s ease;
+}
+
+.casa-explode-legend li.on {
+  opacity: 1;
+}
+
+.casa-explode-dot {
+  width: 7px;
+  height: 7px;
+  border: 1px solid var(--color-primary);
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.casa-explode-legend li.on .casa-explode-dot {
+  background: var(--color-primary);
+  box-shadow: 0 0 8px color-mix(in oklch, var(--color-primary) 60%, transparent);
+}
+
+.casa-explode-hint {
+  position: absolute;
+  bottom: 1.6rem;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+  font-size: 0.7rem;
+  letter-spacing: 0.16em;
+  color: color-mix(in oklch, var(--color-primary) 65%, transparent);
+  pointer-events: none;
+}
+
+.casa-explode-hint-arrow {
+  font-size: 1.05rem;
+  line-height: 1;
+}
+
+@media (max-width: 768px) {
+  .casa-explode-copy {
+    position: static;
+    max-width: none;
+    padding: 5rem 6vw 0;
+    text-align: center;
+  }
+
+  .casa-explode-section {
+    flex-direction: column;
+    justify-content: flex-start;
+    gap: 1.5rem;
+    padding-bottom: 3rem;
+  }
+
+  .casa-explode-legend {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 1rem;
+    justify-content: center;
+  }
+}
+
 /* —— Recorrido del flujo —— */
 .landing-journey-bg {
   position: absolute;
