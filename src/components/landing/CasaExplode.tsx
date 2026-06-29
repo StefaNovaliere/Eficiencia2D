@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { memo, useLayoutEffect, useRef } from "react";
+import Link from "next/link";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
+import { ArrowRight } from "lucide-react";
 import { CASA_EXPLODE_SVG, CASA_VIEWBOX } from "./casaExplodeSvg";
 
 /**
@@ -122,6 +124,8 @@ const BEATS = [
   },
 ];
 
+const INTRO_PORTION = 0.11; // primer tramo del scroll: hero integrado, animación en pausa
+
 const FADE = 0.1; // tramo del crossfade armado -> piezas
 const EXPLODE_END = 0.4; // fin de la separación; el vuelo ocupa [0.40, 1]
 const STAGGER_SPAN = 0.46; // dispersión de arranques del vuelo (en pNest)
@@ -134,6 +138,8 @@ const ease = (t: number): number =>
   t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 const clamp01 = (t: number): number => Math.min(1, Math.max(0, t));
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
+
+const SVG_MARKUP = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${CASA_VIEWBOX}" role="img" aria-label="Casa que se descompone y vuela a planchas de corte">${CASA_EXPLODE_SVG}</svg>`;
 
 /** Pisos/losas horizontales → P1; el resto (paredes + carpinterías) → P2. */
 const isFloor = (name: string): boolean => /slab|foundation|step|canopy/.test(name);
@@ -206,18 +212,47 @@ function bezier(t: number, p0: number, c: number, p1: number): number {
   return u * u * p0 + 2 * u * t * c + t * t * p1;
 }
 
-export default function CasaExplode() {
+function mountSvgLayers(
+  svgEl: SVGSVGElement,
+  planchasG: SVGGElement,
+  panelsG: SVGGElement,
+  dustG: SVGGElement,
+) {
+  if (
+    !svgEl.isConnected ||
+    (planchasG.parentNode === svgEl &&
+      panelsG.parentNode === svgEl &&
+      dustG.parentNode === svgEl)
+  ) {
+    return;
+  }
+  svgEl.insertBefore(planchasG, svgEl.firstChild);
+  if (panelsG.parentNode !== svgEl) {
+    svgEl.insertBefore(panelsG, planchasG.nextSibling);
+  }
+  if (dustG.parentNode !== svgEl) {
+    svgEl.insertBefore(dustG, panelsG.nextSibling);
+  }
+}
+
+function CasaExplode() {
   const sectionRef = useRef<HTMLElement>(null);
+  const pinRef = useRef<HTMLDivElement>(null);
   const svgHostRef = useRef<HTMLDivElement>(null);
   const copyRef = useRef<HTMLDivElement>(null);
+  const introRef = useRef<HTMLDivElement>(null);
+  const hintRef = useRef<HTMLDivElement>(null);
   const tubeFillRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const host = svgHostRef.current;
     const section = sectionRef.current;
-    if (!host || !section) return;
+    const pin = pinRef.current;
+    if (!host || !section || !pin) return;
 
-    host.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${CASA_VIEWBOX}" role="img" aria-label="Casa que se descompone y vuela a planchas de corte">${CASA_EXPLODE_SVG}</svg>`;
+    let disposed = false;
+    const isLive = () =>
+      !disposed && host.isConnected && section.isConnected && pin.isConnected;
 
     const svgEl = host.querySelector("svg");
     if (!svgEl) return;
@@ -254,6 +289,17 @@ export default function CasaExplode() {
         spin: 0,
       };
     });
+
+    const piecesG = document.createElementNS(SVG_NS, "g");
+    piecesG.setAttribute("id", "pieces-layer");
+    for (const p of pieces) {
+      if (p.el.parentNode === svgEl) {
+        piecesG.appendChild(p.el);
+      }
+    }
+    if (piecesG.childNodes.length > 0) {
+      svgEl.appendChild(piecesG);
+    }
 
     // Capas: planchas (fondo) -> paneles 2D -> polvo -> piezas iso (frente).
     const planchasG = document.createElementNS(SVG_NS, "g");
@@ -425,9 +471,7 @@ export default function CasaExplode() {
       store.spin = spin;
     });
 
-    svgEl.insertBefore(dustG, svgEl.firstChild);
-    svgEl.insertBefore(panelsG, dustG);
-    svgEl.insertBefore(planchasG, panelsG);
+    mountSvgLayers(svgEl, planchasG, panelsG, dustG);
 
     const panelEls = copyRef.current
       ? [...copyRef.current.querySelectorAll<HTMLElement>(".casa-explode-panel")]
@@ -435,6 +479,21 @@ export default function CasaExplode() {
     const tubeFill = tubeFillRef.current;
 
     let lastKey = "";
+
+    const reorderPieces = (sorted: PieceRef[]) => {
+      if (!piecesG.isConnected) return;
+      for (const g of sorted) {
+        if (g.el.parentNode === piecesG) {
+          piecesG.appendChild(g.el);
+        }
+      }
+    };
+
+    const moveAssembledToFront = () => {
+      if (assembled?.isConnected && assembled.parentNode === svgEl) {
+        svgEl.appendChild(assembled);
+      }
+    };
 
     // Cola de polvo neón muestreada sobre un arco.
     const renderDust = (
@@ -467,6 +526,8 @@ export default function CasaExplode() {
     };
 
     const render = (p: number) => {
+      if (!isLive() || !svgEl.isConnected) return;
+
       const eExp = ease(clamp01(p / EXPLODE_END));
       const pNest = clamp01((p - EXPLODE_END) / (1 - EXPLODE_END));
       const fade = Math.min(1, p / FADE);
@@ -531,11 +592,11 @@ export default function CasaExplode() {
         const sorted = [...pieces].sort((a, b) => a.depth - b.depth);
         const key = sorted.map((g) => g.name).join(",");
         if (key !== lastKey) {
-          for (const g of sorted) svgEl.appendChild(g.el);
+          reorderPieces(sorted);
           lastKey = key;
         }
       }
-      if (assembled && fade < 1) svgEl.appendChild(assembled);
+      if (assembled && fade > 0 && fade < 1) moveAssembledToFront();
 
       // Beat de texto activo (último cuyo `start` ya pasó) + tubo de progreso.
       let active = 0;
@@ -544,29 +605,108 @@ export default function CasaExplode() {
       if (tubeFill) tubeFill.style.height = `${(clamp01(p) * 100).toFixed(2)}%`;
     };
 
+    const setIntro = (t: number) => {
+      const introOpacity = 1 - t;
+      if (introRef.current) {
+        introRef.current.style.opacity = String(introOpacity);
+        introRef.current.style.visibility = introOpacity < 0.04 ? "hidden" : "visible";
+        introRef.current.style.pointerEvents = introOpacity > 0.2 ? "auto" : "none";
+      }
+      if (copyRef.current) {
+        const copyOpacity = t > 0.82 ? clamp01((t - 0.82) / 0.18) : 0;
+        copyRef.current.style.opacity = String(copyOpacity);
+        copyRef.current.style.visibility = copyOpacity < 0.04 ? "hidden" : "visible";
+      }
+    };
+
+    const renderIntro = (t: number) => {
+      if (!isLive() || !svgEl.isConnected) return;
+
+      const peek = lerp(0.22, 1, t);
+      if (assembled) assembled.style.opacity = String(peek);
+      for (const g of pieces) {
+        g.el.style.opacity = "0";
+        g.el.setAttribute("transform", "translate(0,0)");
+      }
+      planchasG.style.opacity = "0";
+      for (const pan of panelsG.querySelectorAll<SVGElement>(".panel")) pan.style.opacity = "0";
+      if (tubeFill) tubeFill.style.height = "0%";
+      panelEls.forEach((el) => el.classList.remove("on"));
+    };
+
     gsap.registerPlugin(ScrollTrigger);
     const ctx = gsap.context(() => {
       ScrollTrigger.create({
         trigger: section,
+        pin: pin,
+        pinReparent: false,
+        anticipatePin: 1,
         start: "top top",
-        end: "+=560%",
-        pin: true,
+        end: "+=380%",
         scrub: 0.4,
-        onUpdate: (self) => render(self.progress),
+        onUpdate: (self) => {
+          if (!isLive()) return;
+
+          const p = self.progress;
+          if (p < INTRO_PORTION) {
+            const t = ease(p / INTRO_PORTION);
+            setIntro(t);
+            renderIntro(t);
+            if (hintRef.current) hintRef.current.style.opacity = String(1 - t);
+            return;
+          }
+          setIntro(1);
+          if (hintRef.current) hintRef.current.style.opacity = "1";
+          const animP = clamp01((p - INTRO_PORTION) / (1 - INTRO_PORTION));
+          render(animP);
+        },
       });
     }, section);
 
-    render(0);
+    setIntro(0);
+    renderIntro(0);
 
     return () => {
+      disposed = true;
       ctx.revert();
-      host.innerHTML = "";
     };
   }, []);
 
   return (
     <section ref={sectionRef} id="recorrido" className="casa-explode-section">
-      <div ref={copyRef} className="casa-explode-copy">
+      <div ref={pinRef} className="casa-explode-pin">
+      <div ref={introRef} className="casa-intro">
+        <p className="casa-intro-badge">modelos 3D · corte · nube</p>
+        <img
+          src="/images/logoFaviconE2d.svg"
+          alt="Eficiencia2D"
+          width={144}
+          height={144}
+          className="casa-intro-logo e2d-logo-glow"
+        />
+        <h1 className="casa-intro-title e2d-title-glow">
+          Cortá en{" "}
+          <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary via-secondary to-primary">
+            3D
+          </span>
+          . Exportá planchas.
+        </h1>
+        <p className="casa-intro-lead">
+          La mayor parte del trabajo es revisar el modelo, medir y marcar cortes.
+          Las planchas vienen al final.
+        </p>
+        <div className="casa-intro-cta">
+          <Link href="/home" className="btn btn-primary gap-2 shadow-lg shadow-primary/35 px-8">
+            Empezar
+            <ArrowRight size={16} />
+          </Link>
+          <a href="#nube" className="btn btn-ghost border border-primary/25 text-primary/90">
+            La nube
+          </a>
+        </div>
+      </div>
+
+      <div ref={copyRef} className="casa-explode-copy" style={{ opacity: 0 }}>
         <p className="casa-explode-kicker">de la casa a la plancha</p>
         <div className="casa-explode-panels">
           {BEATS.map((b, i) => (
@@ -580,8 +720,13 @@ export default function CasaExplode() {
       </div>
 
       <div className="casa-explode-stage">
-        {/* El SVG se inyecta imperativamente en el efecto (ver useEffect). */}
-        <div ref={svgHostRef} className="casa-explode" aria-hidden />
+        <div
+          ref={svgHostRef}
+          className="casa-explode"
+          aria-hidden
+          suppressHydrationWarning
+          dangerouslySetInnerHTML={{ __html: SVG_MARKUP }}
+        />
       </div>
 
       {/* Tubo de vidrio que se llena de líquido neón con el avance del scroll. */}
@@ -594,10 +739,13 @@ export default function CasaExplode() {
         ))}
       </div>
 
-      <div className="casa-explode-hint">
+      <div ref={hintRef} className="casa-explode-hint">
         <span className="animate-pulse">deslizá</span>
         <span className="casa-explode-hint-arrow">↓</span>
+      </div>
       </div>
     </section>
   );
 }
+
+export default memo(CasaExplode);
