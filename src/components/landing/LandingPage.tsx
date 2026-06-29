@@ -11,6 +11,7 @@ import FlowStepVisual from "@/components/landing/FlowStepVisual";
 import NeonThemeSwitch from "@/components/NeonThemeSwitch";
 
 const LandingScene = dynamic(() => import("./LandingScene"), { ssr: false });
+const CasaExplode = dynamic(() => import("./CasaExplode"), { ssr: false });
 
 const JOURNEY = [
   {
@@ -235,6 +236,8 @@ export default function LandingPage() {
           <span className="text-lg leading-none">↓</span>
         </div>
       </section>
+
+      <CasaExplode />
 
       <section id="recorrido" ref={workflowRef} className="landing-journey relative py-24 md:py-32 px-4 md:px-8 overflow-hidden">
         <div className="landing-journey-bg" aria-hidden />
