@@ -23,7 +23,6 @@ function TopBar({ isAuthPage }: { isAuthPage: boolean }) {
       </Link>
 
       <div className="flex items-center gap-1.5">
-        
         <Link
           href="/settings"
           className="btn btn-ghost btn-sm btn-circle"

@@ -8,6 +8,7 @@ import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { ArrowRight } from "lucide-react";
 import { useViewerPalette } from "@/context/ThemeContext";
 import FlowStepVisual from "@/components/landing/FlowStepVisual";
+import NeonThemeSwitch from "@/components/NeonThemeSwitch";
 
 const LandingScene = dynamic(() => import("./LandingScene"), { ssr: false });
 
@@ -91,13 +92,16 @@ export default function LandingPage() {
 
       heroTl
         .to(".landing-scroll-hint", { opacity: 0, duration: 0.1 }, 0.02)
-        .to(".landing-scene", { opacity: 0.32, duration: 0.35, ease: "power2.out" }, 0.08)
+        .to(".landing-scene", { opacity: 0.4, duration: 0.35, ease: "power2.out" }, 0.08)
         .to(".landing-hero-dim", { opacity: 1, duration: 0.35, ease: "power2.out" }, 0.08)
         .to(".landing-hero-content", { opacity: 1, y: 0, duration: 0.4, ease: "power2.out" }, 0.12)
         .to(".landing-hero-logo", { scale: 1, duration: 0.45, ease: "back.out(1.5)" }, 0.12)
+        /* Transformación: opacidad casi plana para no delatar el corte */
+        .to(".landing-scene", { opacity: 0.46, duration: 0.42, ease: "none" }, 0.22)
+        .to(".landing-scene", { opacity: 0.5, duration: 0.38, ease: "none" }, 0.48)
         .to(".landing-hero-content", { opacity: 0, y: -40, duration: 0.25 }, 0.78)
         .to(".landing-hero-dim", { opacity: 0, duration: 0.25 }, 0.78)
-        .to(".landing-scene", { opacity: 0.2, duration: 0.25 }, 0.78);
+        .to(".landing-scene", { opacity: 0.52, duration: 0.25, ease: "power2.out" }, 0.78);
 
       gsap.utils.toArray<HTMLElement>(".landing-journey-row").forEach((row, i) => {
         const visual = row.querySelector(".landing-journey-visual");
@@ -164,7 +168,8 @@ export default function LandingPage() {
             Recorrido
           </a>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 sm:gap-3">
+          <NeonThemeSwitch />
           <Link href="/login" className="btn btn-ghost btn-sm hidden sm:inline-flex">
             Ingresar
           </Link>
@@ -290,19 +295,32 @@ export default function LandingPage() {
       <footer className="landing-footer border-t border-base-300/40 py-10 px-4 md:px-8">
         <div className="max-w-5xl mx-auto flex flex-col md:flex-row items-center justify-between gap-8">
           <div className="flex items-center gap-3">
-            <img src="/images/logoFaviconE2d.svg" alt="" width={36} height={36} className="w-9 h-9 e2d-logo-glow" />
-            <div>
-              <p className="font-semibold text-sm">Eficiencia2D</p>
-              <p className="text-xs text-base-content/45">IdeasHaus</p>
+            <img
+              src="/images/logoFaviconE2d.svg"
+              alt=""
+              width={36}
+              height={36}
+              className="w-9 h-9 e2d-logo-glow"
+            />
+            <p className="font-semibold text-sm">Eficiencia2D</p>
+          </div>
+
+          <div className="flex flex-col items-center gap-2 text-center">
+            <p className="text-xs text-base-content/50">Una aplicación hecha por</p>
+            <div className="flex items-center gap-2.5">
+              <img
+                src="/images/ideas_haus_sinFondo.svg"
+                alt=""
+                width={148}
+                height={52}
+                className="h-10 md:h-11 w-auto opacity-95"
+              />
+              <span className="text-base md:text-lg font-bold tracking-tight text-base-content/90">
+                IdeasHaus
+              </span>
             </div>
           </div>
-          <img
-            src="/images/ideas_haus_sinFondo.svg"
-            alt="IdeasHaus"
-            width={120}
-            height={40}
-            className="h-8 w-auto opacity-90"
-          />
+
           <div className="flex gap-4 text-xs text-base-content/45">
             <Link href="/settings" className="hover:text-primary">
               Configuración
