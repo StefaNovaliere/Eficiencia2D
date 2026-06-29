@@ -229,7 +229,7 @@
 }
 
 .casa-explode {
-  width: min(92vw, 1100px);
+  width: min(82vw, 880px);
 }
 
 .casa-explode svg {
@@ -252,6 +252,27 @@
 
 .casa-explode [id^="piece-"] {
   transition: transform 0.05s linear;
+}
+
+/* Planchas de corte (fase de nest): contorno punteado + rótulo, detrás de las piezas. */
+.casa-explode #planchas {
+  transition: opacity 0.2s linear;
+}
+
+.casa-explode .plancha {
+  fill: color-mix(in oklch, var(--color-primary) 6%, transparent);
+  stroke: var(--color-primary);
+  stroke-width: 2.4;
+  stroke-dasharray: 16 11;
+  opacity: 0.9;
+}
+
+.casa-explode .plancha-label {
+  fill: var(--color-primary);
+  font-family: ui-monospace, "JetBrains Mono", Menlo, monospace;
+  font-size: 34px;
+  letter-spacing: 1px;
+  opacity: 0.85;
 }
 
 .casa-explode-copy {
