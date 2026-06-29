@@ -9,7 +9,7 @@ import { ArrowRight } from "lucide-react";
 import { useViewerPalette } from "@/context/ThemeContext";
 import NeonThemeSwitch from "@/components/NeonThemeSwitch";
 
-const LandingScene = dynamic(() => import("./LandingScene"), { ssr: false });
+
 const CasaExplode = dynamic(() => import("./CasaExplode"), { ssr: false });
 
 export default function LandingPage() {
@@ -125,13 +125,7 @@ export default function LandingPage() {
         ref={heroRef}
         className="landing-hero relative min-h-screen flex items-center justify-center pt-20 px-4 md:px-8"
       >
-        <LandingScene
-          scrollProgress={scrollProgress}
-          primaryColor={palette.leaderPrimary}
-          secondaryColor={palette.leaderSecondary}
-          wallColor={palette.wall}
-          floorColor={palette.floor}
-        />
+
         <div className="landing-hero-dim absolute inset-0 z-[1] pointer-events-none opacity-0" aria-hidden />
 
         <div className="landing-hero-content relative z-10 max-w-3xl mx-auto text-center opacity-0">
