@@ -10,30 +10,39 @@ import { CASA_EXPLODE_SVG, CASA_VIEWBOX } from "./casaExplodeSvg";
  *
  *  1. EXPLODE (p 0 → 0.40): crossfade de la capa armada (#assembled) a las piezas
  *     separables; cada pieza se separa por su vector (data-dx/dy) con painter's dinámico.
- *  2. VUELO/NEST (p 0.40 → 1): cada pieza vuela escalonada por un arco (con giro y traza
- *     de polvo neón) hacia su plancha de corte y, al aterrizar, se convierte en panel(es)
- *     vector 2D planos. Pisos/losas → P1; paredes + carpinterías → P2.
+ *  2. VUELO/NEST (p 0.40 → 1): cada componente vuela escalonado por un arco (con giro y
+ *     traza de polvo neón) hacia su plancha de corte y queda como panel vector 2D plano.
+ *     Pisos/losas → P1; paredes + carpinterías → P2.
  *
  * Importante: el .obj agrupa las paredes de cada piso como UNA caja (ground_wall /
- * upper_wall). En una plancha real cada pared es un componente aparte, así que esas
- * piezas-caja se descomponen en varios paneles (frente, contrafrente, 2 laterales)
- * agrupados juntos. Las losas y carpinterías sí son un único panel.
+ * upper_wall). En una plancha real cada pared es un componente aparte, así que al empezar
+ * el vuelo esa caja se ABRE en 4 paneles (frente, contrafrente, 2 laterales) y CADA UNO
+ * vuela individualmente a su lugar. Las losas y carpinterías son un único panel.
  *
  * El layout se escala para entrar completo en pantallas de laptop (ver CSS).
  */
 
-interface LocalPanel {
-  ox: number;
-  oy: number;
-  w: number;
-  h: number;
+interface FlatPanel {
   el: SVGGElement;
+  // centro del slot final (coords del viewBox)
+  pcx: number;
+  pcy: number;
+  // vuelo propio (solo paneles de pared)
+  fly: boolean;
+  originX: number;
+  originY: number;
+  ctrlX: number;
+  ctrlY: number;
+  startT: number;
+  spin: number;
+  dust: SVGCircleElement[];
 }
 
 interface PieceRef {
   el: SVGGElement;
-  panels: LocalPanel[];
+  panels: FlatPanel[];
   dust: SVGCircleElement[];
+  wall: boolean;
   dx: number;
   dy: number;
   d0: number;
@@ -45,10 +54,12 @@ interface PieceRef {
   cy: number;
   bw: number;
   bh: number;
-  // super-celda destino (centro = blanco del vuelo) + parámetros de vuelo
+  // vuelo de la pieza iso (no-pared): centro destino + parámetros
   scCx: number;
   scCy: number;
-  isoK: number; // escala de la pieza iso para encajar en su super-celda
+  isoK: number;
+  originX: number;
+  originY: number;
   ctrlX: number;
   ctrlY: number;
   startT: number;
@@ -95,10 +106,11 @@ const LEGEND = [
 
 const FADE = 0.1; // tramo del crossfade armado -> piezas
 const EXPLODE_END = 0.4; // fin de la separación; el vuelo ocupa [0.40, 1]
-const STAGGER_SPAN = 0.5; // dispersión de arranques del vuelo (en pNest)
-const FLIGHT_DUR = 0.46; // duración del vuelo de cada pieza (en pNest)
-const N_DUST = 7;
-const TAIL_STEP = 0.052;
+const STAGGER_SPAN = 0.46; // dispersión de arranques del vuelo (en pNest)
+const FLIGHT_DUR = 0.46; // duración del vuelo de cada componente (en pNest)
+const WALL_FAN_R = 150; // radio del abanico al abrirse las 4 paredes
+const N_DUST = 6;
+const TAIL_STEP = 0.055;
 
 const ease = (t: number): number =>
   t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
@@ -111,7 +123,7 @@ const isWallBox = (name: string): boolean => /wall/.test(name);
 
 /** Layout local (raw) de los paneles que produce una pieza. Paredes → 2×2; resto → 1. */
 function buildPanels(p: PieceRef): { scW: number; scH: number; local: { ox: number; oy: number; w: number; h: number }[] } {
-  if (isWallBox(p.name)) {
+  if (p.wall) {
     const cols = 2;
     const cellW = Math.max(...WALL_PANELS.map((w) => w.w));
     const cellH = Math.max(...WALL_PANELS.map((w) => w.h));
@@ -132,10 +144,7 @@ function buildPanels(p: PieceRef): { scW: number; scH: number; local: { ox: numb
   return { scW: p.bw, scH: p.bh, local: [{ ox: 0, oy: 0, w: p.bw, h: p.bh }] };
 }
 
-/**
- * Empaquetado por estantes (shelf packing) de super-celdas: ordena por alto desc y baja
- * la escala global hasta que entra en el área útil. Conserva proporciones reales.
- */
+/** Empaquetado por estantes (shelf packing) de super-celdas, conservando proporciones. */
 function packShelf(
   items: { w: number; h: number; ref: PieceRef }[],
   innerW: number,
@@ -173,7 +182,7 @@ function packShelf(
   return { k: 0.05, placed: [] };
 }
 
-/** Posición del centroide a lo largo del arco de vuelo (Bézier cuadrática). */
+/** Posición a lo largo del arco de vuelo (Bézier cuadrática). */
 function bezier(t: number, p0: number, c: number, p1: number): number {
   const u = 1 - t;
   return u * u * p0 + 2 * u * t * c + t * t * p1;
@@ -189,7 +198,6 @@ export default function CasaExplode() {
     const section = sectionRef.current;
     if (!host || !section) return;
 
-    // Inyección imperativa: el SVG vive fuera de la reconciliación de React.
     host.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${CASA_VIEWBOX}" role="img" aria-label="Casa que se descompone y vuela a planchas de corte">${CASA_EXPLODE_SVG}</svg>`;
 
     const svgEl = host.querySelector("svg");
@@ -200,15 +208,17 @@ export default function CasaExplode() {
       ...svgEl.querySelectorAll<SVGGElement>('[id^="piece-"]'),
     ].map((el) => {
       const b = el.getBBox();
+      const name = el.dataset.piece || el.id;
       return {
         el,
         panels: [],
         dust: [],
+        wall: isWallBox(name),
         dx: parseFloat(el.dataset.dx || "0"),
         dy: parseFloat(el.dataset.dy || "0"),
         d0: parseFloat(el.dataset.d0 || "0"),
         dr: parseFloat(el.dataset.dr || "0"),
-        name: el.dataset.piece || el.id,
+        name,
         depth: 0,
         cx: b.x + b.width / 2,
         cy: b.y + b.height / 2,
@@ -217,6 +227,8 @@ export default function CasaExplode() {
         scCx: 0,
         scCy: 0,
         isoK: 1,
+        originX: 0,
+        originY: 0,
         ctrlX: 0,
         ctrlY: 0,
         startT: 0,
@@ -250,6 +262,19 @@ export default function CasaExplode() {
       planchasG.appendChild(label);
     }
 
+    const mkDust = (n: number): SVGCircleElement[] => {
+      const arr: SVGCircleElement[] = [];
+      for (let j = 0; j < n; j++) {
+        const c = document.createElementNS(SVG_NS, "circle");
+        c.setAttribute("class", "dust");
+        c.setAttribute("r", "0");
+        c.style.opacity = "0";
+        dustG.appendChild(c);
+        arr.push(c);
+      }
+      return arr;
+    };
+
     const mkPanel = (px: number, py: number, pw: number, ph: number): SVGGElement => {
       const g = document.createElementNS(SVG_NS, "g");
       g.setAttribute("class", "panel");
@@ -275,7 +300,7 @@ export default function CasaExplode() {
       return g;
     };
 
-    // Empaquetar cada grupo (por super-celdas) y crear paneles + pool de polvo.
+    // Empaquetar cada grupo (por super-celdas) y crear paneles.
     const assignGroup = (list: PieceRef[], pl: Plancha) => {
       const innerX = pl.x + PAD;
       const innerY = pl.y + PAD + LABEL_GAP;
@@ -297,37 +322,88 @@ export default function CasaExplode() {
         for (const lp of spec.local) {
           const ax = x0 + lp.ox * k;
           const ay = y0 + lp.oy * k;
-          const el = mkPanel(ax, ay, lp.w * k, lp.h * k);
-          pp.ref.panels.push({ ox: lp.ox, oy: lp.oy, w: lp.w, h: lp.h, el });
+          const aw = lp.w * k;
+          const ah = lp.h * k;
+          const el = mkPanel(ax, ay, aw, ah);
+          pp.ref.panels.push({
+            el,
+            pcx: ax + aw / 2,
+            pcy: ay + ah / 2,
+            fly: pp.ref.wall,
+            originX: 0,
+            originY: 0,
+            ctrlX: 0,
+            ctrlY: 0,
+            startT: 0,
+            spin: 0,
+            dust: pp.ref.wall ? mkDust(N_DUST) : [],
+          });
         }
-        for (let j = 0; j < N_DUST; j++) {
-          const c = document.createElementNS(SVG_NS, "circle");
-          c.setAttribute("class", "dust");
-          c.setAttribute("r", "0");
-          c.style.opacity = "0";
-          dustG.appendChild(c);
-          pp.ref.dust.push(c);
-        }
+        // La pieza iso (no-pared) usa su propio pool de polvo para el vuelo.
+        if (!pp.ref.wall) pp.ref.dust = mkDust(N_DUST);
       }
     };
     assignGroup(pieces.filter((p) => isFloor(p.name)), P1);
     assignGroup(pieces.filter((p) => !isFloor(p.name)), P2);
 
-    // Parámetros de vuelo: arranque escalonado (orden de aterrizaje arriba→abajo) + arco + giro.
-    const ranked = [...pieces].sort((a, b) => a.scCy - b.scCy || a.scCx - b.scCx);
-    ranked.forEach((g, i) => {
-      g.startT = (i / Math.max(1, ranked.length - 1)) * STAGGER_SPAN;
-      const p0x = g.cx + g.dx;
-      const p0y = g.cy + g.dy;
-      const mx = (p0x + g.scCx) / 2;
-      const my = (p0y + g.scCy) / 2;
-      const dx = g.scCx - p0x;
-      const dy = g.scCy - p0y;
-      const dist = Math.hypot(dx, dy) || 1;
+    // Lista de "voladores": piezas iso (no-pared) + cada panel de pared, por separado.
+    interface Flyer {
+      wall: boolean;
+      piece: PieceRef;
+      panel: FlatPanel | null;
+      idx: number;
+      tx: number;
+      ty: number;
+    }
+    const flyers: Flyer[] = [];
+    for (const p of pieces) {
+      if (p.wall) {
+        p.panels.forEach((pan, idx) =>
+          flyers.push({ wall: true, piece: p, panel: pan, idx, tx: pan.pcx, ty: pan.pcy }),
+        );
+      } else {
+        flyers.push({ wall: false, piece: p, panel: null, idx: 0, tx: p.scCx, ty: p.scCy });
+      }
+    }
+    // Las paredes vuelan primero (se ve la separación temprano), luego el resto arriba→abajo.
+    flyers.sort((a, b) => {
+      const aw = a.wall ? 0 : 1;
+      const bw = b.wall ? 0 : 1;
+      if (aw !== bw) return aw - bw;
+      return a.ty - b.ty || a.tx - b.tx;
+    });
+    const NF = flyers.length;
+    flyers.forEach((f, i) => {
+      const startT = (i / Math.max(1, NF - 1)) * STAGGER_SPAN;
       const side = i % 2 === 0 ? 1 : -1;
-      g.ctrlX = mx + (-dy / dist) * dist * 0.28 * side;
-      g.ctrlY = my + (dx / dist) * dist * 0.28 * side - dist * 0.12;
-      g.spin = side * (12 + ((i * 17) % 16)) * (Math.PI / 180);
+      let ox: number;
+      let oy: number;
+      if (f.wall && f.panel) {
+        // Origen en abanico alrededor del centroide explotado de la caja.
+        const bcx = f.piece.cx + f.piece.dx;
+        const bcy = f.piece.cy + f.piece.dy;
+        const a = (f.idx / WALL_PANELS.length) * Math.PI * 2 + 0.7;
+        ox = bcx + Math.cos(a) * WALL_FAN_R;
+        oy = bcy + Math.sin(a) * WALL_FAN_R * 0.72;
+      } else {
+        ox = f.piece.cx + f.piece.dx;
+        oy = f.piece.cy + f.piece.dy;
+      }
+      const mx = (ox + f.tx) / 2;
+      const my = (oy + f.ty) / 2;
+      const dx = f.tx - ox;
+      const dy = f.ty - oy;
+      const dist = Math.hypot(dx, dy) || 1;
+      const ctrlX = mx + (-dy / dist) * dist * 0.28 * side;
+      const ctrlY = my + (dx / dist) * dist * 0.28 * side - dist * 0.12;
+      const spin = side * (12 + ((i * 17) % 16)) * (Math.PI / 180);
+      const store = f.wall && f.panel ? f.panel : f.piece;
+      store.originX = ox;
+      store.originY = oy;
+      store.ctrlX = ctrlX;
+      store.ctrlY = ctrlY;
+      store.startT = startT;
+      store.spin = spin;
     });
 
     svgEl.insertBefore(dustG, svgEl.firstChild);
@@ -340,6 +416,36 @@ export default function CasaExplode() {
 
     let lastKey = "";
 
+    // Cola de polvo neón muestreada sobre un arco.
+    const renderDust = (
+      dust: SVGCircleElement[],
+      ef: number,
+      flying: number,
+      ox: number,
+      oy: number,
+      cx: number,
+      cy: number,
+      tx: number,
+      ty: number,
+    ) => {
+      const dxx = tx - ox;
+      const dyy = ty - oy;
+      const dl = Math.hypot(dxx, dyy) || 1;
+      for (let j = 0; j < dust.length; j++) {
+        const tj = ef - (j + 1) * TAIL_STEP;
+        const c = dust[j];
+        if (tj <= 0 || flying <= 0) {
+          c.style.opacity = "0";
+          continue;
+        }
+        const jit = (((j * 53 + 7) % 11) - 5) * 2.2;
+        c.setAttribute("cx", String(bezier(tj, ox, cx, tx) + (-dyy / dl) * jit));
+        c.setAttribute("cy", String(bezier(tj, oy, cy, ty) + (dxx / dl) * jit));
+        c.setAttribute("r", String((1 - j / dust.length) * 7 + 1.5));
+        c.style.opacity = String(flying * (1 - j / dust.length) * 0.6);
+      }
+    };
+
     const render = (p: number) => {
       const eExp = ease(clamp01(p / EXPLODE_END));
       const pNest = clamp01((p - EXPLODE_END) / (1 - EXPLODE_END));
@@ -350,21 +456,43 @@ export default function CasaExplode() {
 
       for (const g of pieces) {
         if (pNest <= 0) {
-          // Fase explode: separar y profundidad real.
+          // Fase explode: la pieza iso se separa (la caja de paredes aún entera).
           g.el.style.opacity = String(fade);
           g.el.setAttribute("transform", `translate(${g.dx * eExp},${g.dy * eExp})`);
           for (const pan of g.panels) pan.el.style.opacity = "0";
           for (const c of g.dust) c.style.opacity = "0";
+          for (const pan of g.panels) for (const c of pan.dust) c.style.opacity = "0";
           g.depth = g.d0 + g.dr * eExp;
           continue;
         }
-        // Fase vuelo/nest: arco + giro + crossfade a panel(es) 2D.
+
+        if (g.wall) {
+          // La caja se desvanece rápido mientras sus 4 paneles se abren y vuelan solos.
+          g.el.setAttribute("transform", `translate(${g.dx},${g.dy})`);
+          g.el.style.opacity = String(fade * (1 - clamp01(pNest / 0.1)));
+          for (const pan of g.panels) {
+            const fp = clamp01((pNest - pan.startT) / FLIGHT_DUR);
+            const ef = ease(fp);
+            const bx = bezier(ef, pan.originX, pan.ctrlX, pan.pcx);
+            const by = bezier(ef, pan.originY, pan.ctrlY, pan.pcy);
+            const s = lerp(0.7, 1, ef);
+            const ang = (pan.spin * Math.sin(ef * Math.PI) * 180) / Math.PI;
+            pan.el.setAttribute(
+              "transform",
+              `translate(${bx},${by}) rotate(${ang}) scale(${s}) translate(${-pan.pcx},${-pan.pcy})`,
+            );
+            pan.el.style.opacity = String(clamp01(fp / 0.08));
+            const flying = clamp01(fp / 0.08) * clamp01((1 - fp) / 0.12);
+            renderDust(pan.dust, ef, flying, pan.originX, pan.originY, pan.ctrlX, pan.ctrlY, pan.pcx, pan.pcy);
+          }
+          continue;
+        }
+
+        // Pieza normal (losa/carpintería): la iso vuela y al aterrizar cruza a su panel 2D.
         const fp = clamp01((pNest - g.startT) / FLIGHT_DUR);
         const ef = ease(fp);
-        const p0x = g.cx + g.dx;
-        const p0y = g.cy + g.dy;
-        const bx = bezier(ef, p0x, g.ctrlX, g.scCx);
-        const by = bezier(ef, p0y, g.ctrlY, g.scCy);
+        const bx = bezier(ef, g.originX, g.ctrlX, g.scCx);
+        const by = bezier(ef, g.originY, g.ctrlY, g.scCy);
         const s = lerp(1, g.isoK, ef);
         const ang = (g.spin * Math.sin(ef * Math.PI) * 180) / Math.PI;
         g.el.setAttribute(
@@ -374,28 +502,11 @@ export default function CasaExplode() {
         const panelOp = clamp01((fp - 0.72) / 0.28);
         g.el.style.opacity = String(fade * (1 - clamp01((fp - 0.82) / 0.18)));
         for (const pan of g.panels) pan.el.style.opacity = String(panelOp);
-
-        // Polvo neón: cola muestreada sobre el arco, detrás de la pieza.
         const flying = clamp01(fp / 0.08) * clamp01((1 - fp) / 0.12);
-        for (let j = 0; j < g.dust.length; j++) {
-          const tj = ef - (j + 1) * TAIL_STEP;
-          const c = g.dust[j];
-          if (tj <= 0 || flying <= 0) {
-            c.style.opacity = "0";
-            continue;
-          }
-          const dxx = g.scCx - p0x;
-          const dyy = g.scCy - p0y;
-          const dl = Math.hypot(dxx, dyy) || 1;
-          const jit = (((j * 53 + 7) % 11) - 5) * 2.2;
-          c.setAttribute("cx", String(bezier(tj, p0x, g.ctrlX, g.scCx) + (-dyy / dl) * jit));
-          c.setAttribute("cy", String(bezier(tj, p0y, g.ctrlY, g.scCy) + (dxx / dl) * jit));
-          c.setAttribute("r", String((1 - j / g.dust.length) * 7 + 1.5));
-          c.style.opacity = String(flying * (1 - j / g.dust.length) * 0.6);
-        }
+        renderDust(g.dust, ef, flying, g.originX, g.originY, g.ctrlX, g.ctrlY, g.scCx, g.scCy);
       }
 
-      // painter's dinámico solo durante el explode; congelado en el vuelo (evita parpadeo).
+      // painter's dinámico solo durante el explode; congelado en el vuelo.
       if (pNest <= 0) {
         const sorted = [...pieces].sort((a, b) => a.depth - b.depth);
         const key = sorted.map((g) => g.name).join(",");
@@ -442,7 +553,7 @@ export default function CasaExplode() {
         </h2>
         <p className="casa-explode-lead">
           Deslizá para descomponer el modelo: cada parte se separa, vuela a su plancha y se
-          acomoda como panel de corte. Los pisos van a una, las paredes y carpinterías a otra.
+          acomoda como panel de corte. Hasta las paredes de cada piso se reparten una por una.
         </p>
         <ul ref={legendRef} className="casa-explode-legend">
           {LEGEND.map((label) => (
