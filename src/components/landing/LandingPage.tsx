@@ -7,45 +7,16 @@ import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { ArrowRight } from "lucide-react";
 import { useViewerPalette } from "@/context/ThemeContext";
-import FlowStepVisual from "@/components/landing/FlowStepVisual";
 import NeonThemeSwitch from "@/components/NeonThemeSwitch";
 
 const LandingScene = dynamic(() => import("./LandingScene"), { ssr: false });
 const CasaExplode = dynamic(() => import("./CasaExplode"), { ssr: false });
-
-const JOURNEY = [
-  {
-    kicker: "01 · subir",
-    title: "Tu .obj en la nube",
-    body: "Lo cargás una vez y seguís desde la compu, el celu o la tablet. Acá todavía no hay planchas — solo tu modelo guardado.",
-    visual: "upload" as const,
-  },
-  {
-    kicker: "02 · revisar",
-    title: "Acá vivís en el 3D",
-    body: "Medís, clasificás piezas y marcás cortes en el visor. Es el paso más largo y el que más importa: definís cómo se va a cortar.",
-    visual: "review" as const,
-  },
-  {
-    kicker: "03 · planchas",
-    title: "Recién acá aparecen las láminas",
-    body: "El anidado arma las planchas de corte con tus paneles. Es el único momento del flujo donde trabajás con la lámina como salida.",
-    visual: "nest" as const,
-  },
-  {
-    kicker: "04 · armar",
-    title: "Montás pieza por pieza",
-    body: "Descargás el PDF y, si querés, el instructivo interactivo te guía el armado en 3D — otra vez en el modelo, no en el plano.",
-    visual: "assembly" as const,
-  },
-];
 
 export default function LandingPage() {
   const containerRef = useRef<HTMLDivElement>(null);
   const heroRef = useRef<HTMLElement>(null);
   const progressRef = useRef<HTMLDivElement>(null);
   const navRef = useRef<HTMLElement>(null);
-  const workflowRef = useRef<HTMLElement>(null);
   const ctaRef = useRef<HTMLElement>(null);
   const [scrollProgress, setScrollProgress] = useState(0);
   const palette = useViewerPalette();
@@ -103,37 +74,6 @@ export default function LandingPage() {
         .to(".landing-hero-content", { opacity: 0, y: -40, duration: 0.25 }, 0.78)
         .to(".landing-hero-dim", { opacity: 0, duration: 0.25 }, 0.78)
         .to(".landing-scene", { opacity: 0.52, duration: 0.25, ease: "power2.out" }, 0.78);
-
-      gsap.utils.toArray<HTMLElement>(".landing-journey-row").forEach((row, i) => {
-        const visual = row.querySelector(".landing-journey-visual");
-        const copy = row.querySelector(".landing-journey-copy");
-        gsap.from(row, {
-          opacity: 0,
-          y: 40,
-          duration: 0.7,
-          ease: "power3.out",
-          scrollTrigger: { trigger: row, start: "top 82%" },
-        });
-        if (visual) {
-          gsap.from(visual, {
-            scale: 0.92,
-            duration: 0.8,
-            delay: 0.05,
-            ease: "back.out(1.4)",
-            scrollTrigger: { trigger: row, start: "top 82%" },
-          });
-        }
-        if (copy) {
-          gsap.from(copy, {
-            x: i % 2 === 0 ? 24 : -24,
-            opacity: 0,
-            duration: 0.6,
-            delay: 0.1,
-            ease: "power2.out",
-            scrollTrigger: { trigger: row, start: "top 82%" },
-          });
-        }
-      });
 
       gsap.from(".landing-cta-inner", {
         opacity: 0,
@@ -238,49 +178,6 @@ export default function LandingPage() {
       </section>
 
       <CasaExplode />
-
-      <section id="recorrido" ref={workflowRef} className="landing-journey relative py-24 md:py-32 px-4 md:px-8 overflow-hidden">
-        <div className="landing-journey-bg" aria-hidden />
-        <div className="max-w-6xl mx-auto relative z-10">
-          <div className="text-center mb-16 md:mb-20">
-            <h2 className="text-3xl md:text-4xl font-extrabold mb-4 e2d-title-glow">
-              Qué hacés en cada paso
-            </h2>
-            <p className="text-base-content/60 max-w-xl mx-auto leading-relaxed">
-              No pasás todo el tiempo mirando planos. Pasás la mayor parte en el modelo 3D;
-              la lámina es el resultado.
-            </p>
-          </div>
-
-          <div className="space-y-16 md:space-y-24">
-            {JOURNEY.map((step, i) => (
-              <article
-                key={step.kicker}
-                className={`landing-journey-row flex flex-col gap-8 md:gap-12 items-center ${
-                  i % 2 === 1 ? "md:flex-row-reverse" : "md:flex-row"
-                }`}
-              >
-                <div className="landing-journey-visual w-full md:w-[48%] flex justify-center">
-                  <div className="flow-visual-frame">
-                    <FlowStepVisual kind={step.visual} />
-                  </div>
-                </div>
-                <div className="landing-journey-copy w-full md:w-[44%]">
-                  <p className="text-primary font-mono text-xs tracking-widest uppercase mb-3">
-                    {step.kicker}
-                  </p>
-                  <h3 className="text-2xl md:text-3xl font-bold mb-4 text-base-content">
-                    {step.title}
-                  </h3>
-                  <p className="text-base-content/65 leading-relaxed text-base md:text-lg">
-                    {step.body}
-                  </p>
-                </div>
-              </article>
-            ))}
-          </div>
-        </div>
-      </section>
 
       <section ref={ctaRef} className="relative py-20 md:py-28 px-4 md:px-8">
         <div className="landing-cta-inner max-w-xl mx-auto text-center p-10 md:p-12 rounded-3xl border border-primary/30 bg-gradient-to-br from-primary/12 via-base-100/80 to-secondary/10 shadow-[0_0_60px_color-mix(in_oklch,var(--color-primary)_12%,transparent)]">

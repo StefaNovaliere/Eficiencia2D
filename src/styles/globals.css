@@ -305,8 +305,8 @@
 .casa-explode-copy {
   position: absolute;
   left: 6vw;
-  top: 16vh;
-  max-width: 340px;
+  top: 15vh;
+  max-width: 360px;
   z-index: 10;
   pointer-events: none;
 }
@@ -329,10 +329,112 @@
 }
 
 .casa-explode-lead {
-  font-size: 0.9rem;
+  font-size: 0.95rem;
   line-height: 1.55;
   color: color-mix(in oklch, var(--color-base-content) 70%, transparent);
   margin: 0;
+}
+
+/* Paneles de texto sincronizados con la animación (estilo anime.js). */
+.casa-explode-panels {
+  position: relative;
+  margin-top: 1.3rem;
+  min-height: 220px;
+}
+
+.casa-explode-panel {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transform: translateY(16px);
+  transition: opacity 0.5s ease, transform 0.5s ease;
+  pointer-events: none;
+}
+
+.casa-explode-panel.on {
+  opacity: 1;
+  transform: none;
+}
+
+.casa-explode-step {
+  font-family: ui-monospace, "JetBrains Mono", Menlo, monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--color-primary);
+  margin: 0 0 0.7rem;
+}
+
+/* Tubo de vidrio que se llena de líquido neón con el avance del scroll. */
+.casa-tube {
+  position: absolute;
+  right: clamp(18px, 4vw, 64px);
+  top: 50%;
+  transform: translateY(-50%);
+  width: 18px;
+  height: min(46vh, 440px);
+  z-index: 10;
+  pointer-events: none;
+}
+
+.casa-tube-glass {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border-radius: 999px;
+  overflow: hidden;
+  border: 1px solid color-mix(in oklch, var(--color-primary) 35%, transparent);
+  background: color-mix(in oklch, var(--color-base-300) 45%, transparent);
+  box-shadow:
+    inset 0 0 14px color-mix(in oklch, #000 45%, transparent),
+    0 0 20px color-mix(in oklch, var(--color-primary) 12%, transparent);
+  backdrop-filter: blur(2px);
+}
+
+/* Reflejo de vidrio (gloss). */
+.casa-tube-glass::before {
+  content: "";
+  position: absolute;
+  top: 5%;
+  left: 4px;
+  width: 4px;
+  height: 90%;
+  border-radius: 999px;
+  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0.04));
+  opacity: 0.55;
+}
+
+.casa-tube-fill {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 0%;
+  border-radius: 999px 999px 0 0;
+  background: linear-gradient(to top, var(--color-secondary), var(--color-primary));
+  box-shadow: 0 0 18px color-mix(in oklch, var(--color-primary) 65%, transparent);
+  transition: height 0.08s linear;
+}
+
+/* Menisco brillante en la superficie del líquido. */
+.casa-tube-fill::after {
+  content: "";
+  position: absolute;
+  top: -3px;
+  left: 0;
+  right: 0;
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--color-primary) 55%, #fff);
+  box-shadow: 0 0 14px var(--color-primary);
+}
+
+.casa-tube-tick {
+  position: absolute;
+  left: -5px;
+  right: -5px;
+  height: 1px;
+  background: color-mix(in oklch, var(--color-primary) 40%, transparent);
 }
 
 .casa-explode-legend {
@@ -408,6 +510,14 @@
     flex-wrap: wrap;
     gap: 0.25rem 1rem;
     justify-content: center;
+  }
+
+  .casa-explode-panels {
+    min-height: 150px;
+  }
+
+  .casa-tube {
+    display: none;
   }
 }
 
