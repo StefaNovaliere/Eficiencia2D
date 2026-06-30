@@ -7,6 +7,7 @@ import { useAuth } from "@/context/AuthContext";
 import NestingPreview from "@/components/NestingPreview";
 import { fetchNestingPreview, resolveOriginalFilename, userCutsForApi, type SplitOperation } from "@/services/api";
 import type { SheetConfig } from "@/core/types";
+import { useProjectStateAutosave } from "@/hooks/useProjectStateAutosave";
 
 function overridesToRecord(
   overrides: { groupId: number; newCategory: string }[],
@@ -52,6 +53,28 @@ export default function NestingPage() {
 
   const [isRecomputing, setIsRecomputing] = useState(false);
 
+  const { queuePatch } = useProjectStateAutosave({
+    token,
+    projectId: fileId,
+    enabled: Boolean(token && fileId),
+  });
+
+  const savePrintSettings = useCallback(
+    (newScale: number, newConfig: SheetConfig, newPaper: string, newMode: PdfPageMode) => {
+      queuePatch({
+        scale_denom: newScale,
+        sheet_config: {
+          width_m: newConfig.widthM,
+          height_m: newConfig.heightM,
+          gap_m: newConfig.gapM,
+        },
+        paper: newPaper,
+        page_mode: newMode,
+      });
+    },
+    [queuePatch],
+  );
+
   useEffect(() => {
     if (!isLoadingSession && !nestingData) {
       router.replace(phase1Result ? "/review" : "/home");
@@ -96,6 +119,7 @@ export default function NestingPage() {
           user_cuts: userCutsForApi(savedUserCuts),
         }, token);
         setNestingData(nesting);
+        savePrintSettings(newScale, newConfig, newPaper, newMode);
       } catch (err: unknown) {
         console.error(err);
         alert(err instanceof Error ? err.message : "No se pudo recalcular el nesting.");
@@ -103,7 +127,7 @@ export default function NestingPage() {
         setIsRecomputing(false);
       }
     },
-    [phase1Result, fileId, projectFileName, minAreaM2, savedMerges, savedSplits, savedOverrides, savedWallWallDecisions, savedMarks, savedUserCuts, setNestingData, token],
+    [phase1Result, fileId, projectFileName, minAreaM2, savedMerges, savedSplits, savedOverrides, savedWallWallDecisions, savedMarks, savedUserCuts, setNestingData, token, savePrintSettings],
   );
 
   const handleSheetConfigChange = useCallback((newConfig: SheetConfig) => {

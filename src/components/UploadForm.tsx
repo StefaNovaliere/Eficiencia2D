@@ -3,12 +3,13 @@
 import { useCallback, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowRight, FileBox, RotateCcw, Trash2 } from "lucide-react";
-import { uploadModelFile, uploadDemoObj } from "@/services/api";
+import { uploadModelFile, uploadDemoObj, recomputeTopology, resolveOriginalFilename, type SplitOperation } from "@/services/api";
 import DemoButton from "./DemoButton";
 import SavedProjectsPicker from "./SavedProjectsPicker";
 import { useAuth } from "@/context/AuthContext";
 import { useProjectContext } from "@/context/ProjectContext";
 import { openUserProject, type UserProject } from "@/services/projects";
+import { restoreProjectState, savedStateNeedsRecompute } from "@/services/project-state";
 
 export default function UploadForm() {
   const router = useRouter();
@@ -28,6 +29,7 @@ export default function UploadForm() {
     nestingData,
     resetProject,
     isLoadingSession,
+    applyRestoredState,
   } = useProjectContext();
 
   const [isParsing, setIsParsing] = useState(false);
@@ -179,6 +181,30 @@ export default function UploadForm() {
         setPhase1Result(backendRes.topology);
         setPreviewObj(backendRes.preview_obj);
 
+        if (backendRes.saved_state) {
+          const restored = restoreProjectState(backendRes.saved_state);
+          if (restored) {
+            applyRestoredState(restored);
+
+            if (savedStateNeedsRecompute(restored, backendRes.topology.appliedAxis)) {
+              const updated = await recomputeTopology(
+                {
+                  file_id: backendRes.file_id,
+                  original_filename: resolveOriginalFilename(displayName, backendRes.topology.stem),
+                  axis: restored.axis ?? backendRes.topology.appliedAxis,
+                  min_area_m2: restored.minAreaM2 ?? 1.0,
+                  merges: restored.savedMerges ?? [],
+                  splits: (restored.savedSplits ?? []).map(
+                    (s): SplitOperation => ({ group_id: s.groupId, mode: s.mode }),
+                  ),
+                },
+                token,
+              );
+              setPhase1Result(updated);
+            }
+          }
+        }
+
         router.push("/review");
       } catch (err: unknown) {
         setError(
@@ -198,6 +224,7 @@ export default function UploadForm() {
       setPhase1Result,
       setPreviewObj,
       router,
+      applyRestoredState,
     ],
   );
 

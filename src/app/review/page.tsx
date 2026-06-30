@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useCallback, useState } from "react";
+import { Suspense, useEffect, useCallback, useState, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useProjectContext } from "@/context/ProjectContext";
 import { useAuth } from "@/context/AuthContext";
@@ -18,6 +18,8 @@ import {
 } from "@/services/api";
 import { buildAssemblyGuideFromTopology } from "@/core/assembly-guide-build";
 import type { FaceCategory } from "@/core/group-classifier";
+import { useProjectStateAutosave } from "@/hooks/useProjectStateAutosave";
+import { buildReviewEditingPatch } from "@/services/project-state";
 
 function overridesToRecord(
   overrides: { groupId: number; newCategory: string }[],
@@ -70,6 +72,41 @@ function ReviewPageContent() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isRecomputing, setIsRecomputing] = useState(false);
 
+  const { queuePatch } = useProjectStateAutosave({
+    token,
+    projectId: fileId,
+    enabled: Boolean(token && fileId),
+  });
+
+  const saveGeometryState = useCallback(
+    (patch: Partial<Pick<RecomputePayload, "axis" | "min_area_m2" | "merges" | "splits">>) => {
+      if (!token || !fileId) return;
+      queuePatch({
+        ...(patch.axis != null ? { axis: patch.axis } : {}),
+        ...(patch.min_area_m2 != null ? { min_area_m2: patch.min_area_m2 } : {}),
+        ...(patch.merges != null ? { merges: patch.merges } : {}),
+        ...(patch.splits != null ? { splits: patch.splits } : {}),
+      });
+    },
+    [token, fileId, queuePatch],
+  );
+
+  const skipInitialEditingAutosave = useRef(true);
+
+  const handleEditingStateChange = useCallback(
+    (snapshot: Parameters<typeof buildReviewEditingPatch>[0]) => {
+      if (skipInitialEditingAutosave.current) {
+        skipInitialEditingAutosave.current = false;
+        return;
+      }
+      const patch = buildReviewEditingPatch(snapshot);
+      if (Object.keys(patch).length > 0) {
+        queuePatch(patch);
+      }
+    },
+    [queuePatch],
+  );
+
   useEffect(() => {
     if (!isLoadingSession && !phase1Result) {
       router.replace("/home");
@@ -95,6 +132,12 @@ function ReviewPageContent() {
       try {
         const updated = await recomputeTopology(payload, token);
         setPhase1Result(updated);
+        saveGeometryState({
+          axis: payload.axis,
+          min_area_m2: payload.min_area_m2,
+          merges: payload.merges,
+          splits: payload.splits,
+        });
       } catch (err: unknown) {
         console.error(err);
         alert(
@@ -106,7 +149,7 @@ function ReviewPageContent() {
         setIsRecomputing(false);
       }
     },
-    [fileId, projectFileName, phase1Result, minAreaM2, savedMerges, savedSplits, setPhase1Result, token],
+    [fileId, projectFileName, phase1Result, minAreaM2, savedMerges, savedSplits, setPhase1Result, token, saveGeometryState],
   );
 
   const handleRotateAxis = useCallback(() => {
@@ -198,6 +241,24 @@ function ReviewPageContent() {
           user_cuts: userCutsForApi(userCuts),
         }, token);
         setNestingData(nesting);
+        if (token && fileId) {
+          queuePatch({
+            overrides: Object.fromEntries(
+              overrides.map((o) => [String(o.groupId), o.newCategory]),
+            ),
+            wall_wall_decisions: decisionsToRecord(wallWallDecisions),
+            marks,
+            user_cuts: userCutsForApi(userCuts),
+            scale_denom: scale,
+            sheet_config: {
+              width_m: sheetConfig.widthM,
+              height_m: sheetConfig.heightM,
+              gap_m: sheetConfig.gapM,
+            },
+            paper,
+            page_mode: pdfPageMode,
+          });
+        }
         router.push("/nesting");
       } catch (err: unknown) {
         console.error(err);
@@ -223,6 +284,7 @@ function ReviewPageContent() {
       setNestingData,
       router,
       token,
+      queuePatch,
     ],
   );
 
@@ -269,7 +331,11 @@ function ReviewPageContent() {
       initialUserCuts={savedUserCuts}
       isRecomputing={isRecomputing}
       isGenerating={isGenerating}
-      onPrintScaleChange={setScale}
+      onPrintScaleChange={(nextScale) => {
+        setScale(nextScale);
+        if (token && fileId) queuePatch({ scale_denom: nextScale });
+      }}
+      onEditingStateChange={handleEditingStateChange}
       onRequestAssemblyPreview={handleRequestAssemblyPreview}
       openAssemblyInstructivo={openAssemblyInstructivo}
     />
