@@ -1,16 +1,17 @@
 import { apiFetch } from "@/services/api";
 import { parseApiError } from "@/services/api-errors";
+import { isAdminRolId, parseUserRol } from "@/services/rols";
 
 export type UserEstado = "pendiente_verificacion" | "activo" | "inactivo" | (string & {});
-
-export type UserRol = "admin" | "estudiante" | (string & {});
 
 export interface AuthUser {
   id: string;
   email: string;
   nombre: string | null;
   estado: UserEstado;
-  rol: UserRol;
+  rol_id: number;
+  /** Nombre legible del rol (p. ej. "admin", "estudiante"). */
+  rol: string;
 }
 
 export interface AuthResponse {
@@ -43,17 +44,19 @@ export function isActiveUser(user: AuthUser | null | undefined): boolean {
 }
 
 export function isAdminUser(user: AuthUser | null | undefined): boolean {
-  return user?.rol === "admin";
+  return isAdminRolId(user?.rol_id);
 }
 
 export function normalizeAuthUser(raw: unknown): AuthUser {
   const u = raw as Record<string, unknown>;
+  const { rol_id, rol } = parseUserRol(raw);
   return {
     id: String(u.id ?? ""),
     email: String(u.email ?? ""),
     nombre: u.nombre != null && u.nombre !== "" ? String(u.nombre) : null,
     estado: (u.estado as UserEstado) ?? "activo",
-    rol: (u.rol as UserRol) ?? "estudiante",
+    rol_id,
+    rol,
   };
 }
 
@@ -111,12 +114,14 @@ export function clearStoredAuth(): void {
 export async function registerUser(
   email: string,
   password: string,
+  rolId: number,
   nombre?: string,
 ): Promise<RegisterResponse> {
   const trimmedNombre = nombre?.trim();
-  const body: Record<string, string> = {
+  const body: Record<string, string | number> = {
     email: normalizeEmail(email),
     password,
+    rol_id: rolId,
   };
   if (trimmedNombre) {
     body.nombre = trimmedNombre.slice(0, NOMBRE_MAX_LENGTH);

@@ -1,5 +1,11 @@
 import { apiFetch, normalizeUploadResponse, type UploadResponse } from "@/services/api";
 import { parseApiError } from "@/services/api-errors";
+import {
+  parseSavedState,
+  type ProjectSavedState,
+  type ProjectStatePatch,
+  type ProjectStatePatchResponse,
+} from "@/services/project-state";
 
 export interface ProjectSummary {
   walls?: number;
@@ -13,6 +19,8 @@ export interface ProjectSummary {
 export interface MetadataImpresion {
   archivo_original?: string;
   summary?: ProjectSummary;
+  estado_r2?: string;
+  estado_actualizado_at?: string;
   [key: string]: unknown;
 }
 
@@ -186,6 +194,58 @@ export async function openUserProject(
 
   return data;
 }
+
+function normalizeProjectStateResponse(raw: unknown): ProjectStatePatchResponse {
+  const o = raw as Record<string, unknown>;
+  const estado = parseSavedState(o.estado) ?? {};
+  return {
+    proyecto_id: String(o.proyecto_id ?? ""),
+    nombre: String(o.nombre ?? ""),
+    estado_r2: String(o.estado_r2 ?? ""),
+    estado_actualizado_at: String(o.estado_actualizado_at ?? ""),
+    estado,
+    message: String(o.message ?? ""),
+  };
+}
+
+/** Lee el último estado guardado en R2. */
+export async function fetchProjectState(
+  token: string,
+  projectId: string,
+): Promise<ProjectStatePatchResponse> {
+  const res = await apiFetch(`/api/projects/${projectId}/state`, { method: "GET" }, { token });
+
+  if (!res.ok) {
+    await parseApiError(res, "No se pudo cargar el estado del proyecto");
+  }
+
+  return normalizeProjectStateResponse(await res.json());
+}
+
+/** Guarda cambios parciales del estado (autosave). */
+export async function patchProjectState(
+  token: string,
+  projectId: string,
+  patch: ProjectStatePatch,
+): Promise<ProjectStatePatchResponse> {
+  const res = await apiFetch(
+    `/api/projects/${projectId}/state`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    },
+    { token },
+  );
+
+  if (!res.ok) {
+    await parseApiError(res, "No se pudo guardar el estado del proyecto");
+  }
+
+  return normalizeProjectStateResponse(await res.json());
+}
+
+export type { ProjectSavedState, ProjectStatePatch, ProjectStatePatchResponse };
 
 /** Obtiene URL firmada (~1 h) para descargar el archivo 3D original. */
 export async function fetchProjectDownloadUrl(

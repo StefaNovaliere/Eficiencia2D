@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import BackgroundSymbols from "@/components/BackgroundSymbols";
 import { useAuth } from "@/context/AuthContext";
 import {
@@ -10,6 +10,7 @@ import {
   PASSWORD_MAX_LENGTH,
   PASSWORD_MIN_LENGTH,
 } from "@/services/auth";
+import { getRols, type Rol } from "@/services/rols";
 import { Mail, CheckCircle2, ArrowRight, Eye, EyeOff } from "lucide-react";
 
 type AuthMode = "login" | "register";
@@ -30,12 +31,46 @@ export default function AuthForm({ mode, passwordUpdatedNotice }: AuthFormProps)
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [nombre, setNombre] = useState("");
+  const [rols, setRols] = useState<Rol[]>([]);
+  const [selectedRolId, setSelectedRolId] = useState<number | "">("");
+  const [isLoadingRols, setIsLoadingRols] = useState(false);
   const [error, setError] = useState("");
   const [unverifiedEmail, setUnverifiedEmail] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [pendingEmail, setPendingEmail] = useState<string | null>(null);
 
   const isRegister = mode === "register";
+
+  useEffect(() => {
+    if (!isRegister) return;
+
+    let cancelled = false;
+    setIsLoadingRols(true);
+
+    getRols()
+      .then((loadedRols) => {
+        if (cancelled) return;
+        const safeRols = Array.isArray(loadedRols) ? loadedRols : [];
+        setRols(safeRols);
+        if (safeRols.length === 1) {
+          setSelectedRolId(safeRols[0].id);
+        }
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setRols([]);
+        setError("No se pudieron cargar los roles disponibles.");
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsLoadingRols(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isRegister]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -61,13 +96,22 @@ export default function AuthForm({ mode, passwordUpdatedNotice }: AuthFormProps)
         setError(`El nombre no puede superar ${NOMBRE_MAX_LENGTH} caracteres.`);
         return;
       }
+      if (selectedRolId === "") {
+        setError("Seleccioná un rol para tu cuenta.");
+        return;
+      }
     }
 
     setIsLoading(true);
 
     try {
       if (isRegister) {
-        const res = await register(trimmedEmail, password, nombre.trim() || undefined);
+        const res = await register(
+          trimmedEmail,
+          password,
+          selectedRolId,
+          nombre.trim() || undefined,
+        );
         setPendingEmail(res.email);
       } else {
         await login(trimmedEmail, password);
@@ -175,7 +219,7 @@ export default function AuthForm({ mode, passwordUpdatedNotice }: AuthFormProps)
       <div className="w-full max-w-md z-10">
         <div className="card bg-base-100 shadow-2xl border border-base-200">
           <div className="card-body p-6 md:p-8">
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <form onSubmit={handleSubmit} className="space-y-6">
               {passwordUpdatedNotice && !isRegister && (
                 <div className="alert alert-success rounded-xl text-sm">
                   <span>Contraseña actualizada. Ya podés iniciar sesión.</span>
@@ -237,6 +281,7 @@ export default function AuthForm({ mode, passwordUpdatedNotice }: AuthFormProps)
                 </div>
               </label>
 
+                  
               {!isRegister && (
                 <div className="text-right -mt-1">
                   <Link
@@ -275,6 +320,32 @@ export default function AuthForm({ mode, passwordUpdatedNotice }: AuthFormProps)
                 </label>
               )}
 
+
+{isRegister && (
+                <label className="form-control w-full">
+                  <span className="label-text font-medium mb-1">Rol</span>
+                  <select
+                    className="select select-bordered w-full bg-base-100"
+                    value={selectedRolId}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setSelectedRolId(value === "" ? "" : Number(value));
+                    }}
+                    required
+                    disabled={isLoadingRols || rols.length === 0}
+                  >
+                    <option value="" disabled>
+                      {isLoadingRols ? "Cargando roles…" : "Seleccioná un rol"}
+                    </option>
+                    {rols.map((rol) => (
+                      <option key={rol.id} value={rol.id}>
+                        {rol.rol}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+
               {error && (
                 <div className="alert alert-error rounded-xl flex-col items-start gap-1">
                   <span>{error}</span>
@@ -291,7 +362,7 @@ export default function AuthForm({ mode, passwordUpdatedNotice }: AuthFormProps)
 
               <button
                 type="submit"
-                disabled={isLoading}
+                disabled={isLoading || (isRegister && (isLoadingRols || selectedRolId === ""))}
                 className="btn btn-primary btn-block rounded-xl shadow-lg shadow-primary/20 mt-2"
               >
                 {isLoading ? (

@@ -7,7 +7,7 @@ vi.mock("@/services/api-base", () => ({
 }));
 
 import { fetchWithApiFallback } from "@/services/api-base";
-import { deleteUserProject, fetchProjectDownloadUrl, listUserProjects, openUserProject } from "@/services/projects";
+import { deleteUserProject, fetchProjectDownloadUrl, listUserProjects, openUserProject, patchProjectState, fetchProjectState } from "@/services/projects";
 
 function jsonResponse(data: unknown, status = 200): Response {
   return {
@@ -103,6 +103,89 @@ describe("openUserProject", () => {
     expect(result.original_filename).toBe("modelo.stl");
     expect(result.topology?.faces).toHaveLength(1);
     expect(result.preview_obj).toBe("v obj...");
+  });
+
+  it("incluye saved_state al abrir un proyecto guardado", async () => {
+    vi.mocked(fetchWithApiFallback).mockResolvedValueOnce(
+      jsonResponse({
+        id: "uuid-1",
+        proyecto_id: "uuid-1",
+        file_id: "uuid-1",
+        original_filename: "modelo.stl",
+        preview_obj: "v obj...",
+        summary: { walls: 2, floors: 1, discards: 0, total_groups: 3 },
+        topology: {
+          stem: "modelo",
+          groups: [{ id: 0, name: "Group0", face_ids: [0] }],
+          joints: [],
+          faces_packed: onePackedTriangle(),
+          raw_faces_packed: onePackedTriangle(),
+        },
+        saved_state: {
+          merges: [[1, 2]],
+          overrides: { "5": "wall" },
+          scale_denom: 50,
+        },
+        estado_actualizado_at: "2026-06-29T22:30:00+00:00",
+      }),
+    );
+
+    const result = await openUserProject("token", "uuid-1");
+    expect(result.saved_state?.merges).toEqual([[1, 2]]);
+    expect(result.saved_state?.overrides).toEqual({ "5": "wall" });
+    expect(result.estado_actualizado_at).toBe("2026-06-29T22:30:00+00:00");
+  });
+});
+
+describe("patchProjectState", () => {
+  it("envía PATCH parcial al endpoint de estado", async () => {
+    vi.mocked(fetchWithApiFallback).mockResolvedValueOnce(
+      jsonResponse({
+        proyecto_id: "uuid-1",
+        nombre: "Mi casa",
+        estado_r2: "user/proj/estado.json",
+        estado_actualizado_at: "2026-06-29T22:30:00+00:00",
+        estado: { overrides: { "5": "wall" } },
+        message: "Estado del proyecto guardado correctamente.",
+      }),
+    );
+
+    const result = await patchProjectState("token", "uuid-1", {
+      overrides: { "5": "wall" },
+    });
+
+    expect(fetchWithApiFallback).toHaveBeenCalledWith(
+      expect.stringContaining("/api/projects/uuid-1/state"),
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ overrides: { "5": "wall" } }),
+      }),
+      expect.objectContaining({ token: "token" }),
+    );
+    expect(result.estado.overrides).toEqual({ "5": "wall" });
+  });
+});
+
+describe("fetchProjectState", () => {
+  it("lee el estado guardado con GET", async () => {
+    vi.mocked(fetchWithApiFallback).mockResolvedValueOnce(
+      jsonResponse({
+        proyecto_id: "uuid-1",
+        nombre: "Mi casa",
+        estado_r2: "user/proj/estado.json",
+        estado_actualizado_at: "2026-06-29T22:30:00+00:00",
+        estado: { merges: [[1, 2]] },
+        message: "ok",
+      }),
+    );
+
+    const result = await fetchProjectState("token", "uuid-1");
+    expect(fetchWithApiFallback).toHaveBeenCalledWith(
+      expect.stringContaining("/api/projects/uuid-1/state"),
+      expect.objectContaining({ method: "GET" }),
+      expect.objectContaining({ token: "token" }),
+    );
+    expect(result.estado.merges).toEqual([[1, 2]]);
   });
 });
 

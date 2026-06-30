@@ -7,6 +7,7 @@ import {
   type ApiFetchOptions,
 } from "@/services/api-base";
 import { parseApiError } from "@/services/api-errors";
+import { parseSavedState, type ProjectSavedState } from "@/services/project-state";
 
 export type { ApiFetchOptions };
 
@@ -46,6 +47,9 @@ export interface UploadResponse {
   topology: Phase1Result;
   preview_obj: string;
   timing?: Record<string, unknown>;
+  /** Estado UI guardado en R2 (respuesta de `/open`). */
+  saved_state?: ProjectSavedState | null;
+  estado_actualizado_at?: string | null;
 }
 
 // Helper to convert snake_case keys to camelCase for the frontend TS interfaces
@@ -107,6 +111,13 @@ export function normalizeUploadResponse(data: Record<string, unknown>): UploadRe
 
   if (data.topology) {
     data.topology = mapTopology(data.topology, filename || undefined);
+  }
+
+  if (data.saved_state != null) {
+    data.saved_state = parseSavedState(data.saved_state);
+  }
+  if (data.estado_actualizado_at != null && data.estado_actualizado_at !== "") {
+    data.estado_actualizado_at = String(data.estado_actualizado_at);
   }
 
   return data as unknown as UploadResponse;

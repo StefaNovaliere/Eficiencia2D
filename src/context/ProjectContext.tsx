@@ -11,6 +11,7 @@ import { DEFAULT_SHEET } from "@/core/sheet-nester";
 import type { SheetConfig } from "@/core/types";
 import type { UserCut } from "@/core/user-cuts";
 import type { AssemblyPreviewData } from "@/services/api";
+import type { RestoredProjectState } from "@/services/project-state";
 
 interface PersistedSession {
   fileName: string;
@@ -76,6 +77,7 @@ interface ProjectContextType {
   setAssemblyGuideData: (data: AssemblyPreviewData | null) => void;
   resetProject: () => void;
   persistSession: () => Promise<void>;
+  applyRestoredState: (restored: RestoredProjectState) => void;
   isLoadingSession: boolean;
 }
 
@@ -172,6 +174,23 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     }
   }, [file, fileId, previewObj, phase1Result, projectFileName, scale, paper, pdfPageMode, minAreaM2, sheetConfig, savedOverrides, savedWallWallDecisions, savedMerges, savedSplits, savedMarks, savedUserCuts]);
 
+  const applyRestoredState = useCallback((restored: RestoredProjectState) => {
+    if (restored.projectFileName != null) setProjectFileName(restored.projectFileName);
+    if (restored.minAreaM2 != null) setMinAreaM2(restored.minAreaM2);
+    if (restored.savedMerges != null) setSavedMerges(restored.savedMerges);
+    if (restored.savedSplits != null) setSavedSplits(restored.savedSplits);
+    if (restored.savedOverrides != null) setSavedOverrides(restored.savedOverrides);
+    if (restored.savedWallWallDecisions != null) {
+      setSavedWallWallDecisions(restored.savedWallWallDecisions);
+    }
+    if (restored.savedMarks != null) setSavedMarks(restored.savedMarks);
+    if (restored.savedUserCuts != null) setSavedUserCuts(restored.savedUserCuts);
+    if (restored.scale != null) setScale(restored.scale);
+    if (restored.paper != null) setPaper(restored.paper);
+    if (restored.pdfPageMode != null) setPdfPageMode(restored.pdfPageMode);
+    if (restored.sheetConfig != null) setSheetConfig(restored.sheetConfig);
+  }, []);
+
   const resetProject = useCallback(() => {
     setFile(null);
     setProjectFileName(null);
@@ -218,6 +237,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         assemblyGuideData, setAssemblyGuideData,
         resetProject,
         persistSession,
+        applyRestoredState,
         isLoadingSession
       }}
     >

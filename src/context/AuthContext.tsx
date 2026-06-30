@@ -30,7 +30,7 @@ interface AuthContextType {
   isAdmin: boolean;
   login: (email: string, password: string) => Promise<void>;
   /** Crea la cuenta. Devuelve la respuesta de registro (sin JWT). */
-  register: (email: string, password: string, nombre?: string) => Promise<RegisterResponse>;
+  register: (email: string, password: string, rolId: number, nombre?: string) => Promise<RegisterResponse>;
   /** Verifica el email con el token del link y aplica la sesión. */
   verifyEmail: (token: string) => Promise<void>;
   logout: () => void;
@@ -102,9 +102,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const register = useCallback(
-    async (email: string, password: string, nombre?: string): Promise<RegisterResponse> => {
+    async (
+      email: string,
+      password: string,
+      rolId: number,
+      nombre?: string,
+    ): Promise<RegisterResponse> => {
       // Ya no devuelve JWT — solo registra y pide verificar correo.
-      return registerUser(email, password, nombre);
+      return registerUser(email, password, rolId, nombre);
     },
     [],
   );

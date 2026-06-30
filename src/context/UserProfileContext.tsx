@@ -49,7 +49,8 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
         nombre: data.nombre,
         email: data.email,
         estado: data.estado,
-        ...(data.rol != null ? { rol: data.rol } : {}),
+        rol_id: data.rol_id,
+        rol: data.rol,
       });
     } catch (err) {
       setProfile(null);

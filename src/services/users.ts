@@ -5,18 +5,38 @@ import {
   PASSWORD_MAX_LENGTH,
   PASSWORD_MIN_LENGTH,
   type UserEstado,
-  type UserRol,
 } from "@/services/auth";
+import { parseUserRol } from "@/services/rols";
 
 export interface UserProfile {
   id: string;
   email: string;
   nombre: string | null;
   estado: UserEstado;
-  rol?: UserRol;
+  rol_id: number;
+  rol: string;
   fecha_creacion: string;
   email_verified_at: string | null;
   total_proyectos: number;
+}
+
+function normalizeUserProfile(raw: unknown): UserProfile {
+  const u = raw as Record<string, unknown>;
+  const { rol_id, rol } = parseUserRol(raw);
+  return {
+    id: String(u.id ?? ""),
+    email: String(u.email ?? ""),
+    nombre: u.nombre != null && u.nombre !== "" ? String(u.nombre) : null,
+    estado: (u.estado as UserEstado) ?? "activo",
+    rol_id,
+    rol,
+    fecha_creacion: String(u.fecha_creacion ?? ""),
+    email_verified_at:
+      u.email_verified_at != null && u.email_verified_at !== ""
+        ? String(u.email_verified_at)
+        : null,
+    total_proyectos: Number(u.total_proyectos ?? 0),
+  };
 }
 
 export interface ChangePasswordResponse {
@@ -30,7 +50,7 @@ export async function fetchUserProfile(token: string): Promise<UserProfile> {
     await parseApiError(res, "No se pudo cargar el perfil");
   }
 
-  return res.json();
+  return normalizeUserProfile(await res.json());
 }
 
 export async function updateUserProfile(
@@ -53,7 +73,7 @@ export async function updateUserProfile(
     await parseApiError(res, "No se pudo actualizar el nombre");
   }
 
-  return res.json();
+  return normalizeUserProfile(await res.json());
 }
 
 export async function changeUserPassword(

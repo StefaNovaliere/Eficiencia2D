@@ -126,6 +126,13 @@ export interface ReviewScreenProps {
   isGenerating?: boolean;
   /** Escala de impresión del proyecto (1:N), compartida con nesting/PDF. */
   onPrintScaleChange: (scale: number) => void;
+  /** Cambios de clasificación, uniones, marcas y cortes para autosave. */
+  onEditingStateChange?: (snapshot: {
+    overrides: ClassificationOverride[];
+    wallWallDecisions: WallWallDecisions;
+    marks: number[];
+    userCuts: UserCut[];
+  }) => void;
   /** Fetches assembly guide using the current in-memory review state (not saved session). */
   onRequestAssemblyPreview?: (
     request: import("@/services/api").AssemblyPreviewRequest,
@@ -449,6 +456,7 @@ export default function ReviewScreen({
   isRecomputing = false,
   isGenerating = false,
   onPrintScaleChange,
+  onEditingStateChange,
   onRequestAssemblyPreview,
   openAssemblyInstructivo = false,
 }: ReviewScreenProps) {
@@ -611,6 +619,19 @@ export default function ReviewScreen({
   const handleRedo = useCallback(() => {
     restoreHistorySnapshot(redo());
   }, [redo, restoreHistorySnapshot]);
+
+  useEffect(() => {
+    if (!onEditingStateChange) return;
+    onEditingStateChange({
+      overrides: Array.from(overrides.entries()).map(([groupId, newCategory]) => ({
+        groupId,
+        newCategory,
+      })),
+      wallWallDecisions,
+      marks: [...markGroupIds],
+      userCuts,
+    });
+  }, [overrides, wallWallDecisions, markGroupIds, userCuts, onEditingStateChange]);
 
   useEffect(() => {
     if (!contextMenu) return;
