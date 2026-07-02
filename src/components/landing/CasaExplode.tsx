@@ -4,7 +4,7 @@ import { memo, useLayoutEffect, useRef } from "react";
 import Link from "next/link";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, Cloud, Laptop, Smartphone, Check } from "lucide-react";
 import { CASA_EXPLODE_SVG, CASA_VIEWBOX } from "./casaExplodeSvg";
 
 /**
@@ -105,36 +105,57 @@ const BEATS = [
     body: "Subís el .obj y trabajás sobre el modelo real: lo medís, lo revisás y marcás cómo se va a cortar.",
   },
   {
-    start: 0.12,
+    start: 0.14,
     step: "02 · componentes",
     title: "Cada parte, identificada",
     body: "El modelo se descompone pieza por pieza. Hasta las paredes de cada piso se reparten una por una.",
   },
   {
-    start: 0.42,
+    start: 0.34,
     step: "03 · anidado",
     title: "Vuelan a la plancha",
     body: "Cada componente se acomoda solo en la lámina de corte, agrupado por tipo y aprovechando el material.",
   },
   {
-    start: 0.62,
-    step: "04 · a cortar",
-    title: "Planchas listas",
-    body: "El anidado deja todo listo para la cortadora: cada pieza en su lámina, sin desperdicio.",
+    start: 0.5,
+    step: "04 · entrega",
+    title: "De cada plancha, tus archivos",
+    body: "Cada plancha se reduce a su plano de corte: un DXF y un PDF. Con tu .obj, son 5 archivos.",
   },
   {
-    start: 0.82,
-    step: "05 · entrega",
-    title: "Tus archivos",
-    body: "Cada plancha se convierte en su plano de corte —DXF y PDF—. Con tu .obj, todo listo para subir a la nube.",
+    start: 0.62,
+    step: "05 · en la nube",
+    title: "Un clic y queda guardado",
+    body: "Los 5 archivos suben y quedan en la nube, junto al modelo. No hace falta reenviar nada.",
   },
+  {
+    start: 0.8,
+    step: "06 · sincronizado",
+    title: "Desde cualquier dispositivo",
+    body: "Abrís en la notebook o el celular y seguís donde lo dejaste. Siempre actualizado.",
+  },
+];
+
+// 5 archivos de salida: cada plancha se reduce a su DXF + PDF, más el .obj de la casa.
+// rx/ry = posición de reposo (fila) en coords del contenedor del visual; device = a qué
+// dispositivo baja en "retomar" ("" = queda guardado en la nube).
+const FILES = [
+  { label: "P1.dxf", rx: 0.2, ry: 0.66, device: "" },
+  { label: "P1.pdf", rx: 0.35, ry: 0.66, device: "" },
+  { label: "casa.obj", rx: 0.5, ry: 0.72, device: "laptop" },
+  { label: "P2.dxf", rx: 0.65, ry: 0.66, device: "" },
+  { label: "P2.pdf", rx: 0.8, ry: 0.66, device: "phone" },
 ];
 
 const INTRO_PORTION = 0.11; // primer tramo del scroll: hero integrado, animación en pausa
 
 const FADE = 0.1; // tramo del crossfade armado -> piezas
-const EXPLODE_END = 0.4; // fin de la separación
-const NEST_END = 0.78; // el anidado termina acá; el "puente" (planchas -> archivos) ocupa [0.78, 1]
+// Fases de la secuencia unificada (en animP, tras el intro):
+const EXPLODE_END = 0.26; // fin de la separación
+const NEST_END = 0.48; // anidado completo (piezas en sus planchas)
+const REDUCE_END = 0.6; // planchas -> 5 archivos
+const UPLOAD_END = 0.78; // los 5 archivos subieron a la nube
+const RETOMAR_END = 0.9; // archivos bajaron a los dispositivos; [0.90,1] = sincronizar
 const STAGGER_SPAN = 0.46; // dispersión de arranques del vuelo (en pNest)
 const FLIGHT_DUR = 0.46; // duración del vuelo de cada componente (en pNest)
 const WALL_FAN_R = 150; // radio del abanico al abrirse las 4 paredes
@@ -250,7 +271,14 @@ function CasaExplode() {
   const introRef = useRef<HTMLDivElement>(null);
   const hintRef = useRef<HTMLDivElement>(null);
   const tubeFillRef = useRef<HTMLDivElement>(null);
-  const filesRef = useRef<HTMLDivElement>(null);
+  const journeyRef = useRef<HTMLDivElement>(null);
+  const cloudRef = useRef<HTMLDivElement>(null);
+  const glowRef = useRef<HTMLDivElement>(null);
+  const laptopRef = useRef<HTMLDivElement>(null);
+  const phoneRef = useRef<HTMLDivElement>(null);
+  const beamLRef = useRef<HTMLDivElement>(null);
+  const beamRRef = useRef<HTMLDivElement>(null);
+  const checkRef = useRef<HTMLDivElement>(null);
 
   useLayoutEffect(() => {
     const host = svgHostRef.current;
@@ -485,9 +513,46 @@ function CasaExplode() {
       ? [...copyRef.current.querySelectorAll<HTMLElement>(".casa-explode-panel")]
       : [];
     const tubeFill = tubeFillRef.current;
-    const fileCards = filesRef.current
-      ? [...filesRef.current.querySelectorAll<HTMLElement>(".e2d-file-card")]
+    const journey = journeyRef.current;
+    const fileEls = journey
+      ? [...journey.querySelectorAll<HTMLElement>(".journey-file")]
       : [];
+
+    // Anclas del visual de la nube (coords locales del contenedor .journey-cloud).
+    type Pt = { x: number; y: number };
+    let cloudPt: Pt = { x: 0, y: 0 };
+    let laptopPt: Pt = { x: 0, y: 0 };
+    let phonePt: Pt = { x: 0, y: 0 };
+    // los archivos aterrizan un poco por ENCIMA del ícono del dispositivo (para verlo).
+    let laptopCardPt: Pt = { x: 0, y: 0 };
+    let phoneCardPt: Pt = { x: 0, y: 0 };
+    const fileBase: Pt[] = FILES.map(() => ({ x: 0, y: 0 }));
+
+    const positionBeam = (el: HTMLDivElement | null, from: Pt, to: Pt) => {
+      if (!el) return;
+      const dx = to.x - from.x;
+      const dy = to.y - from.y;
+      el.style.left = `${from.x}px`;
+      el.style.top = `${from.y}px`;
+      el.style.width = `${Math.hypot(dx, dy)}px`;
+      el.style.transform = `rotate(${(Math.atan2(dy, dx) * 180) / Math.PI}deg)`;
+    };
+
+    const measure = () => {
+      if (!journey) return;
+      const r = journey.getBoundingClientRect();
+      const W = r.width;
+      const H = r.height;
+      cloudPt = { x: W * 0.5, y: H * 0.24 };
+      laptopPt = { x: W * 0.3, y: H * 0.84 };
+      phonePt = { x: W * 0.7, y: H * 0.84 };
+      laptopCardPt = { x: W * 0.3, y: H * 0.73 };
+      phoneCardPt = { x: W * 0.7, y: H * 0.73 };
+      FILES.forEach((f, i) => (fileBase[i] = { x: W * f.rx, y: H * f.ry }));
+      positionBeam(beamLRef.current, cloudPt, laptopPt);
+      positionBeam(beamRRef.current, cloudPt, phonePt);
+    };
+    measure();
 
     let lastKey = "";
 
@@ -541,22 +606,20 @@ function CasaExplode() {
 
       const eExp = ease(clamp01(p / EXPLODE_END));
       const pNest = clamp01((p - EXPLODE_END) / (NEST_END - EXPLODE_END));
-      const bridge = clamp01((p - NEST_END) / (1 - NEST_END));
+      const reduce = clamp01((p - NEST_END) / (REDUCE_END - NEST_END));
+      const upload = clamp01((p - REDUCE_END) / (UPLOAD_END - REDUCE_END));
+      const retomar = clamp01((p - UPLOAD_END) / (RETOMAR_END - UPLOAD_END));
+      const sync = clamp01((p - RETOMAR_END) / (1 - RETOMAR_END));
       const fade = Math.min(1, p / FADE);
 
       if (assembled) assembled.style.opacity = String(1 - fade);
       planchasG.style.opacity = String(clamp01(pNest / 0.12));
 
-      // Puente: las planchas (el svg) se van a fantasma y emergen los archivos de salida.
+      // El SVG (casa → planchas) se va a fantasma al reducirse a archivos y desaparece al subir.
       if (host) {
-        host.style.opacity = String(lerp(1, 0.14, ease(bridge)));
-        host.style.transform = `scale(${lerp(1, 0.92, ease(bridge))})`;
+        host.style.opacity = String(lerp(1, 0, ease(clamp01(reduce + upload * 0.6))));
+        host.style.transform = `scale(${lerp(1, 0.9, ease(clamp01(reduce)))})`;
       }
-      fileCards.forEach((el, i) => {
-        const t = ease(clamp01((bridge - i * 0.12) / 0.55));
-        el.style.opacity = String(t);
-        el.style.transform = `translate(-50%, -50%) translateY(${lerp(26, 0, t)}px)`;
-      });
 
       for (const g of pieces) {
         if (pNest <= 0) {
@@ -621,6 +684,62 @@ function CasaExplode() {
       }
       if (assembled && fade > 0 && fade < 1) moveAssembledToFront();
 
+      // ---- Nube: los 5 archivos suben, y luego bajan a los dispositivos ----
+      const cloudOp = clamp01((p - REDUCE_END) / 0.12);
+      if (glowRef.current) glowRef.current.style.opacity = String(cloudOp * 0.55);
+      if (cloudRef.current) {
+        cloudRef.current.style.opacity = String(cloudOp);
+        cloudRef.current.style.transform = `translate(-50%,-50%) scale(${lerp(0.9, 1.05, clamp01(upload))})`;
+      }
+
+      fileEls.forEach((el, i) => {
+        const f = FILES[i];
+        const base = fileBase[i];
+        let cur = base;
+        let op = 0;
+        let sc = 1;
+        if (p < NEST_END) {
+          op = 0;
+        } else if (p < REDUCE_END) {
+          // emergen de las planchas en su fila de reposo
+          const t = ease(clamp01((reduce - i * 0.05) / 0.7));
+          op = t;
+          sc = lerp(0.82, 1, t);
+        } else if (p < UPLOAD_END) {
+          // suben a la nube y se desvanecen al entrar
+          const t = ease(upload);
+          cur = { x: lerp(base.x, cloudPt.x, t), y: lerp(base.y, cloudPt.y, t) };
+          op = 1 - clamp01((t - 0.68) / 0.32);
+          sc = lerp(1, 0.55, t);
+        } else if (!f.device) {
+          op = 0; // queda guardado en la nube
+        } else {
+          // retomar: baja de la nube hasta apenas arriba del dispositivo
+          const dev = f.device === "laptop" ? laptopCardPt : phoneCardPt;
+          const t = ease(retomar);
+          cur = { x: lerp(cloudPt.x, dev.x, t), y: lerp(cloudPt.y, dev.y, t) };
+          op = clamp01(retomar / 0.22);
+          sc = lerp(0.55, 1, t);
+        }
+        el.style.opacity = String(op);
+        el.style.transform = `translate(-50%,-50%) translate(${cur.x - base.x}px,${cur.y - base.y}px) scale(${sc})`;
+      });
+
+      // dispositivos: aparecen al bajar los archivos (retomar)
+      const devOp = clamp01((p - (UPLOAD_END - 0.03)) / 0.12);
+      if (laptopRef.current) laptopRef.current.style.opacity = String(devOp);
+      if (phoneRef.current) phoneRef.current.style.opacity = String(devOp);
+
+      // haces nube↔dispositivos y ✓ en sincronizar
+      const beamOp = clamp01(retomar) * (sync > 0 ? 0.55 + 0.45 * Math.sin(sync * Math.PI * 4) : 1) * 0.85;
+      if (beamLRef.current) beamLRef.current.style.opacity = String(beamOp);
+      if (beamRRef.current) beamRRef.current.style.opacity = String(beamOp);
+      if (checkRef.current) {
+        const co = clamp01((sync - 0.15) / 0.35);
+        checkRef.current.style.opacity = String(co);
+        checkRef.current.style.transform = `translate(-50%,-50%) scale(${lerp(0.7, 1, co)})`;
+      }
+
       // Beat de texto activo (último cuyo `start` ya pasó) + tubo de progreso.
       let active = 0;
       for (let i = 0; i < BEATS.length; i++) if (p >= BEATS[i].start) active = i;
@@ -659,7 +778,18 @@ function CasaExplode() {
         host.style.opacity = "1";
         host.style.transform = "scale(1)";
       }
-      fileCards.forEach((el) => (el.style.opacity = "0"));
+      fileEls.forEach((el) => (el.style.opacity = "0"));
+      for (const el of [
+        cloudRef.current,
+        glowRef.current,
+        laptopRef.current,
+        phoneRef.current,
+        beamLRef.current,
+        beamRRef.current,
+        checkRef.current,
+      ]) {
+        if (el) el.style.opacity = "0";
+      }
     };
 
     gsap.registerPlugin(ScrollTrigger);
@@ -670,8 +800,9 @@ function CasaExplode() {
         pinReparent: false,
         anticipatePin: 1,
         start: "top top",
-        end: "+=480%",
+        end: "+=760%",
         scrub: 0.4,
+        onRefresh: measure,
         onUpdate: (self) => {
           if (!isLive()) return;
 
@@ -728,8 +859,8 @@ function CasaExplode() {
             Empezar
             <ArrowRight size={16} />
           </Link>
-          <a href="#nube" className="btn btn-ghost border border-primary/25 text-primary/90">
-            La nube
+          <a href="#probar" className="btn btn-ghost border border-primary/25 text-primary/90">
+            Ver el flujo
           </a>
         </div>
       </div>
@@ -757,11 +888,33 @@ function CasaExplode() {
         />
       </div>
 
-      {/* Puente: las planchas se convierten en los archivos de salida (.obj + DXF + PDF). */}
-      <div ref={filesRef} className="casa-bridge-files" aria-hidden>
-        <div className="e2d-file-card casa-bridge-file-a"><span className="e2d-file-ext">casa.obj</span></div>
-        <div className="e2d-file-card casa-bridge-file-b"><span className="e2d-file-ext">planchas.dxf</span></div>
-        <div className="e2d-file-card casa-bridge-file-c"><span className="e2d-file-ext">planchas.pdf</span></div>
+      {/* Nube + dispositivos + los 5 archivos de salida (planchas -> DXF/PDF + .obj -> nube). */}
+      <div ref={journeyRef} className="journey-cloud" aria-hidden>
+        <div ref={glowRef} className="jc-glow" />
+        <div ref={beamLRef} className="jc-beam" />
+        <div ref={beamRRef} className="jc-beam" />
+        <div ref={cloudRef} className="jc-cloud">
+          <Cloud size={60} strokeWidth={1.25} />
+        </div>
+        <div ref={laptopRef} className="jc-device jc-laptop">
+          <Laptop size={24} strokeWidth={1.5} />
+        </div>
+        <div ref={phoneRef} className="jc-device jc-phone">
+          <Smartphone size={20} strokeWidth={1.5} />
+        </div>
+        {FILES.map((f) => (
+          <div
+            key={f.label}
+            className="journey-file e2d-file-card"
+            style={{ left: `${f.rx * 100}%`, top: `${f.ry * 100}%` }}
+          >
+            <span className="e2d-file-ext">{f.label}</span>
+          </div>
+        ))}
+        <div ref={checkRef} className="jc-check">
+          <Check size={14} strokeWidth={2.5} />
+          <span>sincronizado</span>
+        </div>
       </div>
 
       {/* Tubo de vidrio que se llena de líquido neón con el avance del scroll. */}

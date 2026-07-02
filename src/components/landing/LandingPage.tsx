@@ -9,7 +9,6 @@ import { ArrowRight } from "lucide-react";
 import NeonThemeSwitch from "@/components/NeonThemeSwitch";
 
 const CasaExplode = dynamic(() => import("./CasaExplode"), { ssr: false });
-const LandingCloud = dynamic(() => import("./LandingCloud"), { ssr: false });
 const LandingCta = dynamic(() => import("./LandingCta"), { ssr: false });
 
 export default function LandingPage() {
@@ -65,9 +64,6 @@ export default function LandingPage() {
           <a href="#recorrido" className="hover:text-primary transition-colors">
             Recorrido
           </a>
-          <a href="#nube" className="hover:text-primary transition-colors">
-            Nube
-          </a>
           <a href="#probar" className="hover:text-primary transition-colors">
             Probar
           </a>
@@ -85,8 +81,6 @@ export default function LandingPage() {
       </nav>
 
       <CasaExplode />
-
-      <LandingCloud />
 
       <LandingCta />
 
