@@ -56,8 +56,9 @@ function LandingCloud() {
   const visualRef = useRef<HTMLDivElement>(null);
   const glowRef = useRef<HTMLDivElement>(null);
   const cloudRef = useRef<HTMLDivElement>(null);
-  const cardARef = useRef<HTMLDivElement>(null);
-  const cardBRef = useRef<HTMLDivElement>(null);
+  const cardObjRef = useRef<HTMLDivElement>(null);
+  const cardDxfRef = useRef<HTMLDivElement>(null);
+  const cardPdfRef = useRef<HTMLDivElement>(null);
   const laptopRef = useRef<HTMLDivElement>(null);
   const phoneRef = useRef<HTMLDivElement>(null);
   const beamLRef = useRef<HTMLDivElement>(null);
@@ -78,10 +79,14 @@ function LandingCloud() {
       : [];
     const tubeFill = tubeFillRef.current;
 
-    // Anclas (coords locales del visual): nube arriba-centro, dispositivos abajo.
+    // Anclas (coords locales del visual): nube arriba-centro, dispositivos abajo, y la fila
+    // centrada-baja de archivos (origen del "guardar", que continúa el puente desde la casa).
     let cloudPt: Pt = { x: 0, y: 0 };
     let laptopPt: Pt = { x: 0, y: 0 };
     let phonePt: Pt = { x: 0, y: 0 };
+    let objOrigin: Pt = { x: 0, y: 0 };
+    let dxfOrigin: Pt = { x: 0, y: 0 };
+    let pdfOrigin: Pt = { x: 0, y: 0 };
 
     const positionBeam = (el: HTMLDivElement | null, from: Pt, to: Pt) => {
       if (!el) return;
@@ -102,14 +107,20 @@ function LandingCloud() {
       cloudPt = { x: W * 0.5, y: H * 0.28 };
       laptopPt = { x: W * 0.28, y: H * 0.82 };
       phonePt = { x: W * 0.74, y: H * 0.82 };
+      objOrigin = { x: W * 0.22, y: H * 0.8 };
+      dxfOrigin = { x: W * 0.5, y: H * 0.86 };
+      pdfOrigin = { x: W * 0.78, y: H * 0.8 };
       positionBeam(beamLRef.current, cloudPt, laptopPt);
       positionBeam(beamRRef.current, cloudPt, phonePt);
     };
     measure();
 
+    // origin = fila centrada-baja (arranque, viene del puente); device = destino en "retomar"
+    // (null para el .dxf, que sólo sube y no baja a un dispositivo).
     const placeCard = (
       el: HTMLDivElement | null,
-      base: Pt,
+      origin: Pt,
+      device: Pt | null,
       p: number,
       eg: number,
       er: number,
@@ -119,22 +130,27 @@ function LandingCloud() {
       let op: number;
       let sc: number;
       if (p < 0.34) {
-        // sube del dispositivo a la nube y se desvanece al entrar
-        cur = { x: lerp(base.x, cloudPt.x, eg), y: lerp(base.y, cloudPt.y, eg) };
+        // sube desde la fila de archivos a la nube y se desvanece al entrar
+        cur = { x: lerp(origin.x, cloudPt.x, eg), y: lerp(origin.y, cloudPt.y, eg) };
         op = 1 - clamp01((eg - 0.72) / 0.28);
         sc = lerp(1, 0.6, eg);
+      } else if (!device) {
+        // el .dxf queda "guardado": no baja a ningún dispositivo
+        op = 0;
+        cur = cloudPt;
+        sc = 0.6;
       } else if (p < 0.67) {
         // baja de la nube al dispositivo
-        cur = { x: lerp(cloudPt.x, base.x, er), y: lerp(cloudPt.y, base.y, er) };
+        cur = { x: lerp(cloudPt.x, device.x, er), y: lerp(cloudPt.y, device.y, er) };
         op = clamp01(er / 0.25);
         sc = lerp(0.6, 1, er);
       } else {
-        cur = base;
+        cur = device;
         op = 1;
         sc = 1;
       }
-      const dx = cur.x - base.x;
-      const dy = cur.y - base.y;
+      const dx = cur.x - origin.x;
+      const dy = cur.y - origin.y;
       el.style.transform = `translate(-50%,-50%) translate(${dx}px,${dy}px) scale(${sc})`;
       el.style.opacity = String(op);
     };
@@ -151,8 +167,9 @@ function LandingCloud() {
         cloudRef.current.style.transform = `translate(-50%,-50%) scale(${cs})`;
       }
 
-      placeCard(cardARef.current, laptopPt, p, eg, er);
-      placeCard(cardBRef.current, phonePt, p, eg, er);
+      placeCard(cardObjRef.current, objOrigin, laptopPt, p, eg, er);
+      placeCard(cardDxfRef.current, dxfOrigin, null, p, eg, er);
+      placeCard(cardPdfRef.current, pdfOrigin, phonePt, p, eg, er);
 
       // dispositivos: aparecen entrando en "retomar"
       const devOp = lerp(0.28, 1, clamp01((p - 0.28) / 0.2));
@@ -240,11 +257,14 @@ function LandingCloud() {
             <Smartphone size={22} strokeWidth={1.5} />
           </div>
 
-          <div ref={cardARef} className="lc-card lc-card-a">
-            <span>casa.obj</span>
+          <div ref={cardObjRef} className="e2d-file-card lc-card lc-card-obj">
+            <span className="e2d-file-ext">casa.obj</span>
           </div>
-          <div ref={cardBRef} className="lc-card lc-card-b">
-            <span>planchas.pdf</span>
+          <div ref={cardDxfRef} className="e2d-file-card lc-card lc-card-dxf">
+            <span className="e2d-file-ext">planchas.dxf</span>
+          </div>
+          <div ref={cardPdfRef} className="e2d-file-card lc-card lc-card-pdf">
+            <span className="e2d-file-ext">planchas.pdf</span>
           </div>
 
           <div ref={checkRef} className="lc-check">
