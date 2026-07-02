@@ -166,7 +166,8 @@ export function restoreProjectState(raw: unknown): RestoredProjectState | null {
   if (state.overrides) {
     restored.savedOverrides = Object.entries(state.overrides).map(([groupId, newCategory]) => ({
       groupId: Number(groupId),
-      newCategory,
+      // Los overrides persistidos son strings sueltos; el dominio sólo usa FaceCategory.
+      newCategory: newCategory as ClassificationOverride["newCategory"],
     }));
   }
   if (state.wall_wall_decisions) {

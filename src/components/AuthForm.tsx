@@ -106,6 +106,8 @@ export default function AuthForm({ mode, passwordUpdatedNotice }: AuthFormProps)
 
     try {
       if (isRegister) {
+        // El rol ya se validó arriba; este guard estrecha el tipo (number | "" -> number).
+        if (selectedRolId === "") return;
         const res = await register(
           trimmedEmail,
           password,
