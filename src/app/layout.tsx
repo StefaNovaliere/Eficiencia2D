@@ -4,6 +4,7 @@ import { AuthProvider } from "@/context/AuthContext";
 import { ProjectProvider } from "@/context/ProjectContext";
 import { SettingsProvider, SettingsThemeSync } from "@/context/SettingsContext";
 import { UserProfileProvider } from "@/context/UserProfileContext";
+import { SubscriptionProvider } from "@/context/SubscriptionContext";
 import { ThemeProvider } from "@/context/ThemeContext";
 import AppShell from "@/components/AppShell";
 
@@ -52,9 +53,11 @@ export default function RootLayout({
             <UserProfileProvider>
               <SettingsProvider>
                 <SettingsThemeSync />
-                <ProjectProvider>
-                  <AppShell>{children}</AppShell>
-                </ProjectProvider>
+                <SubscriptionProvider>
+                  <ProjectProvider>
+                    <AppShell>{children}</AppShell>
+                  </ProjectProvider>
+                </SubscriptionProvider>
               </SettingsProvider>
             </UserProfileProvider>
           </AuthProvider>
