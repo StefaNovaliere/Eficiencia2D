@@ -463,30 +463,105 @@
 }
 
 /* Puente: fila de archivos centrada-baja que emerge de las planchas. */
-.casa-bridge-files {
+/* Contenedor del visual de la nube (fase final): centrado sobre el escenario. */
+.journey-cloud {
   position: absolute;
-  inset: 0;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(56vh, 560px);
+  aspect-ratio: 1;
   z-index: 8;
   pointer-events: none;
 }
 
-.casa-bridge-files .e2d-file-card {
+.journey-file {
   position: absolute;
-  top: 76%;
   opacity: 0;
   transform: translate(-50%, -50%);
+  z-index: 6;
 }
 
-.casa-bridge-file-a {
-  left: 38%;
-}
-
-.casa-bridge-file-b {
+.jc-glow {
+  position: absolute;
   left: 50%;
+  top: 24%;
+  width: 52%;
+  height: 52%;
+  transform: translate(-50%, -50%);
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--color-primary) 40%, transparent);
+  filter: blur(52px);
+  opacity: 0;
 }
 
-.casa-bridge-file-c {
-  left: 62%;
+.jc-beam {
+  position: absolute;
+  height: 2px;
+  transform-origin: left center;
+  border-radius: 999px;
+  background: linear-gradient(90deg, color-mix(in oklch, var(--color-primary) 90%, transparent), color-mix(in oklch, var(--color-secondary) 80%, transparent));
+  box-shadow: 0 0 10px color-mix(in oklch, var(--color-primary) 55%, transparent);
+  opacity: 0;
+}
+
+.jc-cloud {
+  position: absolute;
+  left: 50%;
+  top: 24%;
+  transform: translate(-50%, -50%);
+  color: var(--color-primary);
+  filter: drop-shadow(0 0 26px color-mix(in oklch, var(--color-primary) 55%, transparent));
+  opacity: 0;
+  z-index: 5;
+}
+
+.jc-device {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.9rem;
+  height: 2.9rem;
+  border-radius: 0.7rem;
+  border: 1px solid color-mix(in oklch, var(--color-primary) 45%, transparent);
+  background: color-mix(in oklch, var(--color-base-200) 70%, transparent);
+  color: var(--color-primary);
+  box-shadow: 0 0 20px color-mix(in oklch, var(--color-primary) 22%, transparent);
+  opacity: 0;
+  z-index: 3;
+}
+
+.jc-laptop {
+  left: 30%;
+  top: 84%;
+}
+
+.jc-phone {
+  left: 70%;
+  top: 84%;
+}
+
+.jc-check {
+  position: absolute;
+  left: 50%;
+  top: 52%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in oklch, var(--color-success) 55%, transparent);
+  background: color-mix(in oklch, var(--color-success) 16%, var(--color-base-100));
+  color: var(--color-success);
+  font-family: ui-monospace, "JetBrains Mono", Menlo, monospace;
+  font-size: 0.66rem;
+  font-weight: 700;
+  box-shadow: 0 0 18px color-mix(in oklch, var(--color-success) 35%, transparent);
+  opacity: 0;
+  z-index: 7;
 }
 
 .casa-explode-legend {
