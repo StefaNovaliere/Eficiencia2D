@@ -117,17 +117,24 @@ const BEATS = [
     body: "Cada componente se acomoda solo en la lámina de corte, agrupado por tipo y aprovechando el material.",
   },
   {
-    start: 0.78,
+    start: 0.62,
     step: "04 · a cortar",
     title: "Planchas listas",
-    body: "Exportás el PDF de corte y, si querés, el instructivo te guía el armado en 3D.",
+    body: "El anidado deja todo listo para la cortadora: cada pieza en su lámina, sin desperdicio.",
+  },
+  {
+    start: 0.82,
+    step: "05 · entrega",
+    title: "Tus archivos",
+    body: "Cada plancha se convierte en su plano de corte —DXF y PDF—. Con tu .obj, todo listo para subir a la nube.",
   },
 ];
 
 const INTRO_PORTION = 0.11; // primer tramo del scroll: hero integrado, animación en pausa
 
 const FADE = 0.1; // tramo del crossfade armado -> piezas
-const EXPLODE_END = 0.4; // fin de la separación; el vuelo ocupa [0.40, 1]
+const EXPLODE_END = 0.4; // fin de la separación
+const NEST_END = 0.78; // el anidado termina acá; el "puente" (planchas -> archivos) ocupa [0.78, 1]
 const STAGGER_SPAN = 0.46; // dispersión de arranques del vuelo (en pNest)
 const FLIGHT_DUR = 0.46; // duración del vuelo de cada componente (en pNest)
 const WALL_FAN_R = 150; // radio del abanico al abrirse las 4 paredes
@@ -243,6 +250,7 @@ function CasaExplode() {
   const introRef = useRef<HTMLDivElement>(null);
   const hintRef = useRef<HTMLDivElement>(null);
   const tubeFillRef = useRef<HTMLDivElement>(null);
+  const filesRef = useRef<HTMLDivElement>(null);
 
   useLayoutEffect(() => {
     const host = svgHostRef.current;
@@ -477,6 +485,9 @@ function CasaExplode() {
       ? [...copyRef.current.querySelectorAll<HTMLElement>(".casa-explode-panel")]
       : [];
     const tubeFill = tubeFillRef.current;
+    const fileCards = filesRef.current
+      ? [...filesRef.current.querySelectorAll<HTMLElement>(".e2d-file-card")]
+      : [];
 
     let lastKey = "";
 
@@ -529,11 +540,23 @@ function CasaExplode() {
       if (!isLive() || !svgEl.isConnected) return;
 
       const eExp = ease(clamp01(p / EXPLODE_END));
-      const pNest = clamp01((p - EXPLODE_END) / (1 - EXPLODE_END));
+      const pNest = clamp01((p - EXPLODE_END) / (NEST_END - EXPLODE_END));
+      const bridge = clamp01((p - NEST_END) / (1 - NEST_END));
       const fade = Math.min(1, p / FADE);
 
       if (assembled) assembled.style.opacity = String(1 - fade);
       planchasG.style.opacity = String(clamp01(pNest / 0.12));
+
+      // Puente: las planchas (el svg) se van a fantasma y emergen los archivos de salida.
+      if (host) {
+        host.style.opacity = String(lerp(1, 0.14, ease(bridge)));
+        host.style.transform = `scale(${lerp(1, 0.92, ease(bridge))})`;
+      }
+      fileCards.forEach((el, i) => {
+        const t = ease(clamp01((bridge - i * 0.12) / 0.55));
+        el.style.opacity = String(t);
+        el.style.transform = `translate(-50%, -50%) translateY(${lerp(26, 0, t)}px)`;
+      });
 
       for (const g of pieces) {
         if (pNest <= 0) {
@@ -632,6 +655,11 @@ function CasaExplode() {
       for (const pan of panelsG.querySelectorAll<SVGElement>(".panel")) pan.style.opacity = "0";
       if (tubeFill) tubeFill.style.height = "0%";
       panelEls.forEach((el) => el.classList.remove("on"));
+      if (host) {
+        host.style.opacity = "1";
+        host.style.transform = "scale(1)";
+      }
+      fileCards.forEach((el) => (el.style.opacity = "0"));
     };
 
     gsap.registerPlugin(ScrollTrigger);
@@ -642,7 +670,7 @@ function CasaExplode() {
         pinReparent: false,
         anticipatePin: 1,
         start: "top top",
-        end: "+=380%",
+        end: "+=480%",
         scrub: 0.4,
         onUpdate: (self) => {
           if (!isLive()) return;
@@ -727,6 +755,13 @@ function CasaExplode() {
           suppressHydrationWarning
           dangerouslySetInnerHTML={{ __html: SVG_MARKUP }}
         />
+      </div>
+
+      {/* Puente: las planchas se convierten en los archivos de salida (.obj + DXF + PDF). */}
+      <div ref={filesRef} className="casa-bridge-files" aria-hidden>
+        <div className="e2d-file-card casa-bridge-file-a"><span className="e2d-file-ext">casa.obj</span></div>
+        <div className="e2d-file-card casa-bridge-file-b"><span className="e2d-file-ext">planchas.dxf</span></div>
+        <div className="e2d-file-card casa-bridge-file-c"><span className="e2d-file-ext">planchas.pdf</span></div>
       </div>
 
       {/* Tubo de vidrio que se llena de líquido neón con el avance del scroll. */}

@@ -445,6 +445,50 @@
   background: color-mix(in oklch, var(--color-primary) 40%, transparent);
 }
 
+/* Tarjeta de archivo compartida (puente casa→nube: mismo look en ambas secciones). */
+.e2d-file-card {
+  padding: 0.4rem 0.7rem;
+  border-radius: 0.5rem;
+  border: 1.5px solid var(--color-primary);
+  background: color-mix(in oklch, var(--color-primary) 14%, var(--color-base-100));
+  box-shadow: 0 0 22px color-mix(in oklch, var(--color-primary) 30%, transparent);
+  white-space: nowrap;
+}
+
+.e2d-file-ext {
+  font-family: ui-monospace, "JetBrains Mono", Menlo, monospace;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+/* Puente: fila de archivos centrada-baja que emerge de las planchas. */
+.casa-bridge-files {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  pointer-events: none;
+}
+
+.casa-bridge-files .e2d-file-card {
+  position: absolute;
+  top: 76%;
+  opacity: 0;
+  transform: translate(-50%, -50%);
+}
+
+.casa-bridge-file-a {
+  left: 38%;
+}
+
+.casa-bridge-file-b {
+  left: 50%;
+}
+
+.casa-bridge-file-c {
+  left: 62%;
+}
+
 .casa-explode-legend {
   list-style: none;
   margin: 1.4rem 0 0;
@@ -766,30 +810,27 @@
   top: 82%;
 }
 
+/* El look de la tarjeta viene de .e2d-file-card (compartido con el puente de la casa);
+   acá sólo el posicionamiento/animación. Base = fila centrada-baja (origen del "guardar"). */
 .lc-card {
   position: absolute;
   transform: translate(-50%, -50%);
-  padding: 0.35rem 0.6rem;
-  border-radius: 0.45rem;
-  border: 1.5px solid var(--color-primary);
-  background: color-mix(in oklch, var(--color-primary) 14%, var(--color-base-100));
-  box-shadow: 0 0 20px color-mix(in oklch, var(--color-primary) 30%, transparent);
-  font-family: ui-monospace, "JetBrains Mono", Menlo, monospace;
-  font-size: 0.66rem;
-  font-weight: 700;
-  color: var(--color-primary);
-  white-space: nowrap;
   z-index: 4;
 }
 
-.lc-card-a {
-  left: 28%;
-  top: 82%;
+.lc-card-obj {
+  left: 22%;
+  top: 80%;
 }
 
-.lc-card-b {
-  left: 74%;
-  top: 82%;
+.lc-card-dxf {
+  left: 50%;
+  top: 86%;
+}
+
+.lc-card-pdf {
+  left: 78%;
+  top: 80%;
 }
 
 .lc-check {
