@@ -523,23 +523,26 @@ export default function InteractiveAssemblyViewer({
         />
       </Canvas>
 
-      <div className="absolute top-0 inset-x-0 z-10 pointer-events-none p-4 sm:p-6">
-        <div className="max-w-xl mx-auto rounded-2xl bg-base-100/90 backdrop-blur-md border border-base-300/40 shadow-xl px-5 py-4 pointer-events-auto">
-          <p className="text-[11px] font-semibold uppercase tracking-widest text-primary/70 mb-1">
-            Paso {currentStep + 1} de {steps.length}
-          </p>
-          <h2 className="text-lg sm:text-xl font-bold text-base-content leading-tight">
+      <div className="absolute top-0 inset-x-0 z-10 pointer-events-none p-2.5 sm:p-3">
+        <div className="max-w-xs mx-auto rounded-xl bg-base-100/90 backdrop-blur-md border border-base-300/40 shadow-lg px-3.5 py-2 pointer-events-auto">
+          <div className="flex items-baseline justify-between gap-2 mb-0.5">
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-primary/70">
+              Paso {currentStep + 1} de {steps.length}
+            </p>
+            <span
+              className="text-[10px] text-base-content/40 font-mono tabular-nums"
+              title={`${placedCount} de ${renderPieces.length} piezas colocadas${
+                viewerSchema === "oriented_box_v1" ? " · oriented_box_v1" : ""
+              }`}
+            >
+              {placedCount}/{renderPieces.length}
+            </span>
+          </div>
+          <h2 className="text-sm sm:text-base font-bold text-base-content leading-tight">
             {step.title}
           </h2>
-          <p className="text-sm text-base-content/65 mt-1.5 leading-relaxed">
+          <p className="text-xs text-base-content/60 mt-0.5 leading-snug line-clamp-2">
             {step.description}
-          </p>
-          <p className="text-xs text-base-content/45 mt-2 font-mono">
-            {step.panel_ids.length} pieza{step.panel_ids.length !== 1 ? "s" : ""} en este paso
-          </p>
-          <p className="text-[11px] text-base-content/35 mt-1 font-mono">
-            {renderPieces.length} piezas totales · {placedCount} colocadas
-            {viewerSchema === "oriented_box_v1" ? " · oriented_box_v1" : ""}
           </p>
         </div>
       </div>
