@@ -169,8 +169,15 @@ export function stepsFromAssemblySteps(
   const sorted = [...entries].sort((a, b) => a.step - b.step);
   const multiLevel = new Set(entries.map((e) => e.level)).size > 1;
 
-  const steps: AssemblySequenceStep[] = [];
+  // Piezas elegibles en el orden de `assembly_steps` (piso base → paredes →
+  // siguiente nivel). Se conserva ese orden como desempate del reordenamiento.
   const placed = new Set<string>();
+  const eligible: {
+    level: number;
+    category: FaceCategory;
+    label: string;
+    area: number;
+  }[] = [];
   for (const e of sorted) {
     const group = groupById.get(e.groupId);
     if (!group) continue;
@@ -179,12 +186,24 @@ export function stepsFromAssemblySteps(
     const label = groupLabel(group, phase1.panelIdByGroup);
     if (!validLabels.has(label) || placed.has(label)) continue;
     placed.add(label);
-    steps.push({
-      title: pieceStepTitle(category, label, multiLevel, e.level),
-      description: `Colocá la pieza ${label}.`,
-      panel_ids: [label],
-    });
+    eligible.push({ level: e.level, category, label, area: group.totalArea });
   }
+
+  // Dentro del flujo abajo→arriba (por nivel, pisos primero), armar del
+  // componente más grande al más chico: así cada pared aparece antes que sus
+  // aberturas (piezas chicas). El sort es estable → ante empate se mantiene el
+  // orden original de `assembly_steps`.
+  const catRank = (c: FaceCategory) => (c === "floor" ? 0 : 1);
+  eligible.sort(
+    (a, b) =>
+      a.level - b.level || catRank(a.category) - catRank(b.category) || b.area - a.area,
+  );
+
+  const steps: AssemblySequenceStep[] = eligible.map((p) => ({
+    title: pieceStepTitle(p.category, p.label, multiLevel, p.level),
+    description: `Colocá la pieza ${p.label}.`,
+    panel_ids: [p.label],
+  }));
 
   // Si ningún paso del backend matcheó con las piezas visibles, no aplica
   // (evita reordenar por orden de panel). El caller cae a su fallback.

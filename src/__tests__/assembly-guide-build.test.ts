@@ -128,6 +128,52 @@ describe("buildAssemblyGuideFromTopology", () => {
     expect(data.steps?.map((s) => s.panel_ids)).toEqual([["A1"], ["P3"], ["P2"]]);
   });
 
+  it("within a level, reveals the largest wall before smaller pieces (openings)", () => {
+    // Un piso (base) + dos muros y una "abertura" chica, todos en el nivel 0.
+    // El backend los emite en un orden donde la abertura chica va antes que los
+    // muros grandes; el front debe reordenar grande→chico dentro del nivel.
+    function g(id: number, cat: FaceCategory, area: number): GeometryGroup {
+      return {
+        id,
+        label: "",
+        category: cat,
+        faceIndices: [],
+        totalArea: area,
+        centroid: { x: 0, y: 0, z: 0 },
+        orientation: "",
+        representativeNormal: { x: 1, y: 0, z: 0 },
+        minY: 0,
+        maxY: 1,
+      };
+    }
+    const lvlGroups = [
+      g(1, "floor", 10), // piso base
+      g(2, "wall", 6), // muro grande
+      g(3, "wall", 0.3), // abertura / carpintería chica
+      g(4, "wall", 3), // muro mediano
+    ];
+    const data = buildAssemblyGuideFromTopology(
+      phase1({
+        groups: lvlGroups,
+        faces: [QUAD],
+        panelIdByGroup: { 1: "F1", 2: "W1", 3: "OP", 4: "W2" },
+        assemblySteps: [
+          { step: 1, groupId: 1, label: "F1", level: 0 }, // piso
+          { step: 2, groupId: 3, label: "OP", level: 0 }, // abertura chica primero (raro)
+          { step: 3, groupId: 2, label: "W1", level: 0 }, // muro grande
+          { step: 4, groupId: 4, label: "W2", level: 0 }, // muro mediano
+        ],
+      }),
+    );
+    // Piso primero (base), luego muros de mayor a menor área: W1(6) → W2(3) → OP(0.3).
+    expect(data.steps?.map((s) => s.panel_ids)).toEqual([
+      ["F1"],
+      ["W1"],
+      ["W2"],
+      ["OP"],
+    ]);
+  });
+
   it("excludes groups whose effective category is discard (override)", () => {
     const overrides = new Map<number, FaceCategory>([[1, "discard"]]);
     const data = buildAssemblyGuideFromTopology(
