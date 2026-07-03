@@ -11,6 +11,7 @@
 // ============================================================================
 
 import { apiFetch } from "@/services/api";
+import { parseApiError } from "@/services/api-errors";
 
 export interface Plan {
   /** Id estable del plan (string; el backend puede usar uuid o slug). */
@@ -201,24 +202,6 @@ export function getLocalSuscripcion(): Suscripcion {
   }
 }
 
-function setLocalSuscripcion(sub: Suscripcion): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(LOCAL_KEY, JSON.stringify(sub));
-  } catch {
-    /* almacenamiento no disponible — se ignora */
-  }
-}
-
-function clearLocalSuscripcion(): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.removeItem(LOCAL_KEY);
-  } catch {
-    /* ignore */
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Lectura resiliente.
 // ---------------------------------------------------------------------------
@@ -261,66 +244,52 @@ export async function getMiSuscripcion(token: string): Promise<SuscripcionFetch>
 }
 
 // ---------------------------------------------------------------------------
-// Escritura resiliente.
+// Escritura (requiere backend; los errores se propagan, NO se ocultan).
 // ---------------------------------------------------------------------------
 
 /**
- * Selecciona/cambia el plan. Con backend: plan gratis → activación inmediata
- * (`kind:"activa"`); plan pago → devuelve un checkout (`kind:"checkout"`). Sin
- * backend: persiste local como activa (para el demo).
+ * Selecciona/cambia el plan.
+ * - Plan gratis → el backend responde 200 con la suscripción → `kind:"activa"`.
+ * - Plan pago → 200 con `checkout_url` (MercadoPago) → `kind:"checkout"` (redirigir).
+ * - Error (401/404/500/…) → **tira** con el `detail` del backend (la UI lo muestra).
  */
 export async function seleccionarPlan(
   token: string,
   plan: Plan,
 ): Promise<SeleccionPlanResult> {
-  // TODO backend: POST /api/users/me/suscripcion { plan_id }.
-  try {
-    const res = await apiFetch(
-      "/api/users/me/suscripcion",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plan_id: plan.id }),
-      },
-      { token },
-    );
-    if (res.ok) {
-      const data = (await res.json()) as Record<string, unknown>;
-      const checkout = data.checkout_url ?? data.checkoutUrl ?? data.init_point;
-      if (typeof checkout === "string" && checkout.trim() !== "") {
-        return { kind: "checkout", url: checkout };
-      }
-      return { kind: "activa", suscripcion: normalizeSuscripcion(data) };
-    }
-    // no-ok (p. ej. 404) → fallback local
-  } catch {
-    /* red → fallback local */
+  const res = await apiFetch(
+    "/api/users/me/suscripcion",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ plan_id: plan.id }),
+    },
+    { token },
+  );
+
+  if (!res.ok) {
+    await parseApiError(res, "No se pudo procesar el plan");
   }
 
-  const sub: Suscripcion = {
-    plan_id: plan.id,
-    estado: "activa",
-    periodo_fin: null,
-  };
-  setLocalSuscripcion(sub);
-  return { kind: "activa", suscripcion: sub };
+  const data = (await res.json()) as Record<string, unknown>;
+  const checkout = data.checkout_url ?? data.checkoutUrl ?? data.init_point;
+  if (typeof checkout === "string" && checkout.trim() !== "") {
+    return { kind: "checkout", url: checkout };
+  }
+  return { kind: "activa", suscripcion: normalizeSuscripcion(data) };
 }
 
-/** Cancela la suscripción (al fin del período). Fallback local si no hay backend. */
+/** Cancela la suscripción (al fin del período). Tira con el `detail` ante error. */
 export async function cancelarSuscripcion(token: string): Promise<Suscripcion> {
-  // TODO backend: DELETE /api/users/me/suscripcion.
-  try {
-    const res = await apiFetch(
-      "/api/users/me/suscripcion",
-      { method: "DELETE" },
-      { token },
-    );
-    if (res.ok) {
-      return normalizeSuscripcion(await res.json());
-    }
-  } catch {
-    /* red → fallback local */
+  const res = await apiFetch(
+    "/api/users/me/suscripcion",
+    { method: "DELETE" },
+    { token },
+  );
+
+  if (!res.ok) {
+    await parseApiError(res, "No se pudo cancelar el plan");
   }
-  clearLocalSuscripcion();
-  return { plan_id: null, estado: "ninguna", periodo_fin: null };
+
+  return normalizeSuscripcion(await res.json());
 }

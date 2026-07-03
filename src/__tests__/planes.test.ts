@@ -1,10 +1,30 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   normalizePlan,
   normalizePlanesList,
   normalizeSuscripcion,
+  seleccionarPlan,
   MOCK_PLANES,
+  type Plan,
 } from "@/services/planes";
+import { apiFetch } from "@/services/api";
+
+vi.mock("@/services/api", () => ({
+  apiFetch: vi.fn(),
+}));
+
+const apiFetchMock = vi.mocked(apiFetch);
+
+function fakeResponse(status: number, body: unknown): Response {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    json: async () => body,
+  } as unknown as Response;
+}
+
+const PRO: Plan = MOCK_PLANES.find((p) => p.slug === "pro")!;
+const GRATIS: Plan = MOCK_PLANES.find((p) => p.slug === "gratis")!;
 
 describe("normalizePlan", () => {
   it("acepta snake_case del backend y aplica defaults", () => {
@@ -63,6 +83,41 @@ describe("normalizeSuscripcion", () => {
       estado: "ninguna",
       periodo_fin: null,
     });
+  });
+});
+
+describe("seleccionarPlan", () => {
+  beforeEach(() => {
+    apiFetchMock.mockReset();
+  });
+
+  it("plan pago con checkout_url → kind:'checkout' (redirige a MP)", async () => {
+    apiFetchMock.mockResolvedValue(
+      fakeResponse(200, { checkout_url: "https://mp.example/checkout/123" }),
+    );
+    const result = await seleccionarPlan("tok", PRO);
+    expect(result).toEqual({ kind: "checkout", url: "https://mp.example/checkout/123" });
+  });
+
+  it("plan gratis 200 sin checkout → kind:'activa'", async () => {
+    apiFetchMock.mockResolvedValue(
+      fakeResponse(200, { plan_id: "gratis", estado: "activa", periodo_fin: null }),
+    );
+    const result = await seleccionarPlan("tok", GRATIS);
+    expect(result.kind).toBe("activa");
+    if (result.kind === "activa") {
+      expect(result.suscripcion.plan_id).toBe("gratis");
+      expect(result.suscripcion.estado).toBe("activa");
+    }
+  });
+
+  it("error 500 → tira con el detail del backend (no 'activado')", async () => {
+    apiFetchMock.mockResolvedValue(
+      fakeResponse(500, { detail: "MercadoPago no está configurado." }),
+    );
+    await expect(seleccionarPlan("tok", PRO)).rejects.toThrow(
+      "MercadoPago no está configurado.",
+    );
   });
 });
 
