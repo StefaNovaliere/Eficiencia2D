@@ -1,8 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { Check, CreditCard, Loader2, Sparkles } from "lucide-react";
 import { useSubscription } from "@/context/SubscriptionContext";
+import { useAuth } from "@/context/AuthContext";
 import type { Plan } from "@/services/planes";
 
 function formatPrecio(plan: Plan): string {
@@ -25,7 +27,7 @@ function formatFecha(iso: string | null): string {
   }
 }
 
-export default function PlanSelector() {
+export default function PlanSelector({ hideHeader = false }: { hideHeader?: boolean }) {
   const {
     planes,
     currentPlan,
@@ -36,12 +38,18 @@ export default function PlanSelector() {
     selectPlan,
     cancelar,
   } = useSubscription();
+  const { isAuthenticated } = useAuth();
+  const router = useRouter();
 
   const [busyId, setBusyId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
   async function handleSelect(plan: Plan) {
+    if (!isAuthenticated) {
+      router.push("/login");
+      return;
+    }
     if (plan.id === currentPlan?.id) return;
     setBusyId(plan.id);
     setNotice(null);
@@ -80,26 +88,28 @@ export default function PlanSelector() {
     suscripcion?.estado === "activa";
 
   return (
-    <section className="space-y-3 pt-2 border-t border-base-300/40">
-      <div className="flex items-start gap-3">
-        <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-primary/10 text-primary shrink-0">
-          <CreditCard size={18} />
+    <section className={hideHeader ? "space-y-3" : "space-y-3 pt-2 border-t border-base-300/40"}>
+      {!hideHeader && (
+        <div className="flex items-start gap-3">
+          <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-primary/10 text-primary shrink-0">
+            <CreditCard size={18} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <h2 className="text-sm font-semibold text-base-content">Plan</h2>
+            <p className="text-xs text-base-content/55 mt-1">
+              {isAuthenticated && currentPlan
+                ? `Plan actual: ${currentPlan.nombre}${
+                    suscripcion?.cancela_al_fin && suscripcion?.periodo_fin
+                      ? ` · finaliza el ${formatFecha(suscripcion.periodo_fin)}`
+                      : suscripcion?.periodo_fin
+                        ? ` · renueva el ${formatFecha(suscripcion.periodo_fin)}`
+                        : ""
+                  }`
+                : "Elegí el plan que mejor se adapte a tu trabajo."}
+            </p>
+          </div>
         </div>
-        <div className="flex-1 min-w-0">
-          <h2 className="text-sm font-semibold text-base-content">Plan</h2>
-          <p className="text-xs text-base-content/55 mt-1">
-            {currentPlan
-              ? `Plan actual: ${currentPlan.nombre}${
-                  suscripcion?.cancela_al_fin && suscripcion?.periodo_fin
-                    ? ` · finaliza el ${formatFecha(suscripcion.periodo_fin)}`
-                    : suscripcion?.periodo_fin
-                      ? ` · renueva el ${formatFecha(suscripcion.periodo_fin)}`
-                      : ""
-                }`
-              : "Elegí el plan que mejor se adapte a tu trabajo."}
-          </p>
-        </div>
-      </div>
+      )}
 
       {isLoading ? (
         <div className="flex items-center gap-2 text-sm text-base-content/50 py-2">
@@ -159,6 +169,8 @@ export default function PlanSelector() {
                       <Loader2 className="h-4 w-4 animate-spin" />
                     ) : active ? (
                       "Plan actual"
+                    ) : !isAuthenticated ? (
+                      "Ingresá para elegir"
                     ) : plan.precio_mensual > 0 ? (
                       "Suscribirme"
                     ) : (
