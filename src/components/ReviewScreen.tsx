@@ -50,6 +50,7 @@ import { useReviewHistory } from "@/hooks/useReviewHistory";
 import type { ModelViewerHandle } from "@/components/ModelViewer";
 import CutToolOverlay from "@/components/CutToolOverlay";
 import MeasureToolOverlay from "@/components/MeasureToolOverlay";
+import FlexControls from "@/components/FlexControls";
 import type {
   CutDragState,
   UserCut,
@@ -460,7 +461,7 @@ export default function ReviewScreen({
   onRequestAssemblyPreview,
   openAssemblyInstructivo = false,
 }: ReviewScreenProps) {
-  const { assemblyGuideData, setAssemblyGuideData } = useProjectContext();
+  const { assemblyGuideData, setAssemblyGuideData, savedFlex } = useProjectContext();
   const [selectedGroupIds, setSelectedGroupIds] = useState<Set<number>>(
     () => new Set(),
   );
@@ -1745,6 +1746,7 @@ export default function ReviewScreen({
           boxSelectActive={boxSelectMode}
           viewerRef={viewerRef}
           markGroupIds={markGroupIds}
+          flexSpecs={savedFlex}
           userCuts={userCuts}
           cutDraft={cutDraft}
           movingCutId={movingCutId}
@@ -2471,6 +2473,15 @@ export default function ReviewScreen({
           <div
             className={`flex-1 min-h-0 overflow-y-auto custom-scrollbar ${sidebarTab === "seleccion" ? "" : "hidden"}`}
           >
+            {/* Superficies curvas: kerf bending / patrones auxéticos por componente */}
+            {selectedGroupIds.size === 1 && (() => {
+              const gid = Array.from(selectedGroupIds)[0];
+              const g = phase1.groups.find((gr) => gr.id === gid);
+              const pid = panelIdByGroup.get(gid);
+              const lbl = g?.label ?? (pid ? `Panel ${pid}` : `Pieza ${gid}`);
+              return <FlexControls groupId={gid} label={lbl} />;
+            })()}
+
             {/* Grupo fusionado: ver paredes, enfocar y desfusionar solo una */}
             {selectedGroupIds.size === 1 && displayMergeMembers.length >= 2 && (
               <div className="px-4 py-3 border-b border-base-300/30 bg-primary/5 space-y-2">

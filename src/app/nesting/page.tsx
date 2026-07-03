@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useProjectContext, type PdfPageMode } from "@/context/ProjectContext";
 import { useAuth } from "@/context/AuthContext";
 import NestingPreview from "@/components/NestingPreview";
-import { fetchNestingPreview, resolveOriginalFilename, userCutsForApi, type SplitOperation } from "@/services/api";
+import { fetchNestingPreview, resolveOriginalFilename, userCutsForApi, flexForApi, type SplitOperation } from "@/services/api";
 import type { SheetConfig } from "@/core/types";
 import { useProjectStateAutosave } from "@/hooks/useProjectStateAutosave";
 
@@ -45,6 +45,7 @@ export default function NestingPage() {
     savedSplits,
     savedMarks,
     savedUserCuts,
+    savedFlex,
     fileId,
     projectFileName,
     persistSession,
@@ -117,6 +118,7 @@ export default function NestingPage() {
           paper: newPaper,
           page_mode: newMode,
           user_cuts: userCutsForApi(savedUserCuts),
+          flex: flexForApi(savedFlex),
         }, token);
         setNestingData(nesting);
         savePrintSettings(newScale, newConfig, newPaper, newMode);
@@ -127,7 +129,7 @@ export default function NestingPage() {
         setIsRecomputing(false);
       }
     },
-    [phase1Result, fileId, projectFileName, minAreaM2, savedMerges, savedSplits, savedOverrides, savedWallWallDecisions, savedMarks, savedUserCuts, setNestingData, token, savePrintSettings],
+    [phase1Result, fileId, projectFileName, minAreaM2, savedMerges, savedSplits, savedOverrides, savedWallWallDecisions, savedMarks, savedUserCuts, savedFlex, setNestingData, token, savePrintSettings],
   );
 
   const handleSheetConfigChange = useCallback((newConfig: SheetConfig) => {
