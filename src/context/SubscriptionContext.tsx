@@ -40,59 +40,87 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
   const { token, isLoadingAuth } = useAuth();
   const [planes, setPlanes] = useState<Plan[]>([]);
   const [suscripcion, setSuscripcion] = useState<Suscripcion | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [unavailable, setUnavailable] = useState(false);
 
+  const [isLoadingPlanes, setIsLoadingPlanes] = useState(true);
+  const [isLoadingSub, setIsLoadingSub] = useState(false);
+
   const load = useCallback(async () => {
-    if (!token) return;
-    setIsLoading(true);
     setError(null);
+    setIsLoadingPlanes(true);
     try {
-      const [planesData, subFetch] = await Promise.all([
-        getPlanes(),
-        getMiSuscripcion(token),
-      ]);
-      setPlanes(planesData);
-      setSuscripcion(subFetch.suscripcion);
-      setUnavailable(subFetch.unavailable);
+      setPlanes(await getPlanes());
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudieron cargar los planes");
     } finally {
-      setIsLoading(false);
+      setIsLoadingPlanes(false);
+    }
+    if (token) {
+      setIsLoadingSub(true);
+      try {
+        const subFetch = await getMiSuscripcion(token);
+        setSuscripcion(subFetch.suscripcion);
+        setUnavailable(subFetch.unavailable);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "No se pudo cargar tu suscripción");
+      } finally {
+        setIsLoadingSub(false);
+      }
     }
   }, [token]);
 
+  // Catálogo público: se trae siempre (haya o no sesión) para que /planes y el
+  // chip de la barra funcionen también deslogueado.
+  useEffect(() => {
+    let cancelled = false;
+    setIsLoadingPlanes(true);
+    getPlanes()
+      .then((data) => {
+        if (!cancelled) setPlanes(data);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "No se pudieron cargar los planes");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingPlanes(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Suscripción del usuario: sólo con sesión.
   useEffect(() => {
     if (isLoadingAuth) return;
     if (!token) {
-      setPlanes([]);
       setSuscripcion(null);
-      setError(null);
       setUnavailable(false);
       return;
     }
     let cancelled = false;
-    setIsLoading(true);
-    setError(null);
-    Promise.all([getPlanes(), getMiSuscripcion(token)])
-      .then(([planesData, subFetch]) => {
+    setIsLoadingSub(true);
+    getMiSuscripcion(token)
+      .then((subFetch) => {
         if (cancelled) return;
-        setPlanes(planesData);
         setSuscripcion(subFetch.suscripcion);
         setUnavailable(subFetch.unavailable);
       })
       .catch((err) => {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : "No se pudieron cargar los planes");
+        setError(err instanceof Error ? err.message : "No se pudo cargar tu suscripción");
       })
       .finally(() => {
-        if (!cancelled) setIsLoading(false);
+        if (!cancelled) setIsLoadingSub(false);
       });
     return () => {
       cancelled = true;
     };
   }, [token, isLoadingAuth]);
+
+  const isLoadingCombined = isLoadingPlanes || isLoadingSub;
 
   const currentPlan =
     (suscripcion?.plan_id != null &&
@@ -125,7 +153,7 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
         planes,
         suscripcion,
         currentPlan,
-        isLoading,
+        isLoading: isLoadingCombined,
         error,
         unavailable,
         selectPlan,

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { Bell, Check, Keyboard, Loader2, Palette } from "lucide-react";
 import UserAccountSection from "@/components/UserAccountSection";
-import PlanSelector from "@/components/PlanSelector";
+import PlanSummary from "@/components/PlanSummary";
 import { useAuth } from "@/context/AuthContext";
 import { useSettings } from "@/context/SettingsContext";
 import { THEMES, useTheme, type ThemeId } from "@/context/ThemeContext";
@@ -82,7 +82,7 @@ export default function UserSettingsForm() {
     <div className="space-y-6">
       {isAuthenticated && <UserAccountSection />}
 
-      {isAuthenticated && <PlanSelector />}
+      {isAuthenticated && <PlanSummary />}
 
       {isAuthenticated && settingsUnavailable && settingsError && (
         <div className="alert alert-warning rounded-xl text-sm">
