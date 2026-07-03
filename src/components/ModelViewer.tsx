@@ -8,6 +8,8 @@ import * as THREE from "three";
 import type { Face3D, Vec3 } from "@/core/types";
 import type { FaceCategory, GeometryGroup } from "@/core/group-classifier";
 import { computeMarkedOpeningGroups3D, type MarkOpeningGroupLines } from "@/core/mark-preview";
+import { computeFlexPreview3D } from "@/core/flex-preview";
+import type { FlexSpec } from "@/core/flex-bending";
 import {
   computeCutPreviewSegments,
   panelUVToWorldOnSurface,
@@ -842,6 +844,15 @@ const MEASURE_PREVIEW_MATERIAL = new THREE.LineBasicMaterial({
   depthWrite: false,
 });
 
+/** Preview esquemático (no autoritativo) del patrón de flexión kerf/auxético. */
+const FLEX_PREVIEW_MATERIAL = new THREE.LineBasicMaterial({
+  color: 0x22d3ee,
+  depthTest: false,
+  depthWrite: false,
+  transparent: true,
+  opacity: 0.85,
+});
+
 function buildCutPreviewGeometry(
   segments: CutPreviewSegment[],
 ): THREE.BufferGeometry {
@@ -1122,6 +1133,8 @@ interface SceneProps {
   isSolid?: boolean;
   boxSelectActive?: boolean;
   markGroupIds?: Set<number>;
+  /** Specs de flexión (kerf/auxético) por grupo — preview esquemático. */
+  flexSpecs?: FlexSpec[];
   userCuts?: UserCut[];
   cutDraft?: CutDragState | null;
   movingCutId?: string | null;
@@ -1153,6 +1166,7 @@ export interface PanelRaycastContext {
 }
 
 const EMPTY_MARK_SET = new Set<number>();
+const EMPTY_FLEX: FlexSpec[] = [];
 
 function Scene({
   faces,
@@ -1170,6 +1184,7 @@ function Scene({
   isSolid = false,
   boxSelectActive = false,
   markGroupIds = EMPTY_MARK_SET,
+  flexSpecs = EMPTY_FLEX,
   userCuts = [],
   cutDraft = null,
   movingCutId = null,
@@ -1460,6 +1475,19 @@ function Scene({
     [faces, groups, markGroupIds, appliedAxis, hiddenGroupIds],
   );
 
+  // Preview esquemático (cian) del patrón de flexión kerf/auxético por grupo.
+  const flexPreviewSegments = useMemo(() => {
+    if (flexSpecs.length === 0) return [] as CutPreviewSegment[];
+    const groupLines = computeFlexPreview3D(faces, groups, flexSpecs, appliedAxis, hiddenGroupIds);
+    const out: CutPreviewSegment[] = [];
+    for (const gl of groupLines) {
+      for (const s of gl.segments) {
+        out.push({ groupId: gl.groupId, normal: gl.normal, a: s.a, b: s.b });
+      }
+    }
+    return out;
+  }, [faces, groups, flexSpecs, appliedAxis, hiddenGroupIds]);
+
   const cutPreviewSegments = useMemo(() => {
     const parentGroups = projectionGroups ?? groups;
     const fromCuts = computeCutPreviewSegments(
@@ -1586,6 +1614,15 @@ function Scene({
             lookupGroups={cutPreviewLookupGroups}
             centerOffset={bounds.center}
             material={CUT_PREVIEW_MATERIAL}
+          />
+        )}
+
+        {flexPreviewSegments.length > 0 && (
+          <PreviewOverlays
+            segments={flexPreviewSegments}
+            lookupGroups={groups}
+            centerOffset={bounds.center}
+            material={FLEX_PREVIEW_MATERIAL}
           />
         )}
 
@@ -2258,6 +2295,8 @@ export interface ModelViewerProps {
   viewerRef?: React.MutableRefObject<ModelViewerHandle | null>;
   /** Groups whose openings (holes) are engraved in red on the cut sheet. */
   markGroupIds?: Set<number>;
+  /** Specs de flexión (kerf/auxético) por grupo — preview esquemático. */
+  flexSpecs?: FlexSpec[];
   userCuts?: UserCut[];
   cutDraft?: CutDragState | null;
   movingCutId?: string | null;
@@ -2294,6 +2333,7 @@ export default function ModelViewer({
   boxSelectActive = false,
   viewerRef,
   markGroupIds = EMPTY_MARK_SET,
+  flexSpecs = EMPTY_FLEX,
   userCuts = [],
   cutDraft = null,
   movingCutId = null,
@@ -2386,6 +2426,7 @@ export default function ModelViewer({
         isSolid={isSolid}
         boxSelectActive={boxSelectActive}
         markGroupIds={markGroupIds}
+        flexSpecs={flexSpecs}
         userCuts={userCuts}
         cutDraft={cutDraft}
         movingCutId={movingCutId}
