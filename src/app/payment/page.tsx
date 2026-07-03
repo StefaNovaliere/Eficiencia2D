@@ -10,6 +10,7 @@ import {
   base64ToBlob,
   generateProjectFiles,
   userCutsForApi,
+  flexForApi,
   type SplitOperation,
 } from "@/services/api";
 import { extractAssemblyGuideFromZip } from "@/core/assembly-guide";
@@ -42,6 +43,7 @@ export default function PaymentPage() {
     savedSplits,
     savedMarks,
     savedUserCuts,
+    savedFlex,
     scale,
     paper,
     pdfPageMode,
@@ -125,6 +127,7 @@ export default function PaymentPage() {
         splits: savedSplits.map((s): SplitOperation => ({ group_id: s.groupId, mode: s.mode })),
         marks: savedMarks,
         user_cuts: userCutsForApi(savedUserCuts),
+        flex: flexForApi(savedFlex),
       }, token);
 
       if (!backendRes.zip_base64) {
@@ -168,6 +171,7 @@ export default function PaymentPage() {
     savedSplits,
     savedMarks,
     savedUserCuts,
+    savedFlex,
     triggerDownload,
     setAssemblyGuideData,
     token,

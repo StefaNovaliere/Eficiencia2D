@@ -2,6 +2,8 @@ import { decodePackedFaces } from "@/core/packed-faces";
 import type { Phase1Result, NestingPreviewData, ClassificationOverride } from "@/core/pipeline";
 import type { UserCut } from "@/core/user-cuts";
 import { serializeUserCutsForApi } from "@/core/user-cuts";
+import type { FlexSpec } from "@/core/flex-bending";
+import { serializeFlexForApi } from "@/core/flex-bending";
 import {
   fetchWithApiFallback,
   type ApiFetchOptions,
@@ -14,6 +16,11 @@ export type { ApiFetchOptions };
 /** Serializa los cortes manuales del usuario al formato snake_case del backend. */
 export function userCutsForApi(cuts: UserCut[]): Record<string, unknown>[] {
   return serializeUserCutsForApi(cuts);
+}
+
+/** Serializa los specs de flexión (kerf/auxético) al formato snake_case del backend. */
+export function flexForApi(specs: FlexSpec[]): Record<string, unknown>[] {
+  return serializeFlexForApi(specs);
 }
 
 export async function apiFetch(
@@ -252,6 +259,8 @@ export interface NestingPreviewPayload {
   /** Cortes manuales del usuario (panel-local, metros). Para previsualizar las
    *  planchas con los recortes aplicados. */
   user_cuts?: Record<string, unknown>[];
+  /** Specs de flexión por grupo (kerf/auxético). Ver CONTRATO_kerf_auxetico.md. */
+  flex?: Record<string, unknown>[];
 }
 
 export interface GenerateRequestPayload {
@@ -279,6 +288,8 @@ export interface GenerateRequestPayload {
   /** Recortes manuales del usuario (panel-local, metros). Campo reservado: la
    *  herramienta de corte se re-implementará contra el backend. */
   user_cuts?: Record<string, unknown>[];
+  /** Specs de flexión por grupo (kerf/auxético). Ver CONTRATO_kerf_auxetico.md. */
+  flex?: Record<string, unknown>[];
 }
 
 export interface GenerateResponse {
