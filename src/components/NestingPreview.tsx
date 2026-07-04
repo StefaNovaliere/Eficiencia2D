@@ -145,12 +145,20 @@ function SheetCanvas({
         ctx.lineWidth = 1.25;
         ctx.lineJoin = "round";
         for (const e of edges) {
-          ctx.strokeStyle = isMark && e.hole === true ? "#dc2626" : color;
+          // Precedencia: patrón de flexión (kerf/auxético) = corte negro;
+          // aberturas grabadas = rojo; resto = color de corte del panel.
+          ctx.strokeStyle = e.flex === true
+            ? "#111827"
+            : isMark && e.hole === true
+              ? "#dc2626"
+              : color;
+          ctx.lineWidth = e.flex === true ? 0.8 : 1.25;
           ctx.beginPath();
           ctx.moveTo(toX(px + e.a.x), toY(py + e.a.y));
           ctx.lineTo(toX(px + e.b.x), toY(py + e.b.y));
           ctx.stroke();
         }
+        ctx.lineWidth = 1.25;
 
         // Panel ID — fixed size in sheet space (8mm) so labels don't scale
         // with panel size and overlap edges.

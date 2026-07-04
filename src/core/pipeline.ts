@@ -79,6 +79,21 @@ export interface Phase1Result {
    * Opcional: si no viene, el front sintetiza un orden por orientación.
    */
   assemblySteps?: AssemblyStep[];
+  /**
+   * Curvatura detectada por el backend, por id de grupo curvo (los planos no
+   * figuran). El front la usa para sugerir método/spacing de flexión. Opcional.
+   */
+  curvature?: Record<number, GroupCurvature>;
+}
+
+/** Metadata de curvatura de un grupo (para kerf/auxético). */
+export interface GroupCurvature {
+  curved: boolean;
+  /** Curvatura simple (desarrollable → kerf) o doble (→ auxético). */
+  kind: "single" | "double";
+  bendRadiusM?: number;
+  principalDir?: Vec3;
+  normalSpreadDeg?: number;
 }
 
 export interface ClassificationOverride {
