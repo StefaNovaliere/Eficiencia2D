@@ -25,7 +25,7 @@ export interface NestingPanel {
   category: "wall" | "floor";
   widthM: number;
   heightM: number;
-  edges: Array<{ a: Vec2; b: Vec2; hole?: boolean }>;
+  edges: Array<{ a: Vec2; b: Vec2; hole?: boolean; flex?: boolean }>;
   /** When true, this component's openings (hole edges) are engraved (red) not cut. */
   isMark?: boolean;
 }
@@ -54,12 +54,13 @@ export interface NestingResult {
 
 /** Rota las aristas de un panel 90° (dibujo 2D puro). Lo usa NestingPreview. */
 export function rotateEdges(
-  edges: Array<{ a: Vec2; b: Vec2; hole?: boolean }>,
+  edges: Array<{ a: Vec2; b: Vec2; hole?: boolean; flex?: boolean }>,
   originalW: number,
-): Array<{ a: Vec2; b: Vec2; hole?: boolean }> {
+): Array<{ a: Vec2; b: Vec2; hole?: boolean; flex?: boolean }> {
   return edges.map((e) => ({
     a: { x: e.a.y, y: originalW - e.a.x },
     b: { x: e.b.y, y: originalW - e.b.x },
     hole: e.hole,
+    flex: e.flex,
   }));
 }

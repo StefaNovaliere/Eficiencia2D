@@ -37,9 +37,15 @@ export interface FlexSpec {
   axisDeg?: number;
 }
 
-/** Límites sanos para el espaciado (m): 5 mm – 50 mm. */
-export const FLEX_SPACING_MIN_M = 0.005;
-export const FLEX_SPACING_MAX_M = 0.05;
+/**
+ * Espaciado en **metros FÍSICOS de la maqueta** (material a cortar), NO metros del
+ * edificio. El backend lo escala por `scale_denom`. Rango útil kerf 2–6 mm.
+ */
+export const FLEX_SPACING_MIN_M = 0.002;
+export const FLEX_SPACING_MAX_M = 0.006;
+/** Ligamento (puente sin cortar), en metros de maqueta: 0.8–3 mm. */
+export const FLEX_LIGAMENT_MIN_M = 0.0008;
+export const FLEX_LIGAMENT_MAX_M = 0.003;
 
 export const FLEX_METHOD_LABEL: Record<FlexMethod, string> = {
   kerf: "Kerf bending",
@@ -48,23 +54,47 @@ export const FLEX_METHOD_LABEL: Record<FlexMethod, string> = {
   auxetic_chiral: "Auxético · quiral",
 };
 
-/** Defaults por método (placeholder; el back puede recomendar según radio/espesor). */
+/**
+ * Defaults por método, en mm físicos de maqueta: kerf 3 mm, auxético 6 mm,
+ * ligamento 1.5 mm. El back puede recomendar según radio/espesor.
+ */
 export function defaultFlexSpec(groupId: number, method: FlexMethod): FlexSpec {
-  const base: FlexSpec = { groupId, method, spacingM: 0.012 };
   if (method === "kerf") {
-    return { ...base, spacingM: 0.008, kerfWidthM: 0.0015, axisDeg: 0 };
+    return { groupId, method, spacingM: 0.003, ligamentM: 0.0015, kerfWidthM: 0.0015, axisDeg: 0 };
   }
-  // Auxéticos: pitch de celda algo mayor + ligamento.
-  return { ...base, spacingM: 0.016, ligamentM: 0.003 };
+  return { groupId, method, spacingM: 0.006, ligamentM: 0.0015 };
 }
 
 export function clampSpacing(m: number): number {
-  if (!Number.isFinite(m)) return 0.012;
+  if (!Number.isFinite(m)) return 0.003;
   return Math.min(FLEX_SPACING_MAX_M, Math.max(FLEX_SPACING_MIN_M, m));
 }
 
 export function isAuxetic(method: FlexMethod): boolean {
   return method !== "kerf";
+}
+
+/**
+ * Máximo ángulo (grados) entre las normales dadas. Para detectar fusiones de
+ * paredes NO coplanares (panel "fantasma") antes de aplicar flex.
+ */
+export function maxNormalSpreadDeg(
+  normals: readonly { x: number; y: number; z: number }[],
+): number {
+  const ang = (a: { x: number; y: number; z: number }, b: typeof a) => {
+    const la = Math.hypot(a.x, a.y, a.z);
+    const lb = Math.hypot(b.x, b.y, b.z);
+    if (la < 1e-9 || lb < 1e-9) return 0;
+    const c = Math.min(1, Math.max(-1, (a.x * b.x + a.y * b.y + a.z * b.z) / (la * lb)));
+    return (Math.acos(c) * 180) / Math.PI;
+  };
+  let spread = 0;
+  for (let i = 0; i < normals.length; i++) {
+    for (let j = i + 1; j < normals.length; j++) {
+      spread = Math.max(spread, ang(normals[i], normals[j]));
+    }
+  }
+  return spread;
 }
 
 // ---------------------------------------------------------------------------
@@ -125,54 +155,57 @@ export function parseFlexFromApi(raw: unknown): FlexSpec[] {
 // ---------------------------------------------------------------------------
 export type Segment2D = { u0: number; v0: number; u1: number; v1: number };
 
-/** Filas paralelas de ranuras kerf, orientadas por `axisDeg`, con puentes. */
-function kerfSegments(spec: FlexSpec, widthM: number, heightM: number): Segment2D[] {
-  const spacing = clampSpacing(spec.spacingM);
-  const angle = ((spec.axisDeg ?? 0) * Math.PI) / 180;
-  // Dirección de las ranuras (a lo largo) y de avance (perpendicular).
-  const dir = { x: Math.cos(angle), y: Math.sin(angle) };
-  const step = { x: -Math.sin(angle), y: Math.cos(angle) };
+// El preview usa un **pitch VISUAL** (nº acotado de líneas/celdas según el tamaño
+// del panel), NO el spacing físico (2–6 mm): a escala de edificio ese spacing daría
+// miles de líneas. Es sólo una guía esquemática; la densidad real la corta el back.
+const VISUAL_KERF_LINES = 14;
+const VISUAL_AUX_CELLS = 7;
+
+/** Pocas líneas rectas paralelas DISCONTINUAS (dashes), orientadas por `axisDeg`. */
+function kerfSegments(_spec: FlexSpec, widthM: number, heightM: number, axisDeg = 0): Segment2D[] {
+  const angle = (axisDeg * Math.PI) / 180;
+  const dir = { x: Math.cos(angle), y: Math.sin(angle) }; // a lo largo de la ranura
+  const step = { x: -Math.sin(angle), y: Math.cos(angle) }; // avance entre líneas
   const cx = widthM / 2;
   const cy = heightM / 2;
-  // Longitud generosa para cruzar el panel; el visor/panel recorta.
-  const half = Math.hypot(widthM, heightM);
-  const bridge = Math.max(spec.ligamentM ?? spacing * 0.5, spacing * 0.35);
-  const count = Math.max(1, Math.floor((half * 2) / spacing));
+  const maxDim = Math.max(widthM, heightM);
+  const pitch = Math.max(maxDim / VISUAL_KERF_LINES, 1e-4);
+  const half = Math.hypot(widthM, heightM) / 2;
+  const dash = pitch * 0.9;
+  const gap = pitch * 0.6;
+  const lines = Math.ceil(half / pitch);
   const segs: Segment2D[] = [];
-  for (let i = -count; i <= count; i++) {
-    // Fila i: alternar el corte para dejar puentes (kerf real es interrumpido).
-    const offset = i * spacing;
-    const bx = cx + step.x * offset;
-    const by = cy + step.y * offset;
-    // Dos tramos por fila con un puente al medio (esquemático).
-    const gap = bridge / 2;
-    const aStart = { x: bx - dir.x * half, y: by - dir.y * half };
-    const aEnd = { x: bx - dir.x * gap, y: by - dir.y * gap };
-    const bStart = { x: bx + dir.x * gap, y: by + dir.y * gap };
-    const bEnd = { x: bx + dir.x * half, y: by + dir.y * half };
-    // Alternar el puente por fila (patrón brick).
-    if (i % 2 === 0) {
-      segs.push({ u0: aStart.x, v0: aStart.y, u1: aEnd.x, v1: aEnd.y });
-      segs.push({ u0: bStart.x, v0: bStart.y, u1: bEnd.x, v1: bEnd.y });
-    } else {
-      segs.push({ u0: aStart.x, v0: aStart.y, u1: bEnd.x, v1: bEnd.y });
+  for (let i = -lines; i <= lines; i++) {
+    const off = i * pitch;
+    const bx = cx + step.x * off;
+    const by = cy + step.y * off;
+    for (let t = -half; t < half; t += dash + gap) {
+      const t2 = Math.min(t + dash, half);
+      segs.push({
+        u0: bx + dir.x * t,
+        v0: by + dir.y * t,
+        u1: bx + dir.x * t2,
+        v1: by + dir.y * t2,
+      });
     }
   }
   return segs;
 }
 
-/** Celdas auxéticas esquemáticas: una grilla de cuadraditos rotados (referencia). */
-function auxeticSegments(spec: FlexSpec, widthM: number, heightM: number): Segment2D[] {
-  const pitch = clampSpacing(spec.spacingM);
+/** Teselado RALO de celdas (cuadrados rotatorios) — representativo, no autoritativo. */
+function auxeticSegments(_spec: FlexSpec, widthM: number, heightM: number): Segment2D[] {
+  const maxDim = Math.max(widthM, heightM);
+  const pitch = Math.max(maxDim / VISUAL_AUX_CELLS, 1e-4);
+  const cols = Math.max(1, Math.round(widthM / pitch));
+  const rows = Math.max(1, Math.round(heightM / pitch));
+  const cw = widthM / cols;
+  const ch = heightM / rows;
+  const s = Math.min(cw, ch) * 0.6; // lado del corte dentro de la celda (deja ligamento)
   const segs: Segment2D[] = [];
-  const cols = Math.max(1, Math.floor(widthM / pitch));
-  const rows = Math.max(1, Math.floor(heightM / pitch));
-  const s = pitch * 0.62; // lado del corte dentro de la celda (deja ligamento)
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
-      const cx = (c + 0.5) * pitch;
-      const cy = (r + 0.5) * pitch;
-      // Rotar el cuadradito 45° en celdas alternas (patrón de cuadrados rotatorios).
+      const cx = (c + 0.5) * cw;
+      const cy = (r + 0.5) * ch;
       const rot = (r + c) % 2 === 0 ? Math.PI / 4 : 0;
       const pts: { x: number; y: number }[] = [];
       for (let k = 0; k < 4; k++) {
@@ -200,7 +233,7 @@ export function flexPatternSegments2D(
 ): Segment2D[] {
   if (widthM <= 0 || heightM <= 0) return [];
   const raw = spec.method === "kerf"
-    ? kerfSegments(spec, widthM, heightM)
+    ? kerfSegments(spec, widthM, heightM, spec.axisDeg ?? 0)
     : auxeticSegments(spec, widthM, heightM);
   // Recortar al rectángulo del panel (clip simple por extremos dentro del bbox).
   return raw
@@ -236,4 +269,59 @@ function clipToRect(seg: Segment2D, w: number, h: number): Segment2D | null {
     u1: seg.u0 + t1 * dx,
     v1: seg.v0 + t1 * dy,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Clip al CONTORNO real del componente (no al bbox). El preview no debe pintar
+// fuera de la pared ni dentro de sus aberturas.
+// ---------------------------------------------------------------------------
+export type ContourEdge = { a: { x: number; y: number }; b: { x: number; y: number } };
+
+/** Test punto-en-polígono por even-odd sobre las aristas (excluye huecos). */
+function pointInEdges(x: number, y: number, edges: ContourEdge[]): boolean {
+  let inside = false;
+  for (const e of edges) {
+    const yi = e.a.y, yj = e.b.y;
+    const xi = e.a.x, xj = e.b.x;
+    const intersect =
+      yi > y !== yj > y &&
+      x < ((xj - xi) * (y - yi)) / (yj - yi + (yj === yi ? 1e-12 : 0)) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+/**
+ * Recorta un segmento a la parte interior del polígono descripto por `edges`.
+ * Devuelve los tramos que caen dentro (0, 1 o varios).
+ */
+export function clipSegmentToContour(seg: Segment2D, edges: ContourEdge[]): Segment2D[] {
+  const dx = seg.u1 - seg.u0;
+  const dy = seg.v1 - seg.v0;
+  const ts: number[] = [0, 1];
+  for (const e of edges) {
+    const ex = e.b.x - e.a.x;
+    const ey = e.b.y - e.a.y;
+    const denom = dx * ey - dy * ex;
+    if (Math.abs(denom) < 1e-12) continue;
+    const t = ((e.a.x - seg.u0) * ey - (e.a.y - seg.v0) * ex) / denom;
+    const s = ((e.a.x - seg.u0) * dy - (e.a.y - seg.v0) * dx) / denom;
+    if (t > 1e-9 && t < 1 - 1e-9 && s >= -1e-9 && s <= 1 + 1e-9) ts.push(t);
+  }
+  ts.sort((a, b) => a - b);
+  const out: Segment2D[] = [];
+  for (let i = 0; i + 1 < ts.length; i++) {
+    const ta = ts[i];
+    const tb = ts[i + 1];
+    if (tb - ta < 1e-6) continue;
+    const tm = (ta + tb) / 2;
+    if (!pointInEdges(seg.u0 + dx * tm, seg.v0 + dy * tm, edges)) continue;
+    out.push({
+      u0: seg.u0 + dx * ta,
+      v0: seg.v0 + dy * ta,
+      u1: seg.u0 + dx * tb,
+      v1: seg.v0 + dy * tb,
+    });
+  }
+  return out;
 }

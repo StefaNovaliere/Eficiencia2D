@@ -51,6 +51,7 @@ import type { ModelViewerHandle } from "@/components/ModelViewer";
 import CutToolOverlay from "@/components/CutToolOverlay";
 import MeasureToolOverlay from "@/components/MeasureToolOverlay";
 import FlexControls from "@/components/FlexControls";
+import { maxNormalSpreadDeg } from "@/core/flex-bending";
 import type {
   CutDragState,
   UserCut,
@@ -2473,13 +2474,30 @@ export default function ReviewScreen({
           <div
             className={`flex-1 min-h-0 overflow-y-auto custom-scrollbar ${sidebarTab === "seleccion" ? "" : "hidden"}`}
           >
-            {/* Superficies curvas: kerf bending / patrones auxéticos por componente */}
+            {/* Superficies curvas: kerf/auxético — sólo en paredes (no pisos) */}
             {selectedGroupIds.size === 1 && (() => {
               const gid = Array.from(selectedGroupIds)[0];
-              const g = phase1.groups.find((gr) => gr.id === gid);
+              const dg = displayGroups.find((gr) => gr.id === gid);
+              // Flex es para paredes/superficies a plegar, no pisos/horizontales.
+              if (!dg || dg.category !== "wall") return null;
               const pid = panelIdByGroup.get(gid);
-              const lbl = g?.label ?? (pid ? `Panel ${pid}` : `Pieza ${gid}`);
-              return <FlexControls groupId={gid} label={lbl} />;
+              const lbl = dg.label ?? (pid ? `Panel ${pid}` : `Pieza ${gid}`);
+              // Aviso si la selección es una fusión de paredes no coplanares.
+              let coplanarWarning = false;
+              if (displayMergeMembers.length >= 2) {
+                const normals = displayMergeMembers
+                  .map((id) => phase1.groups.find((gr) => gr.id === id)?.representativeNormal)
+                  .filter((n): n is NonNullable<typeof n> => n != null);
+                coplanarWarning = maxNormalSpreadDeg(normals) > 15;
+              }
+              return (
+                <FlexControls
+                  groupId={gid}
+                  label={lbl}
+                  coplanarWarning={coplanarWarning}
+                  curvature={phase1.curvature?.[gid]}
+                />
+              );
             })()}
 
             {/* Grupo fusionado: ver paredes, enfocar y desfusionar solo una */}
