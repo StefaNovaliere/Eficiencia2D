@@ -9,7 +9,12 @@
 import type { Face3D, Vec3 } from "@/core/types";
 import type { GeometryGroup } from "@/core/group-classifier";
 import { projectFacesTo2D } from "@/core/panel-projection";
-import { flexPatternSegments2D, type FlexSpec } from "@/core/flex-bending";
+import {
+  clipSegmentToContour,
+  flexPatternSegments2D,
+  type ContourEdge,
+  type FlexSpec,
+} from "@/core/flex-bending";
 
 type UpAxis = "Y" | "Z";
 
@@ -63,7 +68,13 @@ export function computeFlexPreview3D(
     const projected = projectFacesTo2D(groupFaces, group.representativeNormal, up);
     if (!projected || projected.widthM <= 0 || projected.heightM <= 0) continue;
 
-    const segs2d = flexPatternSegments2D(spec, projected.widthM, projected.heightM);
+    const rawSegs = flexPatternSegments2D(spec, projected.widthM, projected.heightM);
+    if (rawSegs.length === 0) continue;
+
+    // Recortar al contorno REAL del componente (no al bbox): no pintar fuera de la
+    // pared ni dentro de sus aberturas.
+    const contour: ContourEdge[] = projected.edges.map((e) => ({ a: e.a, b: e.b }));
+    const segs2d = rawSegs.flatMap((s) => clipSegmentToContour(s, contour));
     if (segs2d.length === 0) continue;
 
     const anchor = groupFaces[0].vertices[0];
