@@ -24,7 +24,7 @@ export default function ResetPasswordScreen() {
 
   if (!token) {
     return (
-      <main className="flex flex-col min-h-screen items-center justify-center py-12 px-4 relative">
+      <main className="flex flex-col min-h-screen items-center justify-center py-2 px-4 relative">
         <BackgroundSymbols />
         <div className="w-full max-w-md z-10 card bg-base-100 shadow-2xl border border-base-200">
           <div className="card-body p-6 md:p-8 text-center space-y-4">
@@ -79,7 +79,7 @@ export default function ResetPasswordScreen() {
   }
 
   return (
-    <main className="flex flex-col min-h-screen items-center py-12 px-4 md:px-8 relative">
+    <main className="flex flex-col min-h-screen items-center py-2 px-4 md:px-8 relative">
       <BackgroundSymbols />
 
       <div className="w-full max-w-md z-10 mt-8 md:mt-12">

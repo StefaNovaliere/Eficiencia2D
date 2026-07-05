@@ -206,7 +206,7 @@ export default function PaymentPage() {
     return (
       <div className="flex flex-col min-h-screen items-center justify-center p-4">
         <div className="card bg-base-100 shadow-2xl border border-base-200 w-full max-w-md">
-          <div className="card-body items-center text-center gap-3 py-12">
+          <div className="card-body items-center text-center gap-3 py-2">
             <div className="text-success text-5xl">✓</div>
             <h2 className="text-2xl font-bold">¡Listo! Tus planos se descargaron</h2>
             <p className="text-base-content/70">

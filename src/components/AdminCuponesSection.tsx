@@ -3,20 +3,28 @@
 import { useCallback, useEffect, useState } from "react";
 import { Loader2, Plus, RefreshCw, Ticket } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
+import { getPlanes, type Plan } from "@/services/planes";
 import {
   createCupon,
   datetimeLocalToIso,
+  formatCuponBeneficio,
   formatCuponDate,
   isCuponActive,
   listCupones,
+  type CreateCuponPayload,
   type Cupon,
 } from "@/services/cupones";
+
+type BeneficioTipo = "porcentaje" | "monto" | "plan";
 
 const EMPTY_FORM = {
   codigo: "",
   descripcion: "",
+  beneficioTipo: "porcentaje" as BeneficioTipo,
   descuento_porcentaje: "20",
-  limite_usos: "",
+  descuento_monto: "1500",
+  plan_id: "",
+  limite_usos: "100",
   limite_usos_por_usuario: "1",
   fecha_inicio: "",
   fecha_expiracion: "",
@@ -26,6 +34,7 @@ const EMPTY_FORM = {
 export default function AdminCuponesSection() {
   const { token } = useAuth();
   const [cupones, setCupones] = useState<Cupon[]>([]);
+  const [planes, setPlanes] = useState<Plan[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -55,6 +64,12 @@ export default function AdminCuponesSection() {
     void loadCupones();
   }, [loadCupones]);
 
+  useEffect(() => {
+    getPlanes()
+      .then(setPlanes)
+      .catch(() => setPlanes([]));
+  }, []);
+
   const visibleCupones = onlyActive ? cupones.filter((c) => isCuponActive(c)) : cupones;
 
   async function handleSubmit(e: React.FormEvent) {
@@ -62,15 +77,83 @@ export default function AdminCuponesSection() {
     if (!token) return;
 
     const codigo = form.codigo.trim();
-    const descuento = Number(form.descuento_porcentaje);
+    const descripcion = form.descripcion.trim();
+    const limiteUsos = Number(form.limite_usos);
 
     if (!codigo) {
       setError("El código es obligatorio");
       return;
     }
-    if (!Number.isFinite(descuento) || descuento <= 0 || descuento > 100) {
-      setError("El descuento debe ser un porcentaje entre 1 y 100");
+    if (!descripcion) {
+      setError("La descripción es obligatoria");
       return;
+    }
+    if (!Number.isFinite(limiteUsos) || limiteUsos < 1) {
+      setError("El límite de usos total debe ser un número mayor o igual a 1");
+      return;
+    }
+
+    const limitePorUsuario = form.limite_usos_por_usuario.trim()
+      ? Number(form.limite_usos_por_usuario)
+      : undefined;
+    if (
+      limitePorUsuario != null &&
+      (!Number.isFinite(limitePorUsuario) || limitePorUsuario < 1)
+    ) {
+      setError("El límite por usuario debe ser un número mayor a 0");
+      return;
+    }
+
+    let payload: CreateCuponPayload;
+
+    if (form.beneficioTipo === "porcentaje") {
+      const descuento = Number(form.descuento_porcentaje);
+      if (!Number.isFinite(descuento) || descuento <= 0 || descuento > 100) {
+        setError("El descuento porcentual debe estar entre 1 y 100");
+        return;
+      }
+      payload = {
+        codigo,
+        descripcion,
+        limite_usos: limiteUsos,
+        limite_usos_por_usuario: limitePorUsuario,
+        descuento_porcentaje: descuento,
+        fecha_inicio: datetimeLocalToIso(form.fecha_inicio),
+        fecha_expiracion: datetimeLocalToIso(form.fecha_expiracion),
+        activo: form.activo,
+      };
+    } else if (form.beneficioTipo === "monto") {
+      const monto = Number(form.descuento_monto);
+      if (!Number.isFinite(monto) || monto <= 0) {
+        setError("El descuento fijo debe ser un monto mayor a 0");
+        return;
+      }
+      payload = {
+        codigo,
+        descripcion,
+        limite_usos: limiteUsos,
+        limite_usos_por_usuario: limitePorUsuario,
+        descuento_monto: monto,
+        fecha_inicio: datetimeLocalToIso(form.fecha_inicio),
+        fecha_expiracion: datetimeLocalToIso(form.fecha_expiracion),
+        activo: form.activo,
+      };
+    } else {
+      const planId = Number(form.plan_id);
+      if (!Number.isFinite(planId) || planId < 1) {
+        setError("Seleccioná un plan para el cupón de acceso");
+        return;
+      }
+      payload = {
+        codigo,
+        descripcion,
+        limite_usos: limiteUsos,
+        limite_usos_por_usuario: limitePorUsuario,
+        plan_id: planId,
+        fecha_inicio: datetimeLocalToIso(form.fecha_inicio),
+        fecha_expiracion: datetimeLocalToIso(form.fecha_expiracion),
+        activo: form.activo,
+      };
     }
 
     setIsSaving(true);
@@ -78,32 +161,7 @@ export default function AdminCuponesSection() {
     setSuccess(null);
 
     try {
-      const limiteUsos = form.limite_usos.trim() ? Number(form.limite_usos) : undefined;
-      const limitePorUsuario = form.limite_usos_por_usuario.trim()
-        ? Number(form.limite_usos_por_usuario)
-        : undefined;
-
-      if (limiteUsos != null && (!Number.isFinite(limiteUsos) || limiteUsos < 1)) {
-        throw new Error("El límite de usos debe ser un número mayor a 0");
-      }
-      if (
-        limitePorUsuario != null &&
-        (!Number.isFinite(limitePorUsuario) || limitePorUsuario < 1)
-      ) {
-        throw new Error("El límite por usuario debe ser un número mayor a 0");
-      }
-
-      const created = await createCupon(token, {
-        codigo,
-        descripcion: form.descripcion.trim() || undefined,
-        descuento_porcentaje: descuento,
-        limite_usos: limiteUsos,
-        limite_usos_por_usuario: limitePorUsuario,
-        fecha_inicio: datetimeLocalToIso(form.fecha_inicio),
-        fecha_expiracion: datetimeLocalToIso(form.fecha_expiracion),
-        activo: form.activo,
-      });
-
+      const created = await createCupon(token, payload);
       setCupones((prev) => [created, ...prev.filter((c) => c.id !== created.id)]);
       setForm(EMPTY_FORM);
       setShowForm(false);
@@ -123,9 +181,9 @@ export default function AdminCuponesSection() {
             <Ticket size={18} />
           </div>
           <div>
-            <h3 className="text-sm font-semibold text-base-content">Cupones de descuento</h3>
+            <h3 className="text-sm font-semibold text-base-content">Cupones</h3>
             <p className="text-xs text-base-content/55 mt-0.5">
-              Crear códigos promocionales y consultar los activos.
+              Descuentos en planes de pago o acceso directo a un plan.
             </p>
           </div>
         </div>
@@ -172,32 +230,90 @@ export default function AdminCuponesSection() {
                 required
               />
             </label>
-            <label className="form-control w-full">
-              <span className="label-text text-xs font-medium mb-1">Descuento (%) *</span>
-              <input
-                type="number"
-                min={1}
-                max={100}
-                className="input input-bordered input-sm w-full"
-                value={form.descuento_porcentaje}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, descuento_porcentaje: e.target.value }))
-                }
-                required
-              />
-            </label>
             <label className="form-control w-full sm:col-span-2">
-              <span className="label-text text-xs font-medium mb-1">Descripción</span>
+              <span className="label-text text-xs font-medium mb-1">Descripción *</span>
               <input
                 type="text"
                 className="input input-bordered input-sm w-full"
-                placeholder="20% off primer mes"
+                placeholder="20% off en plan Pro"
                 value={form.descripcion}
                 onChange={(e) => setForm((f) => ({ ...f, descripcion: e.target.value }))}
+                required
               />
             </label>
+
+            <label className="form-control w-full sm:col-span-2">
+              <span className="label-text text-xs font-medium mb-1">Tipo de beneficio *</span>
+              <select
+                className="select select-bordered select-sm w-full"
+                value={form.beneficioTipo}
+                onChange={(e) =>
+                  setForm((f) => ({
+                    ...f,
+                    beneficioTipo: e.target.value as BeneficioTipo,
+                  }))
+                }
+              >
+                <option value="porcentaje">Descuento porcentual (%)</option>
+                <option value="monto">Descuento fijo (monto)</option>
+                <option value="plan">Acceso a un plan (sin pago)</option>
+              </select>
+            </label>
+
+            {form.beneficioTipo === "porcentaje" && (
+              <label className="form-control w-full">
+                <span className="label-text text-xs font-medium mb-1">Descuento (%) *</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={100}
+                  className="input input-bordered input-sm w-full"
+                  value={form.descuento_porcentaje}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, descuento_porcentaje: e.target.value }))
+                  }
+                  required
+                />
+              </label>
+            )}
+
+            {form.beneficioTipo === "monto" && (
+              <label className="form-control w-full">
+                <span className="label-text text-xs font-medium mb-1">Descuento fijo (ARS) *</span>
+                <input
+                  type="number"
+                  min={1}
+                  className="input input-bordered input-sm w-full"
+                  value={form.descuento_monto}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, descuento_monto: e.target.value }))
+                  }
+                  required
+                />
+              </label>
+            )}
+
+            {form.beneficioTipo === "plan" && (
+              <label className="form-control w-full sm:col-span-2">
+                <span className="label-text text-xs font-medium mb-1">Plan incluido *</span>
+                <select
+                  className="select select-bordered select-sm w-full"
+                  value={form.plan_id}
+                  onChange={(e) => setForm((f) => ({ ...f, plan_id: e.target.value }))}
+                  required
+                >
+                  <option value="">Seleccioná un plan</option>
+                  {planes.map((plan) => (
+                    <option key={plan.id} value={plan.plan_id}>
+                      {plan.nombre}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+
             <label className="form-control w-full">
-              <span className="label-text text-xs font-medium mb-1">Límite de usos total</span>
+              <span className="label-text text-xs font-medium mb-1">Límite de usos total *</span>
               <input
                 type="number"
                 min={1}
@@ -205,6 +321,7 @@ export default function AdminCuponesSection() {
                 placeholder="100"
                 value={form.limite_usos}
                 onChange={(e) => setForm((f) => ({ ...f, limite_usos: e.target.value }))}
+                required
               />
             </label>
             <label className="form-control w-full">
@@ -328,8 +445,12 @@ export default function AdminCuponesSection() {
                       <p className="font-mono font-semibold text-sm tracking-wide">
                         {cupon.codigo}
                       </p>
-                      <span className="badge badge-primary badge-sm">
-                        {cupon.descuento_porcentaje}% off
+                      <span
+                        className={`badge badge-sm ${
+                          cupon.tipo === "plan" ? "badge-secondary" : "badge-primary"
+                        }`}
+                      >
+                        {formatCuponBeneficio(cupon)}
                       </span>
                       {activeNow ? (
                         <span className="badge badge-success badge-outline badge-sm">Activo</span>

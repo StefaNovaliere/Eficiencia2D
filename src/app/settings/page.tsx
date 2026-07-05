@@ -10,10 +10,10 @@ export default function SettingsPage() {
   const { isAuthenticated } = useAuth();
 
   return (
-    <main className="flex flex-col min-h-screen items-center py-6 px-4 md:px-8 relative">
+    <main className="flex flex-col min-h-screen items-center py-2 px-4 md:px-8 relative">
       <BackgroundSymbols />
 
-      <div className="w-full max-w-lg z-10 ">
+      <div className="w-full max-w-3xl z-10 ">
         <Link
           href="/home"
           className="inline-flex items-center gap-1.5 text-sm text-base-content/60 hover:text-base-content mb-6"

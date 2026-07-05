@@ -14,8 +14,10 @@ import { apiFetch } from "@/services/api";
 import { parseApiError } from "@/services/api-errors";
 
 export interface Plan {
-  /** Id estable del plan (string; el backend puede usar uuid o slug). */
+  /** Id estable del plan (string; suele ser el id numérico del backend). */
   id: string;
+  /** Id numérico para cupones y suscripción (`plan_id` en la API). */
+  plan_id: number;
   /** Slug legible (`gratis` | `pro` | `estudio` | …). */
   slug: string;
   nombre: string;
@@ -54,7 +56,8 @@ export type SeleccionPlanResult =
 // ---------------------------------------------------------------------------
 export const MOCK_PLANES: Plan[] = [
   {
-    id: "gratis",
+    id: "1",
+    plan_id: 1,
     slug: "gratis",
     nombre: "Gratis",
     precio_mensual: 0,
@@ -69,7 +72,8 @@ export const MOCK_PLANES: Plan[] = [
     orden: 1,
   },
   {
-    id: "pro",
+    id: "2",
+    plan_id: 2,
     slug: "pro",
     nombre: "Pro",
     precio_mensual: 8000,
@@ -86,7 +90,8 @@ export const MOCK_PLANES: Plan[] = [
     orden: 2,
   },
   {
-    id: "estudio",
+    id: "3",
+    plan_id: 3,
     slug: "estudio",
     nombre: "Estudio",
     precio_mensual: 20000,
@@ -122,9 +127,14 @@ export function normalizePlan(raw: unknown): Plan | null {
 
   const precio = Number(p.precio_mensual ?? p.precio ?? p.price ?? 0);
   const periodoRaw = String(p.periodo ?? p.period ?? "mes");
+  const idStr = String(id);
+  const numericId = Number(p.plan_id ?? idStr);
+  const planId = Number.isFinite(numericId) ? numericId : 0;
+
   return {
-    id: String(id),
-    slug: String(p.slug ?? id),
+    id: idStr,
+    plan_id: planId,
+    slug: String(p.slug ?? idStr),
     nombre: String(nombre),
     precio_mensual: Number.isFinite(precio) ? precio : 0,
     moneda: String(p.moneda ?? p.currency ?? "ARS"),
@@ -151,6 +161,19 @@ export function normalizePlanesList(raw: unknown): Plan[] {
     .filter((x): x is Plan => x != null);
   planes.sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0));
   return planes;
+}
+
+/** Id numérico del plan para cupones y suscripción. */
+export function resolvePlanNumericId(plan: Plan): number {
+  if (Number.isFinite(plan.plan_id) && plan.plan_id > 0) return plan.plan_id;
+  const parsed = Number(plan.id);
+  if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  throw new Error(`No se pudo resolver el id numérico del plan "${plan.nombre}"`);
+}
+
+/** Busca un plan del catálogo por id numérico o slug. */
+export function findPlanByNumericId(planes: Plan[], planId: number): Plan | undefined {
+  return planes.find((p) => p.plan_id === planId || Number(p.id) === planId);
 }
 
 const VALID_ESTADOS: SuscripcionEstado[] = [
@@ -256,13 +279,22 @@ export async function getMiSuscripcion(token: string): Promise<SuscripcionFetch>
 export async function seleccionarPlan(
   token: string,
   plan: Plan,
+  options?: { cuponCodigo?: string },
 ): Promise<SeleccionPlanResult> {
+  const payload: Record<string, string | number> = {
+    plan_id: resolvePlanNumericId(plan),
+  };
+  const cuponCodigo = options?.cuponCodigo?.trim().toUpperCase();
+  if (cuponCodigo) {
+    payload.cupon_codigo = cuponCodigo;
+  }
+
   const res = await apiFetch(
     "/api/users/me/suscripcion",
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ plan_id: plan.id }),
+      body: JSON.stringify(payload),
     },
     { token },
   );

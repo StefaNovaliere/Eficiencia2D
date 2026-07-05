@@ -11,6 +11,7 @@ import React, {
 import { useAuth } from "@/context/AuthContext";
 import {
   cancelarSuscripcion,
+  findPlanByNumericId,
   getMiSuscripcion,
   getPlanes,
   seleccionarPlan,
@@ -29,7 +30,7 @@ interface SubscriptionContextType {
   /** true si el estado se resolvió localmente (backend no disponible). */
   unavailable: boolean;
   /** Selecciona un plan. Si devuelve checkout, redirige a pagar. */
-  selectPlan: (plan: Plan) => Promise<SeleccionPlanResult>;
+  selectPlan: (plan: Plan, options?: { cuponCodigo?: string }) => Promise<SeleccionPlanResult>;
   cancelar: () => Promise<void>;
   refresh: () => Promise<void>;
 }
@@ -124,13 +125,18 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
 
   const currentPlan =
     (suscripcion?.plan_id != null &&
-      planes.find((p) => p.id === suscripcion.plan_id)) ||
+      (findPlanByNumericId(planes, Number(suscripcion.plan_id)) ??
+        planes.find(
+          (p) =>
+            p.id === suscripcion.plan_id ||
+            p.slug === suscripcion.plan_id,
+        ))) ||
     null;
 
   const selectPlan = useCallback(
-    async (plan: Plan): Promise<SeleccionPlanResult> => {
+    async (plan: Plan, options?: { cuponCodigo?: string }): Promise<SeleccionPlanResult> => {
       if (!token) throw new Error("Tenés que iniciar sesión para elegir un plan");
-      const result = await seleccionarPlan(token, plan);
+      const result = await seleccionarPlan(token, plan, options);
       if (result.kind === "checkout") {
         if (typeof window !== "undefined") window.location.href = result.url;
         return result;

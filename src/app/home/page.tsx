@@ -4,7 +4,7 @@ import StepIndicator from "@/components/StepIndicator";
 
 export default function AppHomePage() {
   return (
-    <main className="e2d-app-home flex flex-col min-h-screen items-center py-12 px-4 md:px-8 relative">
+    <main className="e2d-app-home flex flex-col min-h-screen items-center py-2 px-4 md:px-8 relative">
       <BackgroundSymbols />
 
       <div className="text-center mb-8 mt-4 md:mt-8 z-10">

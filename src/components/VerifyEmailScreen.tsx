@@ -41,7 +41,7 @@ export default function VerifyEmailScreen() {
   }, [token, verifyEmail, router]);
 
   return (
-    <main className="flex flex-col min-h-screen items-center justify-center py-12 px-4 relative">
+    <main className="flex flex-col min-h-screen items-center justify-center py-2 px-4 relative">
       <BackgroundSymbols />
 
       <div className="w-full max-w-md z-10">
