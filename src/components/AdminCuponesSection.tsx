@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Loader2, Plus, RefreshCw, Ticket } from "lucide-react";
+import { ChevronDown, ChevronUp, Loader2, Plus, RefreshCw, Ticket } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { getPlanes, type Plan } from "@/services/planes";
 import {
@@ -11,11 +11,25 @@ import {
   formatCuponDate,
   isCuponActive,
   listCupones,
+  updateCupon,
   type CreateCuponPayload,
   type Cupon,
+  type CuponesListFilters,
 } from "@/services/cupones";
 
 type BeneficioTipo = "porcentaje" | "monto" | "plan";
+type TipoFilter = "" | "plan" | "descuento";
+type DescuentoTipoFilter = "" | "porcentaje" | "monto";
+type ActivoFilter = "" | "true" | "false";
+
+const DEFAULT_FILTERS = {
+  tipo: "" as TipoFilter,
+  descuento_tipo: "" as DescuentoTipoFilter,
+  plan_id: "",
+  activo: "" as ActivoFilter,
+  fecha_inicio_desde: "",
+  fecha_inicio_hasta: "",
+};
 
 const EMPTY_FORM = {
   codigo: "",
@@ -40,8 +54,29 @@ export default function AdminCuponesSection() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
-  const [onlyActive, setOnlyActive] = useState(true);
+  const [filters, setFilters] = useState(DEFAULT_FILTERS);
+  const [page, setPage] = useState(1);
+  const [listMeta, setListMeta] = useState({ total: 0, total_pages: 0, page_size: 20 });
   const [form, setForm] = useState(EMPTY_FORM);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [hideFilters, setHideFilters] = useState(true);
+
+  const buildListFilters = useCallback((): CuponesListFilters => {
+    const query: CuponesListFilters = { page, page_size: 20 };
+    if (filters.activo === "true") query.activo = true;
+    if (filters.activo === "false") query.activo = false;
+    if (filters.tipo) query.tipo = filters.tipo;
+    if (filters.descuento_tipo) query.descuento_tipo = filters.descuento_tipo;
+    if (filters.plan_id) {
+      const planId = Number(filters.plan_id);
+      if (Number.isFinite(planId)) query.plan_id = planId;
+    }
+    const desde = datetimeLocalToIso(filters.fecha_inicio_desde);
+    const hasta = datetimeLocalToIso(filters.fecha_inicio_hasta);
+    if (desde) query.fecha_inicio_desde = desde;
+    if (hasta) query.fecha_inicio_hasta = hasta;
+    return query;
+  }, [filters, page]);
 
   const loadCupones = useCallback(async () => {
     if (!token) return;
@@ -50,15 +85,21 @@ export default function AdminCuponesSection() {
     setError(null);
 
     try {
-      const result = await listCupones(token);
+      const result = await listCupones(token, buildListFilters());
       setCupones(result.cupones);
+      setListMeta({
+        total: result.total,
+        total_pages: result.total_pages,
+        page_size: result.page_size,
+      });
     } catch (err) {
       setCupones([]);
+      setListMeta({ total: 0, total_pages: 0, page_size: 20 });
       setError(err instanceof Error ? err.message : "No se pudieron cargar los cupones");
     } finally {
       setIsLoading(false);
     }
-  }, [token]);
+  }, [token, buildListFilters]);
 
   useEffect(() => {
     void loadCupones();
@@ -70,7 +111,17 @@ export default function AdminCuponesSection() {
       .catch(() => setPlanes([]));
   }, []);
 
-  const visibleCupones = onlyActive ? cupones.filter((c) => isCuponActive(c)) : cupones;
+  function applyFilters(next: Partial<typeof DEFAULT_FILTERS>) {
+    setFilters((current) => ({ ...current, ...next }));
+    setPage(1);
+  }
+
+  function resetFilters() {
+    setFilters(DEFAULT_FILTERS);
+    setPage(1);
+  }
+
+  const visibleCupones = cupones;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -170,6 +221,28 @@ export default function AdminCuponesSection() {
       setError(err instanceof Error ? err.message : "No se pudo crear el cupón");
     } finally {
       setIsSaving(false);
+    }
+  }
+
+  async function handleToggleActivo(cupon: Cupon) {
+    if (!token) return;
+
+    setTogglingId(cupon.id);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const updated = await updateCupon(token, cupon.id, { activo: !cupon.activo });
+      setCupones((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+      setSuccess(
+        updated.activo
+          ? `Cupón ${updated.codigo} reactivado.`
+          : `Cupón ${updated.codigo} desactivado.`,
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo actualizar el cupón");
+    } finally {
+      setTogglingId(null);
     }
   }
 
@@ -401,21 +474,115 @@ export default function AdminCuponesSection() {
         </div>
       )}
 
+      <div className="rounded-xl border border-base-300/60 bg-base-100/40 p-3 space-y-3">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-xs font-medium text-base-content/70">Filtros</p>
+          <button
+            type="button"
+            onClick={() => setHideFilters((v) => !v)}
+            className="btn btn-outline btn-sm rounded-xl border-base-300 gap-2"
+            aria-expanded={!hideFilters}
+            aria-label={hideFilters ? "Mostrar filtros" : "Ocultar filtros"}
+          >
+            {hideFilters ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
+          </button>
+        </div>
+        <div className={`space-y-3 ${hideFilters ? "hidden" : ""}`}>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+          <label className="form-control w-full">
+            <span className="label-text text-xs mb-1">Estado en BD</span>
+            <select
+              className="select select-bordered select-sm w-full"
+              value={filters.activo}
+              onChange={(e) => applyFilters({ activo: e.target.value as ActivoFilter })}
+            >
+              <option value="">Todos</option>
+              <option value="true">Activos</option>
+              <option value="false">Desactivados</option>
+            </select>
+          </label>
+          <label className="form-control w-full">
+            <span className="label-text text-xs mb-1">Tipo de cupón</span>
+            <select
+              className="select select-bordered select-sm w-full"
+              value={filters.tipo}
+              onChange={(e) => {
+                const tipo = e.target.value as TipoFilter;
+                applyFilters({
+                  tipo,
+                  descuento_tipo: tipo === "plan" ? "" : filters.descuento_tipo,
+                  plan_id: tipo === "descuento" ? "" : filters.plan_id,
+                });
+              }}
+            >
+              <option value="">Todos</option>
+              <option value="plan">Acceso a plan</option>
+              <option value="descuento">Descuento</option>
+            </select>
+          </label>
+          <label className="form-control w-full">
+            <span className="label-text text-xs mb-1">Tipo de descuento</span>
+            <select
+              className="select select-bordered select-sm w-full"
+              value={filters.descuento_tipo}
+              disabled={filters.tipo === "plan"}
+              onChange={(e) =>
+                applyFilters({ descuento_tipo: e.target.value as DescuentoTipoFilter })
+              }
+            >
+              <option value="">Todos</option>
+              <option value="porcentaje">Porcentaje</option>
+              <option value="monto">Monto fijo</option>
+            </select>
+          </label>
+          <label className="form-control w-full">
+            <span className="label-text text-xs mb-1">Plan específico</span>
+            <select
+              className="select select-bordered select-sm w-full"
+              value={filters.plan_id}
+              disabled={filters.tipo === "descuento"}
+              onChange={(e) => applyFilters({ plan_id: e.target.value })}
+            >
+              <option value="">Todos</option>
+              {planes.map((plan) => (
+                <option key={plan.id} value={String(plan.plan_id)}>
+                  {plan.nombre}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="form-control w-full">
+            <span className="label-text text-xs mb-1">Inicio desde</span>
+            <input
+              type="datetime-local"
+              className="input input-bordered input-sm w-full"
+              value={filters.fecha_inicio_desde}
+              onChange={(e) => applyFilters({ fecha_inicio_desde: e.target.value })}
+            />
+          </label>
+          <label className="form-control w-full">
+            <span className="label-text text-xs mb-1">Inicio hasta</span>
+            <input
+              type="datetime-local"
+              className="input input-bordered input-sm w-full"
+              value={filters.fecha_inicio_hasta}
+              onChange={(e) => applyFilters({ fecha_inicio_hasta: e.target.value })}
+            />
+          </label>
+        </div>
+        <button type="button" className="btn btn-ghost btn-xs" onClick={resetFilters}>
+          Limpiar filtros
+        </button>
+        </div>
+      </div>
+
       <div className="flex items-center justify-between gap-3">
         <p className="text-xs text-base-content/55">
-          {onlyActive
-            ? `${visibleCupones.length} cupón${visibleCupones.length === 1 ? "" : "es"} activo${visibleCupones.length === 1 ? "" : "s"}`
-            : `${cupones.length} cupón${cupones.length === 1 ? "" : "es"} en total`}
+          {listMeta.total} cupón{listMeta.total === 1 ? "" : "es"}
+          {listMeta.total_pages > 1
+            ? ` · página ${page} de ${listMeta.total_pages}`
+            : ""}
         </p>
-        <label className="flex items-center gap-2 cursor-pointer text-xs">
-          <input
-            type="checkbox"
-            className="toggle toggle-sm toggle-primary"
-            checked={onlyActive}
-            onChange={(e) => setOnlyActive(e.target.checked)}
-          />
-          Solo activos
-        </label>
       </div>
 
       {isLoading ? (
@@ -425,14 +592,14 @@ export default function AdminCuponesSection() {
         </div>
       ) : visibleCupones.length === 0 ? (
         <p className="text-sm text-base-content/55 py-2">
-          {onlyActive
-            ? "No hay cupones activos en este momento."
-            : "Todavía no hay cupones creados."}
+          No hay cupones que coincidan con los filtros.
         </p>
       ) : (
+        <>
         <ul className="space-y-2 max-h-80 overflow-y-auto pr-1">
           {visibleCupones.map((cupon) => {
             const activeNow = isCuponActive(cupon);
+            const isToggling = togglingId === cupon.id;
 
             return (
               <li
@@ -440,7 +607,7 @@ export default function AdminCuponesSection() {
                 className="rounded-xl border border-base-300/60 bg-base-100/50 px-3 py-3"
               >
                 <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
                       <p className="font-mono font-semibold text-sm tracking-wide">
                         {cupon.codigo}
@@ -452,7 +619,11 @@ export default function AdminCuponesSection() {
                       >
                         {formatCuponBeneficio(cupon)}
                       </span>
-                      {activeNow ? (
+                      {!cupon.activo ? (
+                        <span className="badge badge-warning badge-outline badge-sm">
+                          Desactivado
+                        </span>
+                      ) : activeNow ? (
                         <span className="badge badge-success badge-outline badge-sm">Activo</span>
                       ) : (
                         <span className="badge badge-ghost badge-sm">Inactivo</span>
@@ -474,11 +645,51 @@ export default function AdminCuponesSection() {
                       {formatCuponDate(cupon.fecha_expiracion)}
                     </p>
                   </div>
+                  <button
+                    type="button"
+                    className={`btn btn-sm rounded-xl shrink-0 ${
+                      cupon.activo ? "btn-outline btn-error" : "btn-outline btn-success"
+                    }`}
+                    disabled={isToggling || isSaving}
+                    onClick={() => void handleToggleActivo(cupon)}
+                  >
+                    {isToggling ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : cupon.activo ? (
+                      "Desactivar"
+                    ) : (
+                      "Reactivar"
+                    )}
+                  </button>
                 </div>
               </li>
             );
           })}
         </ul>
+        {listMeta.total_pages > 1 && (
+          <div className="flex items-center justify-center gap-2 pt-2">
+            <button
+              type="button"
+              className="btn btn-sm btn-outline rounded-xl"
+              disabled={page <= 1 || isLoading}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+            >
+              Anterior
+            </button>
+            <span className="text-xs text-base-content/55">
+              {page} / {listMeta.total_pages}
+            </span>
+            <button
+              type="button"
+              className="btn btn-sm btn-outline rounded-xl"
+              disabled={page >= listMeta.total_pages || isLoading}
+              onClick={() => setPage((p) => p + 1)}
+            >
+              Siguiente
+            </button>
+          </div>
+        )}
+        </>
       )}
     </section>
   );

@@ -13,6 +13,7 @@ import {
   isCuponActive,
   listCupones,
   resolverPrecioFinalDescuento,
+  updateCupon,
   validarCuponPorCodigo,
 } from "@/services/cupones";
 
@@ -51,11 +52,16 @@ describe("listCupones", () => {
           },
         ],
         total: 1,
+        page: 1,
+        page_size: 20,
+        total_pages: 1,
       }),
     );
 
     const result = await listCupones("token");
     expect(result.total).toBe(1);
+    expect(result.page).toBe(1);
+    expect(result.page_size).toBe(20);
     expect(result.cupones[0].codigo).toBe("VERANO2026");
     expect(result.cupones[0].tipo).toBe("descuento");
     expect(result.cupones[0].descuento_porcentaje).toBe(20);
@@ -116,6 +122,32 @@ describe("createCupon", () => {
       expect.objectContaining({
         method: "POST",
         body: expect.stringContaining('"plan_id":2'),
+      }),
+      expect.objectContaining({ token: "token" }),
+    );
+  });
+});
+
+describe("updateCupon", () => {
+  it("envía PATCH con activo false", async () => {
+    vi.mocked(fetchWithApiFallback).mockResolvedValueOnce(
+      jsonResponse({
+        id: "c1",
+        codigo: "VERANO2026",
+        tipo: "descuento",
+        descuento_porcentaje: 20,
+        activo: false,
+      }),
+    );
+
+    const updated = await updateCupon("token", "c1", { activo: false });
+
+    expect(updated.activo).toBe(false);
+    expect(fetchWithApiFallback).toHaveBeenCalledWith(
+      expect.stringContaining("/api/cupones/c1"),
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ activo: false }),
       }),
       expect.objectContaining({ token: "token" }),
     );
