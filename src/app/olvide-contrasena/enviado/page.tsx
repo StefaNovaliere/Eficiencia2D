@@ -4,7 +4,7 @@ import BackgroundSymbols from "@/components/BackgroundSymbols";
 
 export default function OlvideContrasenaEnviadoPage() {
   return (
-    <main className="flex flex-col min-h-screen items-center py-12 px-4 md:px-8 relative">
+    <main className="flex flex-col min-h-screen items-center py-2 px-4 md:px-8 relative">
       <BackgroundSymbols />
 
       <div className="w-full max-w-md z-10 mt-8 md:mt-16">

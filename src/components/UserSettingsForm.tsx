@@ -87,7 +87,7 @@ export default function UserSettingsForm() {
   }
 
 
-  const [hideTheme, setHideTheme] = useState(false);
+  const [hideTheme, setHideTheme] = useState(true);
   function handleHideTheme() {
     setHideTheme(!hideTheme);
   }
@@ -139,8 +139,8 @@ export default function UserSettingsForm() {
               <h2 className="text-sm font-semibold text-base-content">Tema</h2>
               <p className="text-xs text-base-content/55 mt-1">
                 {isAuthenticated
-                  ? "Elegí el estilo visual. Se guarda en tu cuenta."
-                  : "Elegí el estilo visual. Se aplica solo en este dispositivo."}
+                  ? "Elegí el estilo visual."
+                  : "Elegí el estilo visual."}
               </p>
             </div>
           </div>

@@ -166,14 +166,14 @@ export default function PaymentScreen({
         </div>
 
         {stage === "loading" && (
-          <div className="flex flex-col items-center gap-3 py-6 text-base-content/70">
+          <div className="flex flex-col items-center gap-3 py-2 text-base-content/70">
             <span className="loading loading-spinner text-primary" />
             <p>Preparando pago...</p>
           </div>
         )}
 
         {stage === "verifying" && (
-          <div className="flex flex-col items-center gap-3 py-6 text-base-content/70">
+          <div className="flex flex-col items-center gap-3 py-2 text-base-content/70">
             <span className="loading loading-spinner text-primary" />
             <p>Verificando pago...</p>
           </div>

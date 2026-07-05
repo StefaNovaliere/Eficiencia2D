@@ -158,7 +158,7 @@ export default function GroupList({
       {!collapsed && (
       <div className="flex-1 overflow-y-auto p-3 space-y-1.5 custom-scrollbar min-h-0">
         {shownGroups.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-12 text-center px-4">
+          <div className="flex flex-col items-center justify-center py-2 text-center px-4">
             <Layers size={28} className="text-base-content/20 mb-3" />
             <p className="text-sm text-base-content/50">No hay capas visibles</p>
             <p className="text-xs text-base-content/35 mt-1">Activá filtros en la barra superior</p>
