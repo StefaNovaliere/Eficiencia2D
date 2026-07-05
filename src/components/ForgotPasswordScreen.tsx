@@ -79,7 +79,7 @@ export default function ForgotPasswordScreen() {
               <button
                 type="submit"
                 disabled={isLoading}
-                className="btn btn-primary btn-block rounded-xl shadow-lg shadow-primary/20"
+                className="btn btn-primary mt-2 btn-block rounded-xl shadow-lg shadow-primary/20"
               >
                 {isLoading ? (
                   <span className="loading loading-spinner loading-md" />

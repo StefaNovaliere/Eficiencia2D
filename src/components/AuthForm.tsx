@@ -285,7 +285,7 @@ export default function AuthForm({ mode, passwordUpdatedNotice }: AuthFormProps)
 
                   
               {!isRegister && (
-                <div className="text-right -mt-1">
+                <div className="text-right mt-1">
                   <Link
                     href="/olvide-contrasena"
                     className="text-sm text-primary font-medium hover:underline"
