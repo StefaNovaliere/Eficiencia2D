@@ -65,6 +65,21 @@ export type CreateCuponPayload =
 export interface CuponesListResult {
   cupones: Cupon[];
   total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+}
+
+export interface CuponesListFilters {
+  page?: number;
+  page_size?: number;
+  /** Filtra por flag `activo` en BD (no vigencia por fechas/usos). */
+  activo?: boolean;
+  tipo?: CuponTipo;
+  descuento_tipo?: "porcentaje" | "monto";
+  plan_id?: number;
+  fecha_inicio_desde?: string;
+  fecha_inicio_hasta?: string;
 }
 
 export interface ValidarCuponResult {
@@ -149,7 +164,17 @@ function normalizeCuponesListResponse(raw: unknown): CuponesListResult {
       const cupones = o.cupones
         .map(normalizeCupon)
         .filter((item): item is Cupon => item != null);
-      return { cupones, total: Number(o.total ?? cupones.length) };
+      const total = Number(o.total ?? cupones.length);
+      const pageSize = Number(o.page_size ?? (cupones.length || 20));
+      const page = Number(o.page ?? 1);
+      const totalPages = Number(o.total_pages ?? (pageSize > 0 ? Math.ceil(total / pageSize) : 0));
+      return {
+        cupones,
+        total,
+        page,
+        page_size: pageSize,
+        total_pages: totalPages,
+      };
     }
 
     const legacyList = o.items ?? o.data;
@@ -157,16 +182,28 @@ function normalizeCuponesListResponse(raw: unknown): CuponesListResult {
       const cupones = legacyList
         .map(normalizeCupon)
         .filter((item): item is Cupon => item != null);
-      return { cupones, total: cupones.length };
+      return {
+        cupones,
+        total: cupones.length,
+        page: 1,
+        page_size: cupones.length,
+        total_pages: cupones.length ? 1 : 0,
+      };
     }
   }
 
   if (Array.isArray(raw)) {
     const cupones = raw.map(normalizeCupon).filter((item): item is Cupon => item != null);
-    return { cupones, total: cupones.length };
+    return {
+      cupones,
+      total: cupones.length,
+      page: 1,
+      page_size: cupones.length,
+      total_pages: cupones.length ? 1 : 0,
+    };
   }
 
-  return { cupones: [], total: 0 };
+  return { cupones: [], total: 0, page: 1, page_size: 20, total_pages: 0 };
 }
 
 function normalizeValidarCuponResponse(raw: unknown): ValidarCuponResult {
@@ -192,8 +229,25 @@ function normalizeValidarCuponResponse(raw: unknown): ValidarCuponResult {
   };
 }
 
-export async function listCupones(token: string): Promise<CuponesListResult> {
-  const res = await apiFetch("/api/cupones", { method: "GET" }, { token });
+export async function listCupones(
+  token: string,
+  filters: CuponesListFilters = {},
+): Promise<CuponesListResult> {
+  const params = new URLSearchParams();
+
+  if (filters.page != null) params.set("page", String(filters.page));
+  if (filters.page_size != null) params.set("page_size", String(filters.page_size));
+  if (filters.activo != null) params.set("activo", filters.activo ? "true" : "false");
+  if (filters.tipo) params.set("tipo", filters.tipo);
+  if (filters.descuento_tipo) params.set("descuento_tipo", filters.descuento_tipo);
+  if (filters.plan_id != null) params.set("plan_id", String(filters.plan_id));
+  if (filters.fecha_inicio_desde) params.set("fecha_inicio_desde", filters.fecha_inicio_desde);
+  if (filters.fecha_inicio_hasta) params.set("fecha_inicio_hasta", filters.fecha_inicio_hasta);
+
+  const qs = params.toString();
+  const path = qs ? `/api/cupones?${qs}` : "/api/cupones";
+
+  const res = await apiFetch(path, { method: "GET" }, { token });
 
   if (!res.ok) {
     await parseApiError(res, "No se pudieron cargar los cupones");
@@ -251,6 +305,38 @@ export async function createCupon(token: string, payload: CreateCuponPayload): P
 
   if (!res.ok) {
     await parseApiError(res, "No se pudo crear el cupón");
+  }
+
+  const cupon = normalizeCupon(await res.json());
+  if (!cupon) {
+    throw new Error("Respuesta de cupón inválida");
+  }
+
+  return cupon;
+}
+
+export interface UpdateCuponPayload {
+  activo: boolean;
+}
+
+/** Actualiza un cupón existente (admin). */
+export async function updateCupon(
+  token: string,
+  cuponId: string,
+  payload: UpdateCuponPayload,
+): Promise<Cupon> {
+  const res = await apiFetch(
+    `/api/cupones/${cuponId}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ activo: payload.activo }),
+    },
+    { token },
+  );
+
+  if (!res.ok) {
+    await parseApiError(res, "No se pudo actualizar el cupón");
   }
 
   const cupon = normalizeCupon(await res.json());
