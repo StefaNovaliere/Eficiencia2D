@@ -4,7 +4,6 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Settings } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
-import { useSubscription } from "@/context/SubscriptionContext";
 
 // Rutas inmersivas del flujo: son pantallas full-screen (`fixed inset-0`) con su
 // propio chrome (paso, volver, herramientas). Ahí NO mostramos la barra global.
@@ -12,19 +11,6 @@ const FLOW_ROUTES = ["/review", "/nesting", "/payment"];
 
 // Landing de marketing: navegación propia, sin TopBar global.
 const STANDALONE_ROUTES = ["/"];
-
-function PlanChip() {
-  const { currentPlan } = useSubscription();
-  return (
-    <Link
-      href="/planes"
-      className="hidden sm:inline-flex items-center h-7 px-2.5 rounded-full border border-base-300 bg-base-200/50 text-xs font-medium text-base-content/70 hover:bg-base-200 hover:text-base-content transition-colors"
-      title="Ver planes"
-    >
-      Plan {currentPlan?.nombre ?? "Gratis"}
-    </Link>
-  );
-}
 
 function TopBar({ isAuthPage }: { isAuthPage: boolean }) {
   const { user, isLoadingAuth, isAuthenticated, isAdmin } = useAuth();
@@ -56,22 +42,19 @@ function TopBar({ isAuthPage }: { isAuthPage: boolean }) {
           isLoadingAuth ? (
             <span className="loading loading-spinner loading-sm text-primary ml-1" />
           ) : isAuthenticated && user ? (
-            <>
-              <PlanChip />
-              {isAdmin ? (
-                <Link
-                  href="/admin"
-                  className="btn btn-ghost btn-sm ml-1 max-w-[12rem] truncate font-medium text-primary hover:bg-primary/10"
-                  title="Panel de administración"
-                >
-                  {user.nombre || user.email}
-                </Link>
-              ) : (
-                <span className="hidden sm:inline text-sm text-base-content/70 ml-1 truncate max-w-[12rem]">
-                  {user.nombre || user.email}
-                </span>
-              )}
-            </>
+            isAdmin ? (
+              <Link
+                href="/admin"
+                className="btn btn-ghost btn-sm ml-1 max-w-[12rem] truncate font-medium text-primary hover:bg-primary/10"
+                title="Panel de administración"
+              >
+                {user.nombre || user.email}
+              </Link>
+            ) : (
+              <span className="hidden sm:inline text-sm text-base-content/70 ml-1 truncate max-w-[12rem]">
+                {user.nombre || user.email}
+              </span>
+            )
           ) : (
             <>
               <Link href="/login" className="btn btn-primary btn-outline btn-sm">Ingresar</Link>

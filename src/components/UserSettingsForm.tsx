@@ -2,13 +2,15 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { Bell, Check, Keyboard, Loader2, Palette } from "lucide-react";
+import { Bell, Check, ChevronDown, ChevronUp, Eye, EyeOff, Keyboard, Loader2, Palette } from "lucide-react";
 import UserAccountSection from "@/components/UserAccountSection";
 import PlanSummary from "@/components/PlanSummary";
 import { useAuth } from "@/context/AuthContext";
 import { useSettings } from "@/context/SettingsContext";
 import { THEMES, useTheme, type ThemeId } from "@/context/ThemeContext";
 import { parseTemaColorToThemeId, themeIdToTemaColor } from "@/services/settings";
+import { LogOut } from "lucide-react";
+
 
 export default function UserSettingsForm() {
   const { isAuthenticated } = useAuth();
@@ -78,6 +80,18 @@ export default function UserSettingsForm() {
   const showAccountLoading = isAuthenticated && isLoadingSettings;
   const displayError = saveError || (settingsUnavailable ? null : settingsError);
 
+  const { logout } = useAuth();
+
+  function handleLogout() {
+    logout();
+  }
+
+
+  const [hideTheme, setHideTheme] = useState(false);
+  function handleHideTheme() {
+    setHideTheme(!hideTheme);
+  }
+
   return (
     <div className="space-y-6">
       {isAuthenticated && <UserAccountSection />}
@@ -115,21 +129,34 @@ export default function UserSettingsForm() {
       </section>
 
       <section className="space-y-3 pt-2 border-t border-base-300/40">
-        <div className="flex items-start gap-3">
-          <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-primary/10 text-primary shrink-0">
-            <Palette size={18} />
-          </div>
-          <div>
-            <h2 className="text-sm font-semibold text-base-content">Tema</h2>
-            <p className="text-xs text-base-content/55 mt-1">
-              {isAuthenticated
-                ? "Elegí el estilo visual. Se guarda en tu cuenta."
-                : "Elegí el estilo visual. Se aplica solo en este dispositivo."}
-            </p>
-          </div>
-        </div>
+        <div className="flex items-start justify-between">
+          <div className="flex items-start gap-3">
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-primary/10 text-primary shrink-0">
+              <Palette size={18} />
+            </div>
+            <div>
+              <h2 className="text-sm font-semibold text-base-content">Tema</h2>
+              <p className="text-xs text-base-content/55 mt-1">
+                {isAuthenticated
+                  ? "Elegí el estilo visual. Se guarda en tu cuenta."
+                  : "Elegí el estilo visual. Se aplica solo en este dispositivo."}
+              </p>
+            </div>
+          </div>
+        <button
+          type="button"
+          onClick={handleHideTheme}
+          className="btn btn-outline btn-sm rounded-xl border-base-300 gap-2"
+        >
+          {hideTheme ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
+          
+
+        </button>
+        </div>
+       
+
+        <div className={`grid grid-cols-1 sm:grid-cols-2 gap-2 ${hideTheme ? "hidden" : ""}`}>
           {THEMES.map((item) => {
             const active = activeThemeId === item.id;
             return (
@@ -138,7 +165,7 @@ export default function UserSettingsForm() {
                 type="button"
                 disabled={isSaving || showAccountLoading}
                 onClick={() => handleThemeChange(item.id)}
-                className={`flex items-center gap-3 p-3 rounded-xl border text-left transition-colors ${
+                className={`flex btn btn-ghost items-center gap-3 p-3 rounded-xl border text-left transition-colors ${
                   active
                     ? "border-primary/40 bg-primary/5 ring-1 ring-primary/20"
                     : "border-base-300/60 bg-base-100 hover:bg-base-200/40"
@@ -157,6 +184,8 @@ export default function UserSettingsForm() {
             );
           })}
         </div>
+
+
       </section>
 
       {isAuthenticated && (
@@ -193,6 +222,24 @@ export default function UserSettingsForm() {
           ) : null}
         </>
       )}
+
+    {isAuthenticated && (
+      <>
+      <section>
+      <div className=" ">
+
+        <button
+          type="button"
+          onClick={handleLogout}
+          className="btn btn-outline btn-neutral w-full   gap-2"
+        >
+          <LogOut size={16} />
+          Salir de la sesión
+        </button>
+      </div>
+      </section>
+      </>
+    )}
 
       {!isAuthenticated && (
         <section className="pt-2 border-t border-base-300/40">

@@ -1,6 +1,6 @@
 import { apiFetch } from "@/services/api";
 import { parseApiError } from "@/services/api-errors";
-import { isAdminRolId, parseUserRol } from "@/services/rols";
+import { ADMIN_ROL_ID, parseUserRol } from "@/services/rols";
 
 export type UserEstado = "pendiente_verificacion" | "activo" | "inactivo" | (string & {});
 
@@ -44,7 +44,7 @@ export function isActiveUser(user: AuthUser | null | undefined): boolean {
 }
 
 export function isAdminUser(user: AuthUser | null | undefined): boolean {
-  return isAdminRolId(user?.rol_id);
+  return user?.rol_id === ADMIN_ROL_ID;
 }
 
 export function normalizeAuthUser(raw: unknown): AuthUser {

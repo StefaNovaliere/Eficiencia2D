@@ -30,6 +30,33 @@ describe("normalizeAuthUser", () => {
     expect(user.rol).toBe("admin");
   });
 
+  it("parsea rol_id aunque venga como string", () => {
+    const user = normalizeAuthUser({
+      id: "1",
+      email: "admin@test.com",
+      nombre: "Admin",
+      estado: "activo",
+      rol_id: "2",
+      rol: "admin",
+    });
+
+    expect(user.rol_id).toBe(ADMIN_ROL_ID);
+    expect(isAdminUser(user)).toBe(true);
+  });
+
+  it("no infiere admin solo por el nombre del rol", () => {
+    const user = normalizeAuthUser({
+      id: "1",
+      email: "admin@test.com",
+      nombre: "Admin",
+      estado: "activo",
+      rol: "admin",
+    });
+
+    expect(user.rol_id).toBe(1);
+    expect(isAdminUser(user)).toBe(false);
+  });
+
   it("usa estudiante por defecto si rol no viene", () => {
     const user = normalizeAuthUser({
       id: "2",

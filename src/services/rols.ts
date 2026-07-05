@@ -13,32 +13,45 @@ export interface ParsedUserRol {
   rol: string;
 }
 
-/** Extrae rol_id y nombre desde distintos formatos del backend. */
+function parseRolId(raw: unknown): number | null {
+  if (typeof raw === "number" && Number.isFinite(raw)) return raw;
+  if (typeof raw === "string" && raw.trim() !== "") {
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function defaultRolLabel(rolId: number): string {
+  return rolId === ADMIN_ROL_ID ? "admin" : "estudiante";
+}
+
+/** Extrae rol_id y nombre desde la respuesta del backend. Admin = rol_id 2. */
 export function parseUserRol(raw: unknown): ParsedUserRol {
   const u = raw as Record<string, unknown>;
 
-  if (typeof u.rol_id === "number") {
+  const directRolId = parseRolId(u.rol_id);
+  if (directRolId != null) {
     return {
-      rol_id: u.rol_id,
-      rol: extractRolName(u.rol) ?? (u.rol_id === ADMIN_ROL_ID ? "admin" : "estudiante"),
+      rol_id: directRolId,
+      rol: extractRolName(u.rol) ?? defaultRolLabel(directRolId),
     };
   }
 
   if (u.rol != null && typeof u.rol === "object") {
     const nested = u.rol as Record<string, unknown>;
-    const rolId = Number(nested.id);
-    return {
-      rol_id: Number.isFinite(rolId) ? rolId : 1,
-      rol: String(nested.rol ?? "estudiante"),
-    };
+    const nestedRolId = parseRolId(nested.rol_id ?? nested.id);
+    if (nestedRolId != null) {
+      return {
+        rol_id: nestedRolId,
+        rol: String(nested.rol ?? defaultRolLabel(nestedRolId)),
+      };
+    }
   }
 
-  if (typeof u.rol === "string") {
-    const name = u.rol;
-    return {
-      rol_id: name === "admin" ? ADMIN_ROL_ID : 1,
-      rol: name,
-    };
+  if (typeof u.rol === "string" && u.rol !== "") {
+    // Sin rol_id no inferimos permisos desde el nombre del rol.
+    return { rol_id: 1, rol: u.rol };
   }
 
   return { rol_id: 1, rol: "estudiante" };

@@ -10,10 +10,10 @@ export default function SettingsPage() {
   const { isAuthenticated } = useAuth();
 
   return (
-    <main className="flex flex-col min-h-screen items-center py-12 px-4 md:px-8 relative">
+    <main className="flex flex-col min-h-screen items-center py-6 px-4 md:px-8 relative">
       <BackgroundSymbols />
 
-      <div className="w-full max-w-lg z-10 mt-8 md:mt-12">
+      <div className="w-full max-w-lg z-10 ">
         <Link
           href="/home"
           className="inline-flex items-center gap-1.5 text-sm text-base-content/60 hover:text-base-content mb-6"
@@ -33,11 +33,7 @@ export default function SettingsPage() {
                   {isAuthenticated ? "Cuenta" : "Aplicación"}
                 </p>
                 <h1 className="text-2xl font-bold tracking-tight">Configuración</h1>
-                <p className="text-sm text-base-content/55 mt-1">
-                  {isAuthenticated
-                    ? "Preferencias guardadas en tu cuenta."
-                    : "Preferencias de esta sesión en el dispositivo."}
-                </p>
+               
               </div>
             </div>
 
