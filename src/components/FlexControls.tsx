@@ -135,14 +135,16 @@ export default function FlexControls({
             onChange={(e) => setSpacingMm(Number(e.target.value))}
           />
           <span className="text-[10px] text-base-content/40 mt-0.5">
-            mm sobre la plancha (material físico), no del edificio.
+            mm sobre la plancha (material físico). Más distancia ⇒ ranura más ancha
+            (se quita más material).
           </span>
         </label>
       )}
 
       <p className="text-[10px] text-base-content/40 leading-snug">
-        Preview esquemático. El corte real (ranuras/celdas) y el desarrollo de la
-        superficie los genera el servidor al generar los planos.
+        Preview esquemático. El patrón <strong>quita material</strong>: abre ranuras
+        rectangulares (huecos) para que la pieza pueda plegarse. Los huecos reales y el
+        desarrollo de la superficie los genera el servidor al generar los planos.
       </p>
     </div>
   );

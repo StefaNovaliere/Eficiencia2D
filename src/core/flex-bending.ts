@@ -155,39 +155,55 @@ export function parseFlexFromApi(raw: unknown): FlexSpec[] {
 // ---------------------------------------------------------------------------
 export type Segment2D = { u0: number; v0: number; u1: number; v1: number };
 
-// El preview usa un **pitch VISUAL** (nº acotado de líneas/celdas según el tamaño
+// El preview usa un **pitch VISUAL** (nº acotado de columnas/celdas según el tamaño
 // del panel), NO el spacing físico (2–6 mm): a escala de edificio ese spacing daría
-// miles de líneas. Es sólo una guía esquemática; la densidad real la corta el back.
-const VISUAL_KERF_LINES = 14;
+// miles de ranuras. Es sólo una guía esquemática; la geometría real la corta el back.
+const VISUAL_KERF_COLUMNS = 12;
 const VISUAL_AUX_CELLS = 7;
 
-/** Pocas líneas rectas paralelas DISCONTINUAS (dashes), orientadas por `axisDeg`. */
+/**
+ * Peine (comb) de RANURAS RECTANGULARES que se remueven — living hinge tipo
+ * acordeón/lattice. Cada ranura es un contorno cerrado (4 aristas) que se lee como
+ * HUECO (material quitado), no como una línea. Columnas interdigitadas: alternan el
+ * extremo con puente (par arriba / impar abajo). Orientado por `axisDeg`.
+ * NO autoritativo: la geometría real (huecos en plancha/DXF) la genera el backend.
+ */
 function kerfSegments(_spec: FlexSpec, widthM: number, heightM: number, axisDeg = 0): Segment2D[] {
   const angle = (axisDeg * Math.PI) / 180;
-  const dir = { x: Math.cos(angle), y: Math.sin(angle) }; // a lo largo de la ranura
-  const step = { x: -Math.sin(angle), y: Math.cos(angle) }; // avance entre líneas
+  const dir = { x: Math.cos(angle), y: Math.sin(angle) }; // largo de la ranura
+  const step = { x: -Math.sin(angle), y: Math.cos(angle) }; // avance entre columnas (eje de doblez)
   const cx = widthM / 2;
   const cy = heightM / 2;
-  const maxDim = Math.max(widthM, heightM);
-  const pitch = Math.max(maxDim / VISUAL_KERF_LINES, 1e-4);
-  const half = Math.hypot(widthM, heightM) / 2;
-  const dash = pitch * 0.9;
-  const gap = pitch * 0.6;
-  const lines = Math.ceil(half / pitch);
+  // Medio-extensiones del panel (bbox) proyectadas sobre dir/step.
+  const halfAlong = 0.5 * (Math.abs(widthM * dir.x) + Math.abs(heightM * dir.y));
+  const halfAcross = 0.5 * (Math.abs(widthM * step.x) + Math.abs(heightM * step.y));
+  const pitch = Math.max((2 * halfAcross) / VISUAL_KERF_COLUMNS, 1e-4);
+  const slotW = pitch * 0.45; // ancho del hueco (ranura removida)
+  const bridge = 2 * halfAlong * 0.15; // puente sin cortar en un extremo
+  const cols = Math.ceil(halfAcross / pitch);
+
   const segs: Segment2D[] = [];
-  for (let i = -lines; i <= lines; i++) {
-    const off = i * pitch;
-    const bx = cx + step.x * off;
-    const by = cy + step.y * off;
-    for (let t = -half; t < half; t += dash + gap) {
-      const t2 = Math.min(t + dash, half);
-      segs.push({
-        u0: bx + dir.x * t,
-        v0: by + dir.y * t,
-        u1: bx + dir.x * t2,
-        v1: by + dir.y * t2,
-      });
-    }
+  const toUV = (al: number, ac: number) => ({
+    u: cx + al * dir.x + ac * step.x,
+    v: cy + al * dir.y + ac * step.y,
+  });
+  const rect = (aMin: number, aMax: number, acMin: number, acMax: number) => {
+    const c0 = toUV(aMin, acMin);
+    const c1 = toUV(aMax, acMin);
+    const c2 = toUV(aMax, acMax);
+    const c3 = toUV(aMin, acMax);
+    segs.push({ u0: c0.u, v0: c0.v, u1: c1.u, v1: c1.v });
+    segs.push({ u0: c1.u, v0: c1.v, u1: c2.u, v1: c2.v });
+    segs.push({ u0: c2.u, v0: c2.v, u1: c3.u, v1: c3.v });
+    segs.push({ u0: c3.u, v0: c3.v, u1: c0.u, v1: c0.v });
+  };
+
+  for (let i = -cols; i <= cols; i++) {
+    const ac = i * pitch;
+    // Ranura larga a lo largo de `dir`, con puente alternado en un extremo.
+    const aMin = i % 2 === 0 ? -halfAlong : -halfAlong + bridge;
+    const aMax = i % 2 === 0 ? halfAlong - bridge : halfAlong;
+    rect(aMin, aMax, ac - slotW / 2, ac + slotW / 2);
   }
   return segs;
 }
