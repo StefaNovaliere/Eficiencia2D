@@ -1,5 +1,9 @@
 # Contrato backend: superficies curvas — kerf bending + patrones auxéticos
 
+> ⚠️ **KERF actualizado en `CONTRATO_kerf_bending_v2.md`**: el kerf **NO es un vector de corte / score**,
+> sino la **remoción de ranuras rectangulares (huecos)** en peine interdigitado (living hinge). Para la
+> parte kerf, seguir la v2; este documento queda vigente para el flujo general y los auxéticos.
+
 ## Principio
 Para paredes/superficies **curvas** no alcanza con exportar un panel plano: hay que cortar un
 **patrón** en la plancha para que pueda doblarse físicamente.
