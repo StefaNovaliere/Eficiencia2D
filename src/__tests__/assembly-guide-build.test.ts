@@ -174,6 +174,45 @@ describe("buildAssemblyGuideFromTopology", () => {
     ]);
   });
 
+  it("chains walls by contact: an adjacent smaller wall goes before a larger disconnected one", () => {
+    // Nivel 0: piso F + 3 muros A(10) B(8) C(6). Contactos pared-pared: A–C y C–B
+    // (cadena A-C-B); A y B NO se tocan. Por área pura sería A, B, C; encadenado
+    // debe ser A, C, B (C toca A; luego B toca C) → nada "colgado" sólo por el piso.
+    function g(id: number, cat: FaceCategory, area: number): GeometryGroup {
+      return {
+        id,
+        label: "",
+        category: cat,
+        faceIndices: [],
+        totalArea: area,
+        centroid: { x: 0, y: 0, z: 0 },
+        orientation: "",
+        representativeNormal: { x: 1, y: 0, z: 0 },
+        minY: 0,
+        maxY: 1,
+      };
+    }
+    const data = buildAssemblyGuideFromTopology(
+      phase1({
+        groups: [g(1, "floor", 20), g(2, "wall", 10), g(3, "wall", 8), g(4, "wall", 6)],
+        faces: [QUAD],
+        panelIdByGroup: { 1: "F", 2: "A", 3: "B", 4: "C" },
+        // Contactos: A(2)–C(4) y C(4)–B(3). A(2)–B(3) NO adyacentes.
+        wallWallJoints: [
+          { jointIndex: 0, groupA: 2, groupB: 4 },
+          { jointIndex: 1, groupA: 4, groupB: 3 },
+        ],
+        assemblySteps: [
+          { step: 1, groupId: 1, label: "F", level: 0 },
+          { step: 2, groupId: 2, label: "A", level: 0 },
+          { step: 3, groupId: 3, label: "B", level: 0 },
+          { step: 4, groupId: 4, label: "C", level: 0 },
+        ],
+      }),
+    );
+    expect(data.steps?.map((s) => s.panel_ids)).toEqual([["F"], ["A"], ["C"], ["B"]]);
+  });
+
   it("excludes groups whose effective category is discard (override)", () => {
     const overrides = new Map<number, FaceCategory>([[1, "discard"]]);
     const data = buildAssemblyGuideFromTopology(

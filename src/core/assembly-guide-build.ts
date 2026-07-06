@@ -172,12 +172,14 @@ export function stepsFromAssemblySteps(
   // Piezas elegibles en el orden de `assembly_steps` (piso base → paredes →
   // siguiente nivel). Se conserva ese orden como desempate del reordenamiento.
   const placed = new Set<string>();
-  const eligible: {
+  type Eligible = {
+    groupId: number;
     level: number;
     category: FaceCategory;
     label: string;
     area: number;
-  }[] = [];
+  };
+  const eligible: Eligible[] = [];
   for (const e of sorted) {
     const group = groupById.get(e.groupId);
     if (!group) continue;
@@ -186,7 +188,7 @@ export function stepsFromAssemblySteps(
     const label = groupLabel(group, phase1.panelIdByGroup);
     if (!validLabels.has(label) || placed.has(label)) continue;
     placed.add(label);
-    eligible.push({ level: e.level, category, label, area: group.totalArea });
+    eligible.push({ groupId: group.id, level: e.level, category, label, area: group.totalArea });
   }
 
   // Dentro del flujo abajo→arriba (por nivel, pisos primero), armar del
@@ -199,7 +201,13 @@ export function stepsFromAssemblySteps(
       a.level - b.level || catRank(a.category) - catRank(b.category) || b.area - a.area,
   );
 
-  const steps: AssemblySequenceStep[] = eligible.map((p) => ({
+  // Armado ENCADENADO: cada pared debe quedar en contacto con otra pared ya
+  // colocada (no sólo compartir piso). Grafo de adyacencia SÓLO pared-pared, a
+  // partir de los contactos que ya trae el backend (joints / wallWallJoints). Si
+  // no hay datos de contacto, el grafo queda vacío ⇒ orden = area-desc (actual).
+  const ordered = chainWallsByContact(eligible, phase1);
+
+  const steps: AssemblySequenceStep[] = ordered.map((p) => ({
     title: pieceStepTitle(p.category, p.label, multiLevel, p.level),
     description: `Colocá la pieza ${p.label}.`,
     panel_ids: [p.label],
@@ -217,6 +225,80 @@ export function stepsFromAssemblySteps(
   }
 
   return steps.length > 0 ? steps : null;
+}
+
+type ChainItem = {
+  groupId: number;
+  level: number;
+  category: FaceCategory;
+  area: number;
+  label: string;
+};
+
+/**
+ * Reordena las PAREDES para que el armado quede ENCADENADO: cada pared debe
+ * quedar en contacto con otra pared ya colocada (no sólo compartir piso).
+ * Conserva el flujo abajo→arriba (por nivel), los pisos primero, y el área como
+ * prioridad (semilla y desempate). El grafo de adyacencia usa SÓLO contactos
+ * pared-pared (`joints`/`wallWallJoints` del backend, excluyendo pisos). Si no
+ * hay datos de contacto, devuelve `eligible` tal cual (= orden area-desc actual).
+ */
+function chainWallsByContact<T extends ChainItem>(eligible: T[], phase1: Phase1Result): T[] {
+  const wallIds = new Set(
+    eligible.filter((e) => e.category !== "floor").map((e) => e.groupId),
+  );
+  if (wallIds.size === 0) return eligible;
+
+  const adj = new Map<number, Set<number>>();
+  const ensure = (k: number): Set<number> => {
+    let s = adj.get(k);
+    if (!s) {
+      s = new Set();
+      adj.set(k, s);
+    }
+    return s;
+  };
+  const addEdge = (a: number, b: number) => {
+    if (a === b || !wallIds.has(a) || !wallIds.has(b)) return;
+    ensure(a).add(b);
+    ensure(b).add(a);
+  };
+  for (const j of phase1.joints ?? []) addEdge(j.groupA, j.groupB);
+  for (const j of phase1.wallWallJoints ?? []) addEdge(j.groupA, j.groupB);
+  if (adj.size === 0) return eligible; // sin contactos pared-pared → orden actual
+
+  // Niveles en orden ascendente (eligible ya viene ordenado por nivel).
+  const levels: number[] = [];
+  for (const e of eligible) if (!levels.includes(e.level)) levels.push(e.level);
+
+  // `placedGroups` es GLOBAL: una pared de un nivel puede encadenarse con una
+  // pared de un nivel inferior ya colocada.
+  const placedGroups = new Set<number>();
+  const out: T[] = [];
+  for (const lvl of levels) {
+    const inLvl = eligible.filter((e) => e.level === lvl);
+    // Pisos primero (en su orden area-desc), como base del nivel.
+    for (const f of inLvl.filter((e) => e.category === "floor")) {
+      out.push(f);
+      placedGroups.add(f.groupId);
+    }
+    // Paredes: greedy encadenado — la mayor de las que tocan lo ya colocado; si
+    // ninguna toca, se siembra con la mayor restante (`remaining` es area-desc).
+    const remaining = inLvl.filter((e) => e.category !== "floor");
+    while (remaining.length > 0) {
+      let idx = remaining.findIndex((w) => {
+        const nb = adj.get(w.groupId);
+        if (!nb) return false;
+        for (const other of nb) if (placedGroups.has(other)) return true;
+        return false;
+      });
+      if (idx === -1) idx = 0;
+      const [w] = remaining.splice(idx, 1);
+      out.push(w);
+      placedGroups.add(w.groupId);
+    }
+  }
+  return out;
 }
 
 /** Fallback front: pisos primero, luego muros agrupados por orientación. */
