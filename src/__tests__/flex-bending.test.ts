@@ -62,13 +62,13 @@ describe("upsert / remove por grupo", () => {
 });
 
 describe("flexPatternSegments2D (preview esquemático)", () => {
-  it("la densidad del preview NO depende del spacing físico (pitch visual acotado)", () => {
+  it("kerf: ranuras rectangulares (contornos cerrados), densidad acotada e independiente del spacing físico", () => {
     const a = flexPatternSegments2D({ ...KERF, spacingM: 0.002 }, 1, 1);
     const b = flexPatternSegments2D({ ...KERF, spacingM: 0.006 }, 1, 1);
     expect(a.length).toBeGreaterThan(0);
     // Mismo pitch visual ⇒ mismo nº de segmentos, independiente del spacing físico.
     expect(a.length).toBe(b.length);
-    // Acotado (no una malla densa de miles de líneas).
+    // Acotado (no una malla densa de miles de ranuras).
     expect(a.length).toBeLessThan(400);
   });
 
