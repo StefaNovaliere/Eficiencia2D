@@ -155,20 +155,29 @@ export function parseFlexFromApi(raw: unknown): FlexSpec[] {
 // ---------------------------------------------------------------------------
 export type Segment2D = { u0: number; v0: number; u1: number; v1: number };
 
-// El preview usa un **pitch VISUAL** (nº acotado de columnas/celdas según el tamaño
-// del panel), NO el spacing físico (2–6 mm): a escala de edificio ese spacing daría
-// miles de ranuras. Es sólo una guía esquemática; la geometría real la corta el back.
-const VISUAL_KERF_COLUMNS = 12;
+// El preview usa un **pitch VISUAL acotado** (nº de columnas según el tamaño del
+// panel), NO el spacing físico literal (2–6 mm): a escala de edificio ese spacing
+// daría miles de ranuras. Pero SÍ reacciona al spacing dentro de un rango acotado
+// para que mover la barra se vea: más spacing ⇒ menos columnas y ranuras más anchas.
+const VISUAL_KERF_COLUMNS_MIN = 8; // a spacing máximo (6 mm)
+const VISUAL_KERF_COLUMNS_MAX = 16; // a spacing mínimo (2 mm)
+const VISUAL_KERF_SLOTFRAC_MIN = 0.3; // ancho de ranura / pitch, a spacing mínimo
+const VISUAL_KERF_SLOTFRAC_MAX = 0.6; // a spacing máximo
 const VISUAL_AUX_CELLS = 7;
+
+function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * t;
+}
 
 /**
  * Peine (comb) de RANURAS RECTANGULARES que se remueven — living hinge tipo
  * acordeón/lattice. Cada ranura es un contorno cerrado (4 aristas) que se lee como
  * HUECO (material quitado), no como una línea. Columnas interdigitadas: alternan el
  * extremo con puente (par arriba / impar abajo). Orientado por `axisDeg`.
+ * El nº de columnas y el ancho de ranura escalan (acotados) con `spec.spacingM`.
  * NO autoritativo: la geometría real (huecos en plancha/DXF) la genera el backend.
  */
-function kerfSegments(_spec: FlexSpec, widthM: number, heightM: number, axisDeg = 0): Segment2D[] {
+function kerfSegments(spec: FlexSpec, widthM: number, heightM: number, axisDeg = 0): Segment2D[] {
   const angle = (axisDeg * Math.PI) / 180;
   const dir = { x: Math.cos(angle), y: Math.sin(angle) }; // largo de la ranura
   const step = { x: -Math.sin(angle), y: Math.cos(angle) }; // avance entre columnas (eje de doblez)
@@ -177,8 +186,13 @@ function kerfSegments(_spec: FlexSpec, widthM: number, heightM: number, axisDeg 
   // Medio-extensiones del panel (bbox) proyectadas sobre dir/step.
   const halfAlong = 0.5 * (Math.abs(widthM * dir.x) + Math.abs(heightM * dir.y));
   const halfAcross = 0.5 * (Math.abs(widthM * step.x) + Math.abs(heightM * step.y));
-  const pitch = Math.max((2 * halfAcross) / VISUAL_KERF_COLUMNS, 1e-4);
-  const slotW = pitch * 0.45; // ancho del hueco (ranura removida)
+  // t = 0 en spacing mínimo (2 mm), 1 en máximo (6 mm).
+  const span = FLEX_SPACING_MAX_M - FLEX_SPACING_MIN_M;
+  const t = span > 0 ? (clampSpacing(spec.spacingM) - FLEX_SPACING_MIN_M) / span : 0;
+  const columns = Math.round(lerp(VISUAL_KERF_COLUMNS_MAX, VISUAL_KERF_COLUMNS_MIN, t));
+  const slotFrac = lerp(VISUAL_KERF_SLOTFRAC_MIN, VISUAL_KERF_SLOTFRAC_MAX, t);
+  const pitch = Math.max((2 * halfAcross) / columns, 1e-4);
+  const slotW = pitch * slotFrac; // ancho del hueco (ranura removida) — crece con el spacing
   const bridge = 2 * halfAlong * 0.15; // puente sin cortar en un extremo
   const cols = Math.ceil(halfAcross / pitch);
 
