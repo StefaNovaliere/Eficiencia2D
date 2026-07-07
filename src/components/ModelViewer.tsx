@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useThree, useFrame } from "@react-three/fiber";
-import { OrbitControls, GizmoHelper, GizmoViewport, Line, Html } from "@react-three/drei";
+import { OrbitControls, GizmoHelper, GizmoViewcube, Line, Html, PointerLockControls } from "@react-three/drei";
 import type React from "react";
 import * as THREE from "three";
 import type { Face3D, Vec3 } from "@/core/types";
@@ -16,6 +16,9 @@ import {
   type CutPreviewSegment,
 } from "@/core/cut-preview";
 import { computeMeasurePreviewSegments, computeMeasureLabelPlacements } from "@/core/measure-preview";
+import { frameDistance } from "@/core/camera-frame";
+import { advanceCycle, uniqueOrdered, type ClickCycleState } from "@/core/pick-cycle";
+import { sectionPlaneParams, type SectionAxis } from "@/core/section-plane";
 import type { MeasureDragState, UserMeasure, MeasureLabelOptions } from "@/core/measure-tool";
 import { DEFAULT_MEASURE_LABEL_OPTIONS } from "@/core/measure-tool";
 import {
@@ -81,8 +84,12 @@ export interface ViewerMaterials {
   normal: Record<FaceCategory, THREE.MeshStandardMaterial>;
   solid: Record<FaceCategory, THREE.MeshStandardMaterial>;
   dimmed: Record<FaceCategory, THREE.MeshStandardMaterial>;
+  /** Rayos X: translúcido, sin escribir profundidad → se ven las piezas internas. */
+  xray: Record<FaceCategory, THREE.MeshStandardMaterial>;
   highlight: THREE.MeshStandardMaterial;
   highlightWire: THREE.LineBasicMaterial;
+  /** Resaltado al pasar el cursor (hover). */
+  hover: THREE.MeshStandardMaterial;
   edge: THREE.LineBasicMaterial;
 }
 
@@ -97,18 +104,22 @@ function createViewerMaterials(palette: ViewerPalette): ViewerMaterials {
   const normal = {} as Record<FaceCategory, THREE.MeshStandardMaterial>;
   const solid = {} as Record<FaceCategory, THREE.MeshStandardMaterial>;
   const dimmed = {} as Record<FaceCategory, THREE.MeshStandardMaterial>;
+  const xray = {} as Record<FaceCategory, THREE.MeshStandardMaterial>;
 
   for (const cat of cats) {
     const hex = colorByCat[cat];
     normal[cat] = makeMaterial(hex, cat === "discard" ? 0.82 : 1.0);
     solid[cat] = makeMaterial(hex, 1.0);
     dimmed[cat] = makeMaterial(hex, cat === "discard" ? 0.08 : 0.14);
+    // Rayos X: translúcido y sin depthWrite → se ven las piezas de atrás.
+    xray[cat] = makeMaterial(hex, cat === "discard" ? 0.06 : 0.16);
+    xray[cat].depthWrite = false;
   }
 
   // El piso tiene caras coplanares con la base de los muros → z-fighting.
   // polygonOffset positivo empuja el piso levemente "detrás" del muro para
   // que el muro siempre gane cuando compiten en la misma posición.
-  for (const m of [normal.floor, solid.floor, dimmed.floor]) {
+  for (const m of [normal.floor, solid.floor, dimmed.floor, xray.floor]) {
     m.polygonOffset = true;
     m.polygonOffsetFactor = 2;
     m.polygonOffsetUnits = 4;
@@ -118,6 +129,7 @@ function createViewerMaterials(palette: ViewerPalette): ViewerMaterials {
     normal,
     solid,
     dimmed,
+    xray,
     highlight: new THREE.MeshStandardMaterial({
       color: hexToNumber(palette.highlight),
       side: THREE.DoubleSide,
@@ -127,6 +139,16 @@ function createViewerMaterials(palette: ViewerPalette): ViewerMaterials {
       metalness: 0.15,
     }),
     highlightWire: new THREE.LineBasicMaterial({ color: hexToNumber(palette.highlight) }),
+    hover: new THREE.MeshStandardMaterial({
+      color: 0x22d3ee,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.4,
+      depthTest: false,
+      depthWrite: false,
+      roughness: 0.4,
+      metalness: 0.1,
+    }),
     edge: new THREE.LineBasicMaterial({
       color: hexToNumber(palette.edge),
       transparent: true,
@@ -141,8 +163,10 @@ function disposeViewerMaterials(materials: ViewerMaterials) {
     ...Object.values(materials.normal),
     ...Object.values(materials.solid),
     ...Object.values(materials.dimmed),
+    ...Object.values(materials.xray),
     materials.highlight,
     materials.highlightWire,
+    materials.hover,
     materials.edge,
   ];
   for (const m of all) m.dispose();
@@ -588,11 +612,26 @@ interface CategoryMeshProps {
   mesh: MergedMeshData;
   isDimmed: boolean;
   isSolid: boolean;
+  xray?: boolean;
   groupAreaById: Map<number, number>;
   materials: ViewerMaterials;
   onPick: (groupId: number) => void;
   onTogglePick: (groupId: number) => void;
   onContextMenu?: (detail: { clientX: number; clientY: number; groupId: number | null }) => void;
+  onHover?: (groupId: number | null, clientX: number, clientY: number) => void;
+  cycleRef?: React.MutableRefObject<ClickCycleState | null>;
+}
+
+/** Candidatos (groupId) bajo el cursor, ordenados por distancia (frontal→fondo), únicos. */
+function candidateGroupIdsFromIntersections(intersections: THREE.Intersection[]): number[] {
+  const ids: number[] = [];
+  for (const hit of intersections) {
+    const data = hit.object.userData.mergedMeshData as MergedMeshData | undefined;
+    if (!data || hit.faceIndex == null || hit.faceIndex < 0) continue;
+    if (hit.faceIndex >= data.groupIds.length) continue;
+    ids.push(data.groupIds[hit.faceIndex]);
+  }
+  return uniqueOrdered(ids);
 }
 
 const PICK_DEPTH_EPS = 0.02;
@@ -623,8 +662,10 @@ function pickGroupFromIntersections(
   return bestId;
 }
 
-function CategoryMesh({ mesh, isDimmed, isSolid, groupAreaById, materials, onPick, onTogglePick, onContextMenu }: CategoryMeshProps) {
-  const material = isDimmed
+function CategoryMesh({ mesh, isDimmed, isSolid, xray = false, groupAreaById, materials, onPick, onTogglePick, onContextMenu, onHover, cycleRef }: CategoryMeshProps) {
+  const material = xray
+    ? materials.xray[mesh.category]
+    : isDimmed
     ? materials.dimmed[mesh.category]
     : isSolid
     ? materials.solid[mesh.category]
@@ -639,14 +680,37 @@ function CategoryMesh({ mesh, isDimmed, isSolid, groupAreaById, materials, onPic
         onPointerDown={(e) => {
           if (e.nativeEvent.button !== 0) return;
           e.stopPropagation();
-          const groupId = pickGroupFromIntersections(e.intersections, groupAreaById);
-          if (groupId == null) return;
+          const smart = pickGroupFromIntersections(e.intersections, groupAreaById);
+          if (smart == null) return;
           if (e.nativeEvent.ctrlKey || e.nativeEvent.metaKey) {
-            onTogglePick(groupId);
+            if (cycleRef) cycleRef.current = null;
+            onTogglePick(smart);
+            return;
+          }
+          // Click cíclico: repetir click ~en el mismo píxel rota entre las piezas
+          // superpuestas (frontal→fondo). El primer click usa el pick inteligente.
+          if (cycleRef) {
+            const ids = candidateGroupIdsFromIntersections(e.intersections);
+            const defaultIndex = Math.max(0, ids.indexOf(smart));
+            const next = advanceCycle(
+              cycleRef.current,
+              e.nativeEvent.clientX,
+              e.nativeEvent.clientY,
+              ids,
+              defaultIndex,
+            );
+            cycleRef.current = next;
+            onPick(ids[next.index] ?? smart);
           } else {
-            onPick(groupId);
+            onPick(smart);
           }
         }}
+        onPointerMove={(e) => {
+          if (!onHover) return;
+          const groupId = pickGroupFromIntersections(e.intersections, groupAreaById);
+          onHover(groupId, e.nativeEvent.clientX, e.nativeEvent.clientY);
+        }}
+        onPointerOut={() => onHover?.(null, 0, 0)}
         onContextMenu={(e) => {
           e.stopPropagation();
           e.nativeEvent.preventDefault();
@@ -658,7 +722,7 @@ function CategoryMesh({ mesh, isDimmed, isSolid, groupAreaById, materials, onPic
           });
         }}
       />
-      {mesh.edgeGeometry && !isDimmed && (
+      {mesh.edgeGeometry && !isDimmed && !xray && (
         <lineSegments geometry={mesh.edgeGeometry} material={materials.edge} />
       )}
     </>
@@ -669,19 +733,156 @@ function CategoryMesh({ mesh, isDimmed, isSolid, groupAreaById, materials, onPic
 // Camera + controls — constrained orbit
 // ---------------------------------------------------------------------------
 
+export interface CameraCommand {
+  nonce: number;
+  kind: "frameSelection" | "frameAll" | "reset";
+}
+
+export interface SectionState {
+  enabled: boolean;
+  axis: SectionAxis;
+  /** Posición del corte 0..1 dentro del rango del modelo en ese eje. */
+  pos: number;
+}
+
+function allMaterialsList(m: ViewerMaterials): THREE.Material[] {
+  return [
+    ...Object.values(m.normal),
+    ...Object.values(m.solid),
+    ...Object.values(m.dimmed),
+    ...Object.values(m.xray),
+    m.highlight,
+    m.hover,
+    m.edge,
+    m.highlightWire,
+  ];
+}
+
+/**
+ * Plano de sección (corte): asigna un THREE.Plane a los materiales para ver el
+ * interior sin atravesar por zoom. El recorte es sólo visual del visor.
+ */
+function SectionPlane({
+  section,
+  min,
+  max,
+  center,
+  materials,
+}: {
+  section: SectionState;
+  min: Vec3;
+  max: Vec3;
+  center: Vec3;
+  materials: ViewerMaterials;
+}) {
+  const { gl } = useThree();
+  const planeRef = useRef(new THREE.Plane(new THREE.Vector3(-1, 0, 0), 0));
+
+  useEffect(() => {
+    gl.localClippingEnabled = true;
+    return () => {
+      gl.localClippingEnabled = false;
+    };
+  }, [gl]);
+
+  useEffect(() => {
+    const list = allMaterialsList(materials);
+    const planes = section.enabled ? [planeRef.current] : [];
+    for (const mm of list) {
+      (mm as THREE.Material).clippingPlanes = planes;
+      mm.needsUpdate = true;
+    }
+    return () => {
+      for (const mm of list) {
+        (mm as THREE.Material).clippingPlanes = [];
+        mm.needsUpdate = true;
+      }
+    };
+  }, [section.enabled, materials]);
+
+  // Actualizar el plano en cada render (cambia eje/posición).
+  const { normal, constant } = sectionPlaneParams(section.axis, section.pos, min, max, center);
+  planeRef.current.normal.set(normal.x, normal.y, normal.z);
+  planeRef.current.constant = constant;
+
+  return null;
+}
+
 interface CameraControlsProps {
   target: Vec3 | null;
   maxDistance: number;
   minDistance: number;
   enabled?: boolean;
+  /** Esfera envolvente de la selección (coords de escena, ya centradas). */
+  selectionSphere?: { center: Vec3; radius: number } | null;
+  /** Radio del modelo completo (media diagonal). */
+  modelRadius?: number;
+  /** Comando imperativo de encuadre (encuadrar / reset). */
+  command?: CameraCommand | null;
 }
 
-function CameraControls({ target, maxDistance, minDistance, enabled = true }: CameraControlsProps) {
+const RESET_DIR = new THREE.Vector3(0.9, 0.6, 0.9).normalize();
+
+/**
+ * Modo Caminar/Volar (primera persona): PointerLockControls (mouse-look) + WASD/
+ * flechas para avanzar/lados y Espacio/E · Shift/Q para subir/bajar. Se usa en
+ * lugar de OrbitControls mientras está activo. `Esc` libera el puntero (nativo).
+ */
+function WalkControls({ speed }: { speed: number }) {
+  const ref = useRef<any>(null);
+  const keys = useRef<Record<string, boolean>>({});
+  const { camera } = useThree();
+
+  useEffect(() => {
+    const down = (e: KeyboardEvent) => {
+      keys.current[e.code] = true;
+    };
+    const up = (e: KeyboardEvent) => {
+      keys.current[e.code] = false;
+    };
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    return () => {
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+      keys.current = {};
+    };
+  }, []);
+
+  useFrame((_, delta) => {
+    const c = ref.current;
+    if (!c || !c.isLocked) return;
+    const v = speed * Math.min(delta, 0.05);
+    const k = keys.current;
+    if (k["KeyW"] || k["ArrowUp"]) c.moveForward(v);
+    if (k["KeyS"] || k["ArrowDown"]) c.moveForward(-v);
+    if (k["KeyD"] || k["ArrowRight"]) c.moveRight(v);
+    if (k["KeyA"] || k["ArrowLeft"]) c.moveRight(-v);
+    if (k["Space"] || k["KeyE"]) camera.position.y += v;
+    if (k["ShiftLeft"] || k["ShiftRight"] || k["KeyQ"]) camera.position.y -= v;
+  });
+
+  return <PointerLockControls ref={ref} />;
+}
+
+function CameraControls({
+  target,
+  maxDistance,
+  minDistance,
+  enabled = true,
+  selectionSphere = null,
+  modelRadius = 1,
+  command = null,
+}: CameraControlsProps) {
   const controlsRef = useRef<any>(null);
+  const { camera } = useThree();
   // Destination for one-shot focus animation. Set when selection changes;
   // cleared once the lerp finishes so the user can pan freely afterward.
   const destRef = useRef<THREE.Vector3 | null>(null);
+  // Optional camera-position destination (frame/reset commands).
+  const camDestRef = useRef<THREE.Vector3 | null>(null);
   const prevKeyRef = useRef<string>("");
+  const prevNonceRef = useRef<number>(-1);
 
   // Only trigger a focus animation when the target actually changes (selection
   // changed). We do NOT re-trigger when target becomes null (deselect) so the
@@ -692,16 +893,55 @@ function CameraControls({ target, maxDistance, minDistance, enabled = true }: Ca
     destRef.current = new THREE.Vector3(target.x, target.y, target.z);
   }
 
-  useFrame(() => {
-    if (!controlsRef.current || !destRef.current) return;
-    const dist = controlsRef.current.target.distanceTo(destRef.current);
-    if (dist < 0.008) {
-      // Arrived — stop lerping. User can now pan freely without interference.
-      destRef.current = null;
-      return;
+  // Encuadrar / reset: recentra el pivote y ubica la cámara para que la esfera
+  // (selección o modelo completo) entre en el fov, conservando la dirección de
+  // vista (o una isométrica por defecto en reset).
+  if (command && command.nonce !== prevNonceRef.current) {
+    prevNonceRef.current = command.nonce;
+    const ctrls = controlsRef.current;
+    if (ctrls) {
+      const useSel = command.kind === "frameSelection" && selectionSphere;
+      const center = useSel
+        ? new THREE.Vector3(selectionSphere!.center.x, selectionSphere!.center.y, selectionSphere!.center.z)
+        : new THREE.Vector3(0, 0, 0);
+      const radius = useSel ? selectionSphere!.radius : modelRadius;
+      const fov = (camera as THREE.PerspectiveCamera).fov ?? 50;
+      let dist = frameDistance(radius, fov, 1.3);
+      dist = Math.min(maxDistance, Math.max(minDistance, dist));
+      let dir: THREE.Vector3;
+      if (command.kind === "reset") {
+        dir = RESET_DIR.clone();
+      } else {
+        dir = camera.position.clone().sub(ctrls.target);
+        if (dir.lengthSq() < 1e-9) dir = RESET_DIR.clone();
+        dir.normalize();
+      }
+      destRef.current = center.clone();
+      camDestRef.current = center.clone().add(dir.multiplyScalar(dist));
     }
-    controlsRef.current.target.lerp(destRef.current, 0.1);
-    controlsRef.current.update();
+  }
+
+  useFrame(() => {
+    const ctrls = controlsRef.current;
+    if (!ctrls) return;
+    let moving = false;
+    if (camDestRef.current) {
+      if (camera.position.distanceTo(camDestRef.current) < 0.01) {
+        camDestRef.current = null;
+      } else {
+        camera.position.lerp(camDestRef.current, 0.15);
+        moving = true;
+      }
+    }
+    if (destRef.current) {
+      if (ctrls.target.distanceTo(destRef.current) < 0.008) {
+        destRef.current = null;
+      } else {
+        ctrls.target.lerp(destRef.current, camDestRef.current ? 0.15 : 0.1);
+        moving = true;
+      }
+    }
+    if (moving) ctrls.update();
   });
 
   return (
@@ -1135,6 +1375,14 @@ interface SceneProps {
   markGroupIds?: Set<number>;
   /** Specs de flexión (kerf/auxético) por grupo — preview esquemático. */
   flexSpecs?: FlexSpec[];
+  /** Comando imperativo de encuadre de cámara (encuadrar / reset). */
+  cameraCommand?: CameraCommand | null;
+  /** Rayos X: paredes translúcidas para ver piezas internas. */
+  xray?: boolean;
+  /** Plano de sección (corte) para ver el interior. */
+  section?: SectionState | null;
+  /** Modo caminar/volar (primera persona) en lugar de órbita. */
+  walkMode?: boolean;
   userCuts?: UserCut[];
   cutDraft?: CutDragState | null;
   movingCutId?: string | null;
@@ -1185,6 +1433,10 @@ function Scene({
   boxSelectActive = false,
   markGroupIds = EMPTY_MARK_SET,
   flexSpecs = EMPTY_FLEX,
+  cameraCommand = null,
+  xray = false,
+  section = null,
+  walkMode = false,
   userCuts = [],
   cutDraft = null,
   movingCutId = null,
@@ -1223,7 +1475,12 @@ function Scene({
     const diag = Math.sqrt(
       (maxX - minX) ** 2 + (maxY - minY) ** 2 + (maxZ - minZ) ** 2,
     );
-    return { center: { x: cx, y: cy, z: cz }, diag };
+    return {
+      center: { x: cx, y: cy, z: cz },
+      diag,
+      min: { x: minX, y: minY, z: minZ },
+      max: { x: maxX, y: maxY, z: maxZ },
+    };
   }, [faces]);
 
   // Merged geometries — rebuilt when categories or overrides change.
@@ -1381,6 +1638,22 @@ function Scene({
       if (selectedGeometry) selectedGeometry.dispose();
     };
   }, [selectedGeometry]);
+
+  // Esfera envolvente de la selección (coords de escena, centradas) para encuadrar.
+  const selectionSphere = useMemo(() => {
+    if (!selectedGeometry) return null;
+    selectedGeometry.computeBoundingSphere();
+    const bs = selectedGeometry.boundingSphere;
+    if (!bs || !Number.isFinite(bs.radius)) return null;
+    return {
+      center: {
+        x: bs.center.x - bounds.center.x,
+        y: bs.center.y - bounds.center.y,
+        z: bs.center.z - bounds.center.z,
+      },
+      radius: Math.max(bs.radius, 0.05),
+    };
+  }, [selectedGeometry, bounds.center]);
 
   // When reviewing wall-wall encounters, tint the yielding wall (la que se acorta).
   const secondaryEncounterGeometry = useMemo(() => {
@@ -1546,14 +1819,48 @@ function Scene({
     modelCenter: bounds.center,
   };
 
+  // Hover: resaltar y nombrar el componente bajo el cursor (confirmar qué se
+  // va a seleccionar). Click cíclico: rotar entre superpuestos.
+  const [hoveredGroupId, setHoveredGroupId] = useState<number | null>(null);
+  const cycleRef = useRef<ClickCycleState | null>(null);
+  const handleHover = (id: number | null) =>
+    setHoveredGroupId((prev) => (prev === id ? prev : id));
+
+  const hoveredGroup =
+    hoveredGroupId != null && !selectedGroupIds.has(hoveredGroupId)
+      ? groups.find((g) => g.id === hoveredGroupId) ?? null
+      : null;
+  const hoveredGeometry = useMemo(() => {
+    if (!hoveredGroup || !hoveredGroup.faceIndices?.length) return null;
+    return buildSelectedGeometry(faces, hoveredGroup.faceIndices);
+  }, [hoveredGroup, faces]);
+  useEffect(() => () => hoveredGeometry?.dispose(), [hoveredGeometry]);
+
   return (
     <>
-      <CameraControls
-        target={focusTarget}
-        maxDistance={maxDist}
-        minDistance={minDist}
-        enabled={!boxSelectActive}
-      />
+      {walkMode ? (
+        <WalkControls speed={Math.max(bounds.diag * 0.4, 1)} />
+      ) : (
+        <CameraControls
+          target={focusTarget}
+          maxDistance={maxDist}
+          minDistance={minDist}
+          enabled={!boxSelectActive}
+          selectionSphere={selectionSphere}
+          modelRadius={bounds.diag * 0.5}
+          command={cameraCommand}
+        />
+      )}
+
+      {section && (
+        <SectionPlane
+          section={section}
+          min={bounds.min}
+          max={bounds.max}
+          center={bounds.center}
+          materials={materials}
+        />
+      )}
 
       {/* Ejes cartesianos en el centro del modelo */}
       {showCenterAxes && (
@@ -1573,11 +1880,14 @@ function Scene({
               mesh={mm}
               isDimmed={isDimmed}
               isSolid={isSolid}
+              xray={xray}
               groupAreaById={groupAreaById}
               materials={materials}
               onPick={onSelectGroup}
               onTogglePick={onToggleGroup}
               onContextMenu={onContextMenu}
+              onHover={handleHover}
+              cycleRef={cycleRef}
             />
           );
         })}
@@ -1590,6 +1900,22 @@ function Scene({
               <primitive object={materials.highlightWire} attach="material" />
             </lineSegments>
           </>
+        )}
+
+        {hoveredGeometry && (
+          <mesh geometry={hoveredGeometry} material={materials.hover} renderOrder={3} />
+        )}
+        {hoveredGroup && (
+          <Html
+            position={[hoveredGroup.centroid.x, hoveredGroup.centroid.y, hoveredGroup.centroid.z]}
+            center
+            style={{ pointerEvents: "none" }}
+            zIndexRange={[100, 0]}
+          >
+            <div className="px-1.5 py-0.5 rounded-md text-[11px] font-medium bg-base-100/90 border border-base-300/60 text-base-content whitespace-nowrap shadow">
+              {hoveredGroup.label || `Pieza ${hoveredGroup.id}`}
+            </div>
+          </Html>
         )}
 
         {secondaryEncounterGeometry && (
@@ -2297,6 +2623,14 @@ export interface ModelViewerProps {
   markGroupIds?: Set<number>;
   /** Specs de flexión (kerf/auxético) por grupo — preview esquemático. */
   flexSpecs?: FlexSpec[];
+  /** Comando imperativo de encuadre de cámara (encuadrar / reset). */
+  cameraCommand?: CameraCommand | null;
+  /** Rayos X: paredes translúcidas para ver piezas internas. */
+  xray?: boolean;
+  /** Plano de sección (corte) para ver el interior. */
+  section?: SectionState | null;
+  /** Modo caminar/volar (primera persona) en lugar de órbita. */
+  walkMode?: boolean;
   userCuts?: UserCut[];
   cutDraft?: CutDragState | null;
   movingCutId?: string | null;
@@ -2334,6 +2668,10 @@ export default function ModelViewer({
   viewerRef,
   markGroupIds = EMPTY_MARK_SET,
   flexSpecs = EMPTY_FLEX,
+  cameraCommand = null,
+  xray = false,
+  section = null,
+  walkMode = false,
   userCuts = [],
   cutDraft = null,
   movingCutId = null,
@@ -2427,6 +2765,10 @@ export default function ModelViewer({
         boxSelectActive={boxSelectActive}
         markGroupIds={markGroupIds}
         flexSpecs={flexSpecs}
+        cameraCommand={cameraCommand}
+        xray={xray}
+        section={section}
+        walkMode={walkMode}
         userCuts={userCuts}
         cutDraft={cutDraft}
         movingCutId={movingCutId}
@@ -2452,18 +2794,18 @@ export default function ModelViewer({
         />
       )}
 
-      {/* Gizmo en la esquina para referencia de orientación constante */}
+      {/* ViewCube: clic en caras/aristas para orientar la vista al instante.
+          Oculto en modo caminar (los controles de órbita no están montados). */}
+      {!walkMode && (
       <GizmoHelper alignment="bottom-right" margin={[80, 80]}>
-        <GizmoViewport
-          axisColors={
-            appliedAxis === "Z"
-              ? ["#ef4444", "#3b82f6", "#22c55e"]
-              : ["#ef4444", "#22c55e", "#3b82f6"]
-          }
-          labels={appliedAxis === "Z" ? ["X", "Z", "Y"] : ["X", "Y", "Z"]}
-          labelColor={palette.gizmoLabel}
+        <GizmoViewcube
+          color={palette.background}
+          textColor={palette.gizmoLabel}
+          strokeColor={palette.gizmoLabel}
+          hoverColor="#22d3ee"
         />
       </GizmoHelper>
+      )}
     </Canvas>
   );
 }

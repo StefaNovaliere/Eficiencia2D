@@ -39,6 +39,7 @@ import {
   PenLine,
   Lightbulb,
   Scissors,
+  Footprints,
   Circle,
   Minus,
   RectangleHorizontal,
@@ -47,7 +48,7 @@ import {
   BookOpen,
 } from "lucide-react";
 import { useReviewHistory } from "@/hooks/useReviewHistory";
-import type { ModelViewerHandle } from "@/components/ModelViewer";
+import type { ModelViewerHandle, CameraCommand, SectionState } from "@/components/ModelViewer";
 import CutToolOverlay from "@/components/CutToolOverlay";
 import MeasureToolOverlay from "@/components/MeasureToolOverlay";
 import FlexControls from "@/components/FlexControls";
@@ -543,6 +544,29 @@ export default function ReviewScreen({
     () => new Set(),
   );
   const [bulkActionNotice, setBulkActionNotice] = useState<string | null>(null);
+  // Comando de cámara (encuadrar / reset) hacia el visor.
+  const [cameraCommand, setCameraCommand] = useState<CameraCommand | null>(null);
+  const triggerCamera = useCallback((kind: CameraCommand["kind"]) => {
+    setCameraCommand({ nonce: Date.now(), kind });
+  }, []);
+  // Rayos X: paredes translúcidas para ver piezas internas.
+  const [xrayMode, setXrayMode] = useState(false);
+  // Plano de sección (corte) para ver el interior.
+  const [section, setSection] = useState<SectionState>({ enabled: false, axis: "y", pos: 0.5 });
+  // Modo caminar/volar (primera persona).
+  const [walkMode, setWalkMode] = useState(false);
+  const toggleWalk = useCallback(() => {
+    setWalkMode((w) => {
+      if (!w) {
+        setCutToolMode(false);
+        setCutDraft(null);
+        setMeasureToolMode(false);
+        setMeasureDraft(null);
+        setBoxSelectMode(false);
+      }
+      return !w;
+    });
+  }, []);
   // Pestaña activa del panel derecho: lista de capas vs acciones de la selección.
   const [sidebarTab, setSidebarTab] = useState<"capas" | "seleccion">("capas");
 
@@ -1634,6 +1658,16 @@ export default function ReviewScreen({
       )
         return;
 
+      // En modo caminar, WASD/flechas son navegación (los maneja el visor): no
+      // dispares atajos de herramientas. Esc sale del modo.
+      if (walkMode) {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          setWalkMode(false);
+        }
+        return;
+      }
+
       if (e.key === "c" || e.key === "C") {
         e.preventDefault();
         setMeasureToolMode(false);
@@ -1702,6 +1736,14 @@ export default function ReviewScreen({
       if ((e.key === "f" || e.key === "F") && canMergeSelected) {
         e.preventDefault();
         handleMergeSelected();
+        return;
+      }
+
+      if (e.key === "z" || e.key === "Z") {
+        // Encuadrar (sin Ctrl/Cmd, que es deshacer). Selección o todo.
+        if (e.ctrlKey || e.metaKey) return;
+        e.preventDefault();
+        triggerCamera(selectedGroupIds.size > 0 ? "frameSelection" : "frameAll");
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -1715,6 +1757,9 @@ export default function ReviewScreen({
     selectedMeasureId,
     handleRemoveMeasure,
     measures.length,
+    triggerCamera,
+    selectedGroupIds,
+    walkMode,
   ]);
 
   const [showWallWallHelp2, setShowWallWallHelp2] = useState(false);
@@ -1748,6 +1793,10 @@ export default function ReviewScreen({
           viewerRef={viewerRef}
           markGroupIds={markGroupIds}
           flexSpecs={savedFlex}
+          cameraCommand={cameraCommand}
+          xray={xrayMode}
+          section={section}
+          walkMode={walkMode}
           userCuts={userCuts}
           cutDraft={cutDraft}
           movingCutId={movingCutId}
@@ -1918,6 +1967,61 @@ export default function ReviewScreen({
           </div>
         )}
 
+        {/* HUD del modo caminar */}
+        {walkMode && (
+          <div
+            data-viewer-chrome
+            className="absolute bottom-4 left-1/2 -translate-x-1/2 z-40 pointer-events-none flex items-center gap-3 px-3 py-1.5 rounded-full bg-base-100/90 backdrop-blur-xl border border-base-300/40 shadow-lg text-xs text-base-content/75"
+          >
+            <Footprints size={13} className="text-primary" />
+            <span>Click para mirar · <b>WASD</b> moverse · <b>Espacio/Shift</b> subir/bajar · <b>Esc</b> salir</span>
+          </div>
+        )}
+
+        {/* Panel del plano de corte (sección) */}
+        {section.enabled && (
+          <div
+            data-viewer-chrome
+            className="absolute bottom-4 left-4 z-40 pointer-events-auto flex items-center gap-2 p-2 rounded-2xl bg-base-100/90 backdrop-blur-xl border border-base-300/40 shadow-lg"
+          >
+            <Scissors size={14} className="text-primary shrink-0" />
+            <div className="inline-flex items-center gap-0.5 p-0.5 rounded-lg bg-base-200/50">
+              {(["x", "y", "z"] as const).map((ax) => (
+                <button
+                  key={ax}
+                  type="button"
+                  className={`px-2 py-1 rounded-md text-xs font-medium uppercase transition-colors ${
+                    section.axis === ax
+                      ? "bg-primary/15 text-primary"
+                      : "text-base-content/60 hover:bg-base-200"
+                  }`}
+                  onClick={() => setSection((s) => ({ ...s, axis: ax }))}
+                >
+                  {ax}
+                </button>
+              ))}
+            </div>
+            <input
+              type="range"
+              className="range range-primary range-xs w-40"
+              min={0}
+              max={1}
+              step={0.01}
+              value={section.pos}
+              onChange={(e) => setSection((s) => ({ ...s, pos: Number(e.target.value) }))}
+              aria-label="Posición del corte"
+            />
+            <button
+              type="button"
+              className="btn btn-ghost btn-xs btn-circle"
+              onClick={() => setSection((s) => ({ ...s, enabled: false }))}
+              aria-label="Cerrar corte"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        )}
+
         {/* Toolbar — por encima del overlay de cortes/selección (z-20) */}
         <div
           data-viewer-chrome
@@ -1959,6 +2063,66 @@ export default function ReviewScreen({
                   aria-label="Rehacer"
                 >
                   <ArrowRight size={15} />
+                </button>
+              </div>
+            </div>
+
+            <div className="hidden sm:block w-px h-7 bg-base-300/50" />
+
+            <div className="inline-flex items-center gap-0.5 p-0.5 rounded-xl bg-base-200/50">
+              <div
+                className="tooltip tooltip-bottom"
+                data-tip={selectedGroupIds.size > 0 ? "Encuadrar selección (Z)" : "Encuadrar todo (Z)"}
+              >
+                <button
+                  type="button"
+                  className={viewToolBtn}
+                  onClick={() =>
+                    triggerCamera(selectedGroupIds.size > 0 ? "frameSelection" : "frameAll")
+                  }
+                  aria-label="Encuadrar"
+                >
+                  <Crosshair size={15} />
+                </button>
+              </div>
+              <div className="tooltip tooltip-bottom" data-tip="Vista general (reset)">
+                <button
+                  type="button"
+                  className={viewToolBtn}
+                  onClick={() => triggerCamera("reset")}
+                  aria-label="Vista general"
+                >
+                  <Maximize size={15} />
+                </button>
+              </div>
+              <div className="tooltip tooltip-bottom" data-tip="Rayos X (ver interior)">
+                <button
+                  type="button"
+                  className={`${viewToolBtn} ${xrayMode ? "bg-primary/15 text-primary hover:bg-primary/20" : ""}`}
+                  onClick={() => setXrayMode((v) => !v)}
+                  aria-label="Rayos X"
+                >
+                  <ScanSearch size={15} />
+                </button>
+              </div>
+              <div className="tooltip tooltip-bottom" data-tip="Plano de corte (ver interior)">
+                <button
+                  type="button"
+                  className={`${viewToolBtn} ${section.enabled ? "bg-primary/15 text-primary hover:bg-primary/20" : ""}`}
+                  onClick={() => setSection((s) => ({ ...s, enabled: !s.enabled }))}
+                  aria-label="Plano de corte"
+                >
+                  <Scissors size={15} />
+                </button>
+              </div>
+              <div className="tooltip tooltip-bottom" data-tip="Caminar / volar (primera persona)">
+                <button
+                  type="button"
+                  className={`${viewToolBtn} ${walkMode ? "bg-primary/15 text-primary hover:bg-primary/20" : ""}`}
+                  onClick={toggleWalk}
+                  aria-label="Caminar"
+                >
+                  <Footprints size={15} />
                 </button>
               </div>
             </div>
