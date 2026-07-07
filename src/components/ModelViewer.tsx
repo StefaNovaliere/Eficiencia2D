@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useThree, useFrame } from "@react-three/fiber";
-import { OrbitControls, GizmoHelper, GizmoViewport, Line, Html } from "@react-three/drei";
+import { OrbitControls, GizmoHelper, GizmoViewcube, Line, Html } from "@react-three/drei";
 import type React from "react";
 import * as THREE from "three";
 import type { Face3D, Vec3 } from "@/core/types";
@@ -16,6 +16,7 @@ import {
   type CutPreviewSegment,
 } from "@/core/cut-preview";
 import { computeMeasurePreviewSegments, computeMeasureLabelPlacements } from "@/core/measure-preview";
+import { frameDistance } from "@/core/camera-frame";
 import type { MeasureDragState, UserMeasure, MeasureLabelOptions } from "@/core/measure-tool";
 import { DEFAULT_MEASURE_LABEL_OPTIONS } from "@/core/measure-tool";
 import {
@@ -669,19 +670,44 @@ function CategoryMesh({ mesh, isDimmed, isSolid, groupAreaById, materials, onPic
 // Camera + controls — constrained orbit
 // ---------------------------------------------------------------------------
 
+export interface CameraCommand {
+  nonce: number;
+  kind: "frameSelection" | "frameAll" | "reset";
+}
+
 interface CameraControlsProps {
   target: Vec3 | null;
   maxDistance: number;
   minDistance: number;
   enabled?: boolean;
+  /** Esfera envolvente de la selección (coords de escena, ya centradas). */
+  selectionSphere?: { center: Vec3; radius: number } | null;
+  /** Radio del modelo completo (media diagonal). */
+  modelRadius?: number;
+  /** Comando imperativo de encuadre (encuadrar / reset). */
+  command?: CameraCommand | null;
 }
 
-function CameraControls({ target, maxDistance, minDistance, enabled = true }: CameraControlsProps) {
+const RESET_DIR = new THREE.Vector3(0.9, 0.6, 0.9).normalize();
+
+function CameraControls({
+  target,
+  maxDistance,
+  minDistance,
+  enabled = true,
+  selectionSphere = null,
+  modelRadius = 1,
+  command = null,
+}: CameraControlsProps) {
   const controlsRef = useRef<any>(null);
+  const { camera } = useThree();
   // Destination for one-shot focus animation. Set when selection changes;
   // cleared once the lerp finishes so the user can pan freely afterward.
   const destRef = useRef<THREE.Vector3 | null>(null);
+  // Optional camera-position destination (frame/reset commands).
+  const camDestRef = useRef<THREE.Vector3 | null>(null);
   const prevKeyRef = useRef<string>("");
+  const prevNonceRef = useRef<number>(-1);
 
   // Only trigger a focus animation when the target actually changes (selection
   // changed). We do NOT re-trigger when target becomes null (deselect) so the
@@ -692,16 +718,55 @@ function CameraControls({ target, maxDistance, minDistance, enabled = true }: Ca
     destRef.current = new THREE.Vector3(target.x, target.y, target.z);
   }
 
-  useFrame(() => {
-    if (!controlsRef.current || !destRef.current) return;
-    const dist = controlsRef.current.target.distanceTo(destRef.current);
-    if (dist < 0.008) {
-      // Arrived — stop lerping. User can now pan freely without interference.
-      destRef.current = null;
-      return;
+  // Encuadrar / reset: recentra el pivote y ubica la cámara para que la esfera
+  // (selección o modelo completo) entre en el fov, conservando la dirección de
+  // vista (o una isométrica por defecto en reset).
+  if (command && command.nonce !== prevNonceRef.current) {
+    prevNonceRef.current = command.nonce;
+    const ctrls = controlsRef.current;
+    if (ctrls) {
+      const useSel = command.kind === "frameSelection" && selectionSphere;
+      const center = useSel
+        ? new THREE.Vector3(selectionSphere!.center.x, selectionSphere!.center.y, selectionSphere!.center.z)
+        : new THREE.Vector3(0, 0, 0);
+      const radius = useSel ? selectionSphere!.radius : modelRadius;
+      const fov = (camera as THREE.PerspectiveCamera).fov ?? 50;
+      let dist = frameDistance(radius, fov, 1.3);
+      dist = Math.min(maxDistance, Math.max(minDistance, dist));
+      let dir: THREE.Vector3;
+      if (command.kind === "reset") {
+        dir = RESET_DIR.clone();
+      } else {
+        dir = camera.position.clone().sub(ctrls.target);
+        if (dir.lengthSq() < 1e-9) dir = RESET_DIR.clone();
+        dir.normalize();
+      }
+      destRef.current = center.clone();
+      camDestRef.current = center.clone().add(dir.multiplyScalar(dist));
     }
-    controlsRef.current.target.lerp(destRef.current, 0.1);
-    controlsRef.current.update();
+  }
+
+  useFrame(() => {
+    const ctrls = controlsRef.current;
+    if (!ctrls) return;
+    let moving = false;
+    if (camDestRef.current) {
+      if (camera.position.distanceTo(camDestRef.current) < 0.01) {
+        camDestRef.current = null;
+      } else {
+        camera.position.lerp(camDestRef.current, 0.15);
+        moving = true;
+      }
+    }
+    if (destRef.current) {
+      if (ctrls.target.distanceTo(destRef.current) < 0.008) {
+        destRef.current = null;
+      } else {
+        ctrls.target.lerp(destRef.current, camDestRef.current ? 0.15 : 0.1);
+        moving = true;
+      }
+    }
+    if (moving) ctrls.update();
   });
 
   return (
@@ -1135,6 +1200,8 @@ interface SceneProps {
   markGroupIds?: Set<number>;
   /** Specs de flexión (kerf/auxético) por grupo — preview esquemático. */
   flexSpecs?: FlexSpec[];
+  /** Comando imperativo de encuadre de cámara (encuadrar / reset). */
+  cameraCommand?: CameraCommand | null;
   userCuts?: UserCut[];
   cutDraft?: CutDragState | null;
   movingCutId?: string | null;
@@ -1185,6 +1252,7 @@ function Scene({
   boxSelectActive = false,
   markGroupIds = EMPTY_MARK_SET,
   flexSpecs = EMPTY_FLEX,
+  cameraCommand = null,
   userCuts = [],
   cutDraft = null,
   movingCutId = null,
@@ -1382,6 +1450,22 @@ function Scene({
     };
   }, [selectedGeometry]);
 
+  // Esfera envolvente de la selección (coords de escena, centradas) para encuadrar.
+  const selectionSphere = useMemo(() => {
+    if (!selectedGeometry) return null;
+    selectedGeometry.computeBoundingSphere();
+    const bs = selectedGeometry.boundingSphere;
+    if (!bs || !Number.isFinite(bs.radius)) return null;
+    return {
+      center: {
+        x: bs.center.x - bounds.center.x,
+        y: bs.center.y - bounds.center.y,
+        z: bs.center.z - bounds.center.z,
+      },
+      radius: Math.max(bs.radius, 0.05),
+    };
+  }, [selectedGeometry, bounds.center]);
+
   // When reviewing wall-wall encounters, tint the yielding wall (la que se acorta).
   const secondaryEncounterGeometry = useMemo(() => {
     const secondaryIds = leaderMarkers.filter((m) => !m.primary).map((m) => m.groupId);
@@ -1553,6 +1637,9 @@ function Scene({
         maxDistance={maxDist}
         minDistance={minDist}
         enabled={!boxSelectActive}
+        selectionSphere={selectionSphere}
+        modelRadius={bounds.diag * 0.5}
+        command={cameraCommand}
       />
 
       {/* Ejes cartesianos en el centro del modelo */}
@@ -2297,6 +2384,8 @@ export interface ModelViewerProps {
   markGroupIds?: Set<number>;
   /** Specs de flexión (kerf/auxético) por grupo — preview esquemático. */
   flexSpecs?: FlexSpec[];
+  /** Comando imperativo de encuadre de cámara (encuadrar / reset). */
+  cameraCommand?: CameraCommand | null;
   userCuts?: UserCut[];
   cutDraft?: CutDragState | null;
   movingCutId?: string | null;
@@ -2334,6 +2423,7 @@ export default function ModelViewer({
   viewerRef,
   markGroupIds = EMPTY_MARK_SET,
   flexSpecs = EMPTY_FLEX,
+  cameraCommand = null,
   userCuts = [],
   cutDraft = null,
   movingCutId = null,
@@ -2427,6 +2517,7 @@ export default function ModelViewer({
         boxSelectActive={boxSelectActive}
         markGroupIds={markGroupIds}
         flexSpecs={flexSpecs}
+        cameraCommand={cameraCommand}
         userCuts={userCuts}
         cutDraft={cutDraft}
         movingCutId={movingCutId}
@@ -2452,16 +2543,13 @@ export default function ModelViewer({
         />
       )}
 
-      {/* Gizmo en la esquina para referencia de orientación constante */}
+      {/* ViewCube: clic en caras/aristas para orientar la vista al instante. */}
       <GizmoHelper alignment="bottom-right" margin={[80, 80]}>
-        <GizmoViewport
-          axisColors={
-            appliedAxis === "Z"
-              ? ["#ef4444", "#3b82f6", "#22c55e"]
-              : ["#ef4444", "#22c55e", "#3b82f6"]
-          }
-          labels={appliedAxis === "Z" ? ["X", "Z", "Y"] : ["X", "Y", "Z"]}
-          labelColor={palette.gizmoLabel}
+        <GizmoViewcube
+          color={palette.background}
+          textColor={palette.gizmoLabel}
+          strokeColor={palette.gizmoLabel}
+          hoverColor="#22d3ee"
         />
       </GizmoHelper>
     </Canvas>
