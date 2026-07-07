@@ -62,14 +62,15 @@ describe("upsert / remove por grupo", () => {
 });
 
 describe("flexPatternSegments2D (preview esquemático)", () => {
-  it("kerf: ranuras rectangulares (contornos cerrados), densidad acotada e independiente del spacing físico", () => {
-    const a = flexPatternSegments2D({ ...KERF, spacingM: 0.002 }, 1, 1);
-    const b = flexPatternSegments2D({ ...KERF, spacingM: 0.006 }, 1, 1);
-    expect(a.length).toBeGreaterThan(0);
-    // Mismo pitch visual ⇒ mismo nº de segmentos, independiente del spacing físico.
-    expect(a.length).toBe(b.length);
-    // Acotado (no una malla densa de miles de ranuras).
-    expect(a.length).toBeLessThan(400);
+  it("kerf: ranuras rectangulares que reaccionan al spacing (acotado)", () => {
+    const dense = flexPatternSegments2D({ ...KERF, spacingM: 0.002 }, 1, 1); // más columnas
+    const wide = flexPatternSegments2D({ ...KERF, spacingM: 0.006 }, 1, 1); // menos, más anchas
+    expect(dense.length).toBeGreaterThan(0);
+    expect(wide.length).toBeGreaterThan(0);
+    // Más spacing ⇒ menos columnas ⇒ menos segmentos (el preview reacciona a la barra).
+    expect(dense.length).toBeGreaterThan(wide.length);
+    // Acotado en ambos extremos (nunca una malla densa de miles de ranuras).
+    expect(dense.length).toBeLessThan(400);
   });
 
   it("los auxéticos generan celdas (segmentos > 0) y respetan el bbox", () => {
