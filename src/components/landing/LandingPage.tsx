@@ -1,60 +1,70 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useLayoutEffect, useRef } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { ArrowRight } from "lucide-react";
 import NeonThemeSwitch from "@/components/NeonThemeSwitch";
+import {
+  scheduleLandingScrollRefresh,
+  setupLandingTail,
+  whenLandingSectionsReady,
+} from "./landingScroll";
 
 const CasaExplode = dynamic(() => import("./CasaExplode"), { ssr: false });
+const LandingPlans = dynamic(() => import("./LandingPlans"), { ssr: false });
 const LandingCta = dynamic(() => import("./LandingCta"), { ssr: false });
 
 export default function LandingPage() {
   const containerRef = useRef<HTMLDivElement>(null);
-  const progressRef = useRef<HTMLDivElement>(null);
   const navRef = useRef<HTMLElement>(null);
+  const footerRef = useRef<HTMLElement>(null);
+  const footerInnerRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     gsap.registerPlugin(ScrollTrigger);
     const ctx = gsap.context(() => {
-      gsap.fromTo(
-        progressRef.current,
-        { scaleX: 0 },
-        {
-          scaleX: 1,
-          ease: "none",
-          scrollTrigger: {
-            trigger: containerRef.current,
-            start: "top top",
-            end: "bottom bottom",
-            scrub: 0.3,
-          },
-        },
-      );
-
       gsap.fromTo(
         navRef.current,
         { y: -60, opacity: 0 },
         { y: 0, opacity: 1, duration: 0.8, ease: "power3.out", delay: 0.15 },
       );
+
     }, containerRef);
 
-    return () => ctx.revert();
+    let tailCleanup = () => {};
+    const cancelWait = whenLandingSectionsReady(["planes", "probar"], () => {
+      requestAnimationFrame(() => {
+        const plans = document.getElementById("planes");
+        const cta = document.getElementById("probar");
+        if (!plans || !cta) return;
+
+        tailCleanup = setupLandingTail({
+          snapSections: [plans, cta],
+          footer: footerRef.current,
+          footerInner: footerInnerRef.current,
+        });
+        scheduleLandingScrollRefresh();
+      });
+    });
+
+    const cancelRefresh = scheduleLandingScrollRefresh();
+
+    return () => {
+      cancelWait();
+      tailCleanup();
+      cancelRefresh();
+      ctx.revert();
+    };
   }, []);
 
   return (
-    <div ref={containerRef} className="landing-root relative overflow-x-hidden bg-base-200 text-base-content">
-      <div
-        ref={progressRef}
-        className="landing-scroll-progress fixed top-0 left-0 right-0 h-[3px] z-[60] origin-left scale-x-0 bg-gradient-to-r from-primary via-secondary to-primary"
-        aria-hidden
-      />
-
+    <div ref={containerRef} className="landing-root relative overflow-x-clip bg-base-200 text-base-content">
       <nav
         ref={navRef}
-        className="landing-nav fixed top-0 inset-x-0 z-50 flex items-center justify-between gap-4 px-4 md:px-8 py-4 border-b border-base-300/30 bg-base-100/70 backdrop-blur-xl"
+        className="landing-nav absolute top-0 inset-x-0 z-50 flex items-center justify-between gap-4 px-4 md:px-8 py-4 border-b border-base-300/30 bg-base-100/70 backdrop-blur-xl"
       >
         <Link href="/" className="flex items-center gap-2.5 font-bold tracking-tight shrink-0">
           <img src="/images/logoFaviconE2d.svg" alt="" width={28} height={28} className="w-7 h-7 e2d-logo-glow" />
@@ -63,6 +73,9 @@ export default function LandingPage() {
         <div className="hidden md:flex items-center gap-8 text-sm text-base-content/60">
           <a href="#recorrido" className="hover:text-primary transition-colors">
             Recorrido
+          </a>
+          <a href="#planes" className="hover:text-primary transition-colors">
+            Planes
           </a>
           <a href="#probar" className="hover:text-primary transition-colors">
             Probar
@@ -82,10 +95,18 @@ export default function LandingPage() {
 
       <CasaExplode />
 
+      <LandingPlans />
+
       <LandingCta />
 
-      <footer className="landing-footer border-t border-base-300/40 py-10 px-4 md:px-8">
-        <div className="max-w-5xl mx-auto flex flex-col md:flex-row items-center justify-between gap-8">
+      <footer
+        ref={footerRef}
+        className="landing-footer border-t border-base-300/40 py-10 px-4 md:px-8"
+      >
+        <div
+          ref={footerInnerRef}
+          className="max-w-5xl mx-auto flex flex-col md:flex-row items-center justify-between gap-8"
+        >
           <div className="flex items-center gap-3">
             <img
               src="/images/logoFaviconE2d.svg"
