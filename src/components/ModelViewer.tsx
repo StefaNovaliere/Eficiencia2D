@@ -17,6 +17,7 @@ import {
 } from "@/core/cut-preview";
 import { computeMeasurePreviewSegments, computeMeasureLabelPlacements } from "@/core/measure-preview";
 import { frameDistance } from "@/core/camera-frame";
+import { advanceCycle, uniqueOrdered, type ClickCycleState } from "@/core/pick-cycle";
 import type { MeasureDragState, UserMeasure, MeasureLabelOptions } from "@/core/measure-tool";
 import { DEFAULT_MEASURE_LABEL_OPTIONS } from "@/core/measure-tool";
 import {
@@ -82,8 +83,12 @@ export interface ViewerMaterials {
   normal: Record<FaceCategory, THREE.MeshStandardMaterial>;
   solid: Record<FaceCategory, THREE.MeshStandardMaterial>;
   dimmed: Record<FaceCategory, THREE.MeshStandardMaterial>;
+  /** Rayos X: translúcido, sin escribir profundidad → se ven las piezas internas. */
+  xray: Record<FaceCategory, THREE.MeshStandardMaterial>;
   highlight: THREE.MeshStandardMaterial;
   highlightWire: THREE.LineBasicMaterial;
+  /** Resaltado al pasar el cursor (hover). */
+  hover: THREE.MeshStandardMaterial;
   edge: THREE.LineBasicMaterial;
 }
 
@@ -98,18 +103,22 @@ function createViewerMaterials(palette: ViewerPalette): ViewerMaterials {
   const normal = {} as Record<FaceCategory, THREE.MeshStandardMaterial>;
   const solid = {} as Record<FaceCategory, THREE.MeshStandardMaterial>;
   const dimmed = {} as Record<FaceCategory, THREE.MeshStandardMaterial>;
+  const xray = {} as Record<FaceCategory, THREE.MeshStandardMaterial>;
 
   for (const cat of cats) {
     const hex = colorByCat[cat];
     normal[cat] = makeMaterial(hex, cat === "discard" ? 0.82 : 1.0);
     solid[cat] = makeMaterial(hex, 1.0);
     dimmed[cat] = makeMaterial(hex, cat === "discard" ? 0.08 : 0.14);
+    // Rayos X: translúcido y sin depthWrite → se ven las piezas de atrás.
+    xray[cat] = makeMaterial(hex, cat === "discard" ? 0.06 : 0.16);
+    xray[cat].depthWrite = false;
   }
 
   // El piso tiene caras coplanares con la base de los muros → z-fighting.
   // polygonOffset positivo empuja el piso levemente "detrás" del muro para
   // que el muro siempre gane cuando compiten en la misma posición.
-  for (const m of [normal.floor, solid.floor, dimmed.floor]) {
+  for (const m of [normal.floor, solid.floor, dimmed.floor, xray.floor]) {
     m.polygonOffset = true;
     m.polygonOffsetFactor = 2;
     m.polygonOffsetUnits = 4;
@@ -119,6 +128,7 @@ function createViewerMaterials(palette: ViewerPalette): ViewerMaterials {
     normal,
     solid,
     dimmed,
+    xray,
     highlight: new THREE.MeshStandardMaterial({
       color: hexToNumber(palette.highlight),
       side: THREE.DoubleSide,
@@ -128,6 +138,16 @@ function createViewerMaterials(palette: ViewerPalette): ViewerMaterials {
       metalness: 0.15,
     }),
     highlightWire: new THREE.LineBasicMaterial({ color: hexToNumber(palette.highlight) }),
+    hover: new THREE.MeshStandardMaterial({
+      color: 0x22d3ee,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.4,
+      depthTest: false,
+      depthWrite: false,
+      roughness: 0.4,
+      metalness: 0.1,
+    }),
     edge: new THREE.LineBasicMaterial({
       color: hexToNumber(palette.edge),
       transparent: true,
@@ -142,8 +162,10 @@ function disposeViewerMaterials(materials: ViewerMaterials) {
     ...Object.values(materials.normal),
     ...Object.values(materials.solid),
     ...Object.values(materials.dimmed),
+    ...Object.values(materials.xray),
     materials.highlight,
     materials.highlightWire,
+    materials.hover,
     materials.edge,
   ];
   for (const m of all) m.dispose();
@@ -589,11 +611,26 @@ interface CategoryMeshProps {
   mesh: MergedMeshData;
   isDimmed: boolean;
   isSolid: boolean;
+  xray?: boolean;
   groupAreaById: Map<number, number>;
   materials: ViewerMaterials;
   onPick: (groupId: number) => void;
   onTogglePick: (groupId: number) => void;
   onContextMenu?: (detail: { clientX: number; clientY: number; groupId: number | null }) => void;
+  onHover?: (groupId: number | null, clientX: number, clientY: number) => void;
+  cycleRef?: React.MutableRefObject<ClickCycleState | null>;
+}
+
+/** Candidatos (groupId) bajo el cursor, ordenados por distancia (frontal→fondo), únicos. */
+function candidateGroupIdsFromIntersections(intersections: THREE.Intersection[]): number[] {
+  const ids: number[] = [];
+  for (const hit of intersections) {
+    const data = hit.object.userData.mergedMeshData as MergedMeshData | undefined;
+    if (!data || hit.faceIndex == null || hit.faceIndex < 0) continue;
+    if (hit.faceIndex >= data.groupIds.length) continue;
+    ids.push(data.groupIds[hit.faceIndex]);
+  }
+  return uniqueOrdered(ids);
 }
 
 const PICK_DEPTH_EPS = 0.02;
@@ -624,8 +661,10 @@ function pickGroupFromIntersections(
   return bestId;
 }
 
-function CategoryMesh({ mesh, isDimmed, isSolid, groupAreaById, materials, onPick, onTogglePick, onContextMenu }: CategoryMeshProps) {
-  const material = isDimmed
+function CategoryMesh({ mesh, isDimmed, isSolid, xray = false, groupAreaById, materials, onPick, onTogglePick, onContextMenu, onHover, cycleRef }: CategoryMeshProps) {
+  const material = xray
+    ? materials.xray[mesh.category]
+    : isDimmed
     ? materials.dimmed[mesh.category]
     : isSolid
     ? materials.solid[mesh.category]
@@ -640,14 +679,37 @@ function CategoryMesh({ mesh, isDimmed, isSolid, groupAreaById, materials, onPic
         onPointerDown={(e) => {
           if (e.nativeEvent.button !== 0) return;
           e.stopPropagation();
-          const groupId = pickGroupFromIntersections(e.intersections, groupAreaById);
-          if (groupId == null) return;
+          const smart = pickGroupFromIntersections(e.intersections, groupAreaById);
+          if (smart == null) return;
           if (e.nativeEvent.ctrlKey || e.nativeEvent.metaKey) {
-            onTogglePick(groupId);
+            if (cycleRef) cycleRef.current = null;
+            onTogglePick(smart);
+            return;
+          }
+          // Click cíclico: repetir click ~en el mismo píxel rota entre las piezas
+          // superpuestas (frontal→fondo). El primer click usa el pick inteligente.
+          if (cycleRef) {
+            const ids = candidateGroupIdsFromIntersections(e.intersections);
+            const defaultIndex = Math.max(0, ids.indexOf(smart));
+            const next = advanceCycle(
+              cycleRef.current,
+              e.nativeEvent.clientX,
+              e.nativeEvent.clientY,
+              ids,
+              defaultIndex,
+            );
+            cycleRef.current = next;
+            onPick(ids[next.index] ?? smart);
           } else {
-            onPick(groupId);
+            onPick(smart);
           }
         }}
+        onPointerMove={(e) => {
+          if (!onHover) return;
+          const groupId = pickGroupFromIntersections(e.intersections, groupAreaById);
+          onHover(groupId, e.nativeEvent.clientX, e.nativeEvent.clientY);
+        }}
+        onPointerOut={() => onHover?.(null, 0, 0)}
         onContextMenu={(e) => {
           e.stopPropagation();
           e.nativeEvent.preventDefault();
@@ -659,7 +721,7 @@ function CategoryMesh({ mesh, isDimmed, isSolid, groupAreaById, materials, onPic
           });
         }}
       />
-      {mesh.edgeGeometry && !isDimmed && (
+      {mesh.edgeGeometry && !isDimmed && !xray && (
         <lineSegments geometry={mesh.edgeGeometry} material={materials.edge} />
       )}
     </>
@@ -1202,6 +1264,8 @@ interface SceneProps {
   flexSpecs?: FlexSpec[];
   /** Comando imperativo de encuadre de cámara (encuadrar / reset). */
   cameraCommand?: CameraCommand | null;
+  /** Rayos X: paredes translúcidas para ver piezas internas. */
+  xray?: boolean;
   userCuts?: UserCut[];
   cutDraft?: CutDragState | null;
   movingCutId?: string | null;
@@ -1253,6 +1317,7 @@ function Scene({
   markGroupIds = EMPTY_MARK_SET,
   flexSpecs = EMPTY_FLEX,
   cameraCommand = null,
+  xray = false,
   userCuts = [],
   cutDraft = null,
   movingCutId = null,
@@ -1630,6 +1695,23 @@ function Scene({
     modelCenter: bounds.center,
   };
 
+  // Hover: resaltar y nombrar el componente bajo el cursor (confirmar qué se
+  // va a seleccionar). Click cíclico: rotar entre superpuestos.
+  const [hoveredGroupId, setHoveredGroupId] = useState<number | null>(null);
+  const cycleRef = useRef<ClickCycleState | null>(null);
+  const handleHover = (id: number | null) =>
+    setHoveredGroupId((prev) => (prev === id ? prev : id));
+
+  const hoveredGroup =
+    hoveredGroupId != null && !selectedGroupIds.has(hoveredGroupId)
+      ? groups.find((g) => g.id === hoveredGroupId) ?? null
+      : null;
+  const hoveredGeometry = useMemo(() => {
+    if (!hoveredGroup || !hoveredGroup.faceIndices?.length) return null;
+    return buildSelectedGeometry(faces, hoveredGroup.faceIndices);
+  }, [hoveredGroup, faces]);
+  useEffect(() => () => hoveredGeometry?.dispose(), [hoveredGeometry]);
+
   return (
     <>
       <CameraControls
@@ -1660,11 +1742,14 @@ function Scene({
               mesh={mm}
               isDimmed={isDimmed}
               isSolid={isSolid}
+              xray={xray}
               groupAreaById={groupAreaById}
               materials={materials}
               onPick={onSelectGroup}
               onTogglePick={onToggleGroup}
               onContextMenu={onContextMenu}
+              onHover={handleHover}
+              cycleRef={cycleRef}
             />
           );
         })}
@@ -1677,6 +1762,22 @@ function Scene({
               <primitive object={materials.highlightWire} attach="material" />
             </lineSegments>
           </>
+        )}
+
+        {hoveredGeometry && (
+          <mesh geometry={hoveredGeometry} material={materials.hover} renderOrder={3} />
+        )}
+        {hoveredGroup && (
+          <Html
+            position={[hoveredGroup.centroid.x, hoveredGroup.centroid.y, hoveredGroup.centroid.z]}
+            center
+            style={{ pointerEvents: "none" }}
+            zIndexRange={[100, 0]}
+          >
+            <div className="px-1.5 py-0.5 rounded-md text-[11px] font-medium bg-base-100/90 border border-base-300/60 text-base-content whitespace-nowrap shadow">
+              {hoveredGroup.label || `Pieza ${hoveredGroup.id}`}
+            </div>
+          </Html>
         )}
 
         {secondaryEncounterGeometry && (
@@ -2386,6 +2487,8 @@ export interface ModelViewerProps {
   flexSpecs?: FlexSpec[];
   /** Comando imperativo de encuadre de cámara (encuadrar / reset). */
   cameraCommand?: CameraCommand | null;
+  /** Rayos X: paredes translúcidas para ver piezas internas. */
+  xray?: boolean;
   userCuts?: UserCut[];
   cutDraft?: CutDragState | null;
   movingCutId?: string | null;
@@ -2424,6 +2527,7 @@ export default function ModelViewer({
   markGroupIds = EMPTY_MARK_SET,
   flexSpecs = EMPTY_FLEX,
   cameraCommand = null,
+  xray = false,
   userCuts = [],
   cutDraft = null,
   movingCutId = null,
@@ -2518,6 +2622,7 @@ export default function ModelViewer({
         markGroupIds={markGroupIds}
         flexSpecs={flexSpecs}
         cameraCommand={cameraCommand}
+        xray={xray}
         userCuts={userCuts}
         cutDraft={cutDraft}
         movingCutId={movingCutId}
