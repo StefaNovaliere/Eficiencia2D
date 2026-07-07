@@ -205,10 +205,6 @@
   opacity: 1 !important;
 }
 
-.landing-scroll-progress {
-  box-shadow: 0 0 14px color-mix(in oklch, var(--color-primary) 45%, transparent);
-}
-
 /* —— Explode SVG de la casa (sección sticky propia) —— */
 .casa-explode-section {
   position: relative;
@@ -952,24 +948,156 @@
   }
 }
 
-/* —— CTA final (scroll normal, sin pin) —— */
-.landing-cta-section {
+/* —— Planes (preview en landing) —— */
+.landing-plans-section {
   position: relative;
   z-index: 3;
   overflow: hidden;
-  background: var(--color-base-100);
-  padding: 5rem 1.5rem 4rem;
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  background: var(--color-base-200);
+  padding: clamp(4rem, 10vh, 6rem) 1.5rem;
+  scroll-margin-top: 0;
+}
+
+.landing-plans-bg {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 60% 50% at 15% 30%, color-mix(in oklch, var(--color-primary) 10%, transparent), transparent 55%),
+    radial-gradient(ellipse 55% 45% at 85% 70%, color-mix(in oklch, var(--color-secondary) 8%, transparent), transparent 50%);
+  pointer-events: none;
+}
+
+.landing-plans-inner {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 960px;
+  margin: 0 auto;
+}
+
+.landing-plans-header {
+  text-align: center;
+  max-width: 36rem;
+  margin: 0 auto 2.5rem;
+  will-change: transform, opacity;
+}
+
+.landing-plans-kicker {
+  font-family: ui-monospace, "JetBrains Mono", Menlo, monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--color-primary);
+  margin: 0 0 0.85rem;
+}
+
+.landing-plans-lead {
+  font-size: 0.95rem;
+  line-height: 1.55;
+  color: color-mix(in oklch, var(--color-base-content) 65%, transparent);
+  margin: 0.75rem 0 0;
+}
+
+.landing-plans-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
 }
 
 @media (min-width: 768px) {
-  .landing-cta-section {
-    padding: 6rem 2rem 5rem;
+  .landing-plans-grid {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1.25rem;
   }
+}
+
+.landing-plans-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 1.35rem 1.25rem 1.5rem;
+  border-radius: 1.25rem;
+  border: 1px solid color-mix(in oklch, var(--color-base-300) 60%, transparent);
+  background: color-mix(in oklch, var(--color-base-100) 88%, transparent);
+  backdrop-filter: blur(8px);
+  will-change: transform, opacity;
+}
+
+.landing-plans-card--featured {
+  border-color: color-mix(in oklch, var(--color-primary) 35%, transparent);
+  background: linear-gradient(
+    145deg,
+    color-mix(in oklch, var(--color-primary) 10%, var(--color-base-100)),
+    color-mix(in oklch, var(--color-base-100) 92%, transparent)
+  );
+  box-shadow: 0 0 40px color-mix(in oklch, var(--color-primary) 12%, transparent);
+}
+
+.landing-plans-badge {
+  position: absolute;
+  top: -0.65rem;
+  right: 0.85rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--color-primary-content);
+  background: var(--color-primary);
+}
+
+.landing-plans-price {
+  margin-top: 0.35rem;
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: var(--color-primary);
+}
+
+.landing-plans-features {
+  list-style: none;
+  margin: 1rem 0 0;
+  padding: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.landing-plans-features li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: color-mix(in oklch, var(--color-base-content) 72%, transparent);
+}
+
+.landing-plans-cta {
+  margin-top: 2.5rem;
+  text-align: center;
+  will-change: transform, opacity;
+}
+
+/* —— CTA final (100vh, card entra desde la derecha al scrollear) —— */
+.landing-cta-section {
+  position: relative;
+  z-index: 3;
+  min-height: 100svh;
+  overflow: hidden;
+  background: var(--color-base-100);
+  scroll-margin-top: 0;
 }
 
 .landing-cta-pin {
   position: relative;
-  min-height: 100vh;
+  min-height: 100svh;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -994,7 +1122,7 @@
   width: 100%;
   max-width: 640px;
   margin: 0 auto;
-  padding: 2rem 0 0;
+  padding: 0 1.5rem;
   text-align: center;
 }
 
@@ -1033,6 +1161,12 @@
   position: relative;
   z-index: 2;
   will-change: transform, opacity;
+}
+
+.landing-footer {
+  position: relative;
+  z-index: 3;
+  background: var(--color-base-100);
 }
 
 /* —— Recorrido del flujo —— */

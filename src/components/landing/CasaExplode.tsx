@@ -6,6 +6,7 @@ import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { ArrowRight, Cloud, Laptop, Smartphone, Check } from "lucide-react";
 import { CASA_EXPLODE_SVG, CASA_VIEWBOX } from "./casaExplodeSvg";
+import { scheduleLandingScrollRefresh } from "./landingScroll";
 
 /**
  * Sección sticky con tres fases encadenadas al scroll:
@@ -825,8 +826,11 @@ function CasaExplode() {
     setIntro(0);
     renderIntro(0);
 
+    const cancelRefresh = scheduleLandingScrollRefresh();
+
     return () => {
       disposed = true;
+      cancelRefresh();
       ctx.revert();
     };
   }, []);
