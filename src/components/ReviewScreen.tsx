@@ -39,6 +39,7 @@ import {
   PenLine,
   Lightbulb,
   Scissors,
+  Footprints,
   Circle,
   Minus,
   RectangleHorizontal,
@@ -552,6 +553,20 @@ export default function ReviewScreen({
   const [xrayMode, setXrayMode] = useState(false);
   // Plano de sección (corte) para ver el interior.
   const [section, setSection] = useState<SectionState>({ enabled: false, axis: "y", pos: 0.5 });
+  // Modo caminar/volar (primera persona).
+  const [walkMode, setWalkMode] = useState(false);
+  const toggleWalk = useCallback(() => {
+    setWalkMode((w) => {
+      if (!w) {
+        setCutToolMode(false);
+        setCutDraft(null);
+        setMeasureToolMode(false);
+        setMeasureDraft(null);
+        setBoxSelectMode(false);
+      }
+      return !w;
+    });
+  }, []);
   // Pestaña activa del panel derecho: lista de capas vs acciones de la selección.
   const [sidebarTab, setSidebarTab] = useState<"capas" | "seleccion">("capas");
 
@@ -1643,6 +1658,16 @@ export default function ReviewScreen({
       )
         return;
 
+      // En modo caminar, WASD/flechas son navegación (los maneja el visor): no
+      // dispares atajos de herramientas. Esc sale del modo.
+      if (walkMode) {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          setWalkMode(false);
+        }
+        return;
+      }
+
       if (e.key === "c" || e.key === "C") {
         e.preventDefault();
         setMeasureToolMode(false);
@@ -1734,6 +1759,7 @@ export default function ReviewScreen({
     measures.length,
     triggerCamera,
     selectedGroupIds,
+    walkMode,
   ]);
 
   const [showWallWallHelp2, setShowWallWallHelp2] = useState(false);
@@ -1770,6 +1796,7 @@ export default function ReviewScreen({
           cameraCommand={cameraCommand}
           xray={xrayMode}
           section={section}
+          walkMode={walkMode}
           userCuts={userCuts}
           cutDraft={cutDraft}
           movingCutId={movingCutId}
@@ -1940,6 +1967,17 @@ export default function ReviewScreen({
           </div>
         )}
 
+        {/* HUD del modo caminar */}
+        {walkMode && (
+          <div
+            data-viewer-chrome
+            className="absolute bottom-4 left-1/2 -translate-x-1/2 z-40 pointer-events-none flex items-center gap-3 px-3 py-1.5 rounded-full bg-base-100/90 backdrop-blur-xl border border-base-300/40 shadow-lg text-xs text-base-content/75"
+          >
+            <Footprints size={13} className="text-primary" />
+            <span>Click para mirar · <b>WASD</b> moverse · <b>Espacio/Shift</b> subir/bajar · <b>Esc</b> salir</span>
+          </div>
+        )}
+
         {/* Panel del plano de corte (sección) */}
         {section.enabled && (
           <div
@@ -2075,6 +2113,16 @@ export default function ReviewScreen({
                   aria-label="Plano de corte"
                 >
                   <Scissors size={15} />
+                </button>
+              </div>
+              <div className="tooltip tooltip-bottom" data-tip="Caminar / volar (primera persona)">
+                <button
+                  type="button"
+                  className={`${viewToolBtn} ${walkMode ? "bg-primary/15 text-primary hover:bg-primary/20" : ""}`}
+                  onClick={toggleWalk}
+                  aria-label="Caminar"
+                >
+                  <Footprints size={15} />
                 </button>
               </div>
             </div>
