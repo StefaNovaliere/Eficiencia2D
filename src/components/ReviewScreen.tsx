@@ -47,7 +47,7 @@ import {
   BookOpen,
 } from "lucide-react";
 import { useReviewHistory } from "@/hooks/useReviewHistory";
-import type { ModelViewerHandle } from "@/components/ModelViewer";
+import type { ModelViewerHandle, CameraCommand } from "@/components/ModelViewer";
 import CutToolOverlay from "@/components/CutToolOverlay";
 import MeasureToolOverlay from "@/components/MeasureToolOverlay";
 import FlexControls from "@/components/FlexControls";
@@ -543,6 +543,11 @@ export default function ReviewScreen({
     () => new Set(),
   );
   const [bulkActionNotice, setBulkActionNotice] = useState<string | null>(null);
+  // Comando de cámara (encuadrar / reset) hacia el visor.
+  const [cameraCommand, setCameraCommand] = useState<CameraCommand | null>(null);
+  const triggerCamera = useCallback((kind: CameraCommand["kind"]) => {
+    setCameraCommand({ nonce: Date.now(), kind });
+  }, []);
   // Pestaña activa del panel derecho: lista de capas vs acciones de la selección.
   const [sidebarTab, setSidebarTab] = useState<"capas" | "seleccion">("capas");
 
@@ -1702,6 +1707,14 @@ export default function ReviewScreen({
       if ((e.key === "f" || e.key === "F") && canMergeSelected) {
         e.preventDefault();
         handleMergeSelected();
+        return;
+      }
+
+      if (e.key === "z" || e.key === "Z") {
+        // Encuadrar (sin Ctrl/Cmd, que es deshacer). Selección o todo.
+        if (e.ctrlKey || e.metaKey) return;
+        e.preventDefault();
+        triggerCamera(selectedGroupIds.size > 0 ? "frameSelection" : "frameAll");
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -1715,6 +1728,8 @@ export default function ReviewScreen({
     selectedMeasureId,
     handleRemoveMeasure,
     measures.length,
+    triggerCamera,
+    selectedGroupIds,
   ]);
 
   const [showWallWallHelp2, setShowWallWallHelp2] = useState(false);
@@ -1748,6 +1763,7 @@ export default function ReviewScreen({
           viewerRef={viewerRef}
           markGroupIds={markGroupIds}
           flexSpecs={savedFlex}
+          cameraCommand={cameraCommand}
           userCuts={userCuts}
           cutDraft={cutDraft}
           movingCutId={movingCutId}
@@ -1959,6 +1975,36 @@ export default function ReviewScreen({
                   aria-label="Rehacer"
                 >
                   <ArrowRight size={15} />
+                </button>
+              </div>
+            </div>
+
+            <div className="hidden sm:block w-px h-7 bg-base-300/50" />
+
+            <div className="inline-flex items-center gap-0.5 p-0.5 rounded-xl bg-base-200/50">
+              <div
+                className="tooltip tooltip-bottom"
+                data-tip={selectedGroupIds.size > 0 ? "Encuadrar selección (Z)" : "Encuadrar todo (Z)"}
+              >
+                <button
+                  type="button"
+                  className={viewToolBtn}
+                  onClick={() =>
+                    triggerCamera(selectedGroupIds.size > 0 ? "frameSelection" : "frameAll")
+                  }
+                  aria-label="Encuadrar"
+                >
+                  <Crosshair size={15} />
+                </button>
+              </div>
+              <div className="tooltip tooltip-bottom" data-tip="Vista general (reset)">
+                <button
+                  type="button"
+                  className={viewToolBtn}
+                  onClick={() => triggerCamera("reset")}
+                  aria-label="Vista general"
+                >
+                  <Maximize size={15} />
                 </button>
               </div>
             </div>

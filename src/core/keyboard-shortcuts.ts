@@ -68,6 +68,12 @@ export const REVIEW_KEYBOARD_SHORTCUTS: KeyboardShortcutSection[] = [
         combos: [["V"]],
       },
       {
+        id: "frame",
+        label: "Encuadrar la vista",
+        detail: "Ajusta la cámara a la selección (o a todo el modelo si no hay selección).",
+        combos: [["Z"]],
+      },
+      {
         id: "box-select",
         label: "Selección por caja",
         combos: [["S"]],
