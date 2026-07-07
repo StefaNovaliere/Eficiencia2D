@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useThree, useFrame } from "@react-three/fiber";
-import { OrbitControls, GizmoHelper, GizmoViewcube, Line, Html } from "@react-three/drei";
+import { OrbitControls, GizmoHelper, GizmoViewcube, Line, Html, PointerLockControls } from "@react-three/drei";
 import type React from "react";
 import * as THREE from "three";
 import type { Face3D, Vec3 } from "@/core/types";
@@ -823,6 +823,48 @@ interface CameraControlsProps {
 
 const RESET_DIR = new THREE.Vector3(0.9, 0.6, 0.9).normalize();
 
+/**
+ * Modo Caminar/Volar (primera persona): PointerLockControls (mouse-look) + WASD/
+ * flechas para avanzar/lados y Espacio/E · Shift/Q para subir/bajar. Se usa en
+ * lugar de OrbitControls mientras está activo. `Esc` libera el puntero (nativo).
+ */
+function WalkControls({ speed }: { speed: number }) {
+  const ref = useRef<any>(null);
+  const keys = useRef<Record<string, boolean>>({});
+  const { camera } = useThree();
+
+  useEffect(() => {
+    const down = (e: KeyboardEvent) => {
+      keys.current[e.code] = true;
+    };
+    const up = (e: KeyboardEvent) => {
+      keys.current[e.code] = false;
+    };
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    return () => {
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+      keys.current = {};
+    };
+  }, []);
+
+  useFrame((_, delta) => {
+    const c = ref.current;
+    if (!c || !c.isLocked) return;
+    const v = speed * Math.min(delta, 0.05);
+    const k = keys.current;
+    if (k["KeyW"] || k["ArrowUp"]) c.moveForward(v);
+    if (k["KeyS"] || k["ArrowDown"]) c.moveForward(-v);
+    if (k["KeyD"] || k["ArrowRight"]) c.moveRight(v);
+    if (k["KeyA"] || k["ArrowLeft"]) c.moveRight(-v);
+    if (k["Space"] || k["KeyE"]) camera.position.y += v;
+    if (k["ShiftLeft"] || k["ShiftRight"] || k["KeyQ"]) camera.position.y -= v;
+  });
+
+  return <PointerLockControls ref={ref} />;
+}
+
 function CameraControls({
   target,
   maxDistance,
@@ -1339,6 +1381,8 @@ interface SceneProps {
   xray?: boolean;
   /** Plano de sección (corte) para ver el interior. */
   section?: SectionState | null;
+  /** Modo caminar/volar (primera persona) en lugar de órbita. */
+  walkMode?: boolean;
   userCuts?: UserCut[];
   cutDraft?: CutDragState | null;
   movingCutId?: string | null;
@@ -1392,6 +1436,7 @@ function Scene({
   cameraCommand = null,
   xray = false,
   section = null,
+  walkMode = false,
   userCuts = [],
   cutDraft = null,
   movingCutId = null,
@@ -1793,15 +1838,19 @@ function Scene({
 
   return (
     <>
-      <CameraControls
-        target={focusTarget}
-        maxDistance={maxDist}
-        minDistance={minDist}
-        enabled={!boxSelectActive}
-        selectionSphere={selectionSphere}
-        modelRadius={bounds.diag * 0.5}
-        command={cameraCommand}
-      />
+      {walkMode ? (
+        <WalkControls speed={Math.max(bounds.diag * 0.4, 1)} />
+      ) : (
+        <CameraControls
+          target={focusTarget}
+          maxDistance={maxDist}
+          minDistance={minDist}
+          enabled={!boxSelectActive}
+          selectionSphere={selectionSphere}
+          modelRadius={bounds.diag * 0.5}
+          command={cameraCommand}
+        />
+      )}
 
       {section && (
         <SectionPlane
@@ -2580,6 +2629,8 @@ export interface ModelViewerProps {
   xray?: boolean;
   /** Plano de sección (corte) para ver el interior. */
   section?: SectionState | null;
+  /** Modo caminar/volar (primera persona) en lugar de órbita. */
+  walkMode?: boolean;
   userCuts?: UserCut[];
   cutDraft?: CutDragState | null;
   movingCutId?: string | null;
@@ -2620,6 +2671,7 @@ export default function ModelViewer({
   cameraCommand = null,
   xray = false,
   section = null,
+  walkMode = false,
   userCuts = [],
   cutDraft = null,
   movingCutId = null,
@@ -2716,6 +2768,7 @@ export default function ModelViewer({
         cameraCommand={cameraCommand}
         xray={xray}
         section={section}
+        walkMode={walkMode}
         userCuts={userCuts}
         cutDraft={cutDraft}
         movingCutId={movingCutId}
@@ -2741,7 +2794,9 @@ export default function ModelViewer({
         />
       )}
 
-      {/* ViewCube: clic en caras/aristas para orientar la vista al instante. */}
+      {/* ViewCube: clic en caras/aristas para orientar la vista al instante.
+          Oculto en modo caminar (los controles de órbita no están montados). */}
+      {!walkMode && (
       <GizmoHelper alignment="bottom-right" margin={[80, 80]}>
         <GizmoViewcube
           color={palette.background}
@@ -2750,6 +2805,7 @@ export default function ModelViewer({
           hoverColor="#22d3ee"
         />
       </GizmoHelper>
+      )}
     </Canvas>
   );
 }
