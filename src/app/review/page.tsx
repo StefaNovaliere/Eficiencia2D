@@ -11,6 +11,7 @@ import {
   recomputeTopology,
   fetchNestingPreview,
   userCutsForApi,
+  flexForApi,
   resolveOriginalFilename,
   type AssemblyPreviewRequest,
   type RecomputePayload,
@@ -57,6 +58,7 @@ function ReviewPageContent() {
     setSavedMarks,
     savedUserCuts,
     setSavedUserCuts,
+    savedFlex,
     fileId,
     projectFileName,
     scale,
@@ -239,6 +241,7 @@ function ReviewPageContent() {
           paper,
           page_mode: pdfPageMode,
           user_cuts: userCutsForApi(userCuts),
+          flex: flexForApi(savedFlex),
         }, token);
         setNestingData(nesting);
         if (token && fileId) {
@@ -273,6 +276,7 @@ function ReviewPageContent() {
       minAreaM2,
       savedMerges,
       savedSplits,
+      savedFlex,
       sheetConfig,
       scale,
       paper,
