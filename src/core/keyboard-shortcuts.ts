@@ -68,6 +68,18 @@ export const REVIEW_KEYBOARD_SHORTCUTS: KeyboardShortcutSection[] = [
         combos: [["V"]],
       },
       {
+        id: "frame",
+        label: "Encuadrar la vista",
+        detail: "Ajusta la cámara a la selección (o a todo el modelo si no hay selección).",
+        combos: [["Z"]],
+      },
+      {
+        id: "walk-move",
+        label: "Caminar / volar (mientras el modo está activo)",
+        detail: "WASD o flechas para moverte; Espacio/E sube, Shift/Q baja; Esc sale.",
+        combos: [["W"], ["A"], ["S"], ["D"]],
+      },
+      {
         id: "box-select",
         label: "Selección por caja",
         combos: [["S"]],
