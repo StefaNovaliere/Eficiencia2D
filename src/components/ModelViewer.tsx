@@ -18,6 +18,7 @@ import {
 import { computeMeasurePreviewSegments, computeMeasureLabelPlacements } from "@/core/measure-preview";
 import { frameDistance } from "@/core/camera-frame";
 import { advanceCycle, uniqueOrdered, type ClickCycleState } from "@/core/pick-cycle";
+import { sectionPlaneParams, type SectionAxis } from "@/core/section-plane";
 import type { MeasureDragState, UserMeasure, MeasureLabelOptions } from "@/core/measure-tool";
 import { DEFAULT_MEASURE_LABEL_OPTIONS } from "@/core/measure-tool";
 import {
@@ -737,6 +738,76 @@ export interface CameraCommand {
   kind: "frameSelection" | "frameAll" | "reset";
 }
 
+export interface SectionState {
+  enabled: boolean;
+  axis: SectionAxis;
+  /** Posición del corte 0..1 dentro del rango del modelo en ese eje. */
+  pos: number;
+}
+
+function allMaterialsList(m: ViewerMaterials): THREE.Material[] {
+  return [
+    ...Object.values(m.normal),
+    ...Object.values(m.solid),
+    ...Object.values(m.dimmed),
+    ...Object.values(m.xray),
+    m.highlight,
+    m.hover,
+    m.edge,
+    m.highlightWire,
+  ];
+}
+
+/**
+ * Plano de sección (corte): asigna un THREE.Plane a los materiales para ver el
+ * interior sin atravesar por zoom. El recorte es sólo visual del visor.
+ */
+function SectionPlane({
+  section,
+  min,
+  max,
+  center,
+  materials,
+}: {
+  section: SectionState;
+  min: Vec3;
+  max: Vec3;
+  center: Vec3;
+  materials: ViewerMaterials;
+}) {
+  const { gl } = useThree();
+  const planeRef = useRef(new THREE.Plane(new THREE.Vector3(-1, 0, 0), 0));
+
+  useEffect(() => {
+    gl.localClippingEnabled = true;
+    return () => {
+      gl.localClippingEnabled = false;
+    };
+  }, [gl]);
+
+  useEffect(() => {
+    const list = allMaterialsList(materials);
+    const planes = section.enabled ? [planeRef.current] : [];
+    for (const mm of list) {
+      (mm as THREE.Material).clippingPlanes = planes;
+      mm.needsUpdate = true;
+    }
+    return () => {
+      for (const mm of list) {
+        (mm as THREE.Material).clippingPlanes = [];
+        mm.needsUpdate = true;
+      }
+    };
+  }, [section.enabled, materials]);
+
+  // Actualizar el plano en cada render (cambia eje/posición).
+  const { normal, constant } = sectionPlaneParams(section.axis, section.pos, min, max, center);
+  planeRef.current.normal.set(normal.x, normal.y, normal.z);
+  planeRef.current.constant = constant;
+
+  return null;
+}
+
 interface CameraControlsProps {
   target: Vec3 | null;
   maxDistance: number;
@@ -1266,6 +1337,8 @@ interface SceneProps {
   cameraCommand?: CameraCommand | null;
   /** Rayos X: paredes translúcidas para ver piezas internas. */
   xray?: boolean;
+  /** Plano de sección (corte) para ver el interior. */
+  section?: SectionState | null;
   userCuts?: UserCut[];
   cutDraft?: CutDragState | null;
   movingCutId?: string | null;
@@ -1318,6 +1391,7 @@ function Scene({
   flexSpecs = EMPTY_FLEX,
   cameraCommand = null,
   xray = false,
+  section = null,
   userCuts = [],
   cutDraft = null,
   movingCutId = null,
@@ -1356,7 +1430,12 @@ function Scene({
     const diag = Math.sqrt(
       (maxX - minX) ** 2 + (maxY - minY) ** 2 + (maxZ - minZ) ** 2,
     );
-    return { center: { x: cx, y: cy, z: cz }, diag };
+    return {
+      center: { x: cx, y: cy, z: cz },
+      diag,
+      min: { x: minX, y: minY, z: minZ },
+      max: { x: maxX, y: maxY, z: maxZ },
+    };
   }, [faces]);
 
   // Merged geometries — rebuilt when categories or overrides change.
@@ -1723,6 +1802,16 @@ function Scene({
         modelRadius={bounds.diag * 0.5}
         command={cameraCommand}
       />
+
+      {section && (
+        <SectionPlane
+          section={section}
+          min={bounds.min}
+          max={bounds.max}
+          center={bounds.center}
+          materials={materials}
+        />
+      )}
 
       {/* Ejes cartesianos en el centro del modelo */}
       {showCenterAxes && (
@@ -2489,6 +2578,8 @@ export interface ModelViewerProps {
   cameraCommand?: CameraCommand | null;
   /** Rayos X: paredes translúcidas para ver piezas internas. */
   xray?: boolean;
+  /** Plano de sección (corte) para ver el interior. */
+  section?: SectionState | null;
   userCuts?: UserCut[];
   cutDraft?: CutDragState | null;
   movingCutId?: string | null;
@@ -2528,6 +2619,7 @@ export default function ModelViewer({
   flexSpecs = EMPTY_FLEX,
   cameraCommand = null,
   xray = false,
+  section = null,
   userCuts = [],
   cutDraft = null,
   movingCutId = null,
@@ -2623,6 +2715,7 @@ export default function ModelViewer({
         flexSpecs={flexSpecs}
         cameraCommand={cameraCommand}
         xray={xray}
+        section={section}
         userCuts={userCuts}
         cutDraft={cutDraft}
         movingCutId={movingCutId}
