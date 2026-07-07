@@ -548,6 +548,8 @@ export default function ReviewScreen({
   const triggerCamera = useCallback((kind: CameraCommand["kind"]) => {
     setCameraCommand({ nonce: Date.now(), kind });
   }, []);
+  // Rayos X: paredes translúcidas para ver piezas internas.
+  const [xrayMode, setXrayMode] = useState(false);
   // Pestaña activa del panel derecho: lista de capas vs acciones de la selección.
   const [sidebarTab, setSidebarTab] = useState<"capas" | "seleccion">("capas");
 
@@ -1764,6 +1766,7 @@ export default function ReviewScreen({
           markGroupIds={markGroupIds}
           flexSpecs={savedFlex}
           cameraCommand={cameraCommand}
+          xray={xrayMode}
           userCuts={userCuts}
           cutDraft={cutDraft}
           movingCutId={movingCutId}
@@ -2005,6 +2008,16 @@ export default function ReviewScreen({
                   aria-label="Vista general"
                 >
                   <Maximize size={15} />
+                </button>
+              </div>
+              <div className="tooltip tooltip-bottom" data-tip="Rayos X (ver interior)">
+                <button
+                  type="button"
+                  className={`${viewToolBtn} ${xrayMode ? "bg-primary/15 text-primary hover:bg-primary/20" : ""}`}
+                  onClick={() => setXrayMode((v) => !v)}
+                  aria-label="Rayos X"
+                >
+                  <ScanSearch size={15} />
                 </button>
               </div>
             </div>
