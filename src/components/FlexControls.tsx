@@ -14,6 +14,7 @@ import {
   removeFlexForGroup,
   upsertFlexSpec,
   type FlexMethod,
+  type KerfDirection,
 } from "@/core/flex-bending";
 
 /** Método sugerido según la curvatura detectada por el backend. */
@@ -67,6 +68,11 @@ export default function FlexControls({
     setSavedFlex(upsertFlexSpec(savedFlex, { ...spec, spacingM: mm / 1000 }));
   }
 
+  function setDirection(direction: KerfDirection) {
+    if (!spec) return;
+    setSavedFlex(upsertFlexSpec(savedFlex, { ...spec, direction }));
+  }
+
   return (
     <div className="px-4 py-3 border-b border-base-300/30 space-y-2">
       <p className="text-[11px] font-semibold uppercase tracking-widest text-base-content/45 flex items-center gap-1.5">
@@ -118,6 +124,31 @@ export default function FlexControls({
           ))}
         </select>
       </label>
+
+      {spec && spec.method === "kerf" && (
+        <div className="form-control w-full">
+          <span className="text-xs text-base-content/60 mb-1">Dirección del kerf</span>
+          <div className="inline-flex items-center gap-0.5 p-0.5 rounded-lg bg-base-200/60 self-start">
+            {(["vertical", "horizontal"] as const).map((d) => (
+              <button
+                key={d}
+                type="button"
+                className={`px-2.5 py-1 rounded-md text-xs font-medium capitalize transition-colors ${
+                  (spec.direction ?? "vertical") === d
+                    ? "bg-primary/15 text-primary"
+                    : "text-base-content/60 hover:bg-base-200"
+                }`}
+                onClick={() => setDirection(d)}
+              >
+                {d}
+              </button>
+            ))}
+          </div>
+          <span className="text-[10px] text-base-content/40 mt-0.5">
+            Eje alrededor del cual se pliega la pieza (columnas verticales u horizontales).
+          </span>
+        </div>
+      )}
 
       {spec && (
         <label className="form-control w-full">

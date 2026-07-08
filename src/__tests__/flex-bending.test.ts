@@ -19,21 +19,37 @@ const KERF: FlexSpec = {
   method: "kerf",
   spacingM: 0.003, // 3 mm físicos de maqueta
   kerfWidthM: 0.0015,
-  axisDeg: 0,
+  direction: "vertical",
 };
 
 describe("serialize / parse round-trip", () => {
-  it("mantiene los campos en snake_case y vuelve", () => {
+  it("mantiene los campos en snake_case y vuelve (con dirección)", () => {
     const wire = serializeFlexForApi([KERF]);
     expect(wire[0]).toMatchObject({
       group_id: 3,
       method: "kerf",
       spacing_m: 0.003,
       kerf_width_m: 0.0015,
-      axis_deg: 0,
+      direction: "vertical",
+      axis_deg: 90, // derivado de "vertical"
     });
     const back = parseFlexFromApi(wire);
-    expect(back[0]).toMatchObject({ groupId: 3, method: "kerf", spacingM: 0.003 });
+    expect(back[0]).toMatchObject({
+      groupId: 3,
+      method: "kerf",
+      spacingM: 0.003,
+      direction: "vertical",
+    });
+  });
+
+  it("dirección horizontal ⇒ axis_deg 0; parse infiere dirección desde axis_deg", () => {
+    const wire = serializeFlexForApi([{ ...KERF, direction: "horizontal" }]);
+    expect(wire[0]).toMatchObject({ direction: "horizontal", axis_deg: 0 });
+    // Retro-compat: sólo axis_deg (sin direction) → se infiere.
+    expect(parseFlexFromApi([{ group_id: 1, method: "kerf", spacing_m: 0.003, axis_deg: 0 }])[0])
+      .toMatchObject({ direction: "horizontal" });
+    expect(parseFlexFromApi([{ group_id: 1, method: "kerf", spacing_m: 0.003, axis_deg: 90 }])[0])
+      .toMatchObject({ direction: "vertical" });
   });
 
   it("descarta métodos desconocidos y entradas sin group_id", () => {
@@ -71,6 +87,30 @@ describe("flexPatternSegments2D (preview esquemático)", () => {
     expect(dense.length).toBeGreaterThan(wide.length);
     // Acotado en ambos extremos (nunca una malla densa de miles de ranuras).
     expect(dense.length).toBeLessThan(400);
+  });
+
+  it("kerf: la dirección cambia la orientación del patrón (columnas por eje distinto)", () => {
+    // Panel 2×1: vertical y horizontal avanzan las columnas por ejes distintos ⇒
+    // distinto nº de columnas/segmentos.
+    const vert = flexPatternSegments2D({ ...KERF, direction: "vertical", spacingM: 0.003 }, 2, 1);
+    const horiz = flexPatternSegments2D({ ...KERF, direction: "horizontal", spacingM: 0.003 }, 2, 1);
+    expect(vert.length).toBeGreaterThan(0);
+    expect(horiz.length).toBeGreaterThan(0);
+    expect(vert.length).not.toBe(horiz.length);
+  });
+
+  it("kerf: margen sólido en los bordes (ninguna ranura toca el borde 'across')", () => {
+    // direction vertical en panel 1×1 ⇒ columnas avanzan en u (0..1); debe quedar
+    // material sólido en u≈0 y u≈1 (ningún segmento del patrón llega al borde).
+    const segs = flexPatternSegments2D({ ...KERF, direction: "vertical", spacingM: 0.002 }, 1, 1);
+    let minU = Infinity;
+    let maxU = -Infinity;
+    for (const s of segs) {
+      minU = Math.min(minU, s.u0, s.u1);
+      maxU = Math.max(maxU, s.u0, s.u1);
+    }
+    expect(minU).toBeGreaterThan(0.02); // margen a la izquierda
+    expect(maxU).toBeLessThan(0.98); // margen a la derecha
   });
 
   it("los auxéticos generan celdas (segmentos > 0) y respetan el bbox", () => {
