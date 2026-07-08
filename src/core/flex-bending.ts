@@ -23,6 +23,14 @@ export const FLEX_METHODS: FlexMethod[] = [
   "auxetic_chiral",
 ];
 
+/**
+ * Dirección del kerf (elegida por el usuario): orientación de las columnas de
+ * ranuras y, por lo tanto, el eje alrededor del cual la pieza se pliega.
+ * - "vertical": columnas verticales → pliega alrededor de un eje vertical.
+ * - "horizontal": columnas horizontales → pliega alrededor de un eje horizontal.
+ */
+export type KerfDirection = "horizontal" | "vertical";
+
 /** Un spec por grupo: el componente se corta con este patrón para poder doblarse. */
 export interface FlexSpec {
   groupId: number;
@@ -33,8 +41,16 @@ export interface FlexSpec {
   ligamentM?: number;
   /** Ancho de la ranura de corte (kerf) en m. Opcional (el back usa el del material). */
   kerfWidthM?: number;
-  /** Orientación del doblez (grados): dirección de las columnas kerf en el marco del panel. */
+  /** Dirección del kerf (horizontal/vertical), elegida por el usuario. Default "vertical". */
+  direction?: KerfDirection;
+  /** @deprecated Derivado de `direction`; se mantiene por compatibilidad. */
   axisDeg?: number;
+}
+
+/** Ángulo (grados) del eje "a lo largo de la ranura" en el marco del panel. */
+export function directionToAxisDeg(direction: KerfDirection | undefined): number {
+  // "vertical": ranuras a lo largo de v (0,1) → 90°. "horizontal": a lo largo de u → 0°.
+  return direction === "horizontal" ? 0 : 90;
 }
 
 /**
@@ -60,7 +76,7 @@ export const FLEX_METHOD_LABEL: Record<FlexMethod, string> = {
  */
 export function defaultFlexSpec(groupId: number, method: FlexMethod): FlexSpec {
   if (method === "kerf") {
-    return { groupId, method, spacingM: 0.003, ligamentM: 0.0015, kerfWidthM: 0.0015, axisDeg: 0 };
+    return { groupId, method, spacingM: 0.003, ligamentM: 0.0015, kerfWidthM: 0.0015, direction: "vertical" };
   }
   return { groupId, method, spacingM: 0.006, ligamentM: 0.0015 };
 }
@@ -118,14 +134,20 @@ export function removeFlexForGroup(specs: FlexSpec[], groupId: number): FlexSpec
 // Serialización para el backend (snake_case, sólo campos del contrato).
 // ---------------------------------------------------------------------------
 export function serializeFlexForApi(specs: FlexSpec[]): Record<string, unknown>[] {
-  return specs.map((s) => ({
-    group_id: s.groupId,
-    method: s.method,
-    spacing_m: clampSpacing(s.spacingM),
-    ...(s.ligamentM != null ? { ligament_m: s.ligamentM } : {}),
-    ...(s.kerfWidthM != null ? { kerf_width_m: s.kerfWidthM } : {}),
-    ...(s.axisDeg != null ? { axis_deg: s.axisDeg } : {}),
-  }));
+  return specs.map((s) => {
+    const direction: KerfDirection = s.direction ?? "vertical";
+    return {
+      group_id: s.groupId,
+      method: s.method,
+      spacing_m: clampSpacing(s.spacingM),
+      ...(s.ligamentM != null ? { ligament_m: s.ligamentM } : {}),
+      ...(s.kerfWidthM != null ? { kerf_width_m: s.kerfWidthM } : {}),
+      // Dirección del kerf elegida por el usuario (+ axis_deg derivado por compat).
+      ...(s.method === "kerf"
+        ? { direction, axis_deg: directionToAxisDeg(direction) }
+        : {}),
+    };
+  });
 }
 
 export function parseFlexFromApi(raw: unknown): FlexSpec[] {
@@ -137,13 +159,21 @@ export function parseFlexFromApi(raw: unknown): FlexSpec[] {
     if (typeof o.group_id !== "number") continue;
     const method = String(o.method) as FlexMethod;
     if (!FLEX_METHODS.includes(method)) continue;
+    const direction: KerfDirection | undefined =
+      o.direction === "horizontal" || o.direction === "vertical"
+        ? o.direction
+        : o.axis_deg != null
+          ? Number(o.axis_deg) === 0
+            ? "horizontal"
+            : "vertical"
+          : undefined;
     out.push({
       groupId: o.group_id,
       method,
       spacingM: clampSpacing(Number(o.spacing_m)),
       ...(o.ligament_m != null ? { ligamentM: Number(o.ligament_m) } : {}),
       ...(o.kerf_width_m != null ? { kerfWidthM: Number(o.kerf_width_m) } : {}),
-      ...(o.axis_deg != null ? { axisDeg: Number(o.axis_deg) } : {}),
+      ...(direction ? { direction } : {}),
     });
   }
   return out;
@@ -193,8 +223,12 @@ function kerfSegments(spec: FlexSpec, widthM: number, heightM: number, axisDeg =
   const slotFrac = lerp(VISUAL_KERF_SLOTFRAC_MIN, VISUAL_KERF_SLOTFRAC_MAX, t);
   const pitch = Math.max((2 * halfAcross) / columns, 1e-4);
   const slotW = pitch * slotFrac; // ancho del hueco (ranura removida) — crece con el spacing
-  const bridge = 2 * halfAlong * 0.15; // puente sin cortar en un extremo
-  const cols = Math.ceil(halfAcross / pitch);
+  const bridge = 2 * halfAlong * 0.15; // puente sin cortar en el extremo largo
+  // Margen SÓLIDO en los bordes: el patrón arranca y termina con material, no con
+  // un hueco. (El registro/margen autoritativo lo hace el backend; acá es visual.)
+  const edgeMargin = pitch * 0.7;
+  const usableAcross = halfAcross - edgeMargin;
+  const cols = Math.max(0, Math.floor(usableAcross / pitch));
 
   const segs: Segment2D[] = [];
   const toUV = (al: number, ac: number) => ({
@@ -214,6 +248,8 @@ function kerfSegments(spec: FlexSpec, widthM: number, heightM: number, axisDeg =
 
   for (let i = -cols; i <= cols; i++) {
     const ac = i * pitch;
+    // El hueco debe quedar dentro del área utilizable (margen sólido en bordes).
+    if (ac - slotW / 2 < -usableAcross - 1e-9 || ac + slotW / 2 > usableAcross + 1e-9) continue;
     // Ranura larga a lo largo de `dir`, con puente alternado en un extremo.
     const aMin = i % 2 === 0 ? -halfAlong : -halfAlong + bridge;
     const aMax = i % 2 === 0 ? halfAlong - bridge : halfAlong;
@@ -263,7 +299,7 @@ export function flexPatternSegments2D(
 ): Segment2D[] {
   if (widthM <= 0 || heightM <= 0) return [];
   const raw = spec.method === "kerf"
-    ? kerfSegments(spec, widthM, heightM, spec.axisDeg ?? 0)
+    ? kerfSegments(spec, widthM, heightM, directionToAxisDeg(spec.direction))
     : auxeticSegments(spec, widthM, heightM);
   // Recortar al rectángulo del panel (clip simple por extremos dentro del bbox).
   return raw
