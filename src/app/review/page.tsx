@@ -12,6 +12,7 @@ import {
   fetchNestingPreview,
   userCutsForApi,
   flexForApi,
+  markLinesForApi,
   resolveOriginalFilename,
   type AssemblyPreviewRequest,
   type RecomputePayload,
@@ -59,6 +60,7 @@ function ReviewPageContent() {
     savedUserCuts,
     setSavedUserCuts,
     savedFlex,
+    savedMarkLines,
     fileId,
     projectFileName,
     scale,
@@ -242,6 +244,7 @@ function ReviewPageContent() {
           page_mode: pdfPageMode,
           user_cuts: userCutsForApi(userCuts),
           flex: flexForApi(savedFlex),
+          mark_lines: markLinesForApi(savedMarkLines),
         }, token);
         setNestingData(nesting);
         if (token && fileId) {
@@ -277,6 +280,7 @@ function ReviewPageContent() {
       savedMerges,
       savedSplits,
       savedFlex,
+      savedMarkLines,
       sheetConfig,
       scale,
       paper,

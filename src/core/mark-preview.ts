@@ -1,6 +1,7 @@
 import type { Face3D, Vec3 } from "@/core/types";
 import type { GeometryGroup } from "@/core/group-classifier";
 import { projectFacesTo2D } from "@/core/panel-projection";
+import type { MarkLine } from "@/core/mark-lines";
 
 type UpAxis = "Y" | "Z";
 
@@ -103,6 +104,80 @@ export function computeMarkedOpeningGroups3D(
     result.push({ groupId: group.id, normal, segments });
   }
 
+  return result;
+}
+
+/**
+ * Líneas de marca ROJAS dibujadas por el usuario (polilíneas en UV del panel) →
+ * segmentos 3D sobre la cara del grupo, para grabar. Mismo mapeo/bias que las
+ * aberturas marcadas; se rinde con el mismo material rojo en el visor.
+ */
+export function computeMarkLines3D(
+  faces: Face3D[],
+  groups: GeometryGroup[],
+  markLines: MarkLine[],
+  up: UpAxis,
+  hiddenGroupIds: Set<number> = new Set(),
+): MarkOpeningGroupLines[] {
+  if (markLines.length === 0) return [];
+
+  const linesByGroup = new Map<number, MarkLine[]>();
+  for (const l of markLines) {
+    const arr = linesByGroup.get(l.groupId);
+    if (arr) arr.push(l);
+    else linesByGroup.set(l.groupId, [l]);
+  }
+
+  const result: MarkOpeningGroupLines[] = [];
+  for (const group of groups) {
+    const groupLines = linesByGroup.get(group.id);
+    if (!groupLines || hiddenGroupIds.has(group.id)) continue;
+
+    const groupFaces = group.faceIndices
+      .map((fi) => faces[fi])
+      .filter((f): f is Face3D => !!f && f.vertices.length >= 3);
+    if (groupFaces.length === 0) continue;
+
+    const projected = projectFacesTo2D(groupFaces, group.representativeNormal, up);
+    if (!projected) continue;
+
+    const anchor = groupFaces[0].vertices[0];
+    const { uAxis, vAxis, originU, originV } = projected;
+
+    const nlen = Math.hypot(
+      group.representativeNormal.x,
+      group.representativeNormal.y,
+      group.representativeNormal.z,
+    );
+    const bias = nlen > 1e-6 ? 0.002 : 0;
+    const nx = nlen > 1e-6 ? (group.representativeNormal.x / nlen) * bias : 0;
+    const ny = nlen > 1e-6 ? (group.representativeNormal.y / nlen) * bias : 0;
+    const nz = nlen > 1e-6 ? (group.representativeNormal.z / nlen) * bias : 0;
+    const normal =
+      nlen > 1e-6
+        ? {
+            x: group.representativeNormal.x / nlen,
+            y: group.representativeNormal.y / nlen,
+            z: group.representativeNormal.z / nlen,
+          }
+        : group.representativeNormal;
+
+    const segments: MarkOpeningSegment[] = [];
+    for (const line of groupLines) {
+      for (let i = 1; i < line.points.length; i++) {
+        const p0 = line.points[i - 1];
+        const p1 = line.points[i];
+        const a = panel2DTo3D(p0.u + originU, p0.v + originV, uAxis, vAxis, anchor);
+        const b = panel2DTo3D(p1.u + originU, p1.v + originV, uAxis, vAxis, anchor);
+        segments.push({
+          groupId: group.id,
+          a: { x: a.x + nx, y: a.y + ny, z: a.z + nz },
+          b: { x: b.x + nx, y: b.y + ny, z: b.z + nz },
+        });
+      }
+    }
+    if (segments.length > 0) result.push({ groupId: group.id, normal, segments });
+  }
   return result;
 }
 
