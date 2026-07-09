@@ -7,7 +7,8 @@ import type React from "react";
 import * as THREE from "three";
 import type { Face3D, Vec3 } from "@/core/types";
 import type { FaceCategory, GeometryGroup } from "@/core/group-classifier";
-import { computeMarkedOpeningGroups3D, type MarkOpeningGroupLines } from "@/core/mark-preview";
+import { computeMarkedOpeningGroups3D, computeMarkLines3D, type MarkOpeningGroupLines } from "@/core/mark-preview";
+import type { MarkLine } from "@/core/mark-lines";
 import { computeFlexPreview3D } from "@/core/flex-preview";
 import type { FlexSpec } from "@/core/flex-bending";
 import {
@@ -1380,6 +1381,8 @@ interface SceneProps {
   isSolid?: boolean;
   boxSelectActive?: boolean;
   markGroupIds?: Set<number>;
+  /** Líneas de marca rojas dibujadas por el usuario (polilíneas UV por grupo). */
+  markLines?: MarkLine[];
   /** Specs de flexión (kerf/auxético) por grupo — preview esquemático. */
   flexSpecs?: FlexSpec[];
   /** Comando imperativo de encuadre de cámara (encuadrar / reset). */
@@ -1421,6 +1424,7 @@ export interface PanelRaycastContext {
 }
 
 const EMPTY_MARK_SET = new Set<number>();
+const EMPTY_MARK_LINES: MarkLine[] = [];
 const EMPTY_FLEX: FlexSpec[] = [];
 
 function Scene({
@@ -1439,6 +1443,7 @@ function Scene({
   isSolid = false,
   boxSelectActive = false,
   markGroupIds = EMPTY_MARK_SET,
+  markLines = EMPTY_MARK_LINES,
   flexSpecs = EMPTY_FLEX,
   cameraCommand = null,
   xray = false,
@@ -1755,6 +1760,12 @@ function Scene({
     [faces, groups, markGroupIds, appliedAxis, hiddenGroupIds],
   );
 
+  // Líneas de marca rojas dibujadas por el usuario (mismo render rojo).
+  const markLineGroups = useMemo(
+    () => computeMarkLines3D(faces, groups, markLines, appliedAxis, hiddenGroupIds),
+    [faces, groups, markLines, appliedAxis, hiddenGroupIds],
+  );
+
   // Preview esquemático (cian) del patrón de flexión kerf/auxético por grupo.
   const flexPreviewSegments = useMemo(() => {
     if (flexSpecs.length === 0) return [] as CutPreviewSegment[];
@@ -1936,6 +1947,14 @@ function Scene({
         {markOpeningGroups.length > 0 && (
           <MarkOpeningOverlays
             groupLines={markOpeningGroups}
+            groups={groups}
+            centerOffset={bounds.center}
+          />
+        )}
+
+        {markLineGroups.length > 0 && (
+          <MarkOpeningOverlays
+            groupLines={markLineGroups}
             groups={groups}
             centerOffset={bounds.center}
           />
@@ -2628,6 +2647,8 @@ export interface ModelViewerProps {
   viewerRef?: React.MutableRefObject<ModelViewerHandle | null>;
   /** Groups whose openings (holes) are engraved in red on the cut sheet. */
   markGroupIds?: Set<number>;
+  /** Líneas de marca rojas dibujadas por el usuario (polilíneas UV por grupo). */
+  markLines?: MarkLine[];
   /** Specs de flexión (kerf/auxético) por grupo — preview esquemático. */
   flexSpecs?: FlexSpec[];
   /** Comando imperativo de encuadre de cámara (encuadrar / reset). */
@@ -2674,6 +2695,7 @@ export default function ModelViewer({
   boxSelectActive = false,
   viewerRef,
   markGroupIds = EMPTY_MARK_SET,
+  markLines = EMPTY_MARK_LINES,
   flexSpecs = EMPTY_FLEX,
   cameraCommand = null,
   xray = false,
@@ -2771,6 +2793,7 @@ export default function ModelViewer({
         isSolid={isSolid}
         boxSelectActive={boxSelectActive}
         markGroupIds={markGroupIds}
+        markLines={markLines}
         flexSpecs={flexSpecs}
         cameraCommand={cameraCommand}
         xray={xray}
