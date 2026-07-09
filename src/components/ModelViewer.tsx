@@ -678,7 +678,9 @@ function CategoryMesh({ mesh, isDimmed, isSolid, xray = false, groupAreaById, ma
         material={material}
         userData={{ mergedMeshData: mesh }}
         onPointerDown={(e) => {
-          if (e.nativeEvent.button !== 0) return;
+          const btn = e.nativeEvent.button;
+          // Middle/right buttons are for camera controls — never pick components.
+          if (btn !== 0) return;
           e.stopPropagation();
           const smart = pickGroupFromIntersections(e.intersections, groupAreaById);
           if (smart == null) return;
@@ -714,11 +716,11 @@ function CategoryMesh({ mesh, isDimmed, isSolid, xray = false, groupAreaById, ma
         onContextMenu={(e) => {
           e.stopPropagation();
           e.nativeEvent.preventDefault();
-          const groupId = pickGroupFromIntersections(e.intersections, groupAreaById);
+          // Right click must not select components — only open menu if already selected.
           onContextMenu?.({
             clientX: e.nativeEvent.clientX,
             clientY: e.nativeEvent.clientY,
-            groupId,
+            groupId: null,
           });
         }}
       />
@@ -920,6 +922,17 @@ function CameraControls({
       camDestRef.current = center.clone().add(dir.multiplyScalar(dist));
     }
   }
+
+  // Left click selects components; middle button rotates; right button pans.
+  useEffect(() => {
+    const ctrls = controlsRef.current;
+    if (!ctrls) return;
+    ctrls.mouseButtons = {
+      LEFT: null,
+      MIDDLE: THREE.MOUSE.ROTATE,
+      RIGHT: THREE.MOUSE.PAN,
+    };
+  }, [enabled]);
 
   useFrame(() => {
     const ctrls = controlsRef.current;

@@ -1048,6 +1048,7 @@ export default function ReviewScreen({
 
   const openViewerContextMenu = useCallback(
     (detail: { clientX: number; clientY: number; groupId: number | null }) => {
+      // Sidebar list may pass groupId; 3D viewer passes null to avoid right-click select.
       if (detail.groupId != null && selectedGroupIds.size === 0) {
         setSelectedGroupIds(new Set([detail.groupId]));
       }
