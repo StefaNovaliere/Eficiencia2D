@@ -260,7 +260,7 @@ export default function AuthForm({ mode, passwordUpdatedNotice }: AuthFormProps)
                 <span className="label-text font-medium mb-1">Contraseña</span>
                 <div className="relative">
                   <input
-                    type={isRegister && showPassword ? "text" : "password"}
+                    type={showPassword ? "text" : "password"}
                     className="input input-bordered w-full bg-base-100 pr-11"
                     placeholder={isRegister ? "Mínimo 6 caracteres" : "Tu contraseña"}
                     value={password}
@@ -270,16 +270,14 @@ export default function AuthForm({ mode, passwordUpdatedNotice }: AuthFormProps)
                     maxLength={isRegister ? PASSWORD_MAX_LENGTH : undefined}
                     autoComplete={isRegister ? "new-password" : "current-password"}
                   />
-                  {isRegister && (
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-sm btn-circle absolute right-1 top-1/2 -translate-y-1/2"
-                      onClick={() => setShowPassword((v) => !v)}
-                      aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
-                    >
-                      {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm btn-circle absolute right-1 top-1/2 -translate-y-1/2"
+                    onClick={() => setShowPassword((v) => !v)}
+                    aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+                  >
+                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
                 </div>
               </label>
 
