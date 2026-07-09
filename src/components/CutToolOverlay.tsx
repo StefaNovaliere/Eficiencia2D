@@ -197,7 +197,7 @@ export default function CutToolOverlay({
     [userCuts, viewerRef, selectedCutId],
   );
 
-  // ── middle mouse: forward to canvas so CameraControls can pan/dolly ──────
+  // ── middle mouse: forward to canvas so OrbitControls can rotate ──────────
   const handleMiddleMouse = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
       const overlay = overlayRef.current;
