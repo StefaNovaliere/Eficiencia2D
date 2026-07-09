@@ -23,6 +23,7 @@
     "polyclip-ts": "^0.16.8",
     "react": "^18.3",
     "react-dom": "^18.3",
+    "react-resizable-panels": "^4.12.1",
     "three": "^0.184.0"
   },
   "devDependencies": {

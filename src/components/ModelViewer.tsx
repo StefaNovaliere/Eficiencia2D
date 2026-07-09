@@ -38,6 +38,7 @@ import {
   type DerivedTriangleRef,
 } from "@/core/cut-derived-groups";
 import { useViewerPalette, type ViewerPalette } from "@/context/ThemeContext";
+import { useCameraNavigation } from "@/context/CameraNavigationContext";
 
 // A floating reference label (panel id) anchored to a component in 3D, drawn
 // when the user selects a wall-wall joint in the review list.
@@ -878,6 +879,7 @@ function CameraControls({
 }: CameraControlsProps) {
   const controlsRef = useRef<any>(null);
   const { camera } = useThree();
+  const { navigationStyle, applyToControls } = useCameraNavigation();
   // Destination for one-shot focus animation. Set when selection changes;
   // cleared once the lerp finishes so the user can pan freely afterward.
   const destRef = useRef<THREE.Vector3 | null>(null);
@@ -923,16 +925,12 @@ function CameraControls({
     }
   }
 
-  // Left click selects components; middle button rotates; right button pans.
+  // Aplica preset de navegación (Blender, CAD, Touchpad, …) al controlador.
   useEffect(() => {
     const ctrls = controlsRef.current;
     if (!ctrls) return;
-    ctrls.mouseButtons = {
-      LEFT: null,
-      MIDDLE: THREE.MOUSE.ROTATE,
-      RIGHT: THREE.MOUSE.PAN,
-    };
-  }, [enabled]);
+    applyToControls(ctrls);
+  }, [enabled, navigationStyle, applyToControls]);
 
   useFrame(() => {
     const ctrls = controlsRef.current;
@@ -964,10 +962,6 @@ function CameraControls({
       enabled={enabled}
       enableDamping
       dampingFactor={0.12}
-      // Full vertical orbit: 0 = directly above, π = directly below.
-      // Small margin at poles avoids gimbal-lock artefacts.
-      minPolarAngle={0.02}
-      maxPolarAngle={Math.PI - 0.02}
       maxDistance={maxDistance}
       minDistance={minDistance}
       // Screen-space panning: the camera pans along its own screen plane,

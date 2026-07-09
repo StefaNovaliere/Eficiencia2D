@@ -17,6 +17,8 @@ export interface PreferenciasInterfaz {
   vista_defecto?: string;
   mostrar_grid?: boolean;
   unidades?: string;
+  /** Preset de navegación 3D: blender | cad | touchpad | tinkercad | revit */
+  navegacion_camara?: string;
   [key: string]: unknown;
 }
 
