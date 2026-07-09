@@ -10,6 +10,7 @@ import type {
 import { DEFAULT_SHEET } from "@/core/sheet-nester";
 import type { SheetConfig } from "@/core/types";
 import type { UserCut } from "@/core/user-cuts";
+import type { MarkLine } from "@/core/mark-lines";
 import type { FlexSpec } from "@/core/flex-bending";
 import type { AssemblyPreviewData } from "@/services/api";
 import type { RestoredProjectState } from "@/services/project-state";
@@ -30,6 +31,7 @@ interface PersistedSession {
   marks?: number[];
   userCuts?: UserCut[];
   flex?: FlexSpec[];
+  markLines?: MarkLine[];
   pageMode?: PdfPageMode;
 }
 
@@ -74,6 +76,8 @@ interface ProjectContextType {
   setSavedMarks: (marks: number[]) => void;
   savedUserCuts: UserCut[];
   setSavedUserCuts: (cuts: UserCut[]) => void;
+  savedMarkLines: MarkLine[];
+  setSavedMarkLines: (lines: MarkLine[]) => void;
   /** Specs de flexión (kerf/auxético) por grupo. Ver flex-bending.ts. */
   savedFlex: FlexSpec[];
   setSavedFlex: (flex: FlexSpec[]) => void;
@@ -104,6 +108,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const [savedSplits, setSavedSplits] = useState<SplitOp[]>([]);
   const [savedMarks, setSavedMarks] = useState<number[]>([]);
   const [savedUserCuts, setSavedUserCuts] = useState<UserCut[]>([]);
+  const [savedMarkLines, setSavedMarkLines] = useState<MarkLine[]>([]);
   const [savedFlex, setSavedFlex] = useState<FlexSpec[]>([]);
   const [assemblyGuideData, setAssemblyGuideData] = useState<AssemblyPreviewData | null>(null);
   const [sheetConfig, setSheetConfig] = useState<SheetConfig>({ ...DEFAULT_SHEET });
@@ -141,6 +146,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       setSavedSplits(parsed.splits ?? []);
       setSavedMarks(parsed.marks ?? []);
       setSavedUserCuts(parsed.userCuts ?? []);
+      setSavedMarkLines(parsed.markLines ?? []);
       setSavedFlex(parsed.flex ?? []);
 
       if (!parsed.phase1Result) {
@@ -174,13 +180,14 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         splits: savedSplits,
         marks: savedMarks,
         userCuts: savedUserCuts,
+        markLines: savedMarkLines,
         flex: savedFlex,
       };
       sessionStorage.setItem(SESSION_KEY, JSON.stringify(persisted));
     } catch {
       // Storage full
     }
-  }, [file, fileId, previewObj, phase1Result, projectFileName, scale, paper, pdfPageMode, minAreaM2, sheetConfig, savedOverrides, savedWallWallDecisions, savedMerges, savedSplits, savedMarks, savedUserCuts, savedFlex]);
+  }, [file, fileId, previewObj, phase1Result, projectFileName, scale, paper, pdfPageMode, minAreaM2, sheetConfig, savedOverrides, savedWallWallDecisions, savedMerges, savedSplits, savedMarks, savedUserCuts, savedFlex, savedMarkLines]);
 
   const applyRestoredState = useCallback((restored: RestoredProjectState) => {
     if (restored.projectFileName != null) setProjectFileName(restored.projectFileName);
@@ -216,6 +223,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     setSavedSplits([]);
     setSavedMarks([]);
     setSavedUserCuts([]);
+    setSavedMarkLines([]);
     setSavedFlex([]);
     setAssemblyGuideData(null);
     setSheetConfig({ ...DEFAULT_SHEET });
@@ -243,6 +251,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         savedSplits, setSavedSplits,
         savedMarks, setSavedMarks,
         savedUserCuts, setSavedUserCuts,
+        savedMarkLines, setSavedMarkLines,
         savedFlex, setSavedFlex,
         assemblyGuideData, setAssemblyGuideData,
         resetProject,

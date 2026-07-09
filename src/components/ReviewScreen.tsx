@@ -39,6 +39,7 @@ import {
   Lasso,
   Trash2,
   PenLine,
+  Spline,
   Lightbulb,
   Scissors,
   Footprints,
@@ -53,6 +54,8 @@ import { useReviewHistory } from "@/hooks/useReviewHistory";
 import type { ModelViewerHandle, CameraCommand, SectionState } from "@/components/ModelViewer";
 import CutToolOverlay from "@/components/CutToolOverlay";
 import MeasureToolOverlay from "@/components/MeasureToolOverlay";
+import MarkLineToolOverlay, { type MarkLineMode } from "@/components/MarkLineToolOverlay";
+import type { MarkLine } from "@/core/mark-lines";
 import FlexControls from "@/components/FlexControls";
 import { maxNormalSpreadDeg } from "@/core/flex-bending";
 import type {
@@ -465,7 +468,8 @@ export default function ReviewScreen({
   onRequestAssemblyPreview,
   openAssemblyInstructivo = false,
 }: ReviewScreenProps) {
-  const { assemblyGuideData, setAssemblyGuideData, savedFlex } = useProjectContext();
+  const { assemblyGuideData, setAssemblyGuideData, savedFlex, savedMarkLines, setSavedMarkLines } =
+    useProjectContext();
   const [selectedGroupIds, setSelectedGroupIds] = useState<Set<number>>(
     () => new Set(),
   );
@@ -529,6 +533,10 @@ export default function ReviewScreen({
   const [selectedMeasureId, setSelectedMeasureId] = useState<string | null>(
     null,
   );
+  // Herramienta de líneas rojas (marcar para grabar).
+  const [markLineToolMode, setMarkLineToolMode] = useState(false);
+  const [markLineMode, setMarkLineMode] = useState<MarkLineMode>("straight");
+  const [markLineDraft, setMarkLineDraft] = useState<MarkLine | null>(null);
   const [measureLabelScale, setMeasureLabelScale] = useState(
     MEASURE_SCALE_ORIGINAL,
   );
@@ -1677,6 +1685,8 @@ export default function ReviewScreen({
         setMeasureToolMode(false);
         setMeasureDraft(null);
         setBoxSelectMode(false);
+        setMarkLineToolMode(false);
+        setMarkLineDraft(null);
         setCutToolMode((prev) => {
           if (!prev) return true;
           setCutDraft(null);
@@ -1692,7 +1702,26 @@ export default function ReviewScreen({
         setCutDraft(null);
         setBoxSelectMode(false);
         setMeasureDraft(null);
+        setMarkLineToolMode(false);
+        setMarkLineDraft(null);
         setMeasureToolMode((prev) => !prev);
+        return;
+      }
+
+      if (e.key === "r" || e.key === "R") {
+        e.preventDefault();
+        setCutToolMode(false);
+        setCutDraft(null);
+        setMeasureToolMode(false);
+        setMeasureDraft(null);
+        setBoxSelectMode(false);
+        setMarkLineDraft(null);
+        setMarkLineToolMode((prev) => {
+          if (!prev) return true;
+          // Re-presionar alterna recta/libre (como las formas del corte).
+          setMarkLineMode((mm) => (mm === "straight" ? "freehand" : "straight"));
+          return true;
+        });
         return;
       }
 
@@ -1707,6 +1736,11 @@ export default function ReviewScreen({
           setMeasures((prev) => prev.slice(0, -1));
           return;
         }
+        if (markLineToolMode && savedMarkLines.length > 0) {
+          e.preventDefault();
+          setSavedMarkLines(savedMarkLines.slice(0, -1));
+          return;
+        }
       }
 
       if (e.key === "s" || e.key === "S") {
@@ -1715,6 +1749,8 @@ export default function ReviewScreen({
         setCutDraft(null);
         setMeasureToolMode(false);
         setMeasureDraft(null);
+        setMarkLineToolMode(false);
+        setMarkLineDraft(null);
         setBoxSelectMode((prev) => !prev);
         return;
       }
@@ -1725,6 +1761,8 @@ export default function ReviewScreen({
         setCutDraft(null);
         setMeasureToolMode(false);
         setMeasureDraft(null);
+        setMarkLineToolMode(false);
+        setMarkLineDraft(null);
         setBoxSelectMode(false);
         return;
       }
@@ -1764,6 +1802,9 @@ export default function ReviewScreen({
     triggerCamera,
     selectedGroupIds,
     walkMode,
+    markLineToolMode,
+    savedMarkLines,
+    setSavedMarkLines,
   ]);
 
   const [showWallWallHelp2, setShowWallWallHelp2] = useState(false);
@@ -2663,6 +2704,7 @@ export default function ReviewScreen({
           boxSelectActive={boxSelectMode}
           viewerRef={viewerRef}
           markGroupIds={markGroupIds}
+          markLines={markLineDraft ? [...savedMarkLines, markLineDraft] : savedMarkLines}
           flexSpecs={savedFlex}
           cameraCommand={cameraCommand}
           xray={xrayMode}
@@ -2698,6 +2740,15 @@ export default function ReviewScreen({
           viewerRef={viewerRef}
           onDraftChange={setMeasureDraft}
           onCommitMeasure={handleCommitMeasure}
+        />
+
+        <MarkLineToolOverlay
+          active={markLineToolMode}
+          mode={markLineMode}
+          edgeSnapEnabled={cutEdgeSnap}
+          viewerRef={viewerRef}
+          onDraftChange={setMarkLineDraft}
+          onCommit={(line) => setSavedMarkLines([...savedMarkLines, line])}
         />
 
         {/* Overlay mientras el backend recalcula la topología */}
@@ -3016,17 +3067,19 @@ export default function ReviewScreen({
               <div className="tooltip tooltip-bottom" data-tip="Cursor (V)">
                 <button
                   type="button"
-                  className={`${viewToolBtn} ${!boxSelectMode && !cutToolMode && !measureToolMode ? "bg-primary/15 text-primary hover:bg-primary/20" : ""}`}
+                  className={`${viewToolBtn} ${!boxSelectMode && !cutToolMode && !measureToolMode && !markLineToolMode ? "bg-primary/15 text-primary hover:bg-primary/20" : ""}`}
                   onClick={() => {
                     setCutToolMode(false);
                     setCutDraft(null);
                     setMeasureToolMode(false);
                     setMeasureDraft(null);
+                    setMarkLineToolMode(false);
+                    setMarkLineDraft(null);
                     setBoxSelectMode(false);
                   }}
                   aria-label="Cursor"
                   aria-pressed={
-                    !boxSelectMode && !cutToolMode && !measureToolMode
+                    !boxSelectMode && !cutToolMode && !measureToolMode && !markLineToolMode
                   }
                 >
                   <MousePointer2 size={15} />
@@ -3044,6 +3097,8 @@ export default function ReviewScreen({
                     setCutDraft(null);
                     setMeasureToolMode(false);
                     setMeasureDraft(null);
+                    setMarkLineToolMode(false);
+                    setMarkLineDraft(null);
                     setBoxSelectMode((s) => !s);
                   }}
                   aria-label="Selección por área"
@@ -3067,6 +3122,8 @@ export default function ReviewScreen({
                     setMeasureToolMode(false);
                     setMeasureDraft(null);
                     setBoxSelectMode(false);
+                    setMarkLineToolMode(false);
+                    setMarkLineDraft(null);
                     setCutDraft(null);
                     setCutToolMode((active) => {
                       if (!active) return true;
@@ -3096,6 +3153,8 @@ export default function ReviewScreen({
                     setCutDraft(null);
                     setBoxSelectMode(false);
                     setMeasureDraft(null);
+                    setMarkLineToolMode(false);
+                    setMarkLineDraft(null);
                     setMeasureToolMode((active) => !active);
                   }}
                   aria-label="Herramienta de medición"
@@ -3104,7 +3163,63 @@ export default function ReviewScreen({
                   <Ruler size={15} />
                 </button>
               </div>
+              <div
+                className="tooltip tooltip-bottom"
+                data-tip={
+                  markLineToolMode
+                    ? "Marca roja · R apaga · V sale"
+                    : "Marcar con líneas rojas (R)"
+                }
+              >
+                <button
+                  type="button"
+                  className={`${viewToolBtn} ${markLineToolMode ? "bg-error/20 text-error hover:bg-error/25" : ""}`}
+                  onClick={() => {
+                    setCutToolMode(false);
+                    setCutDraft(null);
+                    setMeasureToolMode(false);
+                    setMeasureDraft(null);
+                    setBoxSelectMode(false);
+                    setMarkLineDraft(null);
+                    setMarkLineToolMode((a) => !a);
+                  }}
+                  aria-label="Marcar con líneas rojas"
+                  aria-pressed={markLineToolMode}
+                >
+                  <PenLine size={15} />
+                </button>
+              </div>
             </div>
+
+            {markLineToolMode && (
+              <div className="inline-flex items-center gap-1 p-0.5 pl-1.5 rounded-xl bg-error/10 border border-error/25">
+                <span className="text-[11px] font-semibold text-error whitespace-nowrap hidden sm:inline">
+                  {markLineMode === "straight" ? "Recta" : "Libre"}
+                </span>
+                {(
+                  [
+                    { m: "straight" as const, icon: Minus, tip: "Segmento recto (⇧ ortogonal)" },
+                    { m: "freehand" as const, icon: Spline, tip: "Trazo libre (mano alzada)" },
+                  ] as const
+                ).map(({ m, icon: Icon, tip }) => (
+                  <button
+                    key={m}
+                    type="button"
+                    className={`${viewToolBtn} ${markLineMode === m ? "bg-error/25 text-error ring-1 ring-error/40" : ""}`}
+                    title={tip}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setMarkLineDraft(null);
+                      setMarkLineMode(m);
+                    }}
+                    aria-label={tip}
+                    aria-pressed={markLineMode === m}
+                  >
+                    <Icon size={15} />
+                  </button>
+                ))}
+              </div>
+            )}
 
             {measureToolMode && (
               <div className="inline-flex items-center gap-1 p-0.5 pl-1.5 rounded-xl bg-secondary/10 border border-secondary/25">
