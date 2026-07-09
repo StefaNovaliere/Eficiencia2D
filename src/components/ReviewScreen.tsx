@@ -3292,7 +3292,7 @@ export default function ReviewScreen({
             )}
 
             {/* Vista y opciones — divulgación progresiva en un solo menú */}
-            <div className="dropdown dropdown-end">
+            <div className="dropdown">
               <div
                 tabIndex={0}
                 role="button"
@@ -3357,7 +3357,7 @@ export default function ReviewScreen({
                 <li>
                   <label className="justify-between cursor-pointer">
                     <span className="flex items-center gap-2">
-                      <Maximize size={15} /> Pantalla completa
+                      <Maximize size={15} /> Ocultar barra lateral
                     </span>
                     <input
                       type="checkbox"
