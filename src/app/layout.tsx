@@ -3,6 +3,7 @@ import "@/styles/globals.css";
 import { AuthProvider } from "@/context/AuthContext";
 import { ProjectProvider } from "@/context/ProjectContext";
 import { SettingsProvider, SettingsThemeSync } from "@/context/SettingsContext";
+import { CameraNavigationProvider } from "@/context/CameraNavigationContext";
 import { UserProfileProvider } from "@/context/UserProfileContext";
 import { SubscriptionProvider } from "@/context/SubscriptionContext";
 import { ThemeProvider } from "@/context/ThemeContext";
@@ -53,11 +54,13 @@ export default function RootLayout({
             <UserProfileProvider>
               <SettingsProvider>
                 <SettingsThemeSync />
-                <SubscriptionProvider>
-                  <ProjectProvider>
-                    <AppShell>{children}</AppShell>
-                  </ProjectProvider>
-                </SubscriptionProvider>
+                <CameraNavigationProvider>
+                  <SubscriptionProvider>
+                    <ProjectProvider>
+                      <AppShell>{children}</AppShell>
+                    </ProjectProvider>
+                  </SubscriptionProvider>
+                </CameraNavigationProvider>
               </SettingsProvider>
             </UserProfileProvider>
           </AuthProvider>

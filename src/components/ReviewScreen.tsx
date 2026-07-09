@@ -2,9 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
+import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from "react-resizable-panels";
 import GroupList from "./GroupList";
 import MeasureList from "./MeasureList";
 import MeasureScaleSelect from "./MeasureScaleSelect";
+import CameraNavigationSelect from "./CameraNavigationSelect";
 import VisibilityFilters from "./VisibilityFilters";
 import StepIndicator from "./StepIndicator";
 import type { FaceCategory, GeometryGroup } from "@/core/group-classifier";
@@ -479,6 +481,7 @@ export default function ReviewScreen({
   const [showCenterAxes, setShowCenterAxes] = useState(true);
   const [isSolid, setIsSolid] = useState(false);
   const [hideSidebar, setHideSidebar] = useState(false);
+  const [hideToolbar, setHideToolbar] = useState(false);
   // Which wall-wall joint (by jointIndex) is highlighted with leader labels in
   // the 3D viewer. Null = none selected.
   const [selectedJointIndex, setSelectedJointIndex] = useState<number | null>(
@@ -1770,791 +1773,12 @@ export default function ReviewScreen({
   }, [showWallWallHelp2]);
 
   return (
-    <div className="fixed inset-0 z-50 bg-base-200/40 flex flex-col md:flex-row overflow-hidden">
-      <div className="flex-1 relative overflow-hidden" ref={viewerAreaRef}>
-        <ModelViewer
-          faces={phase1.faces}
-          groups={displayGroups}
-          projectionGroups={phase1.groups}
-          derivedCutTriangles={derivedCutTriangles}
-          derivedPanelPolys={derivedPanelPolys}
-          selectedGroupIds={selectedGroupIds}
-          mergeMemberFaceIndices={mergeMemberHighlightFaceIndices}
-          categoryOverrides={overrides}
-          visibleCategories={visibleCategories}
-          hiddenGroupIds={hiddenGroupIds}
-          onSelectGroup={handleSelectGroup}
-          onToggleGroup={handleToggleGroup}
-          onContextMenu={openViewerContextMenu}
-          appliedAxis={phase1.appliedAxis}
-          showCenterAxes={showCenterAxes}
-          leaderMarkers={leaderMarkers}
-          isSolid={isSolid}
-          boxSelectActive={boxSelectMode}
-          viewerRef={viewerRef}
-          markGroupIds={markGroupIds}
-          flexSpecs={savedFlex}
-          cameraCommand={cameraCommand}
-          xray={xrayMode}
-          section={section}
-          walkMode={walkMode}
-          userCuts={userCuts}
-          cutDraft={cutDraft}
-          movingCutId={movingCutId}
-          measureDraft={measureDraft}
-          measures={measures}
-          measureLabelOptions={measureLabelOptions}
-          highlightMeasureId={selectedMeasureId}
-        />
-
-        <CutToolOverlay
-          active={cutToolMode}
-          shapeKind={cutShapeKind}
-          edgeSnapEnabled={cutEdgeSnap}
-          userCuts={userCuts}
-          selectedCutId={selectedCutId}
-          onSelectedCutIdChange={setSelectedCutId}
-          viewerRef={viewerRef}
-          onDraftChange={setCutDraft}
-          onMovingCutId={setMovingCutId}
-          onCommitCut={handleCommitCut}
-          onCommitMove={handleCommitMove}
-        />
-
-        <MeasureToolOverlay
-          active={measureToolMode}
-          shapeKind={measureShapeKind}
-          edgeSnapEnabled={cutEdgeSnap}
-          viewerRef={viewerRef}
-          onDraftChange={setMeasureDraft}
-          onCommitMeasure={handleCommitMeasure}
-        />
-
-        {/* Overlay mientras el backend recalcula la topología */}
-        {isRecomputing && (
-          <div className="absolute inset-0 z-40 flex flex-col items-center justify-center gap-3 bg-base-200/50 backdrop-blur-sm">
-            <span className="loading loading-spinner loading-lg text-primary" />
-            <p className="text-sm font-medium text-base-content/80">
-              Recalculando en el servidor…
-            </p>
-          </div>
-        )}
-
-        {/* Box-select overlay — captures pointer events when active */}
-        {boxSelectMode && !cutToolMode && !measureToolMode && (
-          <div
-            className="absolute inset-0 z-20"
-            style={{ cursor: "crosshair" }}
-            onPointerDown={(e) => {
-              const under = document.elementFromPoint(e.clientX, e.clientY);
-              if (under?.closest("[data-viewer-chrome]")) return;
-              handleBoxPointerDown(e);
-            }}
-            onPointerMove={handleBoxPointerMove}
-            onPointerUp={handleBoxPointerUp}
-          />
-        )}
-
-        {/* Drag rectangle */}
-        {dragRect && (
-          <div
-            className="fixed z-30 pointer-events-none border-2 border-primary bg-primary/10 rounded-sm"
-            style={{
-              left: dragRect.x,
-              top: dragRect.y,
-              width: dragRect.w,
-              height: dragRect.h,
-            }}
-          />
-        )}
-
-        {contextMenu && (
-          <div
-            className="fixed z-[60] min-w-[11rem] rounded-xl border border-base-300/60 bg-base-100/95 backdrop-blur-md shadow-xl shadow-base-content/10 py-1"
-            style={{ left: contextMenu.x, top: contextMenu.y }}
-            onClick={(e) => e.stopPropagation()}
-            onContextMenu={(e) => e.preventDefault()}
-          >
-            {canMergeSelected && (
-              <button
-                type="button"
-                className="flex w-full items-center gap-2 px-3 py-2 text-sm text-left hover:bg-primary/10 transition-colors"
-                onClick={handleMergeSelected}
-              >
-                <Link2 size={15} className="text-primary shrink-0" />
-                {mergeLabel}
-              </button>
-            )}
-            {selectedGroupIds.size >= 2 &&
-              !canMergeSelected &&
-              mergeBlockedReason && (
-                <p className="px-3 py-2 text-[11px] text-base-content/45 leading-relaxed border-b border-base-300/30">
-                  {mergeBlockedReason}
-                </p>
-              )}
-            {canSplitMerged && (
-              <button
-                type="button"
-                className="flex w-full items-center gap-2 px-3 py-2 text-sm text-left hover:bg-base-200/80 transition-colors"
-                onClick={() => {
-                  handleDivideMerged();
-                  setContextMenu(null);
-                }}
-              >
-                <SquareSplitHorizontal
-                  size={15}
-                  className="text-base-content/70 shrink-0"
-                />
-                {divideAllLabel}
-              </button>
-            )}
-            {selectedGroup &&
-              getEffectiveCategory(selectedGroup, overrides) !== "discard" && (
-                <button
-                  type="button"
-                  className={`flex w-full items-center gap-2 px-3 py-2 text-sm text-left transition-colors ${
-                    markGroupIds.has(selectedGroup.id)
-                      ? "hover:bg-error/10 text-error"
-                      : "hover:bg-base-200/80"
-                  }`}
-                  onClick={() => {
-                    handleToggleMark(selectedGroup.id);
-                    setContextMenu(null);
-                  }}
-                >
-                  <PenLine size={15} className="shrink-0" />
-                  {markGroupIds.has(selectedGroup.id)
-                    ? "Desmarcar aberturas"
-                    : "Marcar aberturas (grabar en rojo)"}
-                </button>
-              )}
-            {selectedGroupIds.size > 0 && (
-              <button
-                type="button"
-                className="flex w-full items-center gap-2 px-3 py-2 text-sm text-left hover:bg-error/10 text-error transition-colors"
-                onClick={() => {
-                  const ids = Array.from(selectedGroupIds);
-                  pushHistory();
-                  setOverrides((prev) => {
-                    const next = new Map(prev);
-                    for (const gid of ids)
-                      applyCategoryOverride(next, gid, "discard");
-                    return next;
-                  });
-                  setSelectedGroupIds(new Set());
-                  setContextMenu(null);
-                }}
-              >
-                <Trash2 size={15} className="shrink-0" />
-                Descartar{" "}
-                {selectedGroupIds.size === 1
-                  ? "capa"
-                  : `${selectedGroupIds.size} capas`}
-              </button>
-            )}
-            {selectedGroupIds.size > 0 && (
-              <button
-                type="button"
-                className="flex w-full items-center gap-2 px-3 py-2 text-sm text-left hover:bg-base-200/80 transition-colors"
-                onClick={handleHideSelected}
-              >
-                <EyeOff size={15} className="text-base-content/60 shrink-0" />
-                Ocultar{" "}
-                {selectedGroupIds.size === 1
-                  ? "capa"
-                  : `${selectedGroupIds.size} capas`}
-              </button>
-            )}
-          </div>
-        )}
-
-        {/* HUD del modo caminar */}
-        {walkMode && (
-          <div
-            data-viewer-chrome
-            className="absolute bottom-4 left-1/2 -translate-x-1/2 z-40 pointer-events-none flex items-center gap-3 px-3 py-1.5 rounded-full bg-base-100/90 backdrop-blur-xl border border-base-300/40 shadow-lg text-xs text-base-content/75"
-          >
-            <Footprints size={13} className="text-primary" />
-            <span>Click para mirar · <b>WASD</b> moverse · <b>Espacio/Shift</b> subir/bajar · <b>Esc</b> salir</span>
-          </div>
-        )}
-
-        {/* Panel del plano de corte (sección) */}
-        {section.enabled && (
-          <div
-            data-viewer-chrome
-            className="absolute bottom-4 left-4 z-40 pointer-events-auto flex items-center gap-2 p-2 rounded-2xl bg-base-100/90 backdrop-blur-xl border border-base-300/40 shadow-lg"
-          >
-            <Scissors size={14} className="text-primary shrink-0" />
-            <div className="inline-flex items-center gap-0.5 p-0.5 rounded-lg bg-base-200/50">
-              {(["x", "y", "z"] as const).map((ax) => (
-                <button
-                  key={ax}
-                  type="button"
-                  className={`px-2 py-1 rounded-md text-xs font-medium uppercase transition-colors ${
-                    section.axis === ax
-                      ? "bg-primary/15 text-primary"
-                      : "text-base-content/60 hover:bg-base-200"
-                  }`}
-                  onClick={() => setSection((s) => ({ ...s, axis: ax }))}
-                >
-                  {ax}
-                </button>
-              ))}
-            </div>
-            <input
-              type="range"
-              className="range range-primary range-xs w-40"
-              min={0}
-              max={1}
-              step={0.01}
-              value={section.pos}
-              onChange={(e) => setSection((s) => ({ ...s, pos: Number(e.target.value) }))}
-              aria-label="Posición del corte"
-            />
-            <button
-              type="button"
-              className="btn btn-ghost btn-xs btn-circle"
-              onClick={() => setSection((s) => ({ ...s, enabled: false }))}
-              aria-label="Cerrar corte"
-            >
-              <X size={14} />
-            </button>
-          </div>
-        )}
-
-        {/* Toolbar — por encima del overlay de cortes/selección (z-20) */}
-        <div
-          data-viewer-chrome
-          className="absolute top-4 left-4 right-4 z-40 flex flex-col gap-2 pointer-events-none"
-        >
-          <div className="pointer-events-auto flex flex-wrap items-center gap-2 p-2 rounded-2xl bg-base-100/85 backdrop-blur-xl border border-base-300/40 shadow-lg shadow-base-content/5">
-            <VisibilityFilters
-              stats={stats}
-              visibleCategories={visibleCategories}
-              onToggle={handleToggleVisibility}
-            />
-
-            <div className="hidden sm:block w-px h-7 bg-base-300/50" />
-
-            <div className="inline-flex items-center gap-0.5 p-0.5 rounded-xl bg-base-200/50">
-              <div
-                className="tooltip tooltip-bottom"
-                data-tip="Deshacer (Ctrl+Z)"
-              >
-                <button
-                  type="button"
-                  className={viewToolBtn}
-                  onClick={handleUndo}
-                  disabled={!canUndo}
-                  aria-label="Deshacer"
-                >
-                  <ArrowBackIcon size={15} />
-                </button>
-              </div>
-              <div
-                className="tooltip tooltip-bottom"
-                data-tip="Rehacer (Ctrl+Y)"
-              >
-                <button
-                  type="button"
-                  className={viewToolBtn}
-                  onClick={handleRedo}
-                  disabled={!canRedo}
-                  aria-label="Rehacer"
-                >
-                  <ArrowRight size={15} />
-                </button>
-              </div>
-            </div>
-
-            <div className="hidden sm:block w-px h-7 bg-base-300/50" />
-
-            <div className="inline-flex items-center gap-0.5 p-0.5 rounded-xl bg-base-200/50">
-              <div
-                className="tooltip tooltip-bottom"
-                data-tip={selectedGroupIds.size > 0 ? "Encuadrar selección (Z)" : "Encuadrar todo (Z)"}
-              >
-                <button
-                  type="button"
-                  className={viewToolBtn}
-                  onClick={() =>
-                    triggerCamera(selectedGroupIds.size > 0 ? "frameSelection" : "frameAll")
-                  }
-                  aria-label="Encuadrar"
-                >
-                  <Crosshair size={15} />
-                </button>
-              </div>
-              <div className="tooltip tooltip-bottom" data-tip="Vista general (reset)">
-                <button
-                  type="button"
-                  className={viewToolBtn}
-                  onClick={() => triggerCamera("reset")}
-                  aria-label="Vista general"
-                >
-                  <Maximize size={15} />
-                </button>
-              </div>
-              <div className="tooltip tooltip-bottom" data-tip="Rayos X (ver interior)">
-                <button
-                  type="button"
-                  className={`${viewToolBtn} ${xrayMode ? "bg-primary/15 text-primary hover:bg-primary/20" : ""}`}
-                  onClick={() => setXrayMode((v) => !v)}
-                  aria-label="Rayos X"
-                >
-                  <ScanSearch size={15} />
-                </button>
-              </div>
-              <div className="tooltip tooltip-bottom" data-tip="Plano de corte (ver interior)">
-                <button
-                  type="button"
-                  className={`${viewToolBtn} ${section.enabled ? "bg-primary/15 text-primary hover:bg-primary/20" : ""}`}
-                  onClick={() => setSection((s) => ({ ...s, enabled: !s.enabled }))}
-                  aria-label="Plano de corte"
-                >
-                  <Scissors size={15} />
-                </button>
-              </div>
-              <div className="tooltip tooltip-bottom" data-tip="Caminar / volar (primera persona)">
-                <button
-                  type="button"
-                  className={`${viewToolBtn} ${walkMode ? "bg-primary/15 text-primary hover:bg-primary/20" : ""}`}
-                  onClick={toggleWalk}
-                  aria-label="Caminar"
-                >
-                  <Footprints size={15} />
-                </button>
-              </div>
-            </div>
-
-            <div className="hidden sm:block w-px h-7 bg-base-300/50" />
-
-            <div className="inline-flex items-center gap-0.5 p-0.5 rounded-xl bg-base-200/50">
-              <div className="tooltip tooltip-bottom" data-tip="Cursor (V)">
-                <button
-                  type="button"
-                  className={`${viewToolBtn} ${!boxSelectMode && !cutToolMode && !measureToolMode ? "bg-primary/15 text-primary hover:bg-primary/20" : ""}`}
-                  onClick={() => {
-                    setCutToolMode(false);
-                    setCutDraft(null);
-                    setMeasureToolMode(false);
-                    setMeasureDraft(null);
-                    setBoxSelectMode(false);
-                  }}
-                  aria-label="Cursor"
-                  aria-pressed={
-                    !boxSelectMode && !cutToolMode && !measureToolMode
-                  }
-                >
-                  <MousePointer2 size={15} />
-                </button>
-              </div>
-              <div
-                className="tooltip tooltip-bottom"
-                data-tip="Selección por área (S)"
-              >
-                <button
-                  type="button"
-                  className={`${viewToolBtn} ${boxSelectMode ? "bg-primary/15 text-primary hover:bg-primary/20" : ""}`}
-                  onClick={() => {
-                    setCutToolMode(false);
-                    setCutDraft(null);
-                    setMeasureToolMode(false);
-                    setMeasureDraft(null);
-                    setBoxSelectMode((s) => !s);
-                  }}
-                  aria-label="Selección por área"
-                  aria-pressed={boxSelectMode}
-                >
-                  <Lasso size={15} />
-                </button>
-              </div>
-              <div
-                className="tooltip tooltip-bottom"
-                data-tip={
-                  cutToolMode
-                    ? `${CUT_SHAPE_LABELS[cutShapeKind]} · C cambia forma · Alt libera bordes · V sale`
-                    : "Cortes (C)"
-                }
-              >
-                <button
-                  type="button"
-                  className={`${viewToolBtn} ${cutToolMode ? "bg-secondary/20 text-secondary hover:bg-secondary/25" : ""}`}
-                  onClick={() => {
-                    setMeasureToolMode(false);
-                    setMeasureDraft(null);
-                    setBoxSelectMode(false);
-                    setCutDraft(null);
-                    setCutToolMode((active) => {
-                      if (!active) return true;
-                      setCutShapeKind((shape) => nextCutShape(shape));
-                      return true;
-                    });
-                  }}
-                  aria-label="Herramienta de cortes"
-                  aria-pressed={cutToolMode}
-                >
-                  <Scissors size={15} />
-                </button>
-              </div>
-              <div
-                className="tooltip tooltip-bottom"
-                data-tip={
-                  measureToolMode
-                    ? `${MEASURE_SHAPE_LABELS[measureShapeKind]} · M apaga · V sale`
-                    : "Medir (M) "
-                }
-              >
-                <button
-                  type="button"
-                  className={`${viewToolBtn} ${measureToolMode ? "bg-secondary/20 text-secondary hover:bg-secondary/25" : ""}`}
-                  onClick={() => {
-                    setCutToolMode(false);
-                    setCutDraft(null);
-                    setBoxSelectMode(false);
-                    setMeasureDraft(null);
-                    setMeasureToolMode((active) => !active);
-                  }}
-                  aria-label="Herramienta de medición"
-                  aria-pressed={measureToolMode}
-                >
-                  <Ruler size={15} />
-                </button>
-              </div>
-            </div>
-
-            {measureToolMode && (
-              <div className="inline-flex items-center gap-1 p-0.5 pl-1.5 rounded-xl bg-secondary/10 border border-secondary/25">
-                <span className="text-[11px] font-semibold text-secondary whitespace-nowrap hidden sm:inline">
-                  {MEASURE_SHAPE_LABELS[measureShapeKind]}
-                </span>
-                {(
-                  [
-                    {
-                      kind: "line" as const,
-                      icon: Minus,
-                      tip: "Distancia (⇧ recta)",
-                    },
-                    {
-                      kind: "rect" as const,
-                      icon: RectangleHorizontal,
-                      tip: "Área / alto × ancho (⇧ cuadrado)",
-                    },
-                  ] as const
-                ).map(({ kind, icon: Icon, tip }) => (
-                  <button
-                    key={kind}
-                    type="button"
-                    className={`${viewToolBtn} ${measureShapeKind === kind ? "bg-secondary/25 text-secondary ring-1 ring-secondary/40" : ""}`}
-                    title={tip}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setMeasureDraft(null);
-                      setMeasureShapeKind(kind);
-                    }}
-                    aria-label={tip}
-                    aria-pressed={measureShapeKind === kind}
-                  >
-                    <Icon size={15} />
-                  </button>
-                ))}
-                <MeasureScaleSelect
-                  value={measureLabelScale}
-                  onChange={handleMeasureScaleChange}
-                  onClick={(e) => e.stopPropagation()}
-                  className="border-l border-secondary/25 pl-1 ml-0.5"
-                  selectClassName="select select-bordered select-xs h-8 min-h-8 w-[5.75rem] bg-base-100 font-mono text-[11px]"
-                />
-                <div
-                  className="tooltip tooltip-bottom"
-                  data-tip={
-                    cutEdgeSnap
-                      ? "Bordes pegajosos ON — Alt libera al medir"
-                      : "Bordes pegajosos OFF — clic para activar"
-                  }
-                >
-                  <button
-                    type="button"
-                    className={`${viewToolBtn} ${cutEdgeSnap ? "bg-secondary/25 text-secondary ring-1 ring-secondary/40" : "text-base-content/50"}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setCutEdgeSnap((on) => !on);
-                    }}
-                    aria-label="Bordes pegajosos"
-                    aria-pressed={cutEdgeSnap}
-                  >
-                    <Magnet size={15} />
-                  </button>
-                </div>
-                {measures.length > 0 && (
-                  <>
-                    <span className="text-[11px] font-mono font-semibold text-secondary/80 px-1">
-                      {measures.length}
-                    </span>
-                    <div
-                      className="tooltip tooltip-bottom"
-                      data-tip="Borrar todas las medidas · Supr quita la seleccionada o la última"
-                    >
-                      <button
-                        type="button"
-                        className={`${viewToolBtn} text-base-content/50 hover:text-error`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleClearMeasures();
-                        }}
-                        aria-label="Borrar medidas"
-                      >
-                        <Trash2 size={15} />
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
-
-            {cutToolMode && (
-              <div className="inline-flex items-center gap-1 p-0.5 pl-1.5 rounded-xl bg-secondary/10 border border-secondary/20">
-                <span className="text-[11px] font-semibold text-secondary whitespace-nowrap hidden sm:inline">
-                  {CUT_SHAPE_LABELS[cutShapeKind]}
-                </span>
-                {(
-                  [
-                    {
-                      kind: "rect" as const,
-                      icon: RectangleHorizontal,
-                      tip: "Rectángulo (⇧ cuadrado)",
-                    },
-                    {
-                      kind: "circle" as const,
-                      icon: Circle,
-                      tip: "Óvalo desde esquina (⇧ círculo)",
-                    },
-                    {
-                      kind: "line" as const,
-                      icon: Minus,
-                      tip: "Línea de corte (⇧ recta)",
-                    },
-                  ] as const
-                ).map(({ kind, icon: Icon, tip }) => (
-                  <button
-                    key={kind}
-                    type="button"
-                    className={`${viewToolBtn} ${cutShapeKind === kind ? "bg-secondary/25 text-secondary ring-1 ring-secondary/40" : ""}`}
-                    title={tip}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setCutDraft(null);
-                      setCutShapeKind(kind);
-                    }}
-                    aria-label={tip}
-                    aria-pressed={cutShapeKind === kind}
-                  >
-                    <Icon size={15} />
-                  </button>
-                ))}
-                <div
-                  className="tooltip tooltip-bottom"
-                  data-tip={
-                    cutEdgeSnap
-                      ? "Bordes pegajosos ON — Alt libera al dibujar"
-                      : "Bordes pegajosos OFF — clic para activar"
-                  }
-                >
-                  <button
-                    type="button"
-                    className={`${viewToolBtn} ${cutEdgeSnap ? "bg-secondary/25 text-secondary ring-1 ring-secondary/40" : "text-base-content/50"}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setCutEdgeSnap((on) => !on);
-                    }}
-                    aria-label="Bordes pegajosos"
-                    aria-pressed={cutEdgeSnap}
-                  >
-                    <Magnet size={15} />
-                  </button>
-                </div>
-                {userCuts.length > 0 && (
-                  <span className="text-[10px] font-semibold text-warning/80 px-1 tabular-nums border-l border-warning/20 ml-0.5 pl-1.5">
-                    {userCuts.length}
-                  </span>
-                )}
-              </div>
-            )}
-
-            <div className="hidden sm:block w-px h-7 bg-base-300/50" />
-
-            {/* "Mostrar ocultos" — única acción contextual en la barra. Ocultar
-                vive en el eye-off de cada fila y en el menú contextual. */}
-            {hiddenGroupIds.size > 0 && (
-              <>
-                <div className="inline-flex items-center gap-0.5 p-0.5 rounded-xl bg-base-200/50">
-                  <div
-                    className="tooltip tooltip-bottom"
-                    data-tip="Mostrar ocultos"
-                  >
-                    <button
-                      type="button"
-                      className={`${viewToolBtn} w-auto px-2 gap-1`}
-                      onClick={handleShowAllHidden}
-                    >
-                      <Eye size={14} />
-                      <span className="text-xs font-semibold tabular-nums">
-                        {hiddenGroupIds.size}
-                      </span>
-                    </button>
-                  </div>
-                </div>
-                <div className="hidden sm:block w-px h-7 bg-base-300/50" />
-              </>
-            )}
-
-            {/* Vista y opciones — divulgación progresiva en un solo menú */}
-            <div className="dropdown dropdown-end">
-              <div
-                tabIndex={0}
-                role="button"
-                className="btn btn-sm btn-ghost gap-1.5 rounded-lg"
-              >
-                <SlidersHorizontal size={15} />
-                <span className="text-sm font-medium hidden sm:inline">
-                  Vista
-                </span>
-                <ChevronDown size={14} className="opacity-60" />
-              </div>
-              <ul
-                tabIndex={0}
-                className="dropdown-content menu bg-base-100 rounded-2xl shadow-xl border border-base-300/40 w-64 p-2 mt-2 z-30"
-              >
-                <li>
-                  <button
-                    type="button"
-                    onClick={handleRotateAxis}
-                    disabled={isRecomputing || isGenerating}
-                    className="justify-between"
-                  >
-                    <span className="flex items-center gap-2">
-                      {isRecomputing ? (
-                        <span className="loading loading-spinner loading-xs" />
-                      ) : (
-                        <RefreshCw size={15} />
-                      )}
-                      Rotar eje vertical
-                    </span>
-                    <span className="badge badge-sm badge-ghost font-mono">
-                      {phase1.appliedAxis === "Y" ? "Y↑" : "Z↑"}
-                    </span>
-                  </button>
-                </li>
-                <li>
-                  <label className="justify-between cursor-pointer">
-                    <span className="flex items-center gap-2">
-                      <Crosshair size={15} /> Mostrar ejes
-                    </span>
-                    <input
-                      type="checkbox"
-                      className="toggle toggle-sm toggle-primary"
-                      checked={showCenterAxes}
-                      onChange={() => setShowCenterAxes((s) => !s)}
-                    />
-                  </label>
-                </li>
-                <li>
-                  <label className="justify-between cursor-pointer">
-                    <span className="flex items-center gap-2">
-                      <Box size={15} /> Vista maciza
-                    </span>
-                    <input
-                      type="checkbox"
-                      className="toggle toggle-sm toggle-primary"
-                      checked={isSolid}
-                      onChange={() => setIsSolid((s) => !s)}
-                    />
-                  </label>
-                </li>
-                <li>
-                  <label className="justify-between cursor-pointer">
-                    <span className="flex items-center gap-2">
-                      <Maximize size={15} /> Pantalla completa
-                    </span>
-                    <input
-                      type="checkbox"
-                      className="toggle toggle-sm toggle-primary"
-                      checked={hideSidebar}
-                      onChange={() => setHideSidebar((s) => !s)}
-                    />
-                  </label>
-                </li>
-              </ul>
-            </div>
-            <div className="hidden sm:block w-px h-7 bg-base-300/50" />
-            <div
-              className="tooltip tooltip-bottom inline-flex items-center gap-1.5"
-              data-tip="Descartar automáticamente capas más pequeñas que el umbral"
-            >
-              <Trash2
-                size={14}
-                className="text-base-content/45 shrink-0 hidden sm:block"
-                aria-hidden
-              />
-              <label className="sr-only" htmlFor="min-area-select">
-                Descartar capas menores a
-              </label>
-              <select
-                id="min-area-select"
-                className="select select-bordered select-xs h-7 min-h-7 w-[6.25rem] bg-base-100 font-mono text-[11px] rounded-lg"
-                value={minAreaM2}
-                disabled={isRecomputing || isGenerating}
-                onClick={(e) => e.stopPropagation()}
-                onChange={(e) =>
-                  handleMinAreaChangeWithReset(Number(e.target.value))
-                }
-                aria-label="Descartar capas menores a"
-                title="Descartar capas menores a…"
-              >
-                {MIN_AREA_OPTIONS.map((a) => (
-                  <option key={a} value={a}>
-                    {formatMinAreaOption(a)}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Instructivo de armado button */}
-            {onRequestAssemblyPreview && (
-              <>
-                <div className="hidden sm:block w-px h-7 bg-base-300/50" />
-                <div className="tooltip tooltip-bottom" data-tip="Ver instructivo de armado">
-                  <button
-                    type="button"
-                    className={`btn btn-sm gap-1.5 rounded-lg ${assemblyWindowOpen ? "btn-primary" : "btn-ghost"}`}
-                    onClick={() => setAssemblyWindowOpen(true)}
-                  >
-                    <BookOpen size={15} />
-                    <span className="text-sm font-medium hidden sm:inline">Instructivo</span>
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Assembly window overlay */}
-      {(assemblyWindowOpen && (onRequestAssemblyPreview || assemblyGuideData)) && (
-        <AssemblyWindow
-          data={assemblyData}
-          loading={assemblyLoading}
-          error={assemblyError}
-          phase1={phase1}
-          categoryOverrides={overrides}
-          onClose={() => setAssemblyWindowOpen(false)}
-          onReload={() => void loadAssemblyPreview(true)}
-        />
-      )}
-
-      {!hideSidebar && (
-        <aside className="w-full md:w-[21rem] lg:w-[24rem] flex flex-col border-t md:border-t-0 md:border-l border-base-300/40 bg-base-100 shrink-0 h-[42vh] md:h-full z-20 shadow-2xl shadow-base-content/5">
+    <div className="fixed inset-0 z-50 bg-base-200/40 flex overflow-hidden">
+      <PanelGroup orientation="horizontal" id="review-screen-layout">
+        {!hideSidebar && (
+          <>
+            <Panel defaultSize={350} minSize={250} maxSize={500} className="flex flex-col shrink-0 h-[42vh] md:h-full z-20 shadow-2xl shadow-base-content/5 bg-base-100">
+              <aside className="w-full h-full flex flex-col border-t md:border-t-0 md:border-r border-base-300/40">
           <div className="px-4 pt-4 pb-3 border-b border-base-300/30 shrink-0 bg-base-100/80 text-primary font-semibold tracking-widest">
             <StepIndicator current="review" variant="compact" />
           </div>
@@ -3411,8 +2635,823 @@ export default function ReviewScreen({
               </button>
             </div>
           </div>
-        </aside>
+              </aside>
+            </Panel>
+            <PanelResizeHandle className="w-2 mx-0 cursor-col-resize hover:bg-primary transition-colors divider divider-horizontal" />
+          </>
+        )}
+        <Panel className="relative overflow-hidden flex-1">
+          <div className="w-full h-full relative overflow-hidden" ref={viewerAreaRef}>
+        <ModelViewer
+          faces={phase1.faces}
+          groups={displayGroups}
+          projectionGroups={phase1.groups}
+          derivedCutTriangles={derivedCutTriangles}
+          derivedPanelPolys={derivedPanelPolys}
+          selectedGroupIds={selectedGroupIds}
+          mergeMemberFaceIndices={mergeMemberHighlightFaceIndices}
+          categoryOverrides={overrides}
+          visibleCategories={visibleCategories}
+          hiddenGroupIds={hiddenGroupIds}
+          onSelectGroup={handleSelectGroup}
+          onToggleGroup={handleToggleGroup}
+          onContextMenu={openViewerContextMenu}
+          appliedAxis={phase1.appliedAxis}
+          showCenterAxes={showCenterAxes}
+          leaderMarkers={leaderMarkers}
+          isSolid={isSolid}
+          boxSelectActive={boxSelectMode}
+          viewerRef={viewerRef}
+          markGroupIds={markGroupIds}
+          flexSpecs={savedFlex}
+          cameraCommand={cameraCommand}
+          xray={xrayMode}
+          section={section}
+          walkMode={walkMode}
+          userCuts={userCuts}
+          cutDraft={cutDraft}
+          movingCutId={movingCutId}
+          measureDraft={measureDraft}
+          measures={measures}
+          measureLabelOptions={measureLabelOptions}
+          highlightMeasureId={selectedMeasureId}
+        />
+
+        <CutToolOverlay
+          active={cutToolMode}
+          shapeKind={cutShapeKind}
+          edgeSnapEnabled={cutEdgeSnap}
+          userCuts={userCuts}
+          selectedCutId={selectedCutId}
+          onSelectedCutIdChange={setSelectedCutId}
+          viewerRef={viewerRef}
+          onDraftChange={setCutDraft}
+          onMovingCutId={setMovingCutId}
+          onCommitCut={handleCommitCut}
+          onCommitMove={handleCommitMove}
+        />
+
+        <MeasureToolOverlay
+          active={measureToolMode}
+          shapeKind={measureShapeKind}
+          edgeSnapEnabled={cutEdgeSnap}
+          viewerRef={viewerRef}
+          onDraftChange={setMeasureDraft}
+          onCommitMeasure={handleCommitMeasure}
+        />
+
+        {/* Overlay mientras el backend recalcula la topología */}
+        {isRecomputing && (
+          <div className="absolute inset-0 z-40 flex flex-col items-center justify-center gap-3 bg-base-200/50 backdrop-blur-sm">
+            <span className="loading loading-spinner loading-lg text-primary" />
+            <p className="text-sm font-medium text-base-content/80">
+              Recalculando en el servidor…
+            </p>
+          </div>
+        )}
+
+        {/* Box-select overlay — captures pointer events when active */}
+        {boxSelectMode && !cutToolMode && !measureToolMode && (
+          <div
+            className="absolute inset-0 z-20"
+            style={{ cursor: "crosshair" }}
+            onPointerDown={(e) => {
+              const under = document.elementFromPoint(e.clientX, e.clientY);
+              if (under?.closest("[data-viewer-chrome]")) return;
+              handleBoxPointerDown(e);
+            }}
+            onPointerMove={handleBoxPointerMove}
+            onPointerUp={handleBoxPointerUp}
+          />
+        )}
+
+        {/* Drag rectangle */}
+        {dragRect && (
+          <div
+            className="fixed z-30 pointer-events-none border-2 border-primary bg-primary/10 rounded-sm"
+            style={{
+              left: dragRect.x,
+              top: dragRect.y,
+              width: dragRect.w,
+              height: dragRect.h,
+            }}
+          />
+        )}
+
+        {contextMenu && (
+          <div
+            className="fixed z-[60] min-w-[11rem] rounded-xl border border-base-300/60 bg-base-100/95 backdrop-blur-md shadow-xl shadow-base-content/10 py-1"
+            style={{ left: contextMenu.x, top: contextMenu.y }}
+            onClick={(e) => e.stopPropagation()}
+            onContextMenu={(e) => e.preventDefault()}
+          >
+            {canMergeSelected && (
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 px-3 py-2 text-sm text-left hover:bg-primary/10 transition-colors"
+                onClick={handleMergeSelected}
+              >
+                <Link2 size={15} className="text-primary shrink-0" />
+                {mergeLabel}
+              </button>
+            )}
+            {selectedGroupIds.size >= 2 &&
+              !canMergeSelected &&
+              mergeBlockedReason && (
+                <p className="px-3 py-2 text-[11px] text-base-content/45 leading-relaxed border-b border-base-300/30">
+                  {mergeBlockedReason}
+                </p>
+              )}
+            {canSplitMerged && (
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 px-3 py-2 text-sm text-left hover:bg-base-200/80 transition-colors"
+                onClick={() => {
+                  handleDivideMerged();
+                  setContextMenu(null);
+                }}
+              >
+                <SquareSplitHorizontal
+                  size={15}
+                  className="text-base-content/70 shrink-0"
+                />
+                {divideAllLabel}
+              </button>
+            )}
+            {selectedGroup &&
+              getEffectiveCategory(selectedGroup, overrides) !== "discard" && (
+                <button
+                  type="button"
+                  className={`flex w-full items-center gap-2 px-3 py-2 text-sm text-left transition-colors ${
+                    markGroupIds.has(selectedGroup.id)
+                      ? "hover:bg-error/10 text-error"
+                      : "hover:bg-base-200/80"
+                  }`}
+                  onClick={() => {
+                    handleToggleMark(selectedGroup.id);
+                    setContextMenu(null);
+                  }}
+                >
+                  <PenLine size={15} className="shrink-0" />
+                  {markGroupIds.has(selectedGroup.id)
+                    ? "Desmarcar aberturas"
+                    : "Marcar aberturas (grabar en rojo)"}
+                </button>
+              )}
+            {selectedGroupIds.size > 0 && (
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 px-3 py-2 text-sm text-left hover:bg-error/10 text-error transition-colors"
+                onClick={() => {
+                  const ids = Array.from(selectedGroupIds);
+                  pushHistory();
+                  setOverrides((prev) => {
+                    const next = new Map(prev);
+                    for (const gid of ids)
+                      applyCategoryOverride(next, gid, "discard");
+                    return next;
+                  });
+                  setSelectedGroupIds(new Set());
+                  setContextMenu(null);
+                }}
+              >
+                <Trash2 size={15} className="shrink-0" />
+                Descartar{" "}
+                {selectedGroupIds.size === 1
+                  ? "capa"
+                  : `${selectedGroupIds.size} capas`}
+              </button>
+            )}
+            {selectedGroupIds.size > 0 && (
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 px-3 py-2 text-sm text-left hover:bg-base-200/80 transition-colors"
+                onClick={handleHideSelected}
+              >
+                <EyeOff size={15} className="text-base-content/60 shrink-0" />
+                Ocultar{" "}
+                {selectedGroupIds.size === 1
+                  ? "capa"
+                  : `${selectedGroupIds.size} capas`}
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* HUD del modo caminar */}
+        {walkMode && (
+          <div
+            data-viewer-chrome
+            className="absolute bottom-4 left-1/2 -translate-x-1/2 z-40 pointer-events-none flex items-center gap-3 px-3 py-1.5 rounded-full bg-base-100/90 backdrop-blur-xl border border-base-300/40 shadow-lg text-xs text-base-content/75"
+          >
+            <Footprints size={13} className="text-primary" />
+            <span>Click para mirar · <b>WASD</b> moverse · <b>Espacio/Shift</b> subir/bajar · <b>Esc</b> salir</span>
+          </div>
+        )}
+
+        {/* Panel del plano de corte (sección) */}
+        {section.enabled && (
+          <div
+            data-viewer-chrome
+            className="absolute bottom-4 left-4 z-40 pointer-events-auto flex items-center gap-2 p-2 rounded-2xl bg-base-100/90 backdrop-blur-xl border border-base-300/40 shadow-lg"
+          >
+            <Scissors size={14} className="text-primary shrink-0" />
+            <div className="inline-flex items-center gap-0.5 p-0.5 rounded-lg bg-base-200/50">
+              {(["x", "y", "z"] as const).map((ax) => (
+                <button
+                  key={ax}
+                  type="button"
+                  className={`px-2 py-1 rounded-md text-xs font-medium uppercase transition-colors ${
+                    section.axis === ax
+                      ? "bg-primary/15 text-primary"
+                      : "text-base-content/60 hover:bg-base-200"
+                  }`}
+                  onClick={() => setSection((s) => ({ ...s, axis: ax }))}
+                >
+                  {ax}
+                </button>
+              ))}
+            </div>
+            <input
+              type="range"
+              className="range range-primary range-xs w-40"
+              min={0}
+              max={1}
+              step={0.01}
+              value={section.pos}
+              onChange={(e) => setSection((s) => ({ ...s, pos: Number(e.target.value) }))}
+              aria-label="Posición del corte"
+            />
+            <button
+              type="button"
+              className="btn btn-ghost btn-xs btn-circle"
+              onClick={() => setSection((s) => ({ ...s, enabled: false }))}
+              aria-label="Cerrar corte"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        )}
+
+        {/* Toolbar — por encima del overlay de cortes/selección (z-20) */}
+        {hideToolbar && (
+          <button
+            type="button"
+            className="absolute top-4 right-4 z-50 btn btn-sm btn-circle bg-base-100/80 backdrop-blur-md border border-base-300/40 shadow-lg text-base-content/80 hover:bg-base-200 pointer-events-auto"
+            onClick={() => setHideToolbar(false)}
+            title="Mostrar herramientas"
+          >
+            <ChevronDown size={18} />
+          </button>
+        )}
+        {!hideToolbar && (
+          <div
+            data-viewer-chrome
+            className="absolute top-4 left-4 right-4 z-40 flex flex-col gap-2 pointer-events-none"
+          >
+          <div className="pointer-events-auto flex flex-wrap items-center gap-2 p-2 rounded-2xl bg-base-100/85 backdrop-blur-xl border border-base-300/40 shadow-lg shadow-base-content/5">
+            <VisibilityFilters
+              stats={stats}
+              visibleCategories={visibleCategories}
+              onToggle={handleToggleVisibility}
+            />
+
+            <div className="hidden sm:block w-px h-7 bg-base-300/50" />
+
+            <div className="inline-flex items-center gap-0.5 p-0.5 rounded-xl bg-base-200/50">
+              <div
+                className="tooltip tooltip-bottom"
+                data-tip="Deshacer (Ctrl+Z)"
+              >
+                <button
+                  type="button"
+                  className={viewToolBtn}
+                  onClick={handleUndo}
+                  disabled={!canUndo}
+                  aria-label="Deshacer"
+                >
+                  <ArrowBackIcon size={15} />
+                </button>
+              </div>
+              <div
+                className="tooltip tooltip-bottom"
+                data-tip="Rehacer (Ctrl+Y)"
+              >
+                <button
+                  type="button"
+                  className={viewToolBtn}
+                  onClick={handleRedo}
+                  disabled={!canRedo}
+                  aria-label="Rehacer"
+                >
+                  <ArrowRight size={15} />
+                </button>
+              </div>
+            </div>
+
+            <div className="hidden sm:block w-px h-7 bg-base-300/50" />
+
+            <div className="inline-flex items-center gap-0.5 p-0.5 rounded-xl bg-base-200/50">
+              <div
+                className="tooltip tooltip-bottom"
+                data-tip={selectedGroupIds.size > 0 ? "Encuadrar selección (Z)" : "Encuadrar todo (Z)"}
+              >
+                <button
+                  type="button"
+                  className={viewToolBtn}
+                  onClick={() =>
+                    triggerCamera(selectedGroupIds.size > 0 ? "frameSelection" : "frameAll")
+                  }
+                  aria-label="Encuadrar"
+                >
+                  <Crosshair size={15} />
+                </button>
+              </div>
+              <div className="tooltip tooltip-bottom" data-tip="Vista general (reset)">
+                <button
+                  type="button"
+                  className={viewToolBtn}
+                  onClick={() => triggerCamera("reset")}
+                  aria-label="Vista general"
+                >
+                  <Maximize size={15} />
+                </button>
+              </div>
+              <div className="tooltip tooltip-bottom" data-tip="Rayos X (ver interior)">
+                <button
+                  type="button"
+                  className={`${viewToolBtn} ${xrayMode ? "bg-primary/15 text-primary hover:bg-primary/20" : ""}`}
+                  onClick={() => setXrayMode((v) => !v)}
+                  aria-label="Rayos X"
+                >
+                  <ScanSearch size={15} />
+                </button>
+              </div>
+              <div className="tooltip tooltip-bottom" data-tip="Plano de corte (ver interior)">
+                <button
+                  type="button"
+                  className={`${viewToolBtn} ${section.enabled ? "bg-primary/15 text-primary hover:bg-primary/20" : ""}`}
+                  onClick={() => setSection((s) => ({ ...s, enabled: !s.enabled }))}
+                  aria-label="Plano de corte"
+                >
+                  <Scissors size={15} />
+                </button>
+              </div>
+              <div className="tooltip tooltip-bottom" data-tip="Caminar / volar (primera persona)">
+                <button
+                  type="button"
+                  className={`${viewToolBtn} ${walkMode ? "bg-primary/15 text-primary hover:bg-primary/20" : ""}`}
+                  onClick={toggleWalk}
+                  aria-label="Caminar"
+                >
+                  <Footprints size={15} />
+                </button>
+              </div>
+              {!walkMode && <CameraNavigationSelect variant="toolbar" />}
+            </div>
+
+            <div className="hidden sm:block w-px h-7 bg-base-300/50" />
+
+            <div className="inline-flex items-center gap-0.5 p-0.5 rounded-xl bg-base-200/50">
+              <div className="tooltip tooltip-bottom" data-tip="Cursor (V)">
+                <button
+                  type="button"
+                  className={`${viewToolBtn} ${!boxSelectMode && !cutToolMode && !measureToolMode ? "bg-primary/15 text-primary hover:bg-primary/20" : ""}`}
+                  onClick={() => {
+                    setCutToolMode(false);
+                    setCutDraft(null);
+                    setMeasureToolMode(false);
+                    setMeasureDraft(null);
+                    setBoxSelectMode(false);
+                  }}
+                  aria-label="Cursor"
+                  aria-pressed={
+                    !boxSelectMode && !cutToolMode && !measureToolMode
+                  }
+                >
+                  <MousePointer2 size={15} />
+                </button>
+              </div>
+              <div
+                className="tooltip tooltip-bottom"
+                data-tip="Selección por área (S)"
+              >
+                <button
+                  type="button"
+                  className={`${viewToolBtn} ${boxSelectMode ? "bg-primary/15 text-primary hover:bg-primary/20" : ""}`}
+                  onClick={() => {
+                    setCutToolMode(false);
+                    setCutDraft(null);
+                    setMeasureToolMode(false);
+                    setMeasureDraft(null);
+                    setBoxSelectMode((s) => !s);
+                  }}
+                  aria-label="Selección por área"
+                  aria-pressed={boxSelectMode}
+                >
+                  <Lasso size={15} />
+                </button>
+              </div>
+              <div
+                className="tooltip tooltip-bottom"
+                data-tip={
+                  cutToolMode
+                    ? `${CUT_SHAPE_LABELS[cutShapeKind]} · C cambia forma · Alt libera bordes · V sale`
+                    : "Cortes (C)"
+                }
+              >
+                <button
+                  type="button"
+                  className={`${viewToolBtn} ${cutToolMode ? "bg-secondary/20 text-secondary hover:bg-secondary/25" : ""}`}
+                  onClick={() => {
+                    setMeasureToolMode(false);
+                    setMeasureDraft(null);
+                    setBoxSelectMode(false);
+                    setCutDraft(null);
+                    setCutToolMode((active) => {
+                      if (!active) return true;
+                      setCutShapeKind((shape) => nextCutShape(shape));
+                      return true;
+                    });
+                  }}
+                  aria-label="Herramienta de cortes"
+                  aria-pressed={cutToolMode}
+                >
+                  <Scissors size={15} />
+                </button>
+              </div>
+              <div
+                className="tooltip tooltip-bottom"
+                data-tip={
+                  measureToolMode
+                    ? `${MEASURE_SHAPE_LABELS[measureShapeKind]} · M apaga · V sale`
+                    : "Medir (M) "
+                }
+              >
+                <button
+                  type="button"
+                  className={`${viewToolBtn} ${measureToolMode ? "bg-secondary/20 text-secondary hover:bg-secondary/25" : ""}`}
+                  onClick={() => {
+                    setCutToolMode(false);
+                    setCutDraft(null);
+                    setBoxSelectMode(false);
+                    setMeasureDraft(null);
+                    setMeasureToolMode((active) => !active);
+                  }}
+                  aria-label="Herramienta de medición"
+                  aria-pressed={measureToolMode}
+                >
+                  <Ruler size={15} />
+                </button>
+              </div>
+            </div>
+
+            {measureToolMode && (
+              <div className="inline-flex items-center gap-1 p-0.5 pl-1.5 rounded-xl bg-secondary/10 border border-secondary/25">
+                <span className="text-[11px] font-semibold text-secondary whitespace-nowrap hidden sm:inline">
+                  {MEASURE_SHAPE_LABELS[measureShapeKind]}
+                </span>
+                {(
+                  [
+                    {
+                      kind: "line" as const,
+                      icon: Minus,
+                      tip: "Distancia (⇧ recta)",
+                    },
+                    {
+                      kind: "rect" as const,
+                      icon: RectangleHorizontal,
+                      tip: "Área / alto × ancho (⇧ cuadrado)",
+                    },
+                  ] as const
+                ).map(({ kind, icon: Icon, tip }) => (
+                  <button
+                    key={kind}
+                    type="button"
+                    className={`${viewToolBtn} ${measureShapeKind === kind ? "bg-secondary/25 text-secondary ring-1 ring-secondary/40" : ""}`}
+                    title={tip}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setMeasureDraft(null);
+                      setMeasureShapeKind(kind);
+                    }}
+                    aria-label={tip}
+                    aria-pressed={measureShapeKind === kind}
+                  >
+                    <Icon size={15} />
+                  </button>
+                ))}
+                <MeasureScaleSelect
+                  value={measureLabelScale}
+                  onChange={handleMeasureScaleChange}
+                  onClick={(e) => e.stopPropagation()}
+                  className="border-l border-secondary/25 pl-1 ml-0.5"
+                  selectClassName="select select-bordered select-xs h-8 min-h-8 w-[5.75rem] bg-base-100 font-mono text-[11px]"
+                />
+                <div
+                  className="tooltip tooltip-bottom"
+                  data-tip={
+                    cutEdgeSnap
+                      ? "Bordes pegajosos ON — Alt libera al medir"
+                      : "Bordes pegajosos OFF — clic para activar"
+                  }
+                >
+                  <button
+                    type="button"
+                    className={`${viewToolBtn} ${cutEdgeSnap ? "bg-secondary/25 text-secondary ring-1 ring-secondary/40" : "text-base-content/50"}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setCutEdgeSnap((on) => !on);
+                    }}
+                    aria-label="Bordes pegajosos"
+                    aria-pressed={cutEdgeSnap}
+                  >
+                    <Magnet size={15} />
+                  </button>
+                </div>
+                {measures.length > 0 && (
+                  <>
+                    <span className="text-[11px] font-mono font-semibold text-secondary/80 px-1">
+                      {measures.length}
+                    </span>
+                    <div
+                      className="tooltip tooltip-bottom"
+                      data-tip="Borrar todas las medidas · Supr quita la seleccionada o la última"
+                    >
+                      <button
+                        type="button"
+                        className={`${viewToolBtn} text-base-content/50 hover:text-error`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleClearMeasures();
+                        }}
+                        aria-label="Borrar medidas"
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
+            {cutToolMode && (
+              <div className="inline-flex items-center gap-1 p-0.5 pl-1.5 rounded-xl bg-secondary/10 border border-secondary/20">
+                <span className="text-[11px] font-semibold text-secondary whitespace-nowrap hidden sm:inline">
+                  {CUT_SHAPE_LABELS[cutShapeKind]}
+                </span>
+                {(
+                  [
+                    {
+                      kind: "rect" as const,
+                      icon: RectangleHorizontal,
+                      tip: "Rectángulo (⇧ cuadrado)",
+                    },
+                    {
+                      kind: "circle" as const,
+                      icon: Circle,
+                      tip: "Óvalo desde esquina (⇧ círculo)",
+                    },
+                    {
+                      kind: "line" as const,
+                      icon: Minus,
+                      tip: "Línea de corte (⇧ recta)",
+                    },
+                  ] as const
+                ).map(({ kind, icon: Icon, tip }) => (
+                  <button
+                    key={kind}
+                    type="button"
+                    className={`${viewToolBtn} ${cutShapeKind === kind ? "bg-secondary/25 text-secondary ring-1 ring-secondary/40" : ""}`}
+                    title={tip}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setCutDraft(null);
+                      setCutShapeKind(kind);
+                    }}
+                    aria-label={tip}
+                    aria-pressed={cutShapeKind === kind}
+                  >
+                    <Icon size={15} />
+                  </button>
+                ))}
+                <div
+                  className="tooltip tooltip-bottom"
+                  data-tip={
+                    cutEdgeSnap
+                      ? "Bordes pegajosos ON — Alt libera al dibujar"
+                      : "Bordes pegajosos OFF — clic para activar"
+                  }
+                >
+                  <button
+                    type="button"
+                    className={`${viewToolBtn} ${cutEdgeSnap ? "bg-secondary/25 text-secondary ring-1 ring-secondary/40" : "text-base-content/50"}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setCutEdgeSnap((on) => !on);
+                    }}
+                    aria-label="Bordes pegajosos"
+                    aria-pressed={cutEdgeSnap}
+                  >
+                    <Magnet size={15} />
+                  </button>
+                </div>
+                {userCuts.length > 0 && (
+                  <span className="text-[10px] font-semibold text-warning/80 px-1 tabular-nums border-l border-warning/20 ml-0.5 pl-1.5">
+                    {userCuts.length}
+                  </span>
+                )}
+              </div>
+            )}
+
+            <div className="hidden sm:block w-px h-7 bg-base-300/50" />
+
+            {/* "Mostrar ocultos" — única acción contextual en la barra. Ocultar
+                vive en el eye-off de cada fila y en el menú contextual. */}
+            {hiddenGroupIds.size > 0 && (
+              <>
+                <div className="inline-flex items-center gap-0.5 p-0.5 rounded-xl bg-base-200/50">
+                  <div
+                    className="tooltip tooltip-bottom"
+                    data-tip="Mostrar ocultos"
+                  >
+                    <button
+                      type="button"
+                      className={`${viewToolBtn} w-auto px-2 gap-1`}
+                      onClick={handleShowAllHidden}
+                    >
+                      <Eye size={14} />
+                      <span className="text-xs font-semibold tabular-nums">
+                        {hiddenGroupIds.size}
+                      </span>
+                    </button>
+                  </div>
+                </div>
+                <div className="hidden sm:block w-px h-7 bg-base-300/50" />
+              </>
+            )}
+
+            {/* Vista y opciones — divulgación progresiva en un solo menú */}
+            <div className="dropdown dropdown-end">
+              <div
+                tabIndex={0}
+                role="button"
+                className="btn btn-sm btn-ghost gap-1.5 rounded-lg"
+              >
+                <SlidersHorizontal size={15} />
+                <span className="text-sm font-medium hidden sm:inline">
+                  Vista
+                </span>
+                <ChevronDown size={14} className="opacity-60" />
+              </div>
+              <ul
+                tabIndex={0}
+                className="dropdown-content menu bg-base-100 rounded-2xl shadow-xl border border-base-300/40 w-64 p-2 mt-2 z-30"
+              >
+                <li>
+                  <button
+                    type="button"
+                    onClick={handleRotateAxis}
+                    disabled={isRecomputing || isGenerating}
+                    className="justify-between"
+                  >
+                    <span className="flex items-center gap-2">
+                      {isRecomputing ? (
+                        <span className="loading loading-spinner loading-xs" />
+                      ) : (
+                        <RefreshCw size={15} />
+                      )}
+                      Rotar eje vertical
+                    </span>
+                    <span className="badge badge-sm badge-ghost font-mono">
+                      {phase1.appliedAxis === "Y" ? "Y↑" : "Z↑"}
+                    </span>
+                  </button>
+                </li>
+                <li>
+                  <label className="justify-between cursor-pointer">
+                    <span className="flex items-center gap-2">
+                      <Crosshair size={15} /> Mostrar ejes
+                    </span>
+                    <input
+                      type="checkbox"
+                      className="toggle toggle-sm toggle-primary"
+                      checked={showCenterAxes}
+                      onChange={() => setShowCenterAxes((s) => !s)}
+                    />
+                  </label>
+                </li>
+                <li>
+                  <label className="justify-between cursor-pointer">
+                    <span className="flex items-center gap-2">
+                      <Box size={15} /> Vista maciza
+                    </span>
+                    <input
+                      type="checkbox"
+                      className="toggle toggle-sm toggle-primary"
+                      checked={isSolid}
+                      onChange={() => setIsSolid((s) => !s)}
+                    />
+                  </label>
+                </li>
+                <li>
+                  <label className="justify-between cursor-pointer">
+                    <span className="flex items-center gap-2">
+                      <Maximize size={15} /> Pantalla completa
+                    </span>
+                    <input
+                      type="checkbox"
+                      className="toggle toggle-sm toggle-primary"
+                      checked={hideSidebar}
+                      onChange={() => setHideSidebar((s) => !s)}
+                    />
+                  </label>
+                </li>
+                <li>
+                  <label className="justify-between cursor-pointer">
+                    <span className="flex items-center gap-2">
+                      <EyeOff size={15} /> Ocultar barra superior
+                    </span>
+                    <input
+                      type="checkbox"
+                      className="toggle toggle-sm toggle-primary"
+                      checked={hideToolbar}
+                      onChange={() => setHideToolbar((s) => !s)}
+                    />
+                  </label>
+                </li>
+              </ul>
+            </div>
+            <div className="hidden sm:block w-px h-7 bg-base-300/50" />
+            <div
+              className="tooltip tooltip-bottom inline-flex items-center gap-1.5"
+              data-tip="Descartar automáticamente capas más pequeñas que el umbral"
+            >
+              <Trash2
+                size={14}
+                className="text-base-content/45 shrink-0 hidden sm:block"
+                aria-hidden
+              />
+              <label className="sr-only" htmlFor="min-area-select">
+                Descartar capas menores a
+              </label>
+              <select
+                id="min-area-select"
+                className="select select-bordered select-xs h-7 min-h-7 w-[6.25rem] bg-base-100 font-mono text-[11px] rounded-lg"
+                value={minAreaM2}
+                disabled={isRecomputing || isGenerating}
+                onClick={(e) => e.stopPropagation()}
+                onChange={(e) =>
+                  handleMinAreaChangeWithReset(Number(e.target.value))
+                }
+                aria-label="Descartar capas menores a"
+                title="Descartar capas menores a…"
+              >
+                {MIN_AREA_OPTIONS.map((a) => (
+                  <option key={a} value={a}>
+                    {formatMinAreaOption(a)}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Instructivo de armado button */}
+            {onRequestAssemblyPreview && (
+              <>
+                <div className="hidden sm:block w-px h-7 bg-base-300/50" />
+                <div className="tooltip tooltip-bottom" data-tip="Ver instructivo de armado">
+                  <button
+                    type="button"
+                    className={`btn btn-sm gap-1.5 rounded-lg ${assemblyWindowOpen ? "btn-primary" : "btn-ghost"}`}
+                    onClick={() => setAssemblyWindowOpen(true)}
+                  >
+                    <BookOpen size={15} />
+                    <span className="text-sm font-medium hidden sm:inline">Instructivo</span>
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+        )}
+          </div>
+        </Panel>
+      </PanelGroup>
+
+      {/* Assembly window overlay */}
+      {(assemblyWindowOpen && (onRequestAssemblyPreview || assemblyGuideData)) && (
+        <AssemblyWindow
+          data={assemblyData}
+          loading={assemblyLoading}
+          error={assemblyError}
+          phase1={phase1}
+          categoryOverrides={overrides}
+          onClose={() => setAssemblyWindowOpen(false)}
+          onReload={() => void loadAssemblyPreview(true)}
+        />
       )}
+
+      
 
       {bulkSimilarModal && (
         <dialog className="modal modal-open">
