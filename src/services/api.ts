@@ -4,6 +4,8 @@ import type { UserCut } from "@/core/user-cuts";
 import { serializeUserCutsForApi } from "@/core/user-cuts";
 import type { FlexSpec } from "@/core/flex-bending";
 import { serializeFlexForApi } from "@/core/flex-bending";
+import type { MarkLine } from "@/core/mark-lines";
+import { serializeMarkLinesForApi } from "@/core/mark-lines";
 import {
   fetchWithApiFallback,
   type ApiFetchOptions,
@@ -21,6 +23,11 @@ export function userCutsForApi(cuts: UserCut[]): Record<string, unknown>[] {
 /** Serializa los specs de flexión (kerf/auxético) al formato snake_case del backend. */
 export function flexForApi(specs: FlexSpec[]): Record<string, unknown>[] {
   return serializeFlexForApi(specs);
+}
+
+/** Serializa las líneas de marca rojas al formato snake_case del backend. */
+export function markLinesForApi(lines: MarkLine[]): Record<string, unknown>[] {
+  return serializeMarkLinesForApi(lines);
 }
 
 export async function apiFetch(
@@ -261,6 +268,8 @@ export interface NestingPreviewPayload {
   user_cuts?: Record<string, unknown>[];
   /** Specs de flexión por grupo (kerf/auxético). Ver CONTRATO_kerf_auxetico.md. */
   flex?: Record<string, unknown>[];
+  /** Líneas de marca rojas (polilíneas UV por grupo) a grabar. Ver CONTRATO_mark_lines_backend.md. */
+  mark_lines?: Record<string, unknown>[];
 }
 
 export interface GenerateRequestPayload {
@@ -290,6 +299,8 @@ export interface GenerateRequestPayload {
   user_cuts?: Record<string, unknown>[];
   /** Specs de flexión por grupo (kerf/auxético). Ver CONTRATO_kerf_auxetico.md. */
   flex?: Record<string, unknown>[];
+  /** Líneas de marca rojas (polilíneas UV por grupo) a grabar. Ver CONTRATO_mark_lines_backend.md. */
+  mark_lines?: Record<string, unknown>[];
 }
 
 export interface GenerateResponse {

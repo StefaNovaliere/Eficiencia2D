@@ -11,6 +11,7 @@ import {
   generateProjectFiles,
   userCutsForApi,
   flexForApi,
+  markLinesForApi,
   type SplitOperation,
 } from "@/services/api";
 import { extractAssemblyGuideFromZip } from "@/core/assembly-guide";
@@ -44,6 +45,7 @@ export default function PaymentPage() {
     savedMarks,
     savedUserCuts,
     savedFlex,
+    savedMarkLines,
     scale,
     paper,
     pdfPageMode,
@@ -128,6 +130,7 @@ export default function PaymentPage() {
         marks: savedMarks,
         user_cuts: userCutsForApi(savedUserCuts),
         flex: flexForApi(savedFlex),
+        mark_lines: markLinesForApi(savedMarkLines),
       }, token);
 
       if (!backendRes.zip_base64) {
@@ -172,6 +175,7 @@ export default function PaymentPage() {
     savedMarks,
     savedUserCuts,
     savedFlex,
+    savedMarkLines,
     triggerDownload,
     setAssemblyGuideData,
     token,

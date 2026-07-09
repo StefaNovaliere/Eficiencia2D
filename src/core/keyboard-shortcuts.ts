@@ -97,6 +97,12 @@ export const REVIEW_KEYBOARD_SHORTCUTS: KeyboardShortcutSection[] = [
         combos: [["M"]],
       },
       {
+        id: "mark-line-tool",
+        label: "Marcar con líneas rojas (grabar)",
+        detail: "Si ya está activa, alterna entre trazo recto y libre. Supr borra la última.",
+        combos: [["R"]],
+      },
+      {
         id: "merge",
         label: "Fusionar componentes seleccionados",
         detail: "Solo cuando hay más de un componente seleccionado y se pueden fusionar.",
