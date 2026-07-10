@@ -28,7 +28,7 @@ const SLOT_COLOR = 0xfacc15; // ranuras de encastre (overlay v2, ámbar)
 // es de un solo material; MDF por defecto (cambiar a cartón = un color global
 // cuando exista un selector de material).
 const MDF_COLOR = 0xc9a97e; // tan cálido (MDF)
-const EDGE_BURNT = 0x3b2a1a; // canto oscuro (quemado láser)
+const EDGE_BURNT = 0x7a5c3c; // canto de MDF (chamuscado, apenas más oscuro que la cara)
 
 function isLifted(piece: AssemblySequencePiece): boolean {
   return (piece.lifted?.positions?.length ?? 0) >= 9;
@@ -241,11 +241,11 @@ function StaticLiftedPiece({ piece }: { piece: AssemblySequencePiece }) {
   return (
     <group>
       <mesh geometry={slab.cap} frustumCulled={false} castShadow receiveShadow>
-        <meshStandardMaterial color={MDF_COLOR} roughness={0.7} metalness={0.05} />
+        <meshStandardMaterial color={MDF_COLOR} roughness={0.7} metalness={0.05} side={THREE.DoubleSide} />
       </mesh>
       {slab.wall && (
         <mesh geometry={slab.wall} frustumCulled={false} castShadow receiveShadow>
-          <meshStandardMaterial color={EDGE_BURNT} roughness={0.85} metalness={0.05} />
+          <meshStandardMaterial color={EDGE_BURNT} roughness={0.85} metalness={0.05} side={THREE.DoubleSide} />
         </mesh>
       )}
       {slotGeom && (
@@ -339,11 +339,12 @@ function DroppingLiftedPiece({
           emissiveIntensity={0.45}
           roughness={0.7}
           metalness={0.05}
+          side={THREE.DoubleSide}
         />
       </mesh>
       {slab.wall && (
         <mesh geometry={slab.wall} frustumCulled={false} castShadow receiveShadow>
-          <meshStandardMaterial color={EDGE_BURNT} roughness={0.85} metalness={0.05} />
+          <meshStandardMaterial color={EDGE_BURNT} roughness={0.85} metalness={0.05} side={THREE.DoubleSide} />
         </mesh>
       )}
       {slotGeom && (
