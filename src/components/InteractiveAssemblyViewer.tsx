@@ -15,26 +15,23 @@ import {
   computeSequenceDiag,
   prepareAssemblyPiecesForRender,
 } from "@/core/assembly-sequence";
+import { buildSlab, faceNormalFromPositions } from "@/core/assembly-slab";
 
 const DROP_HEIGHT_FACTOR = 0.35;
 const PAST_COLOR = 0x94a3b8;
 const HIGHLIGHT_COLOR = 0xfbbf24;
 const HIGHLIGHT_EMISSIVE = 0xf59e0b;
-// Colores neón por categoría para las piezas de corte lifteadas.
-const WALL_COLOR = 0x22d3ee; // cian
-const FLOOR_COLOR = 0xff2bd6; // rosa
 const OPENING_COLOR = 0x0f172a; // aberturas (corte)
 const MARK_COLOR = 0xdc2626; // aberturas grabadas (marca, rojo)
 const SLOT_COLOR = 0xfacc15; // ranuras de encastre (overlay v2, ámbar)
+// Material físico (slab con grosor real): caras claras + canto quemado. Un modelo
+// es de un solo material; MDF por defecto (cambiar a cartón = un color global
+// cuando exista un selector de material).
+const MDF_COLOR = 0xc9a97e; // tan cálido (MDF)
+const EDGE_BURNT = 0x3b2a1a; // canto oscuro (quemado láser)
 
 function isLifted(piece: AssemblySequencePiece): boolean {
   return (piece.lifted?.positions?.length ?? 0) >= 9;
-}
-
-function pieceCategoryColor(piece: AssemblySequencePiece): number {
-  if (piece.category === "floor") return FLOOR_COLOR;
-  if (piece.category === "wall") return WALL_COLOR;
-  return piece.color ? hexToNumber(piece.color) : PAST_COLOR;
 }
 
 function sanitizePositions(positions: number[]): number[] {
@@ -62,6 +59,21 @@ function buildMeshGeometry(positions: number[]): THREE.BufferGeometry | null {
     return null;
   }
   return g;
+}
+
+/**
+ * Engrosa el contorno plano lifteado a un slab sólido de espesor `depth`:
+ * `cap` = tapas (frente+dorso), `wall` = cantos laterales. Si no se puede
+ * calcular la normal, cae a la cara plana (sin canto).
+ */
+function buildSlabGeometries(
+  positions: number[],
+  depth: number,
+): { cap: THREE.BufferGeometry | null; wall: THREE.BufferGeometry | null } {
+  const normal = faceNormalFromPositions(positions);
+  if (!normal) return { cap: buildMeshGeometry(positions), wall: null };
+  const { caps, walls } = buildSlab(positions, normal, depth);
+  return { cap: buildMeshGeometry(caps), wall: buildMeshGeometry(walls) };
 }
 
 function buildLineGeometry(segments: number[]): THREE.BufferGeometry | null {
@@ -205,12 +217,12 @@ function DroppingPiece({
   );
 }
 
-/** Pieza de corte ya colocada — contorno real (con aberturas) lifteado a 3D. */
+/** Pieza de corte ya colocada — contorno real (con aberturas) engrosado a slab 3D. */
 function StaticLiftedPiece({ piece }: { piece: AssemblySequencePiece }) {
   const lifted = piece.lifted;
-  const geom = useMemo(
-    () => (lifted ? buildMeshGeometry(lifted.positions) : null),
-    [lifted],
+  const slab = useMemo(
+    () => (lifted ? buildSlabGeometries(lifted.positions, safeDim(piece.depth_m)) : null),
+    [lifted, piece.depth_m],
   );
   const lineGeom = useMemo(
     () =>
@@ -224,18 +236,18 @@ function StaticLiftedPiece({ piece }: { piece: AssemblySequencePiece }) {
     [lifted],
   );
 
-  if (!geom) return <StaticPiece piece={piece} />;
+  if (!slab?.cap) return <StaticPiece piece={piece} />;
 
   return (
     <group>
-      <mesh geometry={geom} frustumCulled={false} castShadow receiveShadow>
-        <meshStandardMaterial
-          color={pieceCategoryColor(piece)}
-          roughness={0.55}
-          metalness={0.1}
-          side={THREE.DoubleSide}
-        />
+      <mesh geometry={slab.cap} frustumCulled={false} castShadow receiveShadow>
+        <meshStandardMaterial color={MDF_COLOR} roughness={0.7} metalness={0.05} />
       </mesh>
+      {slab.wall && (
+        <mesh geometry={slab.wall} frustumCulled={false} castShadow receiveShadow>
+          <meshStandardMaterial color={EDGE_BURNT} roughness={0.85} metalness={0.05} />
+        </mesh>
+      )}
       {slotGeom && (
         <mesh geometry={slotGeom} frustumCulled={false}>
           <meshStandardMaterial color={SLOT_COLOR} roughness={0.6} metalness={0.1} side={THREE.DoubleSide} />
@@ -262,9 +274,9 @@ function DroppingLiftedPiece({
   const groupRef = useRef<THREE.Group>(null);
   const matRef = useRef<THREE.MeshStandardMaterial>(null);
   const fadeTweenRef = useRef<gsap.core.Tween | null>(null);
-  const geom = useMemo(
-    () => (lifted ? buildMeshGeometry(lifted.positions) : null),
-    [lifted],
+  const slab = useMemo(
+    () => (lifted ? buildSlabGeometries(lifted.positions, safeDim(piece.depth_m)) : null),
+    [lifted, piece.depth_m],
   );
   const lineGeom = useMemo(
     () =>
@@ -277,10 +289,10 @@ function DroppingLiftedPiece({
     () => (lifted && (lifted.slots?.length ?? 0) >= 9 ? buildMeshGeometry(lifted.slots!) : null),
     [lifted],
   );
-  const baseColor = pieceCategoryColor(piece);
+  const baseColor = MDF_COLOR;
 
   useLayoutEffect(() => {
-    if (!geom) return;
+    if (!slab?.cap) return;
     const grp = groupRef.current;
     const mat = matRef.current;
     if (!grp || !mat) return;
@@ -313,23 +325,27 @@ function DroppingLiftedPiece({
       dropTween.kill();
       fadeTweenRef.current?.kill();
     };
-  }, [dropHeight, baseColor, geom]);
+  }, [dropHeight, baseColor, slab]);
 
-  if (!geom) return <DroppingPiece piece={piece} dropHeight={dropHeight} />;
+  if (!slab?.cap) return <DroppingPiece piece={piece} dropHeight={dropHeight} />;
 
   return (
     <group ref={groupRef}>
-      <mesh geometry={geom} frustumCulled={false} castShadow receiveShadow>
+      <mesh geometry={slab.cap} frustumCulled={false} castShadow receiveShadow>
         <meshStandardMaterial
           ref={matRef}
           color={HIGHLIGHT_COLOR}
           emissive={HIGHLIGHT_EMISSIVE}
           emissiveIntensity={0.45}
-          roughness={0.55}
-          metalness={0.1}
-          side={THREE.DoubleSide}
+          roughness={0.7}
+          metalness={0.05}
         />
       </mesh>
+      {slab.wall && (
+        <mesh geometry={slab.wall} frustumCulled={false} castShadow receiveShadow>
+          <meshStandardMaterial color={EDGE_BURNT} roughness={0.85} metalness={0.05} />
+        </mesh>
+      )}
       {slotGeom && (
         <mesh geometry={slotGeom} frustumCulled={false}>
           <meshStandardMaterial color={SLOT_COLOR} roughness={0.6} metalness={0.1} side={THREE.DoubleSide} />
