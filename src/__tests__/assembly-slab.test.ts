@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildSlab, faceNormalFromPositions } from "@/core/assembly-slab";
+import { buildSlab, faceNormalFromPositions, resolveSlabThicknessM } from "@/core/assembly-slab";
 
 // Cuadrado unitario en el plano z=0 (normal +Z), dos triángulos.
 const SQUARE: number[] = [
@@ -56,6 +56,14 @@ describe("buildSlab", () => {
     expect(n.y).toBeCloseTo(0, 6);
     expect(Math.abs(n.z)).toBeCloseTo(1, 6);
     expect(faceNormalFromPositions([])).toBeNull();
+  });
+
+  it("resolveSlabThicknessM escala el espesor del material por el denominador", () => {
+    expect(resolveSlabThicknessM(0.003, 100)).toBeCloseTo(0.3, 9); // MDF 3mm @ 1:100
+    expect(resolveSlabThicknessM(0.003, 50)).toBeCloseTo(0.15, 9);
+    // Degradados seguros: escala mínima 1, material negativo → 0.
+    expect(resolveSlabThicknessM(0.003, 0)).toBeCloseTo(0.003, 9);
+    expect(resolveSlabThicknessM(-1, 100)).toBe(0);
   });
 
   it("un hueco interior también recibe pared (agujero pasante)", () => {

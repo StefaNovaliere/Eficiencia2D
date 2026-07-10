@@ -23,6 +23,17 @@ export interface SlabGeometry {
 
 const KEY_DECIMALS = 5;
 
+/**
+ * Espesor del slab en el espacio de mundo del visor (metros a escala real del
+ * edificio). La maqueta se corta en material de `materialThicknessM` (p.ej. MDF
+ * 3 mm) a escala 1:`scaleDenom`, así que en coords reales el canto mide
+ * `materialThicknessM × scaleDenom` — proporción fiel a la maqueta física.
+ * Sin mínimo cosmético: si a 1:200 queda fino, es la verdad.
+ */
+export function resolveSlabThicknessM(materialThicknessM: number, scaleDenom: number): number {
+  return Math.max(materialThicknessM, 0) * Math.max(scaleDenom, 1);
+}
+
 function vkey(x: number, y: number, z: number): string {
   return `${x.toFixed(KEY_DECIMALS)},${y.toFixed(KEY_DECIMALS)},${z.toFixed(KEY_DECIMALS)}`;
 }
