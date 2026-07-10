@@ -29,6 +29,11 @@ import { groupLabel, stepsFromAssemblySteps } from "@/core/assembly-guide-build"
 import { useProjectContext } from "@/context/ProjectContext";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import InteractiveAssemblyViewer from "@/components/InteractiveAssemblyViewer";
+import { resolveSlabThicknessM } from "@/core/assembly-slab";
+
+/** Espesor del material físico de la maqueta. MDF 3 mm por defecto (futuro:
+ *  selector MDF/cartón por proyecto). Se escala por la escala de impresión. */
+const MATERIAL_THICKNESS_M = 0.003;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -341,7 +346,8 @@ export default function AssemblyWindow({
 }: AssemblyWindowProps) {
   const [selectedPanelId, setSelectedPanelId] = useState<string | null>(null);
   const [view, setView] = useState<"elevations" | "table">("elevations");
-  const { nestingData } = useProjectContext();
+  const { nestingData, scale } = useProjectContext();
+  const slabThicknessM = resolveSlabThicknessM(MATERIAL_THICKNESS_M, scale);
 
   // Close on Escape
   useEffect(() => {
@@ -558,6 +564,7 @@ export default function AssemblyWindow({
                 steps={assemblySteps}
                 pieces={assemblyPieces}
                 viewerSchema={displayData.viewerSchema}
+                slabThicknessM={slabThicknessM}
               />
             </ErrorBoundary>
           )}

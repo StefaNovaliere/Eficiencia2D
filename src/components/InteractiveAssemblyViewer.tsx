@@ -432,6 +432,9 @@ export interface InteractiveAssemblyViewerProps {
   steps: AssemblySequenceStep[];
   pieces: AssemblySequencePiece[];
   viewerSchema?: string;
+  /** Espesor del material (m mundo, ya × escala de impresión). Si viene, sustituye
+   *  al `depth_m` de cada pieza para que el grosor sea visible y fiel a la maqueta. */
+  slabThicknessM?: number;
   className?: string;
 }
 
@@ -439,6 +442,7 @@ export default function InteractiveAssemblyViewer({
   steps,
   pieces,
   viewerSchema,
+  slabThicknessM,
   className = "",
 }: InteractiveAssemblyViewerProps) {
   const [currentStep, setCurrentStep] = useState(0);
@@ -453,10 +457,14 @@ export default function InteractiveAssemblyViewer({
     setCurrentStep(0);
   }, [stepsKey, piecesKey]);
 
-  const renderPieces = useMemo(
-    () => prepareAssemblyPiecesForRender(pieces, { viewerSchema }),
-    [pieces, viewerSchema],
-  );
+  const renderPieces = useMemo(() => {
+    const prepared = prepareAssemblyPiecesForRender(pieces, { viewerSchema });
+    // Grosor sensible a la escala: el material físico (p.ej. MDF 3 mm) a escala
+    // 1:N mide `3mm × N` en el mundo real del visor. El `depth_m` por defecto
+    // (12 mm) es invisible sobre piezas de varios metros.
+    if (!slabThicknessM || slabThicknessM <= 0) return prepared;
+    return prepared.map((p) => ({ ...p, depth_m: slabThicknessM }));
+  }, [pieces, viewerSchema, slabThicknessM]);
 
   const visiblePieces = useMemo(
     () => renderPieces.filter((p) => p.stepIndex <= currentStep),
