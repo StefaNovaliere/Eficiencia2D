@@ -13,6 +13,8 @@ import {
   userCutsForApi,
   flexForApi,
   markLinesForApi,
+  ribsForApi,
+  columnsForApi,
   resolveOriginalFilename,
   type AssemblyPreviewRequest,
   type RecomputePayload,
@@ -61,6 +63,8 @@ function ReviewPageContent() {
     setSavedUserCuts,
     savedFlex,
     savedMarkLines,
+    savedRibs,
+    savedColumns,
     fileId,
     projectFileName,
     scale,
@@ -245,6 +249,8 @@ function ReviewPageContent() {
           user_cuts: userCutsForApi(userCuts),
           flex: flexForApi(savedFlex),
           mark_lines: markLinesForApi(savedMarkLines),
+          ribs: ribsForApi(savedRibs),
+          columns: columnsForApi(savedColumns),
         }, token);
         setNestingData(nesting);
         if (token && fileId) {
@@ -281,6 +287,8 @@ function ReviewPageContent() {
       savedSplits,
       savedFlex,
       savedMarkLines,
+      savedRibs,
+      savedColumns,
       sheetConfig,
       scale,
       paper,
