@@ -6,6 +6,8 @@ import type { FlexSpec } from "@/core/flex-bending";
 import { serializeFlexForApi } from "@/core/flex-bending";
 import type { MarkLine } from "@/core/mark-lines";
 import { serializeMarkLinesForApi } from "@/core/mark-lines";
+import type { Rib, Column } from "@/core/reinforcements";
+import { serializeRibsForApi, serializeColumnsForApi } from "@/core/reinforcements";
 import {
   fetchWithApiFallback,
   type ApiFetchOptions,
@@ -28,6 +30,14 @@ export function flexForApi(specs: FlexSpec[]): Record<string, unknown>[] {
 /** Serializa las líneas de marca rojas al formato snake_case del backend. */
 export function markLinesForApi(lines: MarkLine[]): Record<string, unknown>[] {
   return serializeMarkLinesForApi(lines);
+}
+
+/** Serializa nervios/columnas (refuerzos estructurales) al formato del backend. */
+export function ribsForApi(ribs: Rib[]): Record<string, unknown>[] {
+  return serializeRibsForApi(ribs);
+}
+export function columnsForApi(cols: Column[]): Record<string, unknown>[] {
+  return serializeColumnsForApi(cols);
 }
 
 export async function apiFetch(
@@ -270,6 +280,9 @@ export interface NestingPreviewPayload {
   flex?: Record<string, unknown>[];
   /** Líneas de marca rojas (polilíneas UV por grupo) a grabar. Ver CONTRATO_mark_lines_backend.md. */
   mark_lines?: Record<string, unknown>[];
+  /** Refuerzos estructurales (nervios/columnas). Ver CONTRATO_nervios_columnas_backend.md. */
+  ribs?: Record<string, unknown>[];
+  columns?: Record<string, unknown>[];
 }
 
 export interface GenerateRequestPayload {
@@ -301,6 +314,9 @@ export interface GenerateRequestPayload {
   flex?: Record<string, unknown>[];
   /** Líneas de marca rojas (polilíneas UV por grupo) a grabar. Ver CONTRATO_mark_lines_backend.md. */
   mark_lines?: Record<string, unknown>[];
+  /** Refuerzos estructurales (nervios/columnas). Ver CONTRATO_nervios_columnas_backend.md. */
+  ribs?: Record<string, unknown>[];
+  columns?: Record<string, unknown>[];
 }
 
 export interface GenerateResponse {
