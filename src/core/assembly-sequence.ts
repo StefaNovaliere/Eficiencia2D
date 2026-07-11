@@ -1,6 +1,7 @@
 import type { Face3D, Vec3 } from "./types";
 import type { PlateJoint } from "./pipeline";
 import { liftFaces, buildSlots, type LiftedPieceGeometry } from "./assembly-lift";
+import { computeSupportMarks3D } from "./support-marks";
 import type {
   AssemblyPanel,
   AssemblyPreviewData,
@@ -138,8 +139,11 @@ function applyLift(
     const joints = groupId === undefined ? undefined : lift.plateJointsByGroupId?.get(groupId);
     const normal = groupId === undefined ? undefined : lift.normalByGroupId?.get(groupId);
     const slots = joints && joints.length > 0 && normal ? buildSlots(joints, normal) : [];
+    // Marcas de apoyo (rojo): footprint de las juntas de apoyo pegado.
+    const supportMarks =
+      joints && joints.length > 0 && normal ? computeSupportMarks3D(joints, normal) : [];
 
-    return { ...piece, lifted: { ...body, openings: body.openings ?? [], slots } };
+    return { ...piece, lifted: { ...body, openings: body.openings ?? [], slots, supportMarks } };
   } catch {
     // Caer al render de caja.
     return piece;
