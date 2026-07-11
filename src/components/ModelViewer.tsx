@@ -1813,9 +1813,9 @@ function Scene({
   const reinforcementPositions = useMemo(
     () =>
       reinforcements
-        ? computeReinforcementsGeometry(reinforcements.ribs, reinforcements.columns, groups)
+        ? computeReinforcementsGeometry(reinforcements.ribs, reinforcements.columns, groups, faces)
         : [],
-    [reinforcements, groups],
+    [reinforcements, groups, faces],
   );
 
   // Preview esquemático (cian) del patrón de flexión kerf/auxético por grupo.

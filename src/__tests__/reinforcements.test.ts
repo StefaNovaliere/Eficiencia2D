@@ -9,8 +9,11 @@ import {
   type Rib,
   type Column,
 } from "@/core/reinforcements";
+import { ribEdgeForGroups } from "@/core/reinforcements-preview";
+import type { GeometryGroup } from "@/core/group-classifier";
+import type { Face3D } from "@/core/types";
 
-const RIB: Rib = { id: "rib-1", groupA: 2, groupB: 5, sizeM: 0.3 };
+const RIB: Rib = { id: "rib-1", groupA: 2, groupB: 5, sizeM: 0.3, t: 0.5 };
 const COL: Column = { id: "col-1", position: { x: 1, y: 0, z: 2 }, heightM: 3, sizeM: 0.2 };
 
 describe("serialización", () => {
@@ -20,6 +23,7 @@ describe("serialización", () => {
       group_a: 2,
       group_b: 5,
       size_m: 0.3,
+      pos_t: 0.5,
     });
   });
   it("columnas → snake_case con position [x,y,z]", () => {
@@ -36,6 +40,48 @@ describe("remove", () => {
   it("nervios y columnas por id", () => {
     expect(removeRib([RIB], "rib-1")).toEqual([]);
     expect(removeColumn([COL], "col-1")).toEqual([]);
+  });
+});
+
+describe("ribEdgeForGroups (arista de intersección)", () => {
+  // Pared en x=0 (⊥ eje X) y piso en y=0 (⊥ eje Y). Se cruzan en la recta x=0,y=0
+  // (a lo largo de z). z compartido: [0,3].
+  const wall = {
+    id: 1,
+    faceIndices: [0],
+    centroid: { x: 0, y: 1, z: 1.5 },
+    representativeNormal: { x: 1, y: 0, z: 0 },
+  } as unknown as GeometryGroup;
+  const floor = {
+    id: 2,
+    faceIndices: [1],
+    centroid: { x: 1.5, y: 0, z: 1.5 },
+    representativeNormal: { x: 0, y: 1, z: 0 },
+  } as unknown as GeometryGroup;
+  const faces = [
+    { vertices: [{ x: 0, y: 0, z: 0 }, { x: 0, y: 2, z: 0 }, { x: 0, y: 2, z: 3 }, { x: 0, y: 0, z: 3 }] },
+    { vertices: [{ x: 0, y: 0, z: 0 }, { x: 3, y: 0, z: 0 }, { x: 3, y: 0, z: 3 }, { x: 0, y: 0, z: 3 }] },
+  ] as unknown as Face3D[];
+
+  it("ancla en la arista y los catetos apuntan al interior de cada placa", () => {
+    const e = ribEdgeForGroups(wall, floor, faces, 0.5)!;
+    expect(e).not.toBeNull();
+    expect(e.corner.x).toBeCloseTo(0, 6);
+    expect(e.corner.y).toBeCloseTo(0, 6);
+    expect(e.corner.z).toBeCloseTo(1.5, 6); // t=0.5 sobre z∈[0,3]
+    // cateto en la pared → sube en +y; cateto en el piso → avanza en +x.
+    expect(e.dirA.y).toBeCloseTo(1, 6);
+    expect(e.dirB.x).toBeCloseTo(1, 6);
+  });
+
+  it("t desliza a lo largo de la arista", () => {
+    expect(ribEdgeForGroups(wall, floor, faces, 0)!.corner.z).toBeCloseTo(0, 6);
+    expect(ribEdgeForGroups(wall, floor, faces, 1)!.corner.z).toBeCloseTo(3, 6);
+  });
+
+  it("placas paralelas ⇒ null", () => {
+    const floor2 = { ...floor, representativeNormal: { x: 1, y: 0, z: 0 } } as GeometryGroup;
+    expect(ribEdgeForGroups(wall, floor2, faces, 0.5)).toBeNull();
   });
 });
 

@@ -9,7 +9,9 @@ kerf/flex.
 ## Payload (en `/api/nesting-preview` y `/api/generate`)
 ```jsonc
 "ribs": [
-  { "id": "rib-...", "group_a": 12, "group_b": 3, "size_m": 0.3 }   // cartela en la unión ⊥ de 2 placas
+  // cartela/soporte SOBRE la arista de intersección de 2 placas ⊥ (p.ej. pared-piso),
+  // en la posición pos_t (0..1) a lo largo de esa arista.
+  { "id": "rib-...", "group_a": 12, "group_b": 3, "size_m": 0.3, "pos_t": 0.5 }
 ],
 "columns": [
   { "id": "col-...", "position": [x, y, z], "height_m": 3.0, "size_m": 0.2 }  // pilar; position = base
@@ -20,14 +22,16 @@ kerf/flex.
 |-------|-------------|
 | `ribs[].group_a/b` | Las dos placas (grupos) perpendiculares cuya esquina refuerza la cartela. |
 | `ribs[].size_m` | Cateto de la cartela (m mundo). |
+| `ribs[].pos_t` | Posición a lo largo de la arista de intersección (0..1). El usuario la elige libremente (arriba/abajo/en cualquier punto). |
 | `columns[].position` | Base de la columna en coords de mundo (mismo espacio que `faces`/`placements`). |
 | `columns[].height_m` | Altura del pilar. |
 | `columns[].size_m` | Lado de la sección cuadrada. |
 
 ## Qué genera el backend
 ### Nervios (cartelas)
-- Un **triángulo rectángulo** de material que se apoya en las dos placas de `group_a`/`group_b` en su
-  esquina de 90°, con **2 pestañas de encastre** (una por placa).
+- Un **triángulo rectángulo** (soporte) que se apoya en las dos placas de `group_a`/`group_b`, **sobre su
+  arista de intersección** en la posición `pos_t`, con **2 pestañas de encastre** (una por placa). Los
+  catetos van perpendiculares a la arista, hacia el interior de cada placa.
 - Las **muescas** correspondientes en cada placa (ranura para la pestaña), respetando clearance con
   aberturas y otras juntas.
 - La cartela entra en la **lista de piezas + nesting + precio**.
