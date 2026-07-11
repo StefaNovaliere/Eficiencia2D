@@ -14,13 +14,17 @@ import { buildSlab } from "@/core/assembly-slab";
 // ---------------------------------------------------------------------------
 // Modelo de datos
 // ---------------------------------------------------------------------------
-/** Nervio (cartela): triángulo de refuerzo en la unión ⊥ de dos placas. */
+/** Nervio (cartela): triángulo de refuerzo en la esquina donde se cruzan dos
+ *  placas ⊥ (p.ej. pared-piso). Va SOBRE la arista de intersección, como un
+ *  soporte; `t` (0..1) elige la posición a lo largo de esa arista. */
 export interface Rib {
   id: string;
   groupA: number;
   groupB: number;
   /** Tamaño del cateto de la cartela, en metros (mundo). */
   sizeM: number;
+  /** Posición a lo largo de la arista de intersección (0 = un extremo, 1 = el otro). */
+  t: number;
 }
 
 /** Columna estructural: pilar entre dos alturas en una posición. */
@@ -35,6 +39,8 @@ export interface Column {
 
 export const DEFAULT_RIB_SIZE_M = 0.3;
 export const DEFAULT_COLUMN_SIZE_M = 0.2;
+/** Posición inicial del nervio a lo largo de la arista (centro). */
+export const DEFAULT_RIB_T = 0.5;
 
 export function createRibId(): string {
   return `rib-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -54,7 +60,13 @@ export function removeColumn(cols: Column[], id: string): Column[] {
 // Serialización backend (snake_case)
 // ---------------------------------------------------------------------------
 export function serializeRibsForApi(ribs: Rib[]): Record<string, unknown>[] {
-  return ribs.map((r) => ({ id: r.id, group_a: r.groupA, group_b: r.groupB, size_m: r.sizeM }));
+  return ribs.map((r) => ({
+    id: r.id,
+    group_a: r.groupA,
+    group_b: r.groupB,
+    size_m: r.sizeM,
+    pos_t: r.t,
+  }));
 }
 export function serializeColumnsForApi(cols: Column[]): Record<string, unknown>[] {
   return cols.map((c) => ({

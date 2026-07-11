@@ -62,6 +62,7 @@ import {
   removeRib,
   removeColumn,
   DEFAULT_RIB_SIZE_M,
+  DEFAULT_RIB_T,
   DEFAULT_COLUMN_SIZE_M,
 } from "@/core/reinforcements";
 import FlexControls from "@/components/FlexControls";
@@ -773,8 +774,18 @@ export default function ReviewScreen({
   const handleAddRib = useCallback(() => {
     if (selectedGroupIds.size !== 2) return;
     const [groupA, groupB] = Array.from(selectedGroupIds);
-    setSavedRibs([...savedRibs, { id: createRibId(), groupA, groupB, sizeM: DEFAULT_RIB_SIZE_M }]);
+    setSavedRibs([
+      ...savedRibs,
+      { id: createRibId(), groupA, groupB, sizeM: DEFAULT_RIB_SIZE_M, t: DEFAULT_RIB_T },
+    ]);
   }, [selectedGroupIds, savedRibs, setSavedRibs]);
+
+  const handleSetRibT = useCallback(
+    (id: string, t: number) => {
+      setSavedRibs(savedRibs.map((r) => (r.id === id ? { ...r, t } : r)));
+    },
+    [savedRibs, setSavedRibs],
+  );
 
   const handleAddColumn = useCallback(() => {
     if (selectedGroupIds.size < 1) return;
@@ -2016,22 +2027,33 @@ export default function ReviewScreen({
               {(savedRibs.length > 0 || savedColumns.length > 0) && (
                 <ul className="space-y-0.5 pt-0.5">
                   {savedRibs.map((r) => (
-                    <li
-                      key={r.id}
-                      className="flex items-center justify-between text-[11px] text-base-content/70"
-                    >
-                      <span>
-                        Nervio · {panelIdByGroup.get(r.groupA) ?? r.groupA}·
-                        {panelIdByGroup.get(r.groupB) ?? r.groupB}
-                      </span>
-                      <button
-                        type="button"
-                        className="text-base-content/40 hover:text-error px-1"
-                        onClick={() => setSavedRibs(removeRib(savedRibs, r.id))}
-                        aria-label="Quitar nervio"
-                      >
-                        ✕
-                      </button>
+                    <li key={r.id} className="text-[11px] text-base-content/70">
+                      <div className="flex items-center justify-between">
+                        <span>
+                          Nervio · {panelIdByGroup.get(r.groupA) ?? r.groupA}·
+                          {panelIdByGroup.get(r.groupB) ?? r.groupB}
+                        </span>
+                        <button
+                          type="button"
+                          className="text-base-content/40 hover:text-error px-1"
+                          onClick={() => setSavedRibs(removeRib(savedRibs, r.id))}
+                          aria-label="Quitar nervio"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                      <label className="flex items-center gap-1.5 pl-1 pb-0.5">
+                        <span className="text-[9px] text-base-content/40 shrink-0">posición</span>
+                        <input
+                          type="range"
+                          min={0}
+                          max={1}
+                          step={0.02}
+                          value={r.t}
+                          onChange={(e) => handleSetRibT(r.id, Number(e.target.value))}
+                          className="range range-xs range-warning flex-1"
+                        />
+                      </label>
                     </li>
                   ))}
                   {savedColumns.map((c) => (
