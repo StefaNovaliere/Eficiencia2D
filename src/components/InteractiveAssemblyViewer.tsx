@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Canvas } from "@react-three/fiber";
 import { Grid, OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
@@ -27,6 +27,9 @@ const SLOT_COLOR = 0xfacc15; // ranuras de encastre (overlay v2, ámbar)
 // Material físico (slab con grosor real): caras claras + canto quemado. Un modelo
 // es de un solo material; MDF por defecto (cambiar a cartón = un color global
 // cuando exista un selector de material).
+const SUPPORT_MARK_COLOR = 0xdc2626; // marcas de apoyo (rojo, capa MARK)
+/** Muestra/oculta las marcas de apoyo rojas en el instructivo. */
+const SupportMarksContext = createContext(false);
 const MDF_COLOR = 0xc9a97e; // tan cálido (MDF)
 const EDGE_BURNT = 0x7a5c3c; // canto de MDF (chamuscado, apenas más oscuro que la cara)
 
@@ -235,6 +238,14 @@ function StaticLiftedPiece({ piece }: { piece: AssemblySequencePiece }) {
     () => (lifted && (lifted.slots?.length ?? 0) >= 9 ? buildMeshGeometry(lifted.slots!) : null),
     [lifted],
   );
+  const supportGeom = useMemo(
+    () =>
+      lifted && (lifted.supportMarks?.length ?? 0) >= 9
+        ? buildMeshGeometry(lifted.supportMarks!)
+        : null,
+    [lifted],
+  );
+  const showSupport = useContext(SupportMarksContext);
 
   if (!slab?.cap) return <StaticPiece piece={piece} />;
 
@@ -251,6 +262,19 @@ function StaticLiftedPiece({ piece }: { piece: AssemblySequencePiece }) {
       {slotGeom && (
         <mesh geometry={slotGeom} frustumCulled={false}>
           <meshStandardMaterial color={SLOT_COLOR} roughness={0.6} metalness={0.1} side={THREE.DoubleSide} />
+        </mesh>
+      )}
+      {showSupport && supportGeom && (
+        <mesh geometry={supportGeom} frustumCulled={false} renderOrder={2}>
+          <meshStandardMaterial
+            color={SUPPORT_MARK_COLOR}
+            emissive={SUPPORT_MARK_COLOR}
+            emissiveIntensity={0.35}
+            roughness={0.5}
+            side={THREE.DoubleSide}
+            depthTest={false}
+            transparent
+          />
         </mesh>
       )}
       {lineGeom && (
@@ -289,6 +313,14 @@ function DroppingLiftedPiece({
     () => (lifted && (lifted.slots?.length ?? 0) >= 9 ? buildMeshGeometry(lifted.slots!) : null),
     [lifted],
   );
+  const supportGeom = useMemo(
+    () =>
+      lifted && (lifted.supportMarks?.length ?? 0) >= 9
+        ? buildMeshGeometry(lifted.supportMarks!)
+        : null,
+    [lifted],
+  );
+  const showSupport = useContext(SupportMarksContext);
   const baseColor = MDF_COLOR;
 
   useLayoutEffect(() => {
@@ -350,6 +382,19 @@ function DroppingLiftedPiece({
       {slotGeom && (
         <mesh geometry={slotGeom} frustumCulled={false}>
           <meshStandardMaterial color={SLOT_COLOR} roughness={0.6} metalness={0.1} side={THREE.DoubleSide} />
+        </mesh>
+      )}
+      {showSupport && supportGeom && (
+        <mesh geometry={supportGeom} frustumCulled={false} renderOrder={2}>
+          <meshStandardMaterial
+            color={SUPPORT_MARK_COLOR}
+            emissive={SUPPORT_MARK_COLOR}
+            emissiveIntensity={0.35}
+            roughness={0.5}
+            side={THREE.DoubleSide}
+            depthTest={false}
+            transparent
+          />
         </mesh>
       )}
       {lineGeom && (
@@ -447,6 +492,7 @@ export default function InteractiveAssemblyViewer({
   className = "",
 }: InteractiveAssemblyViewerProps) {
   const [currentStep, setCurrentStep] = useState(0);
+  const [showSupportMarks, setShowSupportMarks] = useState(false);
 
   const stepsKey = useMemo(
     () => steps.map((s) => `${s.title}:${s.panel_ids.join(",")}`).join("|"),
@@ -531,12 +577,14 @@ export default function InteractiveAssemblyViewer({
         <directionalLight position={[diag * 2, diag * 3, diag]} intensity={1.4} castShadow />
         <directionalLight position={[-diag, diag * 0.5, -diag]} intensity={0.5} />
 
-        <AssemblyScene
-          pieces={visiblePieces.length > 0 ? visiblePieces : renderPieces}
-          currentStep={currentStep}
-          centerOffset={centerVec}
-          diag={diag}
-        />
+        <SupportMarksContext.Provider value={showSupportMarks}>
+          <AssemblyScene
+            pieces={visiblePieces.length > 0 ? visiblePieces : renderPieces}
+            currentStep={currentStep}
+            centerOffset={centerVec}
+            diag={diag}
+          />
+        </SupportMarksContext.Provider>
 
         <OrbitControls
           makeDefault
@@ -547,6 +595,22 @@ export default function InteractiveAssemblyViewer({
           minPolarAngle={0.05}
         />
       </Canvas>
+
+      <div className="absolute top-2.5 right-2.5 sm:top-3 sm:right-3 z-10">
+        <button
+          type="button"
+          onClick={() => setShowSupportMarks((v) => !v)}
+          className={`rounded-lg border px-2.5 py-1.5 text-[11px] font-medium shadow-lg backdrop-blur-md transition-colors ${
+            showSupportMarks
+              ? "bg-error/20 text-error border-error/40"
+              : "bg-base-100/90 text-base-content/70 border-base-300/40 hover:bg-base-200"
+          }`}
+          title="Muestra en rojo dónde se apoya/pega cada piso o estante"
+          aria-pressed={showSupportMarks}
+        >
+          Marcas de apoyo
+        </button>
+      </div>
 
       <div className="absolute top-0 inset-x-0 z-10 pointer-events-none p-2.5 sm:p-3">
         <div className="max-w-xs mx-auto rounded-xl bg-base-100/90 backdrop-blur-md border border-base-300/40 shadow-lg px-3.5 py-2 pointer-events-auto">
