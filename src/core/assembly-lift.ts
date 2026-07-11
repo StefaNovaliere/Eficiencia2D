@@ -28,6 +28,8 @@ export interface LiftedPieceGeometry {
   hasHoles: boolean;
   /** Triángulos de las ranuras de encastre (overlay v2), en coords de mundo. */
   slots?: number[];
+  /** Triángulos del footprint de APOYO (marca roja: dónde se pega un piso/estante). */
+  supportMarks?: number[];
 }
 
 type Edge = { a: Vec2; b: Vec2; hole?: boolean };

@@ -124,6 +124,10 @@ export interface PlateJoint {
   b: Vec3;
   /** Ancho de la ranura (grosor de la placa cortante), en metros. */
   width: number;
+  /** Tipo de junta: `slot` = encastre físico (ranura); `surface` = apoyo pegado
+   *  (se graba como marca roja, no se corta). Opcional: si el backend no lo manda,
+   *  el front trata todas como preview de apoyo. Ver CONTRATO_marcas_apoyo_backend.md. */
+  kind?: "slot" | "surface";
 }
 
 /**
