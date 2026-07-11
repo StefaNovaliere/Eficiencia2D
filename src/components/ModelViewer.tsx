@@ -9,6 +9,8 @@ import type { Face3D, Vec3 } from "@/core/types";
 import type { FaceCategory, GeometryGroup } from "@/core/group-classifier";
 import { computeMarkedOpeningGroups3D, computeMarkLines3D, type MarkOpeningGroupLines } from "@/core/mark-preview";
 import type { MarkLine } from "@/core/mark-lines";
+import type { Rib, Column } from "@/core/reinforcements";
+import { computeReinforcementsGeometry } from "@/core/reinforcements-preview";
 import { computeFlexPreview3D } from "@/core/flex-preview";
 import type { FlexSpec } from "@/core/flex-bending";
 import {
@@ -1071,6 +1073,44 @@ function MarkOpeningOverlays({
   );
 }
 
+/** Preview esquemático (ámbar) de nervios/columnas en coords de mundo. */
+function ReinforcementsOverlay({
+  positions,
+  centerOffset,
+}: {
+  positions: number[];
+  centerOffset: Vec3;
+}) {
+  const geom = useMemo(() => {
+    if (positions.length < 9) return null;
+    const arr = new Float32Array(positions.length);
+    for (let i = 0; i < positions.length; i += 3) {
+      arr[i] = positions[i] - centerOffset.x;
+      arr[i + 1] = positions[i + 1] - centerOffset.y;
+      arr[i + 2] = positions[i + 2] - centerOffset.z;
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(arr, 3));
+    g.computeVertexNormals();
+    return g;
+  }, [positions, centerOffset.x, centerOffset.y, centerOffset.z]);
+  if (!geom) return null;
+  return (
+    <mesh geometry={geom} frustumCulled={false} renderOrder={3}>
+      <meshStandardMaterial
+        color={0xf59e0b}
+        emissive={0xb45309}
+        emissiveIntensity={0.25}
+        roughness={0.6}
+        metalness={0.1}
+        side={THREE.DoubleSide}
+        transparent
+        opacity={0.85}
+      />
+    </mesh>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // User cut overlays — orange preview of subtract regions
 // ---------------------------------------------------------------------------
@@ -1383,6 +1423,8 @@ interface SceneProps {
   markGroupIds?: Set<number>;
   /** Líneas de marca rojas dibujadas por el usuario (polilíneas UV por grupo). */
   markLines?: MarkLine[];
+  /** Refuerzos estructurales (nervios/columnas) — preview esquemático. */
+  reinforcements?: { ribs: Rib[]; columns: Column[] };
   /** Specs de flexión (kerf/auxético) por grupo — preview esquemático. */
   flexSpecs?: FlexSpec[];
   /** Comando imperativo de encuadre de cámara (encuadrar / reset). */
@@ -1444,6 +1486,7 @@ function Scene({
   boxSelectActive = false,
   markGroupIds = EMPTY_MARK_SET,
   markLines = EMPTY_MARK_LINES,
+  reinforcements,
   flexSpecs = EMPTY_FLEX,
   cameraCommand = null,
   xray = false,
@@ -1766,6 +1809,15 @@ function Scene({
     [faces, groups, markLines, appliedAxis, hiddenGroupIds],
   );
 
+  // Preview esquemático de refuerzos (nervios/columnas).
+  const reinforcementPositions = useMemo(
+    () =>
+      reinforcements
+        ? computeReinforcementsGeometry(reinforcements.ribs, reinforcements.columns, groups)
+        : [],
+    [reinforcements, groups],
+  );
+
   // Preview esquemático (cian) del patrón de flexión kerf/auxético por grupo.
   const flexPreviewSegments = useMemo(() => {
     if (flexSpecs.length === 0) return [] as CutPreviewSegment[];
@@ -1958,6 +2010,10 @@ function Scene({
             groups={groups}
             centerOffset={bounds.center}
           />
+        )}
+
+        {reinforcementPositions.length > 0 && (
+          <ReinforcementsOverlay positions={reinforcementPositions} centerOffset={bounds.center} />
         )}
 
         {cutPreviewSegments.length > 0 && (
@@ -2649,6 +2705,8 @@ export interface ModelViewerProps {
   markGroupIds?: Set<number>;
   /** Líneas de marca rojas dibujadas por el usuario (polilíneas UV por grupo). */
   markLines?: MarkLine[];
+  /** Refuerzos estructurales (nervios/columnas) — preview esquemático. */
+  reinforcements?: { ribs: Rib[]; columns: Column[] };
   /** Specs de flexión (kerf/auxético) por grupo — preview esquemático. */
   flexSpecs?: FlexSpec[];
   /** Comando imperativo de encuadre de cámara (encuadrar / reset). */
@@ -2696,6 +2754,7 @@ export default function ModelViewer({
   viewerRef,
   markGroupIds = EMPTY_MARK_SET,
   markLines = EMPTY_MARK_LINES,
+  reinforcements,
   flexSpecs = EMPTY_FLEX,
   cameraCommand = null,
   xray = false,
@@ -2794,6 +2853,7 @@ export default function ModelViewer({
         boxSelectActive={boxSelectActive}
         markGroupIds={markGroupIds}
         markLines={markLines}
+        reinforcements={reinforcements}
         flexSpecs={flexSpecs}
         cameraCommand={cameraCommand}
         xray={xray}
