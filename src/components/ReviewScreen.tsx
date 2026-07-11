@@ -56,6 +56,15 @@ import CutToolOverlay from "@/components/CutToolOverlay";
 import MeasureToolOverlay from "@/components/MeasureToolOverlay";
 import MarkLineToolOverlay, { type MarkLineMode } from "@/components/MarkLineToolOverlay";
 import type { MarkLine } from "@/core/mark-lines";
+import {
+  createRibId,
+  createColumnId,
+  removeRib,
+  removeColumn,
+  DEFAULT_RIB_SIZE_M,
+  DEFAULT_RIB_T,
+  DEFAULT_COLUMN_SIZE_M,
+} from "@/core/reinforcements";
 import FlexControls from "@/components/FlexControls";
 import { maxNormalSpreadDeg } from "@/core/flex-bending";
 import type {
@@ -468,8 +477,17 @@ export default function ReviewScreen({
   onRequestAssemblyPreview,
   openAssemblyInstructivo = false,
 }: ReviewScreenProps) {
-  const { assemblyGuideData, setAssemblyGuideData, savedFlex, savedMarkLines, setSavedMarkLines } =
-    useProjectContext();
+  const {
+    assemblyGuideData,
+    setAssemblyGuideData,
+    savedFlex,
+    savedMarkLines,
+    setSavedMarkLines,
+    savedRibs,
+    setSavedRibs,
+    savedColumns,
+    setSavedColumns,
+  } = useProjectContext();
   const [selectedGroupIds, setSelectedGroupIds] = useState<Set<number>>(
     () => new Set(),
   );
@@ -738,6 +756,53 @@ export default function ReviewScreen({
   const displayGroups = cutGroupsResult.displayGroups;
   const derivedCutTriangles = cutGroupsResult.derivedTriangles;
   const derivedPanelPolys = cutGroupsResult.derivedPanelPolys;
+
+  // Rango vertical del modelo (para la altura por defecto de una columna).
+  const modelYRange = useMemo(() => {
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (const g of phase1.groups) {
+      minY = Math.min(minY, g.centroid.y);
+      maxY = Math.max(maxY, g.centroid.y);
+    }
+    return Number.isFinite(minY) && maxY > minY ? { minY, maxY } : { minY: 0, maxY: 1 };
+  }, [phase1.groups]);
+
+  const canAddRib = selectedGroupIds.size === 2;
+  const canAddColumn = selectedGroupIds.size >= 1;
+
+  const handleAddRib = useCallback(() => {
+    if (selectedGroupIds.size !== 2) return;
+    const [groupA, groupB] = Array.from(selectedGroupIds);
+    setSavedRibs([
+      ...savedRibs,
+      { id: createRibId(), groupA, groupB, sizeM: DEFAULT_RIB_SIZE_M, t: DEFAULT_RIB_T },
+    ]);
+  }, [selectedGroupIds, savedRibs, setSavedRibs]);
+
+  const handleSetRibT = useCallback(
+    (id: string, t: number) => {
+      setSavedRibs(savedRibs.map((r) => (r.id === id ? { ...r, t } : r)));
+    },
+    [savedRibs, setSavedRibs],
+  );
+
+  const handleAddColumn = useCallback(() => {
+    if (selectedGroupIds.size < 1) return;
+    const firstId = Array.from(selectedGroupIds)[0];
+    const g = phase1.groups.find((gr) => gr.id === firstId);
+    if (!g) return;
+    const height = Math.max(modelYRange.maxY - modelYRange.minY, 0.5);
+    setSavedColumns([
+      ...savedColumns,
+      {
+        id: createColumnId(),
+        position: { x: g.centroid.x, y: modelYRange.minY, z: g.centroid.z },
+        heightM: height,
+        sizeM: DEFAULT_COLUMN_SIZE_M,
+      },
+    ]);
+  }, [selectedGroupIds, phase1.groups, modelYRange, savedColumns, setSavedColumns]);
 
   const displayGroupIds = useMemo(
     () => new Set(displayGroups.map((g) => g.id)),
@@ -1930,6 +1995,87 @@ export default function ReviewScreen({
               );
             })()}
 
+            {/* Refuerzos estructurales: nervios (cartelas) y columnas */}
+            <div className="px-4 py-3 border-b border-base-300/30 space-y-2">
+              <p className="text-[11px] font-semibold uppercase tracking-widest text-base-content/50">
+                Refuerzos estructurales
+              </p>
+              <div className="flex gap-1.5">
+                <button
+                  type="button"
+                  disabled={!canAddRib}
+                  onClick={handleAddRib}
+                  className="btn btn-xs rounded-lg flex-1 disabled:opacity-40"
+                  title="Cartela de refuerzo en la unión de 2 paredes perpendiculares (seleccioná 2)"
+                >
+                  + Nervio
+                </button>
+                <button
+                  type="button"
+                  disabled={!canAddColumn}
+                  onClick={handleAddColumn}
+                  className="btn btn-xs rounded-lg flex-1 disabled:opacity-40"
+                  title="Columna estructural en el componente seleccionado"
+                >
+                  + Columna
+                </button>
+              </div>
+              <p className="text-[10px] text-base-content/40 leading-snug">
+                Nervio: seleccioná 2 paredes ⊥. Columna: 1 componente. El preview (ámbar) es
+                esquemático; el backend genera la pieza real con encastres.
+              </p>
+              {(savedRibs.length > 0 || savedColumns.length > 0) && (
+                <ul className="space-y-0.5 pt-0.5">
+                  {savedRibs.map((r) => (
+                    <li key={r.id} className="text-[11px] text-base-content/70">
+                      <div className="flex items-center justify-between">
+                        <span>
+                          Nervio · {panelIdByGroup.get(r.groupA) ?? r.groupA}·
+                          {panelIdByGroup.get(r.groupB) ?? r.groupB}
+                        </span>
+                        <button
+                          type="button"
+                          className="text-base-content/40 hover:text-error px-1"
+                          onClick={() => setSavedRibs(removeRib(savedRibs, r.id))}
+                          aria-label="Quitar nervio"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                      <label className="flex items-center gap-1.5 pl-1 pb-0.5">
+                        <span className="text-[9px] text-base-content/40 shrink-0">posición</span>
+                        <input
+                          type="range"
+                          min={0}
+                          max={1}
+                          step={0.02}
+                          value={r.t}
+                          onChange={(e) => handleSetRibT(r.id, Number(e.target.value))}
+                          className="range range-xs range-warning flex-1"
+                        />
+                      </label>
+                    </li>
+                  ))}
+                  {savedColumns.map((c) => (
+                    <li
+                      key={c.id}
+                      className="flex items-center justify-between text-[11px] text-base-content/70"
+                    >
+                      <span>Columna</span>
+                      <button
+                        type="button"
+                        className="text-base-content/40 hover:text-error px-1"
+                        onClick={() => setSavedColumns(removeColumn(savedColumns, c.id))}
+                        aria-label="Quitar columna"
+                      >
+                        ✕
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
             {/* Grupo fusionado: ver paredes, enfocar y desfusionar solo una */}
             {selectedGroupIds.size === 1 && displayMergeMembers.length >= 2 && (
               <div className="px-4 py-3 border-b border-base-300/30 bg-primary/5 space-y-2">
@@ -2705,6 +2851,7 @@ export default function ReviewScreen({
           viewerRef={viewerRef}
           markGroupIds={markGroupIds}
           markLines={markLineDraft ? [...savedMarkLines, markLineDraft] : savedMarkLines}
+          reinforcements={{ ribs: savedRibs, columns: savedColumns }}
           flexSpecs={savedFlex}
           cameraCommand={cameraCommand}
           xray={xrayMode}
