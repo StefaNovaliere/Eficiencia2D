@@ -10,6 +10,7 @@ import type { FaceCategory, GeometryGroup } from "@/core/group-classifier";
 import { computeMarkedOpeningGroups3D, computeMarkLines3D, type MarkOpeningGroupLines } from "@/core/mark-preview";
 import type { MarkLine } from "@/core/mark-lines";
 import type { Rib, Column } from "@/core/reinforcements";
+import type { PlateJoint } from "@/core/pipeline";
 import { computeReinforcementsGeometry } from "@/core/reinforcements-preview";
 import { computeFlexPreview3D } from "@/core/flex-preview";
 import type { FlexSpec } from "@/core/flex-bending";
@@ -1424,7 +1425,7 @@ interface SceneProps {
   /** Líneas de marca rojas dibujadas por el usuario (polilíneas UV por grupo). */
   markLines?: MarkLine[];
   /** Refuerzos estructurales (nervios/columnas) — preview esquemático. */
-  reinforcements?: { ribs: Rib[]; columns: Column[] };
+  reinforcements?: { ribs: Rib[]; columns: Column[]; plateJoints?: PlateJoint[] };
   /** Specs de flexión (kerf/auxético) por grupo — preview esquemático. */
   flexSpecs?: FlexSpec[];
   /** Comando imperativo de encuadre de cámara (encuadrar / reset). */
@@ -1813,7 +1814,13 @@ function Scene({
   const reinforcementPositions = useMemo(
     () =>
       reinforcements
-        ? computeReinforcementsGeometry(reinforcements.ribs, reinforcements.columns, groups, faces)
+        ? computeReinforcementsGeometry(
+            reinforcements.ribs,
+            reinforcements.columns,
+            groups,
+            faces,
+            reinforcements.plateJoints,
+          )
         : [],
     [reinforcements, groups, faces],
   );
@@ -2706,7 +2713,7 @@ export interface ModelViewerProps {
   /** Líneas de marca rojas dibujadas por el usuario (polilíneas UV por grupo). */
   markLines?: MarkLine[];
   /** Refuerzos estructurales (nervios/columnas) — preview esquemático. */
-  reinforcements?: { ribs: Rib[]; columns: Column[] };
+  reinforcements?: { ribs: Rib[]; columns: Column[]; plateJoints?: PlateJoint[] };
   /** Specs de flexión (kerf/auxético) por grupo — preview esquemático. */
   flexSpecs?: FlexSpec[];
   /** Comando imperativo de encuadre de cámara (encuadrar / reset). */

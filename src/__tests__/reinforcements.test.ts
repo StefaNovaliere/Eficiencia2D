@@ -79,9 +79,26 @@ describe("ribEdgeForGroups (arista de intersección)", () => {
     expect(ribEdgeForGroups(wall, floor, faces, 1)!.corner.z).toBeCloseTo(3, 6);
   });
 
-  it("placas paralelas ⇒ null", () => {
+  it("placas paralelas y sin joint ⇒ null", () => {
     const floor2 = { ...floor, representativeNormal: { x: 1, y: 0, z: 0 } } as GeometryGroup;
     expect(ribEdgeForGroups(wall, floor2, faces, 0.5)).toBeNull();
+  });
+
+  it("sin solape real ⇒ null (evita ubicaciones lejanas)", () => {
+    // Piso desplazado en z fuera del rango de la pared (z 10..13) → sin arista común.
+    const farFaces = [
+      faces[0],
+      { vertices: [{ x: 0, y: 0, z: 10 }, { x: 3, y: 0, z: 10 }, { x: 3, y: 0, z: 13 }, { x: 0, y: 0, z: 13 }] },
+    ] as unknown as Face3D[];
+    expect(ribEdgeForGroups(wall, floor, farFaces, 0.5)).toBeNull();
+  });
+
+  it("usa la arista EXACTA del backend (PlateJoint) cuando se pasa", () => {
+    const joint = { a: { x: 5, y: 5, z: 0 }, b: { x: 5, y: 5, z: 4 } };
+    const e = ribEdgeForGroups(wall, floor, faces, 0.5, joint)!;
+    expect(e.corner.x).toBeCloseTo(5, 6);
+    expect(e.corner.y).toBeCloseTo(5, 6);
+    expect(e.corner.z).toBeCloseTo(2, 6); // t=0.5 sobre z∈[0,4]
   });
 });
 
