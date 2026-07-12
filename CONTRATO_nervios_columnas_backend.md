@@ -1,61 +1,66 @@
 # Contrato backend: refuerzos estructurales — NERVIOS (cartelas) y COLUMNAS
 
-## Principio
-El MDF/cartón fino pandea. El usuario puede **pedir** refuerzos; el FRONT manda la intención + un preview
-esquemático (ámbar, no autoritativo). El **BACKEND genera la pieza física real** con sus pestañas/encastres,
-calcula las **muescas** en las placas que la reciben, la **nestea** y la **cotiza**. Mismo patrón que
-kerf/flex.
+## ⚠️ Cambio de concepto (importante, leer primero)
+Un refuerzo (nervio o columna) es un **COMPONENTE NUEVO E INDEPENDIENTE**, no una modificación de las placas
+existentes:
+- **NO se tocan las placas existentes** en la plancha de corte (sin muescas/ranuras en la pared ni el piso).
+- El refuerzo se agrega como **una pieza más** a la lista de piezas / nesting / plancha de corte / precio.
+- El usuario, al armar la maqueta física, lo **pega/ubica manualmente** donde quiera. El software sólo lo
+  **sugiere** en el visor 3D (referencia visual); no fuerza una posición en el corte.
+
+Es decir: el `pos_t`, `group_a/b` y `position` que manda el front son **sólo pistas para dibujar el preview
+3D**. Para generar la pieza y nestearla, el backend sólo necesita **tamaño** (y alto/sección en columnas).
+
+## Reparto
+- **FRONT**: preview esquemático (ámbar) en el visor 3D para que el usuario vea dónde iría + manda la lista.
+- **BACKEND**: genera la pieza nueva (triángulo/columna) y la **agrega al nesting y al PDF/DXF** como un
+  componente más. Sin encastres en las placas existentes.
 
 ## Payload (en `/api/nesting-preview` y `/api/generate`)
 ```jsonc
 "ribs": [
-  // cartela/soporte SOBRE la arista de intersección de 2 placas ⊥ (p.ej. pared-piso),
-  // en la posición pos_t (0..1) a lo largo de esa arista.
+  // cartela = triángulo rectángulo de material. group_a/group_b/pos_t son SÓLO
+  // pista de ubicación para el preview 3D del front; para el corte alcanza size_m.
   { "id": "rib-...", "group_a": 12, "group_b": 3, "size_m": 0.3, "pos_t": 0.5 }
 ],
 "columns": [
-  { "id": "col-...", "position": [x, y, z], "height_m": 3.0, "size_m": 0.2 }  // pilar; position = base
+  // pilar independiente. position/height/size describen la columna; position es
+  // sólo pista visual, no obliga una ubicación en el corte.
+  { "id": "col-...", "position": [x, y, z], "height_m": 3.0, "size_m": 0.2 }
 ]
 ```
 
-| Campo | Significado |
-|-------|-------------|
-| `ribs[].group_a/b` | Las dos placas (grupos) perpendiculares cuya esquina refuerza la cartela. |
-| `ribs[].size_m` | Cateto de la cartela (m mundo). |
-| `ribs[].pos_t` | Posición a lo largo de la arista de intersección (0..1). El usuario la elige libremente (arriba/abajo/en cualquier punto). |
-| `columns[].position` | Base de la columna en coords de mundo (mismo espacio que `faces`/`placements`). |
-| `columns[].height_m` | Altura del pilar. |
-| `columns[].size_m` | Lado de la sección cuadrada. |
+| Campo | Uso |
+|-------|-----|
+| `ribs[].size_m` | Cateto del triángulo (m). **Es lo que define la pieza a cortar.** |
+| `ribs[].group_a/b`, `pos_t` | Pista de ubicación para el preview 3D del front (no afecta el corte). |
+| `columns[].height_m`, `size_m` | Alto y lado de sección de la columna. **Definen la pieza.** |
+| `columns[].position` | Pista visual (dónde la sugiere el usuario); no obliga nada en el corte. |
 
-## Qué genera el backend
+## Qué genera el backend (piezas nuevas, NO modifica placas)
 ### Nervios (cartelas)
-- Un **triángulo rectángulo** (soporte) que se apoya en las dos placas de `group_a`/`group_b`, **sobre su
-  arista de intersección** en la posición `pos_t`, con **2 pestañas de encastre** (una por placa). Los
-  catetos van perpendiculares a la arista, hacia el interior de cada placa.
-- Las **muescas** correspondientes en cada placa (ranura para la pestaña), respetando clearance con
-  aberturas y otras juntas.
-- La cartela entra en la **lista de piezas + nesting + precio**.
+- Una pieza **triángulo rectángulo** de catetos `size_m` (× espesor del material), **plana**, lista para
+  cortar. El usuario la pega en la esquina que quiera. **Sin pestañas ni muescas en las placas** (se pega).
+- Se agrega al nesting + plancha + precio como un componente más.
 
-### Columnas
-- Un **pilar** (caja de sección `size_m`, hueco de 4 placas encastradas, o macizo) de alto `height_m` en
-  `position`, con encastres **caja-y-espiga (mortise-tenon)** contra el piso y el techo/nivel superior.
-- Muescas correspondientes en piso/techo + piezas al nesting + precio.
+### Columnas — ⚠️ TERMINAR ESTO (quedó pendiente)
+- Una **columna** como componente(s) nuevo(s): p.ej. una tira que se pliega en caja de sección `size_m` y
+  alto `height_m`, o 4 placas, **desplegada a plano** para cortar. Lista para armar y pegar por el usuario.
+- Se agrega al nesting + plancha + precio. **Sin muescas en piso/techo existentes.**
 
-## Devolver para el gemelo digital
-Devolver las piezas generadas (cartelas/columnas) como piezas del instructivo (mismo formato
-`AssemblySequencePiece`/`placements`) para que el visor 3D las muestre **con grosor** en su pose, y las
-muescas aparezcan como encastres en las placas.
+## Devolver para el gemelo digital (opcional pero deseable)
+Devolver las piezas nuevas en la guía de ensamble (`AssemblySequencePiece`/`placements`) para que el visor
+3D las muestre con grosor. Igual el front ya dibuja un preview esquemático.
 
 ## Front (ya implementado, referencia)
-- Modelo/serialización: `src/core/reinforcements.ts` (`Rib`, `Column`, `serializeRibs/ColumnsForApi`).
-- Estado: `ProjectContext.savedRibs`/`savedColumns`; payload `ribs`/`columns` en los 3 endpoints.
-- UI en Revisión: "Refuerzos estructurales" → "+ Nervio" (2 paredes ⊥ seleccionadas) / "+ Columna"
-  (1 componente) + lista para quitar.
-- Preview esquemático ámbar en el visor (`reinforcements-preview.ts` + `ReinforcementsOverlay`), NO
-  autoritativo — la geometría real (encastres/muescas/nesting) es del backend.
+- Modelo/serialización: `src/core/reinforcements.ts` (`Rib{groupA,groupB,sizeM,t}`, `Column`, serializers).
+- Preview: `reinforcements-preview.ts` ubica el nervio sobre la **arista real del backend** (`PlateJoint` de
+  `nesting-preview`) en la posición `pos_t`; la columna como caja parada en el componente elegido.
+- UI en Revisión: "Refuerzos" → "+ Nervio" (2 placas ⊥) / "+ Columna" (1 componente) + slider de posición
+  del nervio + lista para quitar.
 
 ## Verificación
-1. Con `ribs`/`columns` en el payload → el backend agrega las piezas al nesting y las muescas a las placas,
-   sin romper la silueta ni pisar aberturas.
-2. Las piezas vuelven en la guía de ensamble y se ven con grosor en el gemelo digital.
-3. El precio/cantidad de material reflejan las piezas nuevas.
+1. Con `ribs`/`columns` en el payload → aparecen como **piezas nuevas** en la plancha de corte y el precio;
+   **las placas existentes quedan idénticas** (sin muescas).
+2. Las columnas se generan y cortan (pendiente de ayer) → **terminarlas**.
+3. El 3D muestra el refuerzo en la ubicación sugerida (referencia); el usuario lo pega donde quiera.
