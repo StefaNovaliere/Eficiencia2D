@@ -850,31 +850,7 @@ export default function ReviewScreen({
     // "cursor" ⇒ todos apagados (ya hecho).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uiToolNonce]);
-
-  useEffect(() => {
-    if (!uiIntent) return;
-    switch (uiIntent.id) {
-      case "walk":
-        toggleWalk();
-        break;
-      case "assembly":
-        setAssemblyWindowOpen(true);
-        break;
-      case "kerf":
-        // El panel de curvado vive en la pestaña de acciones de la selección.
-        setSidebarTab("seleccion");
-        break;
-      case "rib":
-        setSidebarTab("seleccion");
-        handleAddRib();
-        break;
-      case "column":
-        setSidebarTab("seleccion");
-        handleAddColumn();
-        break;
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [uiIntent]);
+  // El adaptador de intents (que usa handlers definidos más abajo) vive tras ellos.
 
   const displayGroupIds = useMemo(
     () => new Set(displayGroups.map((g) => g.id)),
@@ -1321,6 +1297,75 @@ export default function ReviewScreen({
       return next;
     });
   }, []);
+
+  // Adaptador de intents del Command Palette → handlers existentes. (Se ubica tras
+  // definirlos todos.) Todo lo que se puede hacer sobre el visor pasa por acá.
+  useEffect(() => {
+    if (!uiIntent) return;
+    const ids = Array.from(selectedGroupIds);
+    const first = ids[0];
+    switch (uiIntent.id) {
+      case "frame":
+        triggerCamera(selectedGroupIds.size > 0 ? "frameSelection" : "frameAll");
+        break;
+      case "reset":
+        triggerCamera("reset");
+        break;
+      case "xray":
+        setXrayMode((v) => !v);
+        break;
+      case "section":
+        setSection((s) => ({ ...s, enabled: !s.enabled }));
+        break;
+      case "walk":
+        toggleWalk();
+        break;
+      case "showHidden":
+        handleShowAllHidden();
+        break;
+      case "assembly":
+        setAssemblyWindowOpen(true);
+        break;
+      case "undo":
+        handleUndo();
+        break;
+      case "redo":
+        handleRedo();
+        break;
+      case "cat.floor":
+        if (first != null) handleChangeCategory(first, "floor");
+        break;
+      case "cat.wall":
+        if (first != null) handleChangeCategory(first, "wall");
+        break;
+      case "cat.discard":
+        if (first != null) handleChangeCategory(first, "discard");
+        break;
+      case "merge":
+        handleMergeSelected();
+        break;
+      case "split":
+        handleDivideMerged();
+        break;
+      case "markOpenings":
+        setSidebarTab("seleccion");
+        for (const id of ids) handleToggleMark(id);
+        break;
+      case "kerf":
+        // El panel de curvado (FlexControls) vive en la pestaña de acciones.
+        setSidebarTab("seleccion");
+        break;
+      case "rib":
+        setSidebarTab("seleccion");
+        handleAddRib();
+        break;
+      case "column":
+        setSidebarTab("seleccion");
+        handleAddColumn();
+        break;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uiIntent]);
 
   const handleCommitCut = useCallback(
     (cut: UserCut) => {
