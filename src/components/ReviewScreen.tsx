@@ -487,6 +487,7 @@ export default function ReviewScreen({
     setSavedRibs,
     savedColumns,
     setSavedColumns,
+    nestingData,
   } = useProjectContext();
   const [selectedGroupIds, setSelectedGroupIds] = useState<Set<number>>(
     () => new Set(),
@@ -792,12 +793,28 @@ export default function ReviewScreen({
     const firstId = Array.from(selectedGroupIds)[0];
     const g = phase1.groups.find((gr) => gr.id === firstId);
     if (!g) return;
-    const height = Math.max(modelYRange.maxY - modelYRange.minY, 0.5);
+
+    // Base = donde está el componente seleccionado; la columna se para ahí.
+    const baseY = g.minY ?? g.centroid.y;
+    // Altura: si el componente es una pared alta, su propia altura; si es un piso,
+    // el hueco hasta el próximo piso de arriba (o un default sensato).
+    let height = g.maxY != null && g.minY != null ? g.maxY - g.minY : 0;
+    if (height < 0.1) {
+      const nextFloorY = phase1.groups
+        .filter((gr) => gr.category === "floor" && gr.centroid.y > baseY + 0.05)
+        .map((gr) => gr.centroid.y)
+        .sort((a, b) => a - b)[0];
+      height =
+        nextFloorY != null
+          ? nextFloorY - baseY
+          : Math.max((modelYRange.maxY - modelYRange.minY) * 0.3, 0.5);
+    }
+
     setSavedColumns([
       ...savedColumns,
       {
         id: createColumnId(),
-        position: { x: g.centroid.x, y: modelYRange.minY, z: g.centroid.z },
+        position: { x: g.centroid.x, y: baseY, z: g.centroid.z },
         heightM: height,
         sizeM: DEFAULT_COLUMN_SIZE_M,
       },
@@ -2851,7 +2868,11 @@ export default function ReviewScreen({
           viewerRef={viewerRef}
           markGroupIds={markGroupIds}
           markLines={markLineDraft ? [...savedMarkLines, markLineDraft] : savedMarkLines}
-          reinforcements={{ ribs: savedRibs, columns: savedColumns }}
+          reinforcements={{
+            ribs: savedRibs,
+            columns: savedColumns,
+            plateJoints: nestingData?.plateJoints ?? [],
+          }}
           flexSpecs={savedFlex}
           cameraCommand={cameraCommand}
           xray={xrayMode}
