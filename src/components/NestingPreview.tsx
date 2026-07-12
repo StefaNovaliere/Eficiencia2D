@@ -9,6 +9,7 @@ import { PRINT_SCALE_OPTIONS } from "@/core/print-scale";
 import { getNestingCanvasColors, useTheme } from "@/context/ThemeContext";
 import type { PdfPageMode } from "@/context/ProjectContext";
 import StepIndicator from "./StepIndicator";
+import { useRegisterFlowNav } from "@/hooks/useRegisterFlowNav";
 
 export interface NestingPreviewProps {
   nesting: NestingPreviewData;
@@ -228,6 +229,14 @@ export default function NestingPreview({
   const [localHeight, setLocalHeight] = useState(String(sheetConfig.heightM));
   const [showConfirm, setShowConfirm] = useState(false);
 
+  // Navegación de flujo constante (barra del shell) — reemplaza el footer propio.
+  useRegisterFlowNav({
+    backLabel: "Volver",
+    onBack,
+    nextLabel: "Generar y Descargar",
+    onNext: () => setShowConfirm(true),
+  });
+
   // En modo cartón (una plancha por hoja) el backend deriva la plancha del
   // papel; los inputs manuales se ocultan. En modo láser (todo en una hoja) la
   // plancha es el material editable a mano.
@@ -279,7 +288,7 @@ export default function NestingPreview({
   const nextScaleOption = SCALE_OPTIONS.find((s) => s >= suggestedScale) ?? suggestedScale;
 
   return (
-    <div className="fixed inset-0 z-50 bg-base-100 flex flex-col">
+    <div className="fixed top-0 left-0 right-0 bottom-14 z-50 bg-base-100 flex flex-col">
       <div className="flex flex-wrap items-center justify-between gap-4 p-4 border-b border-base-300 bg-base-200/50 shrink-0">
         <button className="btn btn-ghost btn-sm" onClick={onBack}>
           &larr; Volver a revisión
@@ -444,17 +453,6 @@ export default function NestingPreview({
               {floorPanels} piso{floorPanels !== 1 ? "s" : ""}
             </span>
           )}
-        </div>
-        <div className="flex gap-2 w-full sm:w-auto">
-          <button className="btn btn-outline flex-1 sm:flex-none" onClick={onBack}>
-            Volver
-          </button>
-          <button
-            className="btn btn-primary flex-1 sm:flex-none"
-            onClick={() => setShowConfirm(true)}
-          >
-            Generar y Descargar
-          </button>
         </div>
       </div>
 
