@@ -11,6 +11,7 @@
 
 import type { GeometryGroup } from "@/core/group-classifier";
 import type { Face3D, Vec3 } from "@/core/types";
+import type { PlateJoint } from "@/core/pipeline";
 import { buildColumnGeometry, buildRibGeometry, type Rib, type Column } from "@/core/reinforcements";
 
 function sub(a: Vec3, b: Vec3): Vec3 {
@@ -57,65 +58,89 @@ export interface RibEdge {
 
 /**
  * Arista de intersección de dos placas ⊥ y el punto en la posición `t`, con los
- * catetos hacia el interior de cada placa. `null` si son ~paralelas o no se cruzan.
+ * catetos hacia el interior de cada placa.
+ *
+ * Preferimos la arista EXACTA que da el backend (`PlateJoint` a→b: el mismo
+ * segmento que ubica bien la unión). Si no hay joint para ese par, caemos a la
+ * intersección de los dos planos recortada al solape de las placas. `null` si no
+ * se puede determinar (placas paralelas y sin joint).
  */
 export function ribEdgeForGroups(
   gA: GeometryGroup,
   gB: GeometryGroup,
   faces: Face3D[],
   t: number,
+  joint?: { a: Vec3; b: Vec3} | null,
 ): RibEdge | null {
   const nA = normalize(gA.representativeNormal);
   const nB = normalize(gB.representativeNormal);
-  const dir = cross(nA, nB);
-  const dirLen = Math.hypot(dir.x, dir.y, dir.z);
-  if (dirLen < 1e-6) return null; // placas paralelas → sin arista
-  const d = scale(dir, 1 / dirLen);
+  const tc = Math.min(Math.max(t, 0), 1);
 
-  // Punto sobre la línea de intersección de los dos planos.
-  // P0 = ( (dA·(nB×dir)) + (dB·(dir×nA)) ) / |dir|²   (dir = nA×nB, sin normalizar)
-  const dA = dot(nA, gA.centroid);
-  const dB = dot(nB, gB.centroid);
-  const denom = dot(dir, dir);
-  const p0 = scale(
-    add(scale(cross(nB, dir), dA), scale(cross(dir, nA), dB)),
-    1 / denom,
-  );
-
-  // Clip de la arista al solape de ambas placas (proyección sobre `d`).
-  const span = (g: GeometryGroup) => {
-    let lo = Infinity;
-    let hi = -Infinity;
-    for (const v of groupVertices(g, faces)) {
-      const s = dot(sub(v, p0), d);
-      if (s < lo) lo = s;
-      if (s > hi) hi = s;
-    }
-    return { lo, hi };
-  };
-  const sa = span(gA);
-  const sb = span(gB);
-  if (!Number.isFinite(sa.lo) || !Number.isFinite(sb.lo)) return null;
-  let lo = Math.max(sa.lo, sb.lo);
-  let hi = Math.min(sa.hi, sb.hi);
-  if (hi <= lo) {
-    // Sin solape real: usar el centro del tramo común aproximado.
-    const mid = (Math.max(sa.lo, sb.lo) + Math.min(sa.hi, sb.hi)) / 2;
-    lo = mid;
-    hi = mid;
+  let a: Vec3;
+  let b: Vec3;
+  if (joint) {
+    // Arista exacta del backend.
+    a = joint.a;
+    b = joint.b;
+  } else {
+    // Fallback: intersección de planos recortada al solape de las placas.
+    const dir = cross(nA, nB);
+    const dirLen = Math.hypot(dir.x, dir.y, dir.z);
+    if (dirLen < 1e-6) return null;
+    const d = scale(dir, 1 / dirLen);
+    const dA = dot(nA, gA.centroid);
+    const dB = dot(nB, gB.centroid);
+    const denom = dot(dir, dir);
+    const p0 = scale(add(scale(cross(nB, dir), dA), scale(cross(dir, nA), dB)), 1 / denom);
+    const span = (g: GeometryGroup) => {
+      let lo = Infinity;
+      let hi = -Infinity;
+      for (const v of groupVertices(g, faces)) {
+        const s = dot(sub(v, p0), d);
+        if (s < lo) lo = s;
+        if (s > hi) hi = s;
+      }
+      return { lo, hi };
+    };
+    const sa = span(gA);
+    const sb = span(gB);
+    if (!Number.isFinite(sa.lo) || !Number.isFinite(sb.lo)) return null;
+    const lo = Math.max(sa.lo, sb.lo);
+    const hi = Math.min(sa.hi, sb.hi);
+    if (hi <= lo) return null; // no comparten arista → no dibujar (evita ubicaciones lejanas)
+    a = add(p0, scale(d, lo));
+    b = add(p0, scale(d, hi));
   }
 
-  const s = lo + Math.min(Math.max(t, 0), 1) * (hi - lo);
-  const corner = add(p0, scale(d, s));
+  const edgeDir = normalize(sub(b, a));
+  const corner: Vec3 = {
+    x: a.x + (b.x - a.x) * tc,
+    y: a.y + (b.y - a.y) * tc,
+    z: a.z + (b.z - a.z) * tc,
+  };
 
-  // Catetos: perpendiculares a la arista, en el plano de cada placa, hacia el
-  // interior (centroide).
+  // Catetos: perpendiculares a la arista, en el plano de cada placa, hacia el interior.
   const orient = (n: Vec3, centroid: Vec3): Vec3 => {
-    let leg = normalize(cross(n, d));
+    let leg = normalize(cross(n, edgeDir));
     if (dot(leg, sub(centroid, corner)) < 0) leg = scale(leg, -1);
     return leg;
   };
   return { corner, dirA: orient(nA, gA.centroid), dirB: orient(nB, gB.centroid) };
+}
+
+/** Busca el PlateJoint (arista real del backend) para el par de grupos {a,b}. */
+function findJointForPair(
+  plateJoints: PlateJoint[] | undefined,
+  gA: number,
+  gB: number,
+): PlateJoint | null {
+  if (!plateJoints) return null;
+  for (const j of plateJoints) {
+    if ((j.cutId === gA && j.cutterId === gB) || (j.cutId === gB && j.cutterId === gA)) {
+      return j;
+    }
+  }
+  return null;
 }
 
 /**
@@ -127,6 +152,7 @@ export function computeReinforcementsGeometry(
   columns: Column[],
   groups: GeometryGroup[],
   faces: Face3D[],
+  plateJoints?: PlateJoint[],
 ): number[] {
   const byId = new Map(groups.map((g) => [g.id, g]));
   const out: number[] = [];
@@ -139,7 +165,8 @@ export function computeReinforcementsGeometry(
     const A = byId.get(r.groupA);
     const B = byId.get(r.groupB);
     if (!A || !B) continue;
-    const edge = ribEdgeForGroups(A, B, faces, r.t);
+    const joint = findJointForPair(plateJoints, r.groupA, r.groupB);
+    const edge = ribEdgeForGroups(A, B, faces, r.t, joint);
     if (!edge) continue;
     const thicknessM = Math.max(r.sizeM * 0.06, 0.01);
     const g = buildRibGeometry(edge.corner, edge.dirA, edge.dirB, r.sizeM, thicknessM);
