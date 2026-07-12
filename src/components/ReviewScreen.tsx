@@ -65,6 +65,7 @@ import {
   DEFAULT_RIB_T,
   DEFAULT_COLUMN_SIZE_M,
 } from "@/core/reinforcements";
+import { useUIStore } from "@/stores/uiStore";
 import FlexControls from "@/components/FlexControls";
 import { maxNormalSpreadDeg } from "@/core/flex-bending";
 import type {
@@ -820,6 +821,60 @@ export default function ReviewScreen({
       },
     ]);
   }, [selectedGroupIds, phase1.groups, modelYRange, savedColumns, setSavedColumns]);
+
+  // ── Puente con el Command Palette (⌘K) ──────────────────────────────────────
+  // Publicamos la selección para gatear comandos, y reaccionamos a la herramienta
+  // / intención que dispara la palette, mapeándola a los modos existentes.
+  const uiToolNonce = useUIStore((s) => s.toolNonce);
+  const uiIntent = useUIStore((s) => s.intent);
+
+  useEffect(() => {
+    useUIStore.getState().setSelectionCount(selectedGroupIds.size);
+  }, [selectedGroupIds]);
+
+  useEffect(() => {
+    if (uiToolNonce === 0) return; // valor inicial, no forzar cursor al montar
+    const tool = useUIStore.getState().activeTool;
+    // Apagar todos y encender el pedido (misma exclusión mutua que la barra).
+    setCutToolMode(false);
+    setCutDraft(null);
+    setMeasureToolMode(false);
+    setMeasureDraft(null);
+    setMarkLineToolMode(false);
+    setMarkLineDraft(null);
+    setBoxSelectMode(false);
+    if (tool === "cut") setCutToolMode(true);
+    else if (tool === "measure") setMeasureToolMode(true);
+    else if (tool === "markLine") setMarkLineToolMode(true);
+    else if (tool === "box") setBoxSelectMode(true);
+    // "cursor" ⇒ todos apagados (ya hecho).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uiToolNonce]);
+
+  useEffect(() => {
+    if (!uiIntent) return;
+    switch (uiIntent.id) {
+      case "walk":
+        toggleWalk();
+        break;
+      case "assembly":
+        setAssemblyWindowOpen(true);
+        break;
+      case "kerf":
+        // El panel de curvado vive en la pestaña de acciones de la selección.
+        setSidebarTab("seleccion");
+        break;
+      case "rib":
+        setSidebarTab("seleccion");
+        handleAddRib();
+        break;
+      case "column":
+        setSidebarTab("seleccion");
+        handleAddColumn();
+        break;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uiIntent]);
 
   const displayGroupIds = useMemo(
     () => new Set(displayGroups.map((g) => g.id)),

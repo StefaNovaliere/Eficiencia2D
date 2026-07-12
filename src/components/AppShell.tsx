@@ -4,6 +4,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Settings } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
+import CommandPalette from "@/components/command/CommandPalette";
+import { useCommandHotkey } from "@/components/command/useCommandHotkey";
 
 // Rutas inmersivas del flujo: son pantallas full-screen (`fixed inset-0`) con su
 // propio chrome (paso, volver, herramientas). Ahí NO mostramos la barra global.
@@ -74,10 +76,12 @@ function TopBar({ isAuthPage }: { isAuthPage: boolean }) {
  */
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() ?? "/";
+  // Atajo global ⌘K + palette montada UNA vez para TODAS las rutas (incluido el
+  // flujo full-screen, donde más falta hace).
+  useCommandHotkey();
+
   const isFlow = FLOW_ROUTES.some((r) => pathname.startsWith(r));
   const isStandalone = STANDALONE_ROUTES.includes(pathname);
-
-  if (isFlow || isStandalone) return <>{children}</>;
 
   const isAuthPage =
     pathname === "/login" ||
@@ -86,10 +90,21 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     pathname.startsWith("/verify-email") ||
     pathname.startsWith("/olvide-contrasena") ||
     pathname.startsWith("/restablecer-contrasena");
+
+  const content =
+    isFlow || isStandalone ? (
+      <>{children}</>
+    ) : (
+      <>
+        <TopBar isAuthPage={isAuthPage} />
+        {children}
+      </>
+    );
+
   return (
     <>
-      <TopBar isAuthPage={isAuthPage} />
-      {children}
+      {content}
+      <CommandPalette />
     </>
   );
 }
