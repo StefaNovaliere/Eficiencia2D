@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { Search } from "lucide-react";
 import { useUIStore } from "@/stores/uiStore";
-import { COMMANDS, rankCommands, type CommandContext, type FlowStep } from "@/core/commands";
+import { COMMANDS, rankCommands, isEnabled, type CommandContext, type FlowStep } from "@/core/commands";
 
 function stepFromPath(pathname: string): FlowStep {
   if (pathname.startsWith("/review")) return "review";
@@ -30,11 +30,7 @@ export default function CommandPalette() {
   const inputRef = useRef<HTMLInputElement>(null);
 
   const ctx: CommandContext = useMemo(
-    () => ({
-      step: stepFromPath(pathname),
-      hasSelection: selectionCount > 0,
-      selectionCount,
-    }),
+    () => ({ step: stepFromPath(pathname), selectionCount }),
     [pathname, selectionCount],
   );
 
@@ -59,7 +55,7 @@ export default function CommandPalette() {
 
   const runCommand = (index: number) => {
     const cmd = results[index];
-    if (!cmd) return;
+    if (!cmd || !isEnabled(cmd, ctx)) return; // no ejecutar los que no cumplen el requisito
     const s = useUIStore.getState();
     cmd.perform({
       setActiveTool: s.setActiveTool,
@@ -115,26 +111,41 @@ export default function CommandPalette() {
               Sin resultados para “{query}”.
             </li>
           )}
-          {results.map((cmd, i) => (
-            <li key={cmd.id}>
-              <button
-                type="button"
-                className={`w-full flex items-center justify-between gap-3 px-4 py-2 text-left text-sm ${
-                  i === active ? "bg-primary/10 text-primary" : "hover:bg-base-200/60"
-                }`}
-                onMouseEnter={() => setActive(i)}
-                onClick={() => runCommand(i)}
-              >
-                <span className="flex items-center gap-2 min-w-0">
-                  <span className="text-[10px] uppercase tracking-wider text-base-content/35 w-16 shrink-0">
-                    {cmd.group}
+          {results.map((cmd, i) => {
+            const enabled = isEnabled(cmd, ctx);
+            return (
+              <li key={cmd.id}>
+                <button
+                  type="button"
+                  disabled={!enabled}
+                  className={`w-full flex items-center justify-between gap-3 px-4 py-2 text-left text-sm ${
+                    !enabled
+                      ? "opacity-45 cursor-not-allowed"
+                      : i === active
+                        ? "bg-primary/10 text-primary"
+                        : "hover:bg-base-200/60"
+                  }`}
+                  onMouseEnter={() => enabled && setActive(i)}
+                  onClick={() => runCommand(i)}
+                >
+                  <span className="flex items-center gap-2 min-w-0">
+                    <span className="text-[10px] uppercase tracking-wider text-base-content/35 w-16 shrink-0">
+                      {cmd.group}
+                    </span>
+                    <span className="truncate">{cmd.title}</span>
                   </span>
-                  <span className="truncate">{cmd.title}</span>
-                </span>
-                {cmd.hotkey && <kbd className="kbd kbd-xs shrink-0">{cmd.hotkey}</kbd>}
-              </button>
-            </li>
-          ))}
+                  <span className="flex items-center gap-2 shrink-0">
+                    {!enabled && cmd.requirement && (
+                      <span className="text-[10px] text-warning/80 hidden sm:inline whitespace-nowrap">
+                        {cmd.requirement}
+                      </span>
+                    )}
+                    {cmd.hotkey && enabled && <kbd className="kbd kbd-xs">{cmd.hotkey}</kbd>}
+                  </span>
+                </button>
+              </li>
+            );
+          })}
         </ul>
       </div>
     </div>

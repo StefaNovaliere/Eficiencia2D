@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { Settings } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import CommandPalette from "@/components/command/CommandPalette";
+import CommandBar from "@/components/command/CommandBar";
 import { useCommandHotkey } from "@/components/command/useCommandHotkey";
 
 // Rutas inmersivas del flujo: son pantallas full-screen (`fixed inset-0`) con su
@@ -104,6 +105,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <>
       {content}
+      {/* Entrada visible al palette: sólo en las pantallas del flujo (visor/planos). */}
+      {isFlow && <CommandBar />}
       <CommandPalette />
     </>
   );

@@ -1,46 +1,60 @@
 import { describe, it, expect } from "vitest";
-import { COMMANDS, rankCommands, type CommandContext } from "@/core/commands";
+import { COMMANDS, rankCommands, isEnabled, type CommandContext, type Command } from "@/core/commands";
 
-const review: CommandContext = { step: "review", hasSelection: true, selectionCount: 2 };
-const reviewNoSel: CommandContext = { step: "review", hasSelection: false, selectionCount: 0 };
-const nesting: CommandContext = { step: "nesting", hasSelection: false, selectionCount: 0 };
+const sel2: CommandContext = { step: "review", selectionCount: 2 };
+const sel1: CommandContext = { step: "review", selectionCount: 1 };
+const sel0: CommandContext = { step: "review", selectionCount: 0 };
+const nesting: CommandContext = { step: "nesting", selectionCount: 0 };
+
+const byId = (id: string) => COMMANDS.find((c) => c.id === id) as Command;
 
 describe("rankCommands", () => {
   it("'curvar madera' rankea Kerf primero", () => {
-    const r = rankCommands(COMMANDS, "curvar madera", review);
-    expect(r[0]?.id).toBe("intent.kerf");
+    expect(rankCommands(COMMANDS, "curvar madera", sel1)[0]?.id).toBe("sel.kerf");
   });
 
-  it("busca por jerga/alias ('reforzar esquina' → nervio)", () => {
-    const r = rankCommands(COMMANDS, "reforzar esquina", review);
-    expect(r[0]?.id).toBe("intent.rib");
+  it("jerga/alias: 'reforzar esquina' → nervio", () => {
+    expect(rankCommands(COMMANDS, "reforzar esquina", sel2)[0]?.id).toBe("reinf.rib");
   });
 
   it("ignora acentos ('area' encuentra 'áreas')", () => {
-    const r = rankCommands(COMMANDS, "area", review);
-    expect(r.some((c) => c.id === "tool.measure")).toBe(true);
+    expect(rankCommands(COMMANDS, "area", sel1).some((c) => c.id === "tool.measure")).toBe(true);
   });
 
-  it("gatea por contexto: sin selección no aparece Kerf ni nervio", () => {
-    const ids = rankCommands(COMMANDS, "", reviewNoSel).map((c) => c.id);
-    expect(ids).not.toContain("intent.kerf");
-    expect(ids).not.toContain("intent.rib");
-    expect(ids).toContain("tool.cut");
+  it("catálogo COMPLETO: incluye vista, selección y refuerzos", () => {
+    const ids = COMMANDS.map((c) => c.id);
+    for (const id of ["view.xray", "edit.undo", "sel.merge", "sel.mark", "reinf.rib", "reinf.column"]) {
+      expect(ids).toContain(id);
+    }
+  });
+});
+
+describe("requisitos (enabled/requirement)", () => {
+  it("nervio deshabilitado con <2 seleccionados, con texto de requisito", () => {
+    const rib = byId("reinf.rib");
+    expect(isEnabled(rib, sel1)).toBe(false);
+    expect(isEnabled(rib, sel2)).toBe(true);
+    expect(rib.requirement).toMatch(/2 paredes/i);
   });
 
-  it("gatea por paso: en nesting no aparecen las herramientas de review", () => {
+  it("acciones de selección deshabilitadas sin selección (pero VISIBLES)", () => {
+    const ids = rankCommands(COMMANDS, "", sel0).map((c) => c.id);
+    expect(ids).toContain("sel.kerf"); // se muestra…
+    expect(isEnabled(byId("sel.kerf"), sel0)).toBe(false); // …pero atenuado
+  });
+
+  it("query vacía: los accionables van primero", () => {
+    const r = rankCommands(COMMANDS, "", sel0);
+    const firstDisabledIdx = r.findIndex((c) => !isEnabled(c, sel0));
+    const lastEnabledIdx = r.map((c) => isEnabled(c, sel0)).lastIndexOf(true);
+    expect(firstDisabledIdx).toBeGreaterThan(lastEnabledIdx);
+  });
+});
+
+describe("gating por paso", () => {
+  it("en nesting no aparecen las herramientas de review; sí la navegación", () => {
     const ids = rankCommands(COMMANDS, "", nesting).map((c) => c.id);
     expect(ids).not.toContain("tool.cut");
-    expect(ids).toContain("nav.continue"); // navegación siempre disponible
-  });
-
-  it("nervio requiere exactamente 2 seleccionados", () => {
-    const one: CommandContext = { step: "review", hasSelection: true, selectionCount: 1 };
-    expect(rankCommands(COMMANDS, "nervio", one)).toHaveLength(0);
-    expect(rankCommands(COMMANDS, "nervio", review)[0]?.id).toBe("intent.rib");
-  });
-
-  it("query vacía devuelve los disponibles (sin filtrar por score)", () => {
-    expect(rankCommands(COMMANDS, "", review).length).toBeGreaterThan(5);
+    expect(ids).toContain("nav.continue");
   });
 });
