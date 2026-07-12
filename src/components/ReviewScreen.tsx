@@ -66,6 +66,7 @@ import {
   DEFAULT_COLUMN_SIZE_M,
 } from "@/core/reinforcements";
 import { useUIStore } from "@/stores/uiStore";
+import { useRegisterFlowNav } from "@/hooks/useRegisterFlowNav";
 import FlexControls from "@/components/FlexControls";
 import { maxNormalSpreadDeg } from "@/core/flex-bending";
 import type {
@@ -1442,6 +1443,20 @@ export default function ReviewScreen({
     onConfirm(result, wallWallDecisions, [...markGroupIds], userCuts);
   }, [overrides, wallWallDecisions, markGroupIds, userCuts, onConfirm]);
 
+  // Navegación de flujo constante (barra del shell). Reemplaza el footer propio.
+  useRegisterFlowNav({
+    backLabel: "Volver",
+    onBack: onCancel,
+    nextLabel: "Continuar",
+    onNext: handleConfirm,
+    canNext: !isGenerating,
+    nextBusy: isGenerating,
+    hint:
+      overrides.size > 0
+        ? `${overrides.size} clasificación${overrides.size !== 1 ? "es" : ""} modificada${overrides.size !== 1 ? "s" : ""}`
+        : undefined,
+  });
+
   // Stats (per effective category).
   const stats = useMemo(() => {
     let floors = 0,
@@ -1996,7 +2011,7 @@ export default function ReviewScreen({
   }, [showWallWallHelp2]);
 
   return (
-    <div className="fixed inset-0 z-50 bg-base-200/40 flex overflow-hidden">
+    <div className="fixed top-0 left-0 right-0 bottom-14 z-50 bg-base-200/40 flex overflow-hidden">
       <PanelGroup orientation="horizontal" id="review-screen-layout">
         {!hideSidebar && (
           <>
@@ -2902,43 +2917,6 @@ export default function ReviewScreen({
           </div>
           {/* /Pestaña: Selección */}
 
-          <div className="mt-auto border-t border-base-300/40 p-4 bg-base-100 shrink-0">
-            {overrides.size > 0 && (
-              <p className="text-[11px] text-warning mb-3 px-2 py-1.5 rounded-lg bg-warning/8 border border-warning/15 text-center font-medium">
-                {overrides.size} clasificación{overrides.size !== 1 ? "es" : ""}{" "}
-                modificada{overrides.size !== 1 ? "s" : ""}
-              </p>
-            )}
-
-            <div className="flex gap-2">
-              <button
-                type="button"
-                className="btn btn-ghost flex-1 rounded-xl border border-base-300/40"
-                onClick={onCancel}
-                disabled={isGenerating}
-              >
-                Volver
-              </button>
-              <button
-                type="button"
-                className="btn btn-primary flex-[1.4] rounded-xl gap-2 shadow-md shadow-primary/20"
-                onClick={handleConfirm}
-                disabled={isGenerating}
-              >
-                {isGenerating ? (
-                  <>
-                    <span className="loading loading-spinner loading-sm" />
-                    Generando…
-                  </>
-                ) : (
-                  <>
-                    Continuar
-                    <ArrowRight size={15} />
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
               </aside>
             </Panel>
             <PanelResizeHandle className="w-2 mx-0 cursor-col-resize hover:bg-primary transition-colors divider divider-horizontal" />

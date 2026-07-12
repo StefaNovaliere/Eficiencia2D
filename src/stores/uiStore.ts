@@ -26,6 +26,10 @@ export interface FlowNav {
   nextLabel?: string;
   onNext?: () => void;
   canNext?: boolean;
+  /** Muestra el botón "siguiente" en estado ocupado (p.ej. generando planos). */
+  nextBusy?: boolean;
+  /** Texto contextual mostrado en la barra (p.ej. "N clasificaciones modificadas"). */
+  hint?: string;
 }
 
 const EMPTY_NAV: FlowNav = {};
