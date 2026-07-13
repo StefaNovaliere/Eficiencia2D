@@ -402,11 +402,13 @@ export default function AssemblyWindow({
     const labelToGroupId = new Map<string, number>();
     const faceIndicesByLabel = new Map<string, number[]>();
     const normalByGroupId = new Map<number, Vec3>();
+    const centroidByGroupId = new Map<number, Vec3>();
     for (const g of phase1.groups) {
       const label = groupLabel(g, phase1.panelIdByGroup);
       labelToGroupId.set(label, g.id);
       faceIndicesByLabel.set(label, g.faceIndices);
       normalByGroupId.set(g.id, g.representativeNormal);
+      centroidByGroupId.set(g.id, g.centroid);
     }
     // Encastres por grupo que los recibe (cut_id).
     const plateJointsByGroupId = new Map<number, PlateJoint[]>();
@@ -421,6 +423,7 @@ export default function AssemblyWindow({
       faceIndicesByLabel,
       plateJointsByGroupId,
       normalByGroupId,
+      centroidByGroupId,
     };
   }, [phase1, nestingData]);
 
