@@ -41,6 +41,7 @@ import {
   PenLine,
   Spline,
   Lightbulb,
+  Wrench,
   Scissors,
   Footprints,
   Circle,
@@ -67,6 +68,7 @@ import {
   type Rib,
 } from "@/core/reinforcements";
 import RibSnapperOverlay from "@/components/RibSnapperOverlay";
+import ToolMenu from "@/components/toolbar/ToolMenu";
 import { useUIStore } from "@/stores/uiStore";
 import { useRegisterFlowNav } from "@/hooks/useRegisterFlowNav";
 import FlexControls from "@/components/FlexControls";
@@ -3401,73 +3403,85 @@ export default function ReviewScreen({
 
             <div className="hidden sm:block w-px h-7 bg-base-300/50" />
 
-            <div className="inline-flex items-center gap-0.5 p-0.5 rounded-xl bg-base-200/50">
-              <div
-                className="tooltip tooltip-bottom"
-                data-tip={selectedGroupIds.size > 0 ? "Encuadrar selección (Z)" : "Encuadrar todo (Z)"}
-              >
-                <button
-                  type="button"
-                  className={viewToolBtn}
-                  onClick={() =>
-                    triggerCamera(selectedGroupIds.size > 0 ? "frameSelection" : "frameAll")
-                  }
-                  aria-label="Encuadrar"
-                >
-                  <Crosshair size={15} />
-                </button>
-              </div>
-              <div className="tooltip tooltip-bottom" data-tip="Vista general (reset)">
-                <button
-                  type="button"
-                  className={viewToolBtn}
-                  onClick={() => triggerCamera("reset")}
-                  aria-label="Vista general"
-                >
-                  <Maximize size={15} />
-                </button>
-              </div>
-              <div className="tooltip tooltip-bottom" data-tip="Rayos X (ver interior)">
-                <button
-                  type="button"
-                  className={`${viewToolBtn} ${xrayMode ? "bg-primary/15 text-primary hover:bg-primary/20" : ""}`}
-                  onClick={() => setXrayMode((v) => !v)}
-                  aria-label="Rayos X"
-                >
-                  <ScanSearch size={15} />
-                </button>
-              </div>
-              <div className="tooltip tooltip-bottom" data-tip="Plano de corte (ver interior)">
-                <button
-                  type="button"
-                  className={`${viewToolBtn} ${section.enabled ? "bg-primary/15 text-primary hover:bg-primary/20" : ""}`}
-                  onClick={() => setSection((s) => ({ ...s, enabled: !s.enabled }))}
-                  aria-label="Plano de corte"
-                >
-                  <Scissors size={15} />
-                </button>
-              </div>
-              <div className="tooltip tooltip-bottom" data-tip="Caminar / volar (primera persona)">
-                <button
-                  type="button"
-                  className={`${viewToolBtn} ${walkMode ? "bg-primary/15 text-primary hover:bg-primary/20" : ""}`}
-                  onClick={toggleWalk}
-                  aria-label="Caminar"
-                >
-                  <Footprints size={15} />
-                </button>
-              </div>
-              {!walkMode && <CameraNavigationSelect variant="toolbar" />}
-            </div>
+            {/* Vistas: cámara y modos de visualización en un popover categorizado. */}
+            <ToolMenu
+              id="views"
+              label="Vistas"
+              icon={Eye}
+              triggerActive={xrayMode || section.enabled || walkMode}
+              items={[
+                {
+                  id: "frame",
+                  label: selectedGroupIds.size > 0 ? "Encuadrar selección" : "Encuadrar todo",
+                  icon: Crosshair,
+                  hotkey: "Z",
+                  onSelect: () =>
+                    triggerCamera(selectedGroupIds.size > 0 ? "frameSelection" : "frameAll"),
+                },
+                {
+                  id: "reset",
+                  label: "Vista general (reset)",
+                  icon: Maximize,
+                  onSelect: () => triggerCamera("reset"),
+                },
+                {
+                  id: "xray",
+                  label: "Rayos X (ver interior)",
+                  icon: ScanSearch,
+                  active: xrayMode,
+                  dividerAbove: true,
+                  onSelect: () => setXrayMode((v) => !v),
+                },
+                {
+                  id: "section",
+                  label: "Plano de corte (ver interior)",
+                  icon: Scissors,
+                  active: section.enabled,
+                  onSelect: () => setSection((s) => ({ ...s, enabled: !s.enabled })),
+                },
+                {
+                  id: "walk",
+                  label: "Caminar / volar (primera persona)",
+                  icon: Footprints,
+                  active: walkMode,
+                  onSelect: toggleWalk,
+                },
+              ]}
+              footer={!walkMode ? <CameraNavigationSelect variant="toolbar" /> : undefined}
+            />
 
             <div className="hidden sm:block w-px h-7 bg-base-300/50" />
 
-            <div className="inline-flex items-center gap-0.5 p-0.5 rounded-xl bg-base-200/50">
-              <div className="tooltip tooltip-bottom" data-tip="Cursor (V)">
-                <button
-                  type="button"
-                  className={`${viewToolBtn} ${!boxSelectMode && !cutToolMode && !measureToolMode && !markLineToolMode ? "bg-primary/15 text-primary hover:bg-primary/20" : ""}`}
-                  onClick={() => {
+            {/* Herramientas: selección/dibujo en un popover categorizado. La activa
+                se resalta en el trigger; sus sub-modos siguen apareciendo al lado. */}
+            <ToolMenu
+              id="tools"
+              label={
+                cutToolMode
+                  ? "Cortes"
+                  : measureToolMode
+                    ? "Medir"
+                    : markLineToolMode
+                      ? "Marcas rojas"
+                      : ribToolMode
+                        ? "Nervio 🧲"
+                        : boxSelectMode
+                          ? "Selección área"
+                          : "Herramientas"
+              }
+              icon={Wrench}
+              triggerActive={
+                cutToolMode || measureToolMode || markLineToolMode || boxSelectMode || ribToolMode
+              }
+              items={[
+                {
+                  id: "cursor",
+                  label: "Cursor / seleccionar",
+                  icon: MousePointer2,
+                  hotkey: "V",
+                  active:
+                    !boxSelectMode && !cutToolMode && !measureToolMode && !markLineToolMode && !ribToolMode,
+                  onSelect: () => {
                     setCutToolMode(false);
                     setCutDraft(null);
                     setMeasureToolMode(false);
@@ -3475,23 +3489,16 @@ export default function ReviewScreen({
                     setMarkLineToolMode(false);
                     setMarkLineDraft(null);
                     setBoxSelectMode(false);
-                  }}
-                  aria-label="Cursor"
-                  aria-pressed={
-                    !boxSelectMode && !cutToolMode && !measureToolMode && !markLineToolMode
-                  }
-                >
-                  <MousePointer2 size={15} />
-                </button>
-              </div>
-              <div
-                className="tooltip tooltip-bottom"
-                data-tip="Selección por área (S)"
-              >
-                <button
-                  type="button"
-                  className={`${viewToolBtn} ${boxSelectMode ? "bg-primary/15 text-primary hover:bg-primary/20" : ""}`}
-                  onClick={() => {
+                    setRibToolMode(false);
+                  },
+                },
+                {
+                  id: "box",
+                  label: "Selección por área",
+                  icon: Lasso,
+                  hotkey: "S",
+                  active: boxSelectMode,
+                  onSelect: () => {
                     setCutToolMode(false);
                     setCutDraft(null);
                     setMeasureToolMode(false);
@@ -3499,25 +3506,18 @@ export default function ReviewScreen({
                     setMarkLineToolMode(false);
                     setMarkLineDraft(null);
                     setBoxSelectMode((s) => !s);
-                  }}
-                  aria-label="Selección por área"
-                  aria-pressed={boxSelectMode}
-                >
-                  <Lasso size={15} />
-                </button>
-              </div>
-              <div
-                className="tooltip tooltip-bottom"
-                data-tip={
-                  cutToolMode
-                    ? `${CUT_SHAPE_LABELS[cutShapeKind]} · C cambia forma · Alt libera bordes · V sale`
-                    : "Cortes (C)"
-                }
-              >
-                <button
-                  type="button"
-                  className={`${viewToolBtn} ${cutToolMode ? "bg-secondary/20 text-secondary hover:bg-secondary/25" : ""}`}
-                  onClick={() => {
+                  },
+                },
+                {
+                  id: "cut",
+                  label: cutToolMode
+                    ? `Cortes · ${CUT_SHAPE_LABELS[cutShapeKind]}`
+                    : "Cortes (recortes manuales)",
+                  icon: Scissors,
+                  hotkey: "C",
+                  active: cutToolMode,
+                  dividerAbove: true,
+                  onSelect: () => {
                     setMeasureToolMode(false);
                     setMeasureDraft(null);
                     setBoxSelectMode(false);
@@ -3529,25 +3529,17 @@ export default function ReviewScreen({
                       setCutShapeKind((shape) => nextCutShape(shape));
                       return true;
                     });
-                  }}
-                  aria-label="Herramienta de cortes"
-                  aria-pressed={cutToolMode}
-                >
-                  <Scissors size={15} />
-                </button>
-              </div>
-              <div
-                className="tooltip tooltip-bottom"
-                data-tip={
-                  measureToolMode
-                    ? `${MEASURE_SHAPE_LABELS[measureShapeKind]} · M apaga · V sale`
-                    : "Medir (M) "
-                }
-              >
-                <button
-                  type="button"
-                  className={`${viewToolBtn} ${measureToolMode ? "bg-secondary/20 text-secondary hover:bg-secondary/25" : ""}`}
-                  onClick={() => {
+                  },
+                },
+                {
+                  id: "measure",
+                  label: measureToolMode
+                    ? `Medir · ${MEASURE_SHAPE_LABELS[measureShapeKind]}`
+                    : "Medir distancias y áreas",
+                  icon: Ruler,
+                  hotkey: "M",
+                  active: measureToolMode,
+                  onSelect: () => {
                     setCutToolMode(false);
                     setCutDraft(null);
                     setBoxSelectMode(false);
@@ -3555,25 +3547,15 @@ export default function ReviewScreen({
                     setMarkLineToolMode(false);
                     setMarkLineDraft(null);
                     setMeasureToolMode((active) => !active);
-                  }}
-                  aria-label="Herramienta de medición"
-                  aria-pressed={measureToolMode}
-                >
-                  <Ruler size={15} />
-                </button>
-              </div>
-              <div
-                className="tooltip tooltip-bottom"
-                data-tip={
-                  markLineToolMode
-                    ? "Marca roja · R apaga · V sale"
-                    : "Marcar con líneas rojas (R)"
-                }
-              >
-                <button
-                  type="button"
-                  className={`${viewToolBtn} ${markLineToolMode ? "bg-error/20 text-error hover:bg-error/25" : ""}`}
-                  onClick={() => {
+                  },
+                },
+                {
+                  id: "markLine",
+                  label: "Marcar con líneas rojas (grabar)",
+                  icon: PenLine,
+                  hotkey: "R",
+                  active: markLineToolMode,
+                  onSelect: () => {
                     setCutToolMode(false);
                     setCutDraft(null);
                     setMeasureToolMode(false);
@@ -3581,14 +3563,28 @@ export default function ReviewScreen({
                     setBoxSelectMode(false);
                     setMarkLineDraft(null);
                     setMarkLineToolMode((a) => !a);
-                  }}
-                  aria-label="Marcar con líneas rojas"
-                  aria-pressed={markLineToolMode}
-                >
-                  <PenLine size={15} />
-                </button>
-              </div>
-            </div>
+                  },
+                },
+                {
+                  id: "ribSnap",
+                  label: "Colocar nervio (imán a la junta)",
+                  icon: Magnet,
+                  active: ribToolMode,
+                  dividerAbove: true,
+                  onSelect: () => {
+                    setCutToolMode(false);
+                    setCutDraft(null);
+                    setMeasureToolMode(false);
+                    setMeasureDraft(null);
+                    setMarkLineToolMode(false);
+                    setMarkLineDraft(null);
+                    setBoxSelectMode(false);
+                    setRibGhost(null);
+                    setRibToolMode((v) => !v);
+                  },
+                },
+              ]}
+            />
 
             {markLineToolMode && (
               <div className="inline-flex items-center gap-1 p-0.5 pl-1.5 rounded-xl bg-error/10 border border-error/25">
