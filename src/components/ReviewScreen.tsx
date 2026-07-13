@@ -61,10 +61,12 @@ import {
   createColumnId,
   removeRib,
   removeColumn,
-  DEFAULT_RIB_SIZE_M,
+  resolveRibSizeM,
   DEFAULT_RIB_T,
   DEFAULT_COLUMN_SIZE_M,
+  type Rib,
 } from "@/core/reinforcements";
+import RibSnapperOverlay from "@/components/RibSnapperOverlay";
 import { useUIStore } from "@/stores/uiStore";
 import { useRegisterFlowNav } from "@/hooks/useRegisterFlowNav";
 import FlexControls from "@/components/FlexControls";
@@ -497,6 +499,7 @@ export default function ReviewScreen({
     savedColumns,
     setSavedColumns,
     nestingData,
+    scale,
   } = useProjectContext();
   const [selectedGroupIds, setSelectedGroupIds] = useState<Set<number>>(
     () => new Set(),
@@ -566,6 +569,9 @@ export default function ReviewScreen({
   );
   // Herramienta de líneas rojas (marcar para grabar).
   const [markLineToolMode, setMarkLineToolMode] = useState(false);
+  // Herramienta "Colocar nervio" (imán a la junta pared↔piso) + fantasma.
+  const [ribToolMode, setRibToolMode] = useState(false);
+  const [ribGhost, setRibGhost] = useState<Rib | null>(null);
   const [markLineMode, setMarkLineMode] = useState<MarkLineMode>("straight");
   const [markLineDraft, setMarkLineDraft] = useState<MarkLine | null>(null);
   const [measureLabelScale, setMeasureLabelScale] = useState(
@@ -642,6 +648,15 @@ export default function ReviewScreen({
     h: number;
   } | null>(null);
   const viewerRef = useRef<ModelViewerHandle | null>(null);
+
+  // Exclusión mutua del imán de nervios: cualquier otra herramienta lo apaga.
+  useEffect(() => {
+    if (cutToolMode || measureToolMode || markLineToolMode || boxSelectMode || walkMode) {
+      setRibToolMode(false);
+      setRibGhost(null);
+    }
+  }, [cutToolMode, measureToolMode, markLineToolMode, boxSelectMode, walkMode]);
+
   const boxDragRef = useRef<{
     startX: number;
     startY: number;
@@ -784,15 +799,24 @@ export default function ReviewScreen({
 
   const canAddRib = selectedGroupIds.size === 2;
   const canAddColumn = selectedGroupIds.size >= 1;
+  // Cartela modesta: 50×50 mm físicos de maqueta, escalados al mundo del visor.
+  const ribSizeM = useMemo(() => resolveRibSizeM(scale), [scale]);
 
   const handleAddRib = useCallback(() => {
     if (selectedGroupIds.size !== 2) return;
     const [groupA, groupB] = Array.from(selectedGroupIds);
     setSavedRibs([
       ...savedRibs,
-      { id: createRibId(), groupA, groupB, sizeM: DEFAULT_RIB_SIZE_M, t: DEFAULT_RIB_T },
+      { id: createRibId(), groupA, groupB, sizeM: ribSizeM, t: DEFAULT_RIB_T },
     ]);
-  }, [selectedGroupIds, savedRibs, setSavedRibs]);
+  }, [selectedGroupIds, savedRibs, setSavedRibs, ribSizeM]);
+
+  const handleCommitSnappedRib = useCallback(
+    (rib: Rib) => {
+      setSavedRibs([...savedRibs, rib]);
+    },
+    [savedRibs, setSavedRibs],
+  );
 
   const handleSetRibT = useCallback(
     (id: string, t: number) => {
@@ -1401,6 +1425,16 @@ export default function ReviewScreen({
       case "rib":
         setSidebarTab("seleccion");
         handleAddRib();
+        break;
+      case "ribSnap":
+        setCutToolMode(false);
+        setCutDraft(null);
+        setMeasureToolMode(false);
+        setMeasureDraft(null);
+        setMarkLineToolMode(false);
+        setMarkLineDraft(null);
+        setBoxSelectMode(false);
+        setRibToolMode(true);
         break;
       case "column":
         setSidebarTab("seleccion");
@@ -2212,13 +2246,39 @@ export default function ReviewScreen({
               <p className="text-[11px] font-semibold uppercase tracking-widest text-base-content/50">
                 Refuerzos estructurales
               </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setRibGhost(null);
+                  setRibToolMode((v) => {
+                    const next = !v;
+                    if (next) {
+                      // Apagar las demás herramientas (una sola activa).
+                      setCutToolMode(false);
+                      setCutDraft(null);
+                      setMeasureToolMode(false);
+                      setMeasureDraft(null);
+                      setMarkLineToolMode(false);
+                      setMarkLineDraft(null);
+                      setBoxSelectMode(false);
+                    }
+                    return next;
+                  });
+                }}
+                className={`btn btn-xs rounded-lg w-full ${
+                  ribToolMode ? "btn-warning" : ""
+                }`}
+                title="Pasá el mouse cerca de una esquina pared-piso: aparece el nervio fantasma y el click lo fija"
+              >
+                🧲 Colocar nervio {ribToolMode ? "(activo — click en una esquina)" : ""}
+              </button>
               <div className="flex gap-1.5">
                 <button
                   type="button"
                   disabled={!canAddRib}
                   onClick={handleAddRib}
                   className="btn btn-xs rounded-lg flex-1 disabled:opacity-40"
-                  title="Cartela de refuerzo en la unión de 2 paredes perpendiculares (seleccioná 2)"
+                  title="Alternativa: cartela en la unión de 2 paredes ⊥ seleccionadas"
                 >
                   + Nervio
                 </button>
@@ -2233,8 +2293,9 @@ export default function ReviewScreen({
                 </button>
               </div>
               <p className="text-[10px] text-base-content/40 leading-snug">
-                Nervio: seleccioná 2 paredes ⊥. Columna: 1 componente. El preview (ámbar) es
-                esquemático; el backend genera la pieza real con encastres.
+                🧲 acercate a una junta pared-piso y aparece el nervio (cartela de 50×50 mm de
+                maqueta). Alternativa: 2 paredes ⊥ + &quot;+ Nervio&quot;. El preview (ámbar) es
+                esquemático; el backend genera la pieza real.
               </p>
               {(savedRibs.length > 0 || savedColumns.length > 0) && (
                 <ul className="space-y-0.5 pt-0.5">
@@ -3028,7 +3089,7 @@ export default function ReviewScreen({
           markGroupIds={markGroupIds}
           markLines={markLineDraft ? [...savedMarkLines, markLineDraft] : savedMarkLines}
           reinforcements={{
-            ribs: savedRibs,
+            ribs: ribGhost ? [...savedRibs, ribGhost] : savedRibs,
             columns: savedColumns,
             plateJoints: nestingData?.plateJoints ?? [],
           }}
@@ -3078,6 +3139,15 @@ export default function ReviewScreen({
           viewerRef={viewerRef}
           onDraftChange={setMarkLineDraft}
           onUpsert={handleUpsertMarkLine}
+        />
+
+        <RibSnapperOverlay
+          active={ribToolMode}
+          viewerRef={viewerRef}
+          plateJoints={nestingData?.plateJoints ?? []}
+          ribSizeM={ribSizeM}
+          onGhostChange={setRibGhost}
+          onCommit={handleCommitSnappedRib}
         />
 
         {/* Overlay mientras el backend recalcula la topología */}
