@@ -28,6 +28,9 @@ export interface AssemblyLiftContext {
   plateJointsByGroupId?: Map<number, PlateJoint[]>;
   /** Normal del plano de cada grupo (para orientar las ranuras). */
   normalByGroupId?: Map<number, Vec3>;
+  /** Centroide de cada grupo — orienta la marca de apoyo hacia la CARA INTERIOR
+   *  (el lado de la pared que mira a la placa que se apoya). */
+  centroidByGroupId?: Map<number, Vec3>;
 }
 
 /** One assembly step from the backend JSON. */
@@ -141,7 +144,9 @@ function applyLift(
     const slots = joints && joints.length > 0 && normal ? buildSlots(joints, normal) : [];
     // Marcas de apoyo (rojo): footprint de las juntas de apoyo pegado.
     const supportMarks =
-      joints && joints.length > 0 && normal ? computeSupportMarks3D(joints, normal) : [];
+      joints && joints.length > 0 && normal
+        ? computeSupportMarks3D(joints, normal, lift.centroidByGroupId)
+        : [];
 
     return { ...piece, lifted: { ...body, openings: body.openings ?? [], slots, supportMarks } };
   } catch {

@@ -41,6 +41,7 @@ import {
   PenLine,
   Spline,
   Lightbulb,
+  Wrench,
   Scissors,
   Footprints,
   Circle,
@@ -61,10 +62,13 @@ import {
   createColumnId,
   removeRib,
   removeColumn,
-  DEFAULT_RIB_SIZE_M,
+  resolveRibSizeM,
   DEFAULT_RIB_T,
   DEFAULT_COLUMN_SIZE_M,
+  type Rib,
 } from "@/core/reinforcements";
+import RibSnapperOverlay from "@/components/RibSnapperOverlay";
+import ToolMenu from "@/components/toolbar/ToolMenu";
 import { useUIStore } from "@/stores/uiStore";
 import { useRegisterFlowNav } from "@/hooks/useRegisterFlowNav";
 import FlexControls from "@/components/FlexControls";
@@ -497,6 +501,7 @@ export default function ReviewScreen({
     savedColumns,
     setSavedColumns,
     nestingData,
+    scale,
   } = useProjectContext();
   const [selectedGroupIds, setSelectedGroupIds] = useState<Set<number>>(
     () => new Set(),
@@ -566,6 +571,9 @@ export default function ReviewScreen({
   );
   // Herramienta de líneas rojas (marcar para grabar).
   const [markLineToolMode, setMarkLineToolMode] = useState(false);
+  // Herramienta "Colocar nervio" (imán a la junta pared↔piso) + fantasma.
+  const [ribToolMode, setRibToolMode] = useState(false);
+  const [ribGhost, setRibGhost] = useState<Rib | null>(null);
   const [markLineMode, setMarkLineMode] = useState<MarkLineMode>("straight");
   const [markLineDraft, setMarkLineDraft] = useState<MarkLine | null>(null);
   const [measureLabelScale, setMeasureLabelScale] = useState(
@@ -642,6 +650,15 @@ export default function ReviewScreen({
     h: number;
   } | null>(null);
   const viewerRef = useRef<ModelViewerHandle | null>(null);
+
+  // Exclusión mutua del imán de nervios: cualquier otra herramienta lo apaga.
+  useEffect(() => {
+    if (cutToolMode || measureToolMode || markLineToolMode || boxSelectMode || walkMode) {
+      setRibToolMode(false);
+      setRibGhost(null);
+    }
+  }, [cutToolMode, measureToolMode, markLineToolMode, boxSelectMode, walkMode]);
+
   const boxDragRef = useRef<{
     startX: number;
     startY: number;
@@ -784,15 +801,24 @@ export default function ReviewScreen({
 
   const canAddRib = selectedGroupIds.size === 2;
   const canAddColumn = selectedGroupIds.size >= 1;
+  // Cartela modesta: 50×50 mm físicos de maqueta, escalados al mundo del visor.
+  const ribSizeM = useMemo(() => resolveRibSizeM(scale), [scale]);
 
   const handleAddRib = useCallback(() => {
     if (selectedGroupIds.size !== 2) return;
     const [groupA, groupB] = Array.from(selectedGroupIds);
     setSavedRibs([
       ...savedRibs,
-      { id: createRibId(), groupA, groupB, sizeM: DEFAULT_RIB_SIZE_M, t: DEFAULT_RIB_T },
+      { id: createRibId(), groupA, groupB, sizeM: ribSizeM, t: DEFAULT_RIB_T },
     ]);
-  }, [selectedGroupIds, savedRibs, setSavedRibs]);
+  }, [selectedGroupIds, savedRibs, setSavedRibs, ribSizeM]);
+
+  const handleCommitSnappedRib = useCallback(
+    (rib: Rib) => {
+      setSavedRibs([...savedRibs, rib]);
+    },
+    [savedRibs, setSavedRibs],
+  );
 
   const handleSetRibT = useCallback(
     (id: string, t: number) => {
@@ -1401,6 +1427,16 @@ export default function ReviewScreen({
       case "rib":
         setSidebarTab("seleccion");
         handleAddRib();
+        break;
+      case "ribSnap":
+        setCutToolMode(false);
+        setCutDraft(null);
+        setMeasureToolMode(false);
+        setMeasureDraft(null);
+        setMarkLineToolMode(false);
+        setMarkLineDraft(null);
+        setBoxSelectMode(false);
+        setRibToolMode(true);
         break;
       case "column":
         setSidebarTab("seleccion");
@@ -2212,13 +2248,39 @@ export default function ReviewScreen({
               <p className="text-[11px] font-semibold uppercase tracking-widest text-base-content/50">
                 Refuerzos estructurales
               </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setRibGhost(null);
+                  setRibToolMode((v) => {
+                    const next = !v;
+                    if (next) {
+                      // Apagar las demás herramientas (una sola activa).
+                      setCutToolMode(false);
+                      setCutDraft(null);
+                      setMeasureToolMode(false);
+                      setMeasureDraft(null);
+                      setMarkLineToolMode(false);
+                      setMarkLineDraft(null);
+                      setBoxSelectMode(false);
+                    }
+                    return next;
+                  });
+                }}
+                className={`btn btn-xs rounded-lg w-full ${
+                  ribToolMode ? "btn-warning" : ""
+                }`}
+                title="Pasá el mouse cerca de una esquina pared-piso: aparece el nervio fantasma y el click lo fija"
+              >
+                🧲 Colocar nervio {ribToolMode ? "(activo — click en una esquina)" : ""}
+              </button>
               <div className="flex gap-1.5">
                 <button
                   type="button"
                   disabled={!canAddRib}
                   onClick={handleAddRib}
                   className="btn btn-xs rounded-lg flex-1 disabled:opacity-40"
-                  title="Cartela de refuerzo en la unión de 2 paredes perpendiculares (seleccioná 2)"
+                  title="Alternativa: cartela en la unión de 2 paredes ⊥ seleccionadas"
                 >
                   + Nervio
                 </button>
@@ -2233,8 +2295,9 @@ export default function ReviewScreen({
                 </button>
               </div>
               <p className="text-[10px] text-base-content/40 leading-snug">
-                Nervio: seleccioná 2 paredes ⊥. Columna: 1 componente. El preview (ámbar) es
-                esquemático; el backend genera la pieza real con encastres.
+                🧲 acercate a una junta pared-piso y aparece el nervio (cartela de 50×50 mm de
+                maqueta). Alternativa: 2 paredes ⊥ + &quot;+ Nervio&quot;. El preview (ámbar) es
+                esquemático; el backend genera la pieza real.
               </p>
               {(savedRibs.length > 0 || savedColumns.length > 0) && (
                 <ul className="space-y-0.5 pt-0.5">
@@ -3028,7 +3091,7 @@ export default function ReviewScreen({
           markGroupIds={markGroupIds}
           markLines={markLineDraft ? [...savedMarkLines, markLineDraft] : savedMarkLines}
           reinforcements={{
-            ribs: savedRibs,
+            ribs: ribGhost ? [...savedRibs, ribGhost] : savedRibs,
             columns: savedColumns,
             plateJoints: nestingData?.plateJoints ?? [],
           }}
@@ -3078,6 +3141,15 @@ export default function ReviewScreen({
           viewerRef={viewerRef}
           onDraftChange={setMarkLineDraft}
           onUpsert={handleUpsertMarkLine}
+        />
+
+        <RibSnapperOverlay
+          active={ribToolMode}
+          viewerRef={viewerRef}
+          plateJoints={nestingData?.plateJoints ?? []}
+          ribSizeM={ribSizeM}
+          onGhostChange={setRibGhost}
+          onCommit={handleCommitSnappedRib}
         />
 
         {/* Overlay mientras el backend recalcula la topología */}
@@ -3331,73 +3403,85 @@ export default function ReviewScreen({
 
             <div className="hidden sm:block w-px h-7 bg-base-300/50" />
 
-            <div className="inline-flex items-center gap-0.5 p-0.5 rounded-xl bg-base-200/50">
-              <div
-                className="tooltip tooltip-bottom"
-                data-tip={selectedGroupIds.size > 0 ? "Encuadrar selección (Z)" : "Encuadrar todo (Z)"}
-              >
-                <button
-                  type="button"
-                  className={viewToolBtn}
-                  onClick={() =>
-                    triggerCamera(selectedGroupIds.size > 0 ? "frameSelection" : "frameAll")
-                  }
-                  aria-label="Encuadrar"
-                >
-                  <Crosshair size={15} />
-                </button>
-              </div>
-              <div className="tooltip tooltip-bottom" data-tip="Vista general (reset)">
-                <button
-                  type="button"
-                  className={viewToolBtn}
-                  onClick={() => triggerCamera("reset")}
-                  aria-label="Vista general"
-                >
-                  <Maximize size={15} />
-                </button>
-              </div>
-              <div className="tooltip tooltip-bottom" data-tip="Rayos X (ver interior)">
-                <button
-                  type="button"
-                  className={`${viewToolBtn} ${xrayMode ? "bg-primary/15 text-primary hover:bg-primary/20" : ""}`}
-                  onClick={() => setXrayMode((v) => !v)}
-                  aria-label="Rayos X"
-                >
-                  <ScanSearch size={15} />
-                </button>
-              </div>
-              <div className="tooltip tooltip-bottom" data-tip="Plano de corte (ver interior)">
-                <button
-                  type="button"
-                  className={`${viewToolBtn} ${section.enabled ? "bg-primary/15 text-primary hover:bg-primary/20" : ""}`}
-                  onClick={() => setSection((s) => ({ ...s, enabled: !s.enabled }))}
-                  aria-label="Plano de corte"
-                >
-                  <Scissors size={15} />
-                </button>
-              </div>
-              <div className="tooltip tooltip-bottom" data-tip="Caminar / volar (primera persona)">
-                <button
-                  type="button"
-                  className={`${viewToolBtn} ${walkMode ? "bg-primary/15 text-primary hover:bg-primary/20" : ""}`}
-                  onClick={toggleWalk}
-                  aria-label="Caminar"
-                >
-                  <Footprints size={15} />
-                </button>
-              </div>
-              {!walkMode && <CameraNavigationSelect variant="toolbar" />}
-            </div>
+            {/* Vistas: cámara y modos de visualización en un popover categorizado. */}
+            <ToolMenu
+              id="views"
+              label="Vistas"
+              icon={Eye}
+              triggerActive={xrayMode || section.enabled || walkMode}
+              items={[
+                {
+                  id: "frame",
+                  label: selectedGroupIds.size > 0 ? "Encuadrar selección" : "Encuadrar todo",
+                  icon: Crosshair,
+                  hotkey: "Z",
+                  onSelect: () =>
+                    triggerCamera(selectedGroupIds.size > 0 ? "frameSelection" : "frameAll"),
+                },
+                {
+                  id: "reset",
+                  label: "Vista general (reset)",
+                  icon: Maximize,
+                  onSelect: () => triggerCamera("reset"),
+                },
+                {
+                  id: "xray",
+                  label: "Rayos X (ver interior)",
+                  icon: ScanSearch,
+                  active: xrayMode,
+                  dividerAbove: true,
+                  onSelect: () => setXrayMode((v) => !v),
+                },
+                {
+                  id: "section",
+                  label: "Plano de corte (ver interior)",
+                  icon: Scissors,
+                  active: section.enabled,
+                  onSelect: () => setSection((s) => ({ ...s, enabled: !s.enabled })),
+                },
+                {
+                  id: "walk",
+                  label: "Caminar / volar (primera persona)",
+                  icon: Footprints,
+                  active: walkMode,
+                  onSelect: toggleWalk,
+                },
+              ]}
+              footer={!walkMode ? <CameraNavigationSelect variant="toolbar" /> : undefined}
+            />
 
             <div className="hidden sm:block w-px h-7 bg-base-300/50" />
 
-            <div className="inline-flex items-center gap-0.5 p-0.5 rounded-xl bg-base-200/50">
-              <div className="tooltip tooltip-bottom" data-tip="Cursor (V)">
-                <button
-                  type="button"
-                  className={`${viewToolBtn} ${!boxSelectMode && !cutToolMode && !measureToolMode && !markLineToolMode ? "bg-primary/15 text-primary hover:bg-primary/20" : ""}`}
-                  onClick={() => {
+            {/* Herramientas: selección/dibujo en un popover categorizado. La activa
+                se resalta en el trigger; sus sub-modos siguen apareciendo al lado. */}
+            <ToolMenu
+              id="tools"
+              label={
+                cutToolMode
+                  ? "Cortes"
+                  : measureToolMode
+                    ? "Medir"
+                    : markLineToolMode
+                      ? "Marcas rojas"
+                      : ribToolMode
+                        ? "Nervio 🧲"
+                        : boxSelectMode
+                          ? "Selección área"
+                          : "Herramientas"
+              }
+              icon={Wrench}
+              triggerActive={
+                cutToolMode || measureToolMode || markLineToolMode || boxSelectMode || ribToolMode
+              }
+              items={[
+                {
+                  id: "cursor",
+                  label: "Cursor / seleccionar",
+                  icon: MousePointer2,
+                  hotkey: "V",
+                  active:
+                    !boxSelectMode && !cutToolMode && !measureToolMode && !markLineToolMode && !ribToolMode,
+                  onSelect: () => {
                     setCutToolMode(false);
                     setCutDraft(null);
                     setMeasureToolMode(false);
@@ -3405,23 +3489,16 @@ export default function ReviewScreen({
                     setMarkLineToolMode(false);
                     setMarkLineDraft(null);
                     setBoxSelectMode(false);
-                  }}
-                  aria-label="Cursor"
-                  aria-pressed={
-                    !boxSelectMode && !cutToolMode && !measureToolMode && !markLineToolMode
-                  }
-                >
-                  <MousePointer2 size={15} />
-                </button>
-              </div>
-              <div
-                className="tooltip tooltip-bottom"
-                data-tip="Selección por área (S)"
-              >
-                <button
-                  type="button"
-                  className={`${viewToolBtn} ${boxSelectMode ? "bg-primary/15 text-primary hover:bg-primary/20" : ""}`}
-                  onClick={() => {
+                    setRibToolMode(false);
+                  },
+                },
+                {
+                  id: "box",
+                  label: "Selección por área",
+                  icon: Lasso,
+                  hotkey: "S",
+                  active: boxSelectMode,
+                  onSelect: () => {
                     setCutToolMode(false);
                     setCutDraft(null);
                     setMeasureToolMode(false);
@@ -3429,25 +3506,18 @@ export default function ReviewScreen({
                     setMarkLineToolMode(false);
                     setMarkLineDraft(null);
                     setBoxSelectMode((s) => !s);
-                  }}
-                  aria-label="Selección por área"
-                  aria-pressed={boxSelectMode}
-                >
-                  <Lasso size={15} />
-                </button>
-              </div>
-              <div
-                className="tooltip tooltip-bottom"
-                data-tip={
-                  cutToolMode
-                    ? `${CUT_SHAPE_LABELS[cutShapeKind]} · C cambia forma · Alt libera bordes · V sale`
-                    : "Cortes (C)"
-                }
-              >
-                <button
-                  type="button"
-                  className={`${viewToolBtn} ${cutToolMode ? "bg-secondary/20 text-secondary hover:bg-secondary/25" : ""}`}
-                  onClick={() => {
+                  },
+                },
+                {
+                  id: "cut",
+                  label: cutToolMode
+                    ? `Cortes · ${CUT_SHAPE_LABELS[cutShapeKind]}`
+                    : "Cortes (recortes manuales)",
+                  icon: Scissors,
+                  hotkey: "C",
+                  active: cutToolMode,
+                  dividerAbove: true,
+                  onSelect: () => {
                     setMeasureToolMode(false);
                     setMeasureDraft(null);
                     setBoxSelectMode(false);
@@ -3459,25 +3529,17 @@ export default function ReviewScreen({
                       setCutShapeKind((shape) => nextCutShape(shape));
                       return true;
                     });
-                  }}
-                  aria-label="Herramienta de cortes"
-                  aria-pressed={cutToolMode}
-                >
-                  <Scissors size={15} />
-                </button>
-              </div>
-              <div
-                className="tooltip tooltip-bottom"
-                data-tip={
-                  measureToolMode
-                    ? `${MEASURE_SHAPE_LABELS[measureShapeKind]} · M apaga · V sale`
-                    : "Medir (M) "
-                }
-              >
-                <button
-                  type="button"
-                  className={`${viewToolBtn} ${measureToolMode ? "bg-secondary/20 text-secondary hover:bg-secondary/25" : ""}`}
-                  onClick={() => {
+                  },
+                },
+                {
+                  id: "measure",
+                  label: measureToolMode
+                    ? `Medir · ${MEASURE_SHAPE_LABELS[measureShapeKind]}`
+                    : "Medir distancias y áreas",
+                  icon: Ruler,
+                  hotkey: "M",
+                  active: measureToolMode,
+                  onSelect: () => {
                     setCutToolMode(false);
                     setCutDraft(null);
                     setBoxSelectMode(false);
@@ -3485,25 +3547,15 @@ export default function ReviewScreen({
                     setMarkLineToolMode(false);
                     setMarkLineDraft(null);
                     setMeasureToolMode((active) => !active);
-                  }}
-                  aria-label="Herramienta de medición"
-                  aria-pressed={measureToolMode}
-                >
-                  <Ruler size={15} />
-                </button>
-              </div>
-              <div
-                className="tooltip tooltip-bottom"
-                data-tip={
-                  markLineToolMode
-                    ? "Marca roja · R apaga · V sale"
-                    : "Marcar con líneas rojas (R)"
-                }
-              >
-                <button
-                  type="button"
-                  className={`${viewToolBtn} ${markLineToolMode ? "bg-error/20 text-error hover:bg-error/25" : ""}`}
-                  onClick={() => {
+                  },
+                },
+                {
+                  id: "markLine",
+                  label: "Marcar con líneas rojas (grabar)",
+                  icon: PenLine,
+                  hotkey: "R",
+                  active: markLineToolMode,
+                  onSelect: () => {
                     setCutToolMode(false);
                     setCutDraft(null);
                     setMeasureToolMode(false);
@@ -3511,14 +3563,28 @@ export default function ReviewScreen({
                     setBoxSelectMode(false);
                     setMarkLineDraft(null);
                     setMarkLineToolMode((a) => !a);
-                  }}
-                  aria-label="Marcar con líneas rojas"
-                  aria-pressed={markLineToolMode}
-                >
-                  <PenLine size={15} />
-                </button>
-              </div>
-            </div>
+                  },
+                },
+                {
+                  id: "ribSnap",
+                  label: "Colocar nervio (imán a la junta)",
+                  icon: Magnet,
+                  active: ribToolMode,
+                  dividerAbove: true,
+                  onSelect: () => {
+                    setCutToolMode(false);
+                    setCutDraft(null);
+                    setMeasureToolMode(false);
+                    setMeasureDraft(null);
+                    setMarkLineToolMode(false);
+                    setMarkLineDraft(null);
+                    setBoxSelectMode(false);
+                    setRibGhost(null);
+                    setRibToolMode((v) => !v);
+                  },
+                },
+              ]}
+            />
 
             {markLineToolMode && (
               <div className="inline-flex items-center gap-1 p-0.5 pl-1.5 rounded-xl bg-error/10 border border-error/25">
