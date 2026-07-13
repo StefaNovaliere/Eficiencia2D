@@ -4,10 +4,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   type ActiveCutShapeKind,
   type CutDragState,
+  type CutPrecisionSpec,
   type UserCut,
   createUserCutId,
+  cutCoordsFromPrecision,
   cutDimensionsLabel,
   findCutAtPoint,
+  getCutPrecisionSpec,
   panelEdgeSnapHints,
   resolveCutDrag,
   snapCutDragToPanelEdges,
@@ -17,6 +20,7 @@ import {
 } from "@/core/user-cuts";
 import type { PanelProjection } from "@/core/cut-preview";
 import type { ModelViewerHandle } from "@/components/ModelViewer";
+import CutPrecisionPanel from "@/components/CutPrecisionPanel";
 
 /** Cached panel plane — used for O(1) ray-plane intersections during drag. */
 interface PlaneCache {
@@ -39,6 +43,8 @@ interface CutToolOverlayProps {
   selectedCutId: string | null;
   onSelectedCutIdChange: (id: string | null) => void;
   viewerRef: React.RefObject<ModelViewerHandle | null>;
+  /** Pared seleccionada — preview en vivo al editar medidas. */
+  targetGroupId?: number | null;
   /** Throttled (rAF) — drives the 3D preview for both create and move. */
   onDraftChange: (draft: CutDragState | null) => void;
   /** Which cut is currently being moved (show it hidden at its old position). */
@@ -49,7 +55,14 @@ interface CutToolOverlayProps {
   onCommitMove: (cut: UserCut) => void;
 }
 
-// ── helpers ────────────────────────────────────────────────────────────────
+const DEFAULT_PRECISION: CutPrecisionSpec = {
+  widthM: 2,
+  heightM: 2,
+  horizontalEdge: "left",
+  verticalEdge: "top",
+  offsetHorizontalM: 0.5,
+  offsetVerticalM: 0.5,
+};
 
 function userCutToDraft(cut: UserCut): CutDragState {
   return {
@@ -75,7 +88,9 @@ function minSize(
 
 const MIN_COMMIT_SIZE_M = MIN_CUT_COMMIT_SIZE_M;
 
-// ── component ──────────────────────────────────────────────────────────────
+function supportsPrecision(kind: ActiveCutShapeKind): boolean {
+  return kind === "rect" || kind === "circle";
+}
 
 export default function CutToolOverlay({
   active,
@@ -85,20 +100,18 @@ export default function CutToolOverlay({
   selectedCutId,
   onSelectedCutIdChange,
   viewerRef,
+  targetGroupId = null,
   onDraftChange,
   onMovingCutId,
   onCommitCut,
   onCommitMove,
 }: CutToolOverlayProps) {
-  // drag state stored in a ref — no re-renders during drag
   const dragRef = useRef<{ active: boolean; mode: DragMode } | null>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
 
-  // rAF throttle for expensive parent updates
   const rafRef = useRef<number | null>(null);
   const latestDraftRef = useRef<CutDragState | null>(null);
 
-  // Only used for label + cursor style — tiny component re-renders
   const [labelInfo, setLabelInfo] = useState<{
     cut: Pick<UserCut, "kind" | "u0" | "v0" | "u1" | "v1"> & { groupId: number };
     x: number;
@@ -113,11 +126,34 @@ export default function CutToolOverlay({
   const [hoverCutId, setHoverCutId] = useState<string | null>(null);
   const hoverRafRef = useRef<number | null>(null);
 
+  const [precision, setPrecision] = useState<CutPrecisionSpec>(DEFAULT_PRECISION);
+  const [precisionPanelOpen, setPrecisionPanelOpen] = useState(true);
+  const [isDragging, setIsDragging] = useState(false);
+  const precisionEdgesRef = useRef({
+    horizontalEdge: DEFAULT_PRECISION.horizontalEdge,
+    verticalEdge: DEFAULT_PRECISION.verticalEdge,
+  });
+  const lastPlaneRef = useRef<PlaneCache | null>(null);
+  const activeGroupRef = useRef<number | null>(null);
+
   const snapActive = edgeSnapEnabled && !altHeld;
+  const showPrecision = active && supportsPrecision(shapeKind) && precisionPanelOpen;
+
+  useEffect(() => {
+    if (active && supportsPrecision(shapeKind)) setPrecisionPanelOpen(true);
+  }, [active, shapeKind]);
+
+  useEffect(() => {
+    precisionEdgesRef.current = {
+      horizontalEdge: precision.horizontalEdge,
+      verticalEdge: precision.verticalEdge,
+    };
+  }, [precision.horizontalEdge, precision.verticalEdge]);
 
   useEffect(() => {
     if (!active) {
       setAltHeld(false);
+      setPrecisionPanelOpen(false);
       return;
     }
     const onKeyDown = (e: KeyboardEvent) => {
@@ -137,6 +173,23 @@ export default function CutToolOverlay({
     };
   }, [active]);
 
+  useEffect(() => {
+    if (targetGroupId != null) activeGroupRef.current = targetGroupId;
+  }, [targetGroupId]);
+
+  // Sync precision form from selected cut (when not dragging).
+  useEffect(() => {
+    if (!showPrecision || isDragging) return;
+    if (!selectedCutId) return;
+    const cut = userCuts.find((c) => c.id === selectedCutId);
+    if (!cut || cut.kind === "line") return;
+    const ps = viewerRef.current?.getPanelSize(cut.groupId);
+    if (!ps) return;
+    setPrecision(
+      getCutPrecisionSpec(cut, ps.widthM, ps.heightM, precisionEdgesRef.current),
+    );
+  }, [selectedCutId, userCuts, showPrecision, isDragging, viewerRef]);
+
   const snapDraft = useCallback(
     (draft: CutDragState): CutDragState => {
       const ps = viewerRef.current?.getPanelSize(draft.groupId);
@@ -146,7 +199,6 @@ export default function CutToolOverlay({
     [viewerRef, snapActive],
   );
 
-  // Flush draft to ModelViewer at most once per animation frame
   const scheduleDraft = useCallback(
     (draft: CutDragState | null) => {
       latestDraftRef.current = draft;
@@ -167,7 +219,6 @@ export default function CutToolOverlay({
     [onDraftChange],
   );
 
-  // Cancel rAF on deactivation
   useEffect(() => {
     if (!active) {
       if (rafRef.current != null) {
@@ -182,6 +233,7 @@ export default function CutToolOverlay({
       onMovingCutId(null);
       setLabelInfo(null);
       setHoverCutId(null);
+      setIsDragging(false);
     }
   }, [active, scheduleDraft, onMovingCutId]);
 
@@ -197,16 +249,267 @@ export default function CutToolOverlay({
     [userCuts, viewerRef, selectedCutId],
   );
 
-  // ── middle mouse: forward to canvas so OrbitControls can rotate ──────────
+  const syncPrecisionFromCut = useCallback(
+    (cut: Pick<UserCut, "kind" | "u0" | "v0" | "u1" | "v1">, groupId: number) => {
+      const ps = viewerRef.current?.getPanelSize(groupId);
+      if (!ps) return;
+      setPrecision(
+        getCutPrecisionSpec(cut, ps.widthM, ps.heightM, precisionEdgesRef.current),
+      );
+    },
+    [viewerRef],
+  );
+
+  const placeCutFromSpec = useCallback(
+    (
+      groupId: number,
+      plane: Pick<PlaneCache, "surfaceNormal" | "surfaceOffset">,
+      spec: CutPrecisionSpec,
+    ): UserCut | null => {
+      const ps = viewerRef.current?.getPanelSize(groupId);
+      if (!ps) return null;
+      if (spec.widthM < MIN_COMMIT_SIZE_M || spec.heightM < MIN_COMMIT_SIZE_M) return null;
+      const coords = cutCoordsFromPrecision(spec, ps.widthM, ps.heightM);
+      return {
+        id: createUserCutId(),
+        groupId,
+        kind: shapeKind,
+        ...coords,
+        surfaceNormal: plane.surfaceNormal,
+        surfaceOffset: plane.surfaceOffset,
+      };
+    },
+    [viewerRef, shapeKind],
+  );
+
+  const previewCutFromSpec = useCallback(
+    (groupId: number, spec: CutPrecisionSpec) => {
+      const ps = viewerRef.current?.getPanelSize(groupId);
+      if (!ps) return;
+      const coords = cutCoordsFromPrecision(spec, ps.widthM, ps.heightM);
+      const plane = lastPlaneRef.current;
+      const draft: CutDragState = {
+        groupId,
+        kind: shapeKind,
+        ...coords,
+        shiftKey: false,
+        ...(plane
+          ? {
+              surfaceNormal: plane.surfaceNormal,
+              surfaceOffset: plane.surfaceOffset,
+            }
+          : {}),
+      };
+      scheduleDraft(snapDraft(draft));
+    },
+    [viewerRef, shapeKind, scheduleDraft, snapDraft],
+  );
+
+  useEffect(() => {
+    if (!active || !supportsPrecision(shapeKind) || isDragging || !precisionPanelOpen) return;
+    if (selectedCutId) return;
+    const gid = activeGroupRef.current ?? targetGroupId;
+    if (gid == null) return;
+    previewCutFromSpec(gid, precision);
+  }, [
+    active,
+    shapeKind,
+    isDragging,
+    precisionPanelOpen,
+    selectedCutId,
+    targetGroupId,
+    precision,
+    previewCutFromSpec,
+  ]);
+
+  const handleAccept = useCallback(() => {
+    if (selectedCutId) {
+      const cut = userCuts.find((c) => c.id === selectedCutId);
+      if (cut && cut.kind !== "line") {
+        const ps = viewerRef.current?.getPanelSize(cut.groupId);
+        if (ps) {
+          const coords = cutCoordsFromPrecision(precision, ps.widthM, ps.heightM);
+          onCommitMove({ ...cut, ...coords });
+        }
+        onSelectedCutIdChange(null);
+        previewCutFromSpec(cut.groupId, precision);
+      } else {
+        onSelectedCutIdChange(null);
+        scheduleDraft(null);
+      }
+    } else {
+      const gid = activeGroupRef.current ?? targetGroupId;
+      if (gid != null) {
+        const plane = lastPlaneRef.current;
+        if (plane) {
+          const placed = placeCutFromSpec(gid, plane, precision);
+          if (placed) {
+            onCommitCut(placed);
+          }
+        } else {
+          const ps = viewerRef.current?.getPanelSize(gid);
+          if (ps) {
+            const coords = cutCoordsFromPrecision(precision, ps.widthM, ps.heightM);
+            if (
+              coords.u1 - coords.u0 >= MIN_COMMIT_SIZE_M &&
+              coords.v1 - coords.v0 >= MIN_COMMIT_SIZE_M
+            ) {
+              const cut: UserCut = {
+                id: createUserCutId(),
+                groupId: gid,
+                kind: shapeKind,
+                ...coords,
+              };
+              onCommitCut(cut);
+            }
+          }
+        }
+        previewCutFromSpec(gid, precision);
+      } else {
+        scheduleDraft(null);
+      }
+    }
+    setPrecisionPanelOpen(true);
+  }, [
+    selectedCutId,
+    userCuts,
+    viewerRef,
+    precision,
+    onCommitMove,
+    targetGroupId,
+    placeCutFromSpec,
+    onCommitCut,
+    onSelectedCutIdChange,
+    shapeKind,
+    scheduleDraft,
+    previewCutFromSpec,
+  ]);
+
+  const handlePrecisionChange = useCallback(
+    (next: CutPrecisionSpec) => {
+      const edgesOnly =
+        next.widthM === precision.widthM &&
+        next.heightM === precision.heightM &&
+        next.offsetHorizontalM === precision.offsetHorizontalM &&
+        next.offsetVerticalM === precision.offsetVerticalM &&
+        (next.horizontalEdge !== precision.horizontalEdge ||
+          next.verticalEdge !== precision.verticalEdge);
+
+      // Cambiar solo el borde de referencia: re-lee offsets, no mueve el corte.
+      if (edgesOnly) {
+        const drag = dragRef.current;
+        const sourceCut =
+          drag?.active && drag.mode.type === "move"
+            ? drag.mode.latest
+            : drag?.active && drag.mode.type === "create" && latestDraftRef.current
+              ? latestDraftRef.current
+              : selectedCutId
+                ? userCuts.find((c) => c.id === selectedCutId)
+                : null;
+
+        if (sourceCut) {
+          const groupId =
+            "groupId" in sourceCut
+              ? sourceCut.groupId
+              : drag?.mode.type === "create"
+                ? drag.mode.groupId
+                : selectedCutId
+                  ? userCuts.find((c) => c.id === selectedCutId)?.groupId
+                  : undefined;
+          if (groupId != null) {
+            const ps = viewerRef.current?.getPanelSize(groupId);
+            if (ps) {
+              setPrecision(
+                getCutPrecisionSpec(sourceCut, ps.widthM, ps.heightM, {
+                  horizontalEdge: next.horizontalEdge,
+                  verticalEdge: next.verticalEdge,
+                }),
+              );
+              return;
+            }
+          }
+        }
+
+        setPrecision(next);
+        return;
+      }
+
+      setPrecision(next);
+
+      // Live-update draft while creating/moving.
+      const drag = dragRef.current;
+      if (drag?.active) {
+        const groupId =
+          drag.mode.type === "move" ? drag.mode.original.groupId : drag.mode.groupId;
+        const ps = viewerRef.current?.getPanelSize(groupId);
+        if (!ps) return;
+        const coords = cutCoordsFromPrecision(next, ps.widthM, ps.heightM);
+        if (drag.mode.type === "create") {
+          const draft: CutDragState = {
+            groupId,
+            kind: shapeKind,
+            ...coords,
+            shiftKey: false,
+            surfaceNormal: drag.mode.plane.surfaceNormal,
+            surfaceOffset: drag.mode.plane.surfaceOffset,
+          };
+          scheduleDraft(draft);
+          setLabelInfo((prev) =>
+            prev
+              ? { ...prev, cut: { groupId, kind: shapeKind, ...coords }, hoverOnly: false }
+              : prev,
+          );
+        } else {
+          const updated: UserCut = {
+            ...drag.mode.original,
+            ...coords,
+          };
+          scheduleDraft(userCutToDraft(updated));
+          dragRef.current = {
+            active: true,
+            mode: { ...drag.mode, latest: updated },
+          };
+          setLabelInfo((prev) =>
+            prev ? { ...prev, cut: updated, hoverOnly: false } : prev,
+          );
+        }
+        return;
+      }
+
+      // Refine selected cut without dragging, or preview on target wall.
+      if (!selectedCutId) {
+        const gid = activeGroupRef.current ?? targetGroupId;
+        if (gid != null && !isDragging) previewCutFromSpec(gid, next);
+        return;
+      }
+      const cut = userCuts.find((c) => c.id === selectedCutId);
+      if (!cut || cut.kind === "line") return;
+      const ps = viewerRef.current?.getPanelSize(cut.groupId);
+      if (!ps) return;
+      const coords = cutCoordsFromPrecision(next, ps.widthM, ps.heightM);
+      onCommitMove({ ...cut, ...coords });
+    },
+    [
+      precision,
+      viewerRef,
+      shapeKind,
+      scheduleDraft,
+      selectedCutId,
+      userCuts,
+      onCommitMove,
+      targetGroupId,
+      isDragging,
+      previewCutFromSpec,
+    ],
+  );
+
   const handleMiddleMouse = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
       const overlay = overlayRef.current;
       if (!overlay) return;
 
-      // Disable pointer events so subsequent pointermove/up reach the canvas
       overlay.style.pointerEvents = "none";
 
-      // Find the Three.js canvas and dispatch a synthetic pointerdown to it
       const canvas = overlay.parentElement?.querySelector("canvas");
       if (canvas) {
         canvas.dispatchEvent(
@@ -227,7 +530,6 @@ export default function CutToolOverlay({
         );
       }
 
-      // Restore pointer events once the middle button is released
       const restore = () => {
         overlay.style.pointerEvents = "";
         window.removeEventListener("pointerup", restore);
@@ -237,18 +539,21 @@ export default function CutToolOverlay({
     [],
   );
 
-  // ── pointer down ──────────────────────────────────────────────────────────
   const handlePointerDown = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
       if (!active) return;
-      if (e.button === 1) { handleMiddleMouse(e); return; }
+      if (e.button === 1) {
+        handleMiddleMouse(e);
+        return;
+      }
       if (e.button !== 0) return;
-      if (document.elementFromPoint(e.clientX, e.clientY)?.closest("[data-viewer-chrome]")) return;
+      if (document.elementFromPoint(e.clientX, e.clientY)?.closest("[data-viewer-chrome]")) {
+        return;
+      }
 
       e.preventDefault();
       e.currentTarget.setPointerCapture(e.pointerId);
 
-      // Full raycast once — subsequent moves use cheap plane intersection
       const hit = viewerRef.current?.raycastPanelFull(e.clientX, e.clientY);
       if (!hit) return;
 
@@ -258,6 +563,8 @@ export default function CutToolOverlay({
         surfaceNormal: hit.surfaceNormal,
         surfaceOffset: hit.surfaceOffset,
       };
+      lastPlaneRef.current = plane;
+      activeGroupRef.current = hit.groupId;
 
       const forceCreate = altHeld;
       const existing = findCutAt(hit.groupId, hit.u, hit.v, forceCreate);
@@ -269,10 +576,10 @@ export default function CutToolOverlay({
           : { u: hit.u, v: hit.v };
 
       if (existing) {
-        // START MOVE — hide original, show draft at same position
         onSelectedCutIdChange(existing.id);
         onMovingCutId(existing.id);
         scheduleDraft(userCutToDraft(existing));
+        setIsDragging(true);
         dragRef.current = {
           active: true,
           mode: {
@@ -298,10 +605,10 @@ export default function CutToolOverlay({
           snapActive,
           edgeHints: panelSize ? panelEdgeSnapHints(startUv.u, startUv.v, panelSize) : null,
         });
+        syncPrecisionFromCut(existing, existing.groupId);
         return;
       }
 
-      // START CREATE
       onSelectedCutIdChange(null);
       const initDraft: CutDragState = snapDraft({
         groupId: hit.groupId,
@@ -314,6 +621,7 @@ export default function CutToolOverlay({
         surfaceNormal: hit.surfaceNormal,
         surfaceOffset: hit.surfaceOffset,
       });
+      setIsDragging(true);
       dragRef.current = {
         active: true,
         mode: { type: "create", groupId: hit.groupId, u0: startUv.u, v0: startUv.v, plane },
@@ -329,10 +637,21 @@ export default function CutToolOverlay({
         edgeHints: panelSize ? panelEdgeSnapHints(startUv.u, startUv.v, panelSize) : null,
       });
     },
-    [active, shapeKind, viewerRef, findCutAt, scheduleDraft, onMovingCutId, onSelectedCutIdChange, handleMiddleMouse, snapActive, snapDraft, altHeld],
+    [
+      active,
+      shapeKind,
+      viewerRef,
+      findCutAt,
+      scheduleDraft,
+      onMovingCutId,
+      onSelectedCutIdChange,
+      handleMiddleMouse,
+      snapActive,
+      snapDraft,
+      altHeld,
+    ],
   );
 
-  // ── pointer move ──────────────────────────────────────────────────────────
   const handlePointerMove = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
       if (!dragRef.current?.active) {
@@ -350,6 +669,13 @@ export default function CutToolOverlay({
             setHoverCutId(null);
             return;
           }
+          lastPlaneRef.current = {
+            scenePoint: hit.scenePoint,
+            projection: hit.projection,
+            surfaceNormal: hit.surfaceNormal,
+            surfaceOffset: hit.surfaceOffset,
+          };
+          activeGroupRef.current = hit.groupId;
           const ps = viewerRef.current?.getPanelSize(hit.groupId);
           if (!ps) {
             setLabelInfo(null);
@@ -401,7 +727,6 @@ export default function CutToolOverlay({
 
       const mode = dragRef.current.mode;
 
-      // O(1) plane intersection — no scene traversal during drag
       const uv = viewerRef.current?.getUVFromMouseOnPlane(
         e.clientX,
         e.clientY,
@@ -431,6 +756,11 @@ export default function CutToolOverlay({
           edgeHints: ps ? panelEdgeSnapHints(snapped.u0, snapped.v0, ps) : null,
         });
         scheduleDraft(snapped);
+        if (ps && supportsPrecision(shapeKind)) {
+          setPrecision(
+            getCutPrecisionSpec(snapped, ps.widthM, ps.heightM, precisionEdgesRef.current),
+          );
+        }
 
         dragRef.current = {
           active: true,
@@ -439,7 +769,6 @@ export default function CutToolOverlay({
         return;
       }
 
-      // CREATE mode
       const u1 = uv ? uv.u : (latestDraftRef.current?.u1 ?? mode.u0);
       const v1 = uv ? uv.v : (latestDraftRef.current?.v1 ?? mode.v0);
 
@@ -463,22 +792,39 @@ export default function CutToolOverlay({
         isMove: false,
         hoverOnly: false,
         snapActive,
-        edgeHints: ps
-          ? panelEdgeSnapHints(resolved.u1, resolved.v1, ps)
-          : null,
+        edgeHints: ps ? panelEdgeSnapHints(resolved.u1, resolved.v1, ps) : null,
       });
+      if (ps && supportsPrecision(shapeKind)) {
+        setPrecision(
+          getCutPrecisionSpec(
+            { ...draft, ...resolved },
+            ps.widthM,
+            ps.heightM,
+            precisionEdgesRef.current,
+          ),
+        );
+      }
     },
-    [active, shapeKind, viewerRef, scheduleDraft, snapActive, snapDraft, findCutAt, altHeld],
+    [
+      active,
+      shapeKind,
+      viewerRef,
+      scheduleDraft,
+      snapActive,
+      snapDraft,
+      findCutAt,
+      altHeld,
+      precision,
+    ],
   );
 
-  // ── pointer up ────────────────────────────────────────────────────────────
   const handlePointerUp = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
       if (!dragRef.current?.active) return;
       const mode = dragRef.current.mode;
       dragRef.current.active = false;
+      setIsDragging(false);
 
-      // Capture draft BEFORE scheduleDraft(null) wipes latestDraftRef
       const committedDraft = latestDraftRef.current;
 
       setLabelInfo(null);
@@ -497,26 +843,62 @@ export default function CutToolOverlay({
           onCommitMove(latest);
         }
         onSelectedCutIdChange(latest.id);
+        syncPrecisionFromCut(latest, latest.groupId);
         return;
       }
 
-      // CREATE — use the captured value
       if (!committedDraft) return;
 
       const snapped = snapDraft({ ...committedDraft, shiftKey: e.shiftKey });
       const resolved = resolveCutDrag({ ...snapped, shiftKey: e.shiftKey });
-      if (minSize(shapeKind, resolved) < MIN_COMMIT_SIZE_M) return;
 
-      onCommitCut({
+      // Click casi sin arrastre → colocar con las medidas del panel de precisión.
+      if (minSize(shapeKind, resolved) < MIN_COMMIT_SIZE_M) {
+        if (supportsPrecision(shapeKind) && snapped.surfaceNormal != null) {
+          const placed = placeCutFromSpec(
+            snapped.groupId,
+            {
+              surfaceNormal: snapped.surfaceNormal,
+              surfaceOffset: snapped.surfaceOffset ?? 0,
+            },
+            precision,
+          );
+          if (placed) {
+            onCommitCut(placed);
+            onSelectedCutIdChange(null);
+            setPrecisionPanelOpen(true);
+            previewCutFromSpec(placed.groupId, precision);
+          }
+        }
+        return;
+      }
+
+      const cut: UserCut = {
         id: createUserCutId(),
         groupId: snapped.groupId,
         kind: shapeKind,
         ...resolved,
         surfaceNormal: snapped.surfaceNormal,
         surfaceOffset: snapped.surfaceOffset,
-      });
+      };
+      onCommitCut(cut);
+      onSelectedCutIdChange(null);
+      setPrecisionPanelOpen(true);
+      previewCutFromSpec(cut.groupId, precision);
     },
-    [shapeKind, onCommitCut, onCommitMove, onMovingCutId, onSelectedCutIdChange, scheduleDraft, snapDraft],
+    [
+      shapeKind,
+      onCommitCut,
+      onCommitMove,
+      onMovingCutId,
+      onSelectedCutIdChange,
+      scheduleDraft,
+      snapDraft,
+      placeCutFromSpec,
+      precision,
+      syncPrecisionFromCut,
+      previewCutFromSpec,
+    ],
   );
 
   const isDraggingMove = dragRef.current?.active && dragRef.current.mode.type === "move";
@@ -583,19 +965,19 @@ export default function CutToolOverlay({
           {isHoverOnly ? (
             <span className="text-[11px] font-sans text-base-content/70">
               {labelInfo.isMove
-                ? "Arrastrá para mover el corte · Alt+clic para dibujar encima"
+                ? "Arrastrá para mover · Alt+clic dibuja encima"
                 : snapActive
                   ? edgeHintLabel
-                    ? `Borde ${edgeHintLabel} — soltá acá para cortar completo`
-                    : "Acercate a un borde para guiar el corte"
-                  : "Modo libre — el corte no pegará a los bordes"}
+                    ? `Borde ${edgeHintLabel}`
+                    : "Acercate a un borde"
+                  : "Modo libre"}
             </span>
           ) : (
             label
           )}
           {labelInfo.isMove && !isHoverOnly && (
             <span className="block text-[11px] text-base-content/50 mt-0.5 font-sans">
-              Soltá para confirmar · Alt+clic dibuja encima · Ctrl+Z deshace
+              Soltá para confirmar
             </span>
           )}
           {!labelInfo.isMove && !isHoverOnly && snapActive && edgeHintLabel && (
@@ -609,6 +991,15 @@ export default function CutToolOverlay({
             </span>
           )}
         </div>
+      )}
+
+      {showPrecision && (
+        <CutPrecisionPanel
+          spec={precision}
+          liveFromDrag={isDragging}
+          onChange={handlePrecisionChange}
+          onAccept={handleAccept}
+        />
       )}
     </>
   );

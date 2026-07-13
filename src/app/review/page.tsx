@@ -7,10 +7,12 @@ import { useAuth } from "@/context/AuthContext";
 import ReviewScreen from "@/components/ReviewScreen";
 import type { ClassificationOverride } from "@/core/pipeline";
 import type { UserCut } from "@/core/user-cuts";
+import type { GroupNote } from "@/core/group-notes";
 import {
   recomputeTopology,
   fetchNestingPreview,
   userCutsForApi,
+  groupNotesForApi,
   flexForApi,
   markLinesForApi,
   ribsForApi,
@@ -61,6 +63,8 @@ function ReviewPageContent() {
     setSavedMarks,
     savedUserCuts,
     setSavedUserCuts,
+    savedNotes,
+    setSavedNotes,
     savedFlex,
     savedMarkLines,
     savedRibs,
@@ -217,6 +221,7 @@ function ReviewPageContent() {
       wallWallDecisions: Map<number, number>,
       marks: number[],
       userCuts: UserCut[],
+      notes: GroupNote[],
     ) => {
       if (!phase1Result || !fileId) return;
 
@@ -224,6 +229,7 @@ function ReviewPageContent() {
       setSavedWallWallDecisions(wallWallDecisions);
       setSavedMarks(marks);
       setSavedUserCuts(userCuts);
+      setSavedNotes(notes);
       setIsGenerating(true);
 
       try {
@@ -261,6 +267,7 @@ function ReviewPageContent() {
             wall_wall_decisions: decisionsToRecord(wallWallDecisions),
             marks,
             user_cuts: userCutsForApi(userCuts),
+            notes: groupNotesForApi(notes),
             scale_denom: scale,
             sheet_config: {
               width_m: sheetConfig.widthM,
@@ -297,6 +304,7 @@ function ReviewPageContent() {
       setSavedWallWallDecisions,
       setSavedMarks,
       setSavedUserCuts,
+      setSavedNotes,
       setNestingData,
       router,
       token,
@@ -345,6 +353,7 @@ function ReviewPageContent() {
       initialWallWallDecisions={savedWallWallDecisions}
       initialMarks={savedMarks}
       initialUserCuts={savedUserCuts}
+      initialNotes={savedNotes}
       isRecomputing={isRecomputing}
       isGenerating={isGenerating}
       onPrintScaleChange={(nextScale) => {

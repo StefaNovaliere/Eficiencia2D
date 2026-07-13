@@ -250,6 +250,110 @@ export function getCutPanelMargins(
   };
 }
 
+/** Bordes de referencia perpendiculares del panel (siempre un H + un V). */
+export type CutHorizontalEdge = "left" | "right";
+export type CutVerticalEdge = "top" | "bottom";
+
+/** Medidas explícitas respecto a dos bordes perpendiculares. */
+export interface CutPrecisionSpec {
+  widthM: number;
+  heightM: number;
+  horizontalEdge: CutHorizontalEdge;
+  verticalEdge: CutVerticalEdge;
+  /** Distancia al borde izquierdo o derecho (m). */
+  offsetHorizontalM: number;
+  /** Distancia al borde superior o inferior (m). */
+  offsetVerticalM: number;
+}
+
+function clamp(n: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, n));
+}
+
+/** Lee tamaño y offsets de un corte respecto a dos bordes perpendiculares. */
+export function getCutPrecisionSpec(
+  cut: Pick<UserCut, "kind" | "u0" | "v0" | "u1" | "v1">,
+  panelWidthM: number,
+  panelHeightM: number,
+  preferred?: Partial<Pick<CutPrecisionSpec, "horizontalEdge" | "verticalEdge">>,
+): CutPrecisionSpec {
+  const resolved = resolveCutDrag({
+    groupId: 0,
+    kind: cut.kind,
+    u0: cut.u0,
+    v0: cut.v0,
+    u1: cut.u1,
+    v1: cut.v1,
+    shiftKey: false,
+  });
+  const { minU, maxU, minV, maxV } = cutBbox({ ...cut, ...resolved });
+  const margins = getCutPanelMargins(cut, panelWidthM, panelHeightM);
+
+  const horizontalEdge =
+    preferred?.horizontalEdge ?? (margins.left <= margins.right ? "left" : "right");
+  const verticalEdge =
+    preferred?.verticalEdge ?? (margins.top <= margins.bottom ? "top" : "bottom");
+
+  return {
+    widthM: Math.max(0, maxU - minU),
+    heightM: Math.max(0, maxV - minV),
+    horizontalEdge,
+    verticalEdge,
+    offsetHorizontalM: horizontalEdge === "left" ? margins.left : margins.right,
+    offsetVerticalM: verticalEdge === "top" ? margins.top : margins.bottom,
+  };
+}
+
+/**
+ * Coloca un corte rectangular/circular a partir de tamaño + offsets
+ * respecto a un borde horizontal y uno vertical (siempre perpendiculares).
+ */
+export function cutCoordsFromPrecision(
+  spec: CutPrecisionSpec,
+  panelWidthM: number,
+  panelHeightM: number,
+): Pick<UserCut, "u0" | "v0" | "u1" | "v1"> {
+  const w = clamp(spec.widthM, 0, panelWidthM);
+  const h = clamp(spec.heightM, 0, panelHeightM);
+
+  let minU: number;
+  let maxU: number;
+  let minV: number;
+  let maxV: number;
+
+  if (spec.horizontalEdge === "left") {
+    minU = clamp(spec.offsetHorizontalM, 0, Math.max(0, panelWidthM - w));
+    maxU = minU + w;
+  } else {
+    maxU = clamp(panelWidthM - spec.offsetHorizontalM, w, panelWidthM);
+    minU = maxU - w;
+  }
+
+  if (spec.verticalEdge === "bottom") {
+    minV = clamp(spec.offsetVerticalM, 0, Math.max(0, panelHeightM - h));
+    maxV = minV + h;
+  } else {
+    maxV = clamp(panelHeightM - spec.offsetVerticalM, h, panelHeightM);
+    minV = maxV - h;
+  }
+
+  return { u0: minU, v0: minV, u1: maxU, v1: maxV };
+}
+
+export function formatCutMetersInput(n: number): string {
+  if (!Number.isFinite(n)) return "";
+  const rounded = Math.round(n * 1000) / 1000;
+  return String(rounded);
+}
+
+export function parseCutMetersInput(raw: string): number | null {
+  const normalized = raw.trim().replace(",", ".");
+  if (!normalized) return null;
+  const n = Number(normalized);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return n;
+}
+
 function distToSegment(
   px: number,
   py: number,
