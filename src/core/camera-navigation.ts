@@ -129,16 +129,18 @@ export const CAMERA_NAVIGATION_PRESETS: Record<
   touchpad: {
     id: "touchpad",
     label: "Touchpad",
-    summary: "Pellizco para zoom · Deslizar para orbitar/panear",
+    summary: "Arrastrar para orbitar · Dos dedos / pellizco para zoom",
     commands: [
-      { icon: "pinch", label: "Zoom — pellizco (pinch) con dos dedos" },
-      { icon: "touch", label: "Órbita — un dedo / deslizar" },
-      { icon: "touch", label: "Paneo — dos dedos (deslizar)" },
-      { icon: "zoom", label: "Zoom — rueda / Ctrl + desplazamiento" },
-      { icon: "mouse-left", label: "Selección — clic izquierdo (app)" },
+      { icon: "touch", label: "Órbita — arrastrar con un dedo" },
+      { icon: "pinch", label: "Zoom — pellizco (pinch) o dos dedos" },
+      { icon: "shift", label: "Paneo — Shift + arrastrar (o botón central)" },
+      { icon: "mouse-left", label: "Selección — clic (sin arrastrar)" },
     ],
     config: {
-      mouseButtons: { LEFT: null, MIDDLE: null, RIGHT: null },
+      // El touchpad de una laptop emite eventos de MOUSE, no `touch`: mapear el
+      // arrastre (LEFT) a órbita. La selección de la app sigue por click (r3f
+      // distingue click de arrastre). `touches` cubre las pantallas táctiles.
+      mouseButtons: { LEFT: MOUSE.ROTATE, MIDDLE: MOUSE.PAN, RIGHT: MOUSE.PAN },
       touches: { ONE: TOUCH.ROTATE, TWO: TOUCH.DOLLY_PAN },
       ...FULL_ORBIT_POLAR,
       enableRotate: true,
