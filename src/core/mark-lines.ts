@@ -28,6 +28,47 @@ export function createMarkLineId(): string {
 /** Longitud mínima total (m) para conservar un trazo (~2 cm). Descarta toques. */
 export const MIN_MARK_LINE_M = 0.02;
 
+/** Segmentos para aproximar un círculo/elipse como polilínea. */
+export const MARK_CIRCLE_SEGMENTS = 48;
+
+/**
+ * Rectángulo (polilínea CERRADA, 5 puntos) a partir del bbox del arrastre
+ * (u0,v0)→(u1,v1). El backend graba la polilínea tal cual — sin cambios.
+ */
+export function rectPoints(u0: number, v0: number, u1: number, v1: number): MarkLinePoint[] {
+  return [
+    { u: u0, v: v0 },
+    { u: u1, v: v0 },
+    { u: u1, v: v1 },
+    { u: u0, v: v1 },
+    { u: u0, v: v0 },
+  ];
+}
+
+/**
+ * Elipse (polilínea CERRADA de `segments`+1 puntos) inscrita en el bbox del
+ * arrastre (u0,v0)→(u1,v1). Con un arrastre cuadrado da un círculo.
+ */
+export function circlePoints(
+  u0: number,
+  v0: number,
+  u1: number,
+  v1: number,
+  segments: number = MARK_CIRCLE_SEGMENTS,
+): MarkLinePoint[] {
+  const cu = (u0 + u1) / 2;
+  const cv = (v0 + v1) / 2;
+  const ru = Math.abs(u1 - u0) / 2;
+  const rv = Math.abs(v1 - v0) / 2;
+  const n = Math.max(3, Math.floor(segments));
+  const pts: MarkLinePoint[] = [];
+  for (let i = 0; i <= n; i++) {
+    const a = (i / n) * Math.PI * 2;
+    pts.push({ u: cu + ru * Math.cos(a), v: cv + rv * Math.sin(a) });
+  }
+  return pts;
+}
+
 /** Longitud total de la polilínea (suma de segmentos), en metros. */
 export function markLineLengthM(points: MarkLinePoint[]): number {
   let total = 0;
