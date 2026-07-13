@@ -1972,8 +1972,11 @@ export default function ReviewScreen({
         setMarkLineDraft(null);
         setMarkLineToolMode((prev) => {
           if (!prev) return true;
-          // Re-presionar alterna recta/libre (como las formas del corte).
-          setMarkLineMode((mm) => (mm === "straight" ? "freehand" : "straight"));
+          // Re-presionar cicla los modos: recta → libre → rectángulo → círculo.
+          setMarkLineMode((mm) => {
+            const order: MarkLineMode[] = ["straight", "freehand", "rect", "circle"];
+            return order[(order.indexOf(mm) + 1) % order.length];
+          });
           return true;
         });
         return;
@@ -3520,12 +3523,20 @@ export default function ReviewScreen({
             {markLineToolMode && (
               <div className="inline-flex items-center gap-1 p-0.5 pl-1.5 rounded-xl bg-error/10 border border-error/25">
                 <span className="text-[11px] font-semibold text-error whitespace-nowrap hidden sm:inline">
-                  {markLineMode === "straight" ? "Recta" : "Libre"}
+                  {markLineMode === "straight"
+                    ? "Recta"
+                    : markLineMode === "freehand"
+                      ? "Libre"
+                      : markLineMode === "rect"
+                        ? "Rectángulo"
+                        : "Círculo"}
                 </span>
                 {(
                   [
                     { m: "straight" as const, icon: Minus, tip: "Segmento recto (⇧ ortogonal)" },
                     { m: "freehand" as const, icon: Spline, tip: "Trazo libre (mano alzada)" },
+                    { m: "rect" as const, icon: RectangleHorizontal, tip: "Rectángulo (⇧ cuadrado)" },
+                    { m: "circle" as const, icon: Circle, tip: "Círculo / elipse (⇧ círculo)" },
                   ] as const
                 ).map(({ m, icon: Icon, tip }) => (
                   <button

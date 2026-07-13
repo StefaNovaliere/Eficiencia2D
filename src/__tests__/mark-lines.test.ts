@@ -6,9 +6,33 @@ import {
   parseMarkLinesFromApi,
   upsertMarkLine,
   removeMarkLine,
+  rectPoints,
+  circlePoints,
   MIN_MARK_LINE_M,
+  MARK_CIRCLE_SEGMENTS,
   type MarkLine,
 } from "@/core/mark-lines";
+
+describe("formas de líneas rojas (rect / circle)", () => {
+  it("rectPoints: 5 puntos, cerrado, cubre el bbox", () => {
+    const p = rectPoints(0, 0, 2, 1);
+    expect(p).toHaveLength(5);
+    expect(p[0]).toEqual(p[4]);
+    expect(p[2]).toEqual({ u: 2, v: 1 });
+  });
+
+  it("circlePoints: segments+1 puntos, cerrado e inscrito en el bbox", () => {
+    const p = circlePoints(0, 0, 2, 2, 8);
+    expect(p).toHaveLength(9);
+    expect(p[0].u).toBeCloseTo(p[8].u, 9);
+    expect(p[0].v).toBeCloseTo(p[8].v, 9);
+    for (const q of p) expect(Math.hypot(q.u - 1, q.v - 1)).toBeCloseTo(1, 6);
+  });
+
+  it("circlePoints default usa MARK_CIRCLE_SEGMENTS", () => {
+    expect(circlePoints(0, 0, 1, 1)).toHaveLength(MARK_CIRCLE_SEGMENTS + 1);
+  });
+});
 
 const LINE: MarkLine = {
   id: "mkl-1",

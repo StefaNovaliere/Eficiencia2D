@@ -6,6 +6,8 @@ import {
   getMarkLinePrecisionSpec,
   markLineLengthM,
   markLinePointsFromPrecision,
+  rectPoints,
+  circlePoints,
   simplifyPolyline,
   MIN_MARK_LINE_M,
   type MarkLine,
@@ -18,7 +20,13 @@ import { snapPointToPanelEdges } from "@/core/user-cuts";
 import type { ModelViewerHandle } from "@/components/ModelViewer";
 import MarkLinePrecisionPanel from "@/components/MarkLinePrecisionPanel";
 
-export type MarkLineMode = "straight" | "freehand";
+export type MarkLineMode = "straight" | "freehand" | "rect" | "circle";
+
+/** Restringe el arrastre a un cuadrado (mismo semilado en u y v) con Shift. */
+function squareConstrain(u0: number, v0: number, u1: number, v1: number): MarkLinePoint {
+  const s = Math.max(Math.abs(u1 - u0), Math.abs(v1 - v0));
+  return { u: u0 + Math.sign(u1 - u0 || 1) * s, v: v0 + Math.sign(v1 - v0 || 1) * s };
+}
 
 interface MarkLineToolOverlayProps {
   active: boolean;
@@ -397,19 +405,26 @@ export default function MarkLineToolOverlay({
         });
       } else {
         let end: MarkLinePoint = uv;
-        if (e.shiftKey) end = orthoConstrain(drag.u0, drag.v0, uv.u, uv.v);
+        if (e.shiftKey) {
+          end =
+            mode === "straight"
+              ? orthoConstrain(drag.u0, drag.v0, uv.u, uv.v)
+              : squareConstrain(drag.u0, drag.v0, uv.u, uv.v);
+        }
         const ps = viewerRef.current?.getPanelSize(drag.groupId);
         if (ps && edgeSnapEnabled) end = snapPointToPanelEdges(end.u, end.v, ps, true);
-        const points = [
-          { u: drag.u0, v: drag.v0 },
-          end,
-        ];
-        scheduleDraft({
-          id: "__draft__",
-          groupId: drag.groupId,
-          points,
-        });
-        if (ps) {
+
+        const points =
+          mode === "rect"
+            ? rectPoints(drag.u0, drag.v0, end.u, end.v)
+            : mode === "circle"
+              ? circlePoints(drag.u0, drag.v0, end.u, end.v)
+              : [{ u: drag.u0, v: drag.v0 }, end];
+
+        scheduleDraft({ id: "__draft__", groupId: drag.groupId, points });
+
+        // Sólo la recta alimenta el panel de colocación precisa.
+        if (mode === "straight" && ps) {
           const live = getMarkLinePrecisionSpec(
             points,
             ps.widthM,
@@ -444,8 +459,8 @@ export default function MarkLineToolOverlay({
     }
 
     if (markLineLengthM(draft.points) < MIN_MARK_LINE_M) {
-      // Clic corto: reponer preview del panel sobre esa pared.
-      showSpecOnWall(precisionRef.current);
+      // Clic corto: sólo la recta repone el preview del panel de precisión.
+      if (mode === "straight") showSpecOnWall(precisionRef.current);
       return;
     }
 
@@ -455,7 +470,8 @@ export default function MarkLineToolOverlay({
       groupId: draft.groupId,
       points: draft.points,
     });
-    editingLineIdRef.current = id;
+    // Sólo la recta queda "en edición" para el panel de colocación precisa.
+    if (mode === "straight") editingLineIdRef.current = id;
   }, [mode, scheduleDraft, showSpecOnWall]);
 
   if (!active) return null;
