@@ -125,6 +125,9 @@ export const COMMANDS: Command[] = [
     when: inReview, enabled: hasSel, requirement: REQ_1, perform: (a) => a.emitIntent("kerf") },
 
   // ─────────── Refuerzos ───────────
+  { id: "reinf.ribSnap", title: "Colocar nervio con imán (junta pared-piso)", group: "Refuerzos",
+    keywords: ["nervio", "iman", "magnetico", "snap", "colocar", "cartela", "esquina", "soporte"],
+    when: inReview, perform: (a) => a.emitIntent("ribSnap") },
   { id: "reinf.rib", title: "Agregar nervio (cartela de refuerzo)", group: "Refuerzos",
     keywords: ["nervio", "cartela", "refuerzo", "rigidez", "soporte", "escuadra", "reforzar esquina"],
     when: inReview, enabled: has2, requirement: REQ_2, perform: (a) => a.emitIntent("rib") },

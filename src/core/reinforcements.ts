@@ -37,6 +37,17 @@ export interface Column {
   sizeM: number;
 }
 
+/** Cateto FÍSICO de la cartela en la maqueta (50×50 mm): pieza modesta, sólo para
+ *  dar escuadra y facilitar el pegado. En el mundo del visor (metros reales del
+ *  edificio) se escala por el denominador de impresión, igual que el espesor. */
+export const DEFAULT_RIB_PHYSICAL_M = 0.05;
+
+/** Tamaño del nervio en metros de MUNDO para una maqueta a escala 1:`scaleDenom`. */
+export function resolveRibSizeM(scaleDenom: number, physicalM: number = DEFAULT_RIB_PHYSICAL_M): number {
+  return Math.max(physicalM, 0) * Math.max(scaleDenom, 1);
+}
+
+/** @deprecated Tamaño fijo previo; usar resolveRibSizeM(scale). */
 export const DEFAULT_RIB_SIZE_M = 0.3;
 export const DEFAULT_COLUMN_SIZE_M = 0.2;
 /** Posición inicial del nervio a lo largo de la arista (centro). */

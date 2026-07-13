@@ -45,6 +45,11 @@ export interface UIState {
   selectionCount: number;
   setSelectionCount: (n: number) => void;
 
+  /** Menú desplegable de la toolbar abierto (uno solo a la vez). */
+  openMenu: "views" | "tools" | null;
+  toggleMenu: (id: "views" | "tools") => void;
+  closeMenu: () => void;
+
   // Herramienta activa (fuente de verdad de la intención; la pantalla la aplica)
   activeTool: ToolId;
   toolMode?: string;
@@ -74,6 +79,10 @@ export const useUIStore = create<UIState>((set, get) => ({
 
   selectionCount: 0,
   setSelectionCount: (n) => set({ selectionCount: n }),
+
+  openMenu: null,
+  toggleMenu: (id) => set((s) => ({ openMenu: s.openMenu === id ? null : id })),
+  closeMenu: () => set({ openMenu: null }),
 
   activeTool: "cursor",
   toolMode: undefined,

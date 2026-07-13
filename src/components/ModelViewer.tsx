@@ -2205,6 +2205,8 @@ export interface ModelViewerHandle {
     v: number;
     /** 3-D hit point in scene (shifted) coords — use as the plane anchor. */
     scenePoint: { x: number; y: number; z: number };
+    /** Hit point in MODEL/world coords (same space as plateJoints/placements). */
+    worldPoint: { x: number; y: number; z: number };
     projection: PanelProjection;
     /** Unit normal of the clicked triangle face (toward camera). */
     surfaceNormal: { x: number; y: number; z: number };
@@ -2525,6 +2527,7 @@ function SceneBridge({
           u: uv.u,
           v: uv.v,
           scenePoint,
+          worldPoint: modelPoint,
           projection,
           surfaceNormal: {
             x: picked.faceNormal.x,
