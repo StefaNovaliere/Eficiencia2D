@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, ChevronRight, Eye, EyeOff, Layers } from "lucide-react";
+import { ChevronDown, ChevronRight, Eye, EyeOff, Layers, StickyNote } from "lucide-react";
 import type { FaceCategory, GeometryGroup } from "@/core/group-classifier";
+import { cutGroupOwnerId } from "@/core/cut-derived-groups";
 
 const CATEGORY_COLORS: Record<FaceCategory, string> = {
   floor: "var(--viewer-floor, #2d4f3e)",
@@ -33,6 +34,8 @@ export interface GroupListProps {
   onShowAllHidden: () => void;
   onChangeCategory: (id: number, category: FaceCategory) => void;
   onOpenContextMenu?: (detail: { clientX: number; clientY: number; groupId: number }) => void;
+  /** Conteo de notas por group_id padre. */
+  noteCountByGroupId?: Map<number, number>;
 }
 
 export default function GroupList({
@@ -49,6 +52,7 @@ export default function GroupList({
   onShowAllHidden,
   onChangeCategory,
   onOpenContextMenu,
+  noteCountByGroupId,
 }: GroupListProps) {
   const [collapsed, setCollapsed] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
@@ -169,6 +173,7 @@ export default function GroupList({
           const effectiveCat = categoryOverrides.get(group.id) ?? group.category;
           const isSelected = selectedGroupIds.has(group.id);
           const color = CATEGORY_COLORS[effectiveCat];
+          const notesCount = noteCountByGroupId?.get(cutGroupOwnerId(group.id)) ?? 0;
 
           return (
             <div
@@ -212,6 +217,15 @@ export default function GroupList({
                     style={{ backgroundColor: color }}
                   />
                   <span className="text-sm font-medium truncate">{group.label}</span>
+                  {notesCount > 0 && (
+                    <span
+                      className="inline-flex items-center gap-0.5 shrink-0 px-1 py-0.5 rounded-md text-[10px] font-medium border border-primary/35 bg-primary/10 text-primary"
+                      title={`${notesCount} nota${notesCount !== 1 ? "s" : ""}`}
+                    >
+                      <StickyNote size={10} strokeWidth={2} />
+                      {notesCount}
+                    </span>
+                  )}
                 </div>
                 <p className="text-[11px] text-base-content/45 mt-0.5 pl-4 tabular-nums">
                   {group.totalArea.toFixed(1)} m² · {group.faceIndices.length} caras

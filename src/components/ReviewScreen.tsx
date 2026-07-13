@@ -17,7 +17,7 @@ import {
 } from "@/core/discard-by-area";
 import type { Phase1Result, ClassificationOverride } from "@/core/pipeline";
 import type { WallWallJoint } from "@/core/assembly-adjuster";
-import type { LeaderMarker } from "./ModelViewer";
+import type { LeaderMarker, GroupNoteMarker } from "./ModelViewer";
 import {
   RefreshCw,
   Box,
@@ -75,6 +75,9 @@ import type {
   ActiveCutShapeKind,
 } from "@/core/user-cuts";
 import { cutDimensionsLabel } from "@/core/user-cuts";
+import type { GroupNote } from "@/core/group-notes";
+import { noteCountByGroupId } from "@/core/group-notes";
+import GroupNotesPanel from "@/components/GroupNotesPanel";
 import {
   buildDisplayGroupsFromCuts,
   cutGroupOwnerId,
@@ -122,6 +125,7 @@ export interface ReviewScreenProps {
     wallWallDecisions: WallWallDecisions,
     marks: number[],
     userCuts: UserCut[],
+    notes: GroupNote[],
   ) => void;
   onCancel: () => void;
   /** Alterna el eje vertical (Y/Z) vía recompute en el backend. */
@@ -140,6 +144,7 @@ export interface ReviewScreenProps {
   initialWallWallDecisions?: WallWallDecisions;
   initialMarks?: number[];
   initialUserCuts?: UserCut[];
+  initialNotes?: GroupNote[];
   /** El backend está recalculando la topología (deshabilita controles). */
   isRecomputing?: boolean;
   isGenerating?: boolean;
@@ -151,6 +156,7 @@ export interface ReviewScreenProps {
     wallWallDecisions: WallWallDecisions;
     marks: number[];
     userCuts: UserCut[];
+    notes: GroupNote[];
   }) => void;
   /** Fetches assembly guide using the current in-memory review state (not saved session). */
   onRequestAssemblyPreview?: (
@@ -472,6 +478,7 @@ export default function ReviewScreen({
   initialWallWallDecisions,
   initialMarks,
   initialUserCuts,
+  initialNotes,
   isRecomputing = false,
   isGenerating = false,
   onPrintScaleChange,
@@ -536,6 +543,9 @@ export default function ReviewScreen({
   // y muestra el preview; el backend aplica los cortes al generar.
   const [userCuts, setUserCuts] = useState<UserCut[]>(
     () => initialUserCuts ?? [],
+  );
+  const [groupNotes, setGroupNotes] = useState<GroupNote[]>(
+    () => initialNotes ?? [],
   );
   const [cutToolMode, setCutToolMode] = useState(false);
   const [cutShapeKind, setCutShapeKind] = useState<ActiveCutShapeKind>("rect");
@@ -688,8 +698,9 @@ export default function ReviewScreen({
       wallWallDecisions,
       marks: [...markGroupIds],
       userCuts,
+      notes: groupNotes,
     });
-  }, [overrides, wallWallDecisions, markGroupIds, userCuts, onEditingStateChange]);
+  }, [overrides, wallWallDecisions, markGroupIds, userCuts, groupNotes, onEditingStateChange]);
 
   useEffect(() => {
     if (!contextMenu) return;
@@ -999,6 +1010,37 @@ export default function ReviewScreen({
     const ownerId = cutGroupOwnerId(selectedGroup.id);
     return userCuts.filter((c) => c.groupId === ownerId);
   }, [selectedGroup, userCuts]);
+
+  const selectedNoteOwnerId = useMemo(
+    () => (selectedGroup ? cutGroupOwnerId(selectedGroup.id) : null),
+    [selectedGroup],
+  );
+
+  const noteCounts = useMemo(() => noteCountByGroupId(groupNotes), [groupNotes]);
+
+  const noteMarkers = useMemo<GroupNoteMarker[]>(() => {
+    if (noteCounts.size === 0) return [];
+    const byId = new Map(phase1.groups.map((g) => [g.id, g]));
+    const out: GroupNoteMarker[] = [];
+    for (const [gid, count] of noteCounts) {
+      if (count <= 0 || hiddenGroupIds.has(gid)) continue;
+      const g = byId.get(gid);
+      if (!g) continue;
+      const cat = overrides.get(gid) ?? g.category;
+      if (!visibleCategories.has(cat)) continue;
+      out.push({ groupId: gid, anchor: g.centroid, noteCount: count });
+    }
+    return out;
+  }, [noteCounts, phase1.groups, hiddenGroupIds, overrides, visibleCategories]);
+
+  const groupLabelsForNotes = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const g of phase1.groups) {
+      const pid = phase1.panelIdByGroup?.[g.id];
+      map.set(g.id, pid ? `${pid} · ${g.label}` : g.label);
+    }
+    return map;
+  }, [phase1.groups, phase1.panelIdByGroup]);
 
   const sameAreaMatches = useMemo(() => {
     if (!selectedGroup) return [];
@@ -1397,6 +1439,21 @@ export default function ReviewScreen({
     setMeasures((prev) => [...prev, measure]);
   }, []);
 
+  const handleUpsertMarkLine = useCallback(
+    (line: MarkLine) => {
+      setSavedMarkLines((prev) => {
+        const idx = prev.findIndex((l) => l.id === line.id);
+        if (idx >= 0) {
+          const next = prev.slice();
+          next[idx] = line;
+          return next;
+        }
+        return [...prev, line];
+      });
+    },
+    [setSavedMarkLines],
+  );
+
   const handleClearMeasures = useCallback(() => {
     setMeasures([]);
     setMeasureDraft(null);
@@ -1440,8 +1497,8 @@ export default function ReviewScreen({
     for (const [groupId, newCategory] of overrides.entries()) {
       result.push({ groupId, newCategory });
     }
-    onConfirm(result, wallWallDecisions, [...markGroupIds], userCuts);
-  }, [overrides, wallWallDecisions, markGroupIds, userCuts, onConfirm]);
+    onConfirm(result, wallWallDecisions, [...markGroupIds], userCuts, groupNotes);
+  }, [overrides, wallWallDecisions, markGroupIds, userCuts, groupNotes, onConfirm]);
 
   // Navegación de flujo constante (barra del shell). Reemplaza el footer propio.
   useRegisterFlowNav({
@@ -2086,6 +2143,7 @@ export default function ReviewScreen({
               hiddenGroupIds={hiddenGroupIds}
               categoryOverrides={overrides}
               visibleCategories={visibleCategories}
+              noteCountByGroupId={noteCounts}
               listActive={sidebarTab === "capas"}
               onSelectGroup={handleSelectGroup}
               onToggleGroup={handleToggleGroup}
@@ -2101,6 +2159,25 @@ export default function ReviewScreen({
           <div
             className={`flex-1 min-h-0 overflow-y-auto custom-scrollbar ${sidebarTab === "seleccion" ? "" : "hidden"}`}
           >
+            <div className="px-4 py-3 border-b border-base-300/30 bg-base-100/60">
+              <GroupNotesPanel
+                notes={groupNotes}
+                selectedGroupId={selectedNoteOwnerId}
+                selectedGroupLabel={
+                  selectedNoteOwnerId != null
+                    ? groupLabelsForNotes.get(selectedNoteOwnerId) ??
+                      selectedGroup?.label
+                    : undefined
+                }
+                groupLabels={groupLabelsForNotes}
+                onChange={setGroupNotes}
+                onSelectGroup={(gid) => {
+                  handleSelectGroup(gid);
+                  setSidebarTab("seleccion");
+                }}
+              />
+            </div>
+
             {/* Superficies curvas: kerf/auxético — sólo en paredes (no pisos) */}
             {selectedGroupIds.size === 1 && (() => {
               const gid = Array.from(selectedGroupIds)[0];
@@ -2941,6 +3018,7 @@ export default function ReviewScreen({
           appliedAxis={phase1.appliedAxis}
           showCenterAxes={showCenterAxes}
           leaderMarkers={leaderMarkers}
+          noteMarkers={noteMarkers}
           isSolid={isSolid}
           boxSelectActive={boxSelectMode}
           viewerRef={viewerRef}
@@ -2972,6 +3050,7 @@ export default function ReviewScreen({
           userCuts={userCuts}
           selectedCutId={selectedCutId}
           onSelectedCutIdChange={setSelectedCutId}
+          targetGroupId={selectedGroup?.id ?? null}
           viewerRef={viewerRef}
           onDraftChange={setCutDraft}
           onMovingCutId={setMovingCutId}
@@ -2992,9 +3071,10 @@ export default function ReviewScreen({
           active={markLineToolMode}
           mode={markLineMode}
           edgeSnapEnabled={cutEdgeSnap}
+          targetGroupId={selectedGroup?.id ?? null}
           viewerRef={viewerRef}
           onDraftChange={setMarkLineDraft}
-          onCommit={(line) => setSavedMarkLines([...savedMarkLines, line])}
+          onUpsert={handleUpsertMarkLine}
         />
 
         {/* Overlay mientras el backend recalcula la topología */}

@@ -118,3 +118,153 @@ export function parseMarkLinesFromApi(raw: unknown): MarkLine[] {
   }
   return out;
 }
+
+// ---------------------------------------------------------------------------
+// Colocación precisa (recta): largo + ángulo + bordes de referencia.
+// ---------------------------------------------------------------------------
+
+export type MarkHorizontalEdge = "left" | "right";
+export type MarkVerticalEdge = "top" | "bottom";
+
+/** @deprecated Prefer `angleDeg`. Kept for migration of old in-memory state. */
+export type MarkLineOrientation = "horizontal" | "vertical";
+
+export interface MarkLinePrecisionSpec {
+  lengthM: number;
+  /**
+   * Ángulo en grados en el plano UV del panel.
+   * 0° = horizontal hacia la derecha (+U), 90° = vertical hacia arriba (+V).
+   */
+  angleDeg: number;
+  horizontalEdge: MarkHorizontalEdge;
+  verticalEdge: MarkVerticalEdge;
+  /** Distancia al borde izquierdo o derecho (m). */
+  offsetHorizontalM: number;
+  /** Distancia al borde superior o inferior (m). */
+  offsetVerticalM: number;
+}
+
+function clamp(n: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, n));
+}
+
+/** Normaliza ángulo a [0, 360). */
+export function normalizeMarkAngleDeg(deg: number): number {
+  if (!Number.isFinite(deg)) return 0;
+  const n = deg % 360;
+  return n < 0 ? n + 360 : n;
+}
+
+/**
+ * Coloca una línea recta de largo fijo desde el ancla (offsets a bordes)
+ * en la dirección `angleDeg`.
+ */
+export function markLinePointsFromPrecision(
+  spec: MarkLinePrecisionSpec,
+  panelWidthM: number,
+  panelHeightM: number,
+): MarkLinePoint[] {
+  const length = Math.max(0, spec.lengthM);
+  const angleDeg = normalizeMarkAngleDeg(spec.angleDeg);
+  const rad = (angleDeg * Math.PI) / 180;
+
+  let anchorU: number;
+  let anchorV: number;
+
+  if (spec.horizontalEdge === "left") {
+    anchorU = clamp(spec.offsetHorizontalM, 0, panelWidthM);
+  } else {
+    anchorU = clamp(panelWidthM - spec.offsetHorizontalM, 0, panelWidthM);
+  }
+
+  if (spec.verticalEdge === "bottom") {
+    anchorV = clamp(spec.offsetVerticalM, 0, panelHeightM);
+  } else {
+    anchorV = clamp(panelHeightM - spec.offsetVerticalM, 0, panelHeightM);
+  }
+
+  const u1 = clamp(anchorU + length * Math.cos(rad), 0, panelWidthM);
+  const v1 = clamp(anchorV + length * Math.sin(rad), 0, panelHeightM);
+
+  return [
+    { u: anchorU, v: anchorV },
+    { u: u1, v: v1 },
+  ];
+}
+
+/** Lee largo / ángulo / offsets de una línea recta (2 puntos). */
+export function getMarkLinePrecisionSpec(
+  points: MarkLinePoint[],
+  panelWidthM: number,
+  panelHeightM: number,
+  preferred?: Partial<
+    Pick<MarkLinePrecisionSpec, "horizontalEdge" | "verticalEdge" | "angleDeg">
+  >,
+): MarkLinePrecisionSpec | null {
+  if (points.length < 2) return null;
+  const a = points[0];
+  const b = points[points.length - 1];
+
+  const angleDeg =
+    preferred?.angleDeg != null && Number.isFinite(preferred.angleDeg)
+      ? normalizeMarkAngleDeg(preferred.angleDeg)
+      : normalizeMarkAngleDeg((Math.atan2(b.v - a.v, b.u - a.u) * 180) / Math.PI);
+
+  const minU = Math.min(a.u, b.u);
+  const maxU = Math.max(a.u, b.u);
+  const minV = Math.min(a.v, b.v);
+  const maxV = Math.max(a.v, b.v);
+
+  const left = minU;
+  const right = Math.max(0, panelWidthM - maxU);
+  const bottom = minV;
+  const top = Math.max(0, panelHeightM - maxV);
+
+  const horizontalEdge =
+    preferred?.horizontalEdge ?? (left <= right ? "left" : "right");
+  const verticalEdge = preferred?.verticalEdge ?? (top <= bottom ? "top" : "bottom");
+
+  // Offsets respecto al ancla (punto de inicio `a`), no al bbox,
+  // para que el ángulo no mueva el punto de referencia al remedir.
+  const offsetHorizontalM =
+    horizontalEdge === "left" ? a.u : Math.max(0, panelWidthM - a.u);
+  const offsetVerticalM =
+    verticalEdge === "top" ? Math.max(0, panelHeightM - a.v) : a.v;
+
+  return {
+    lengthM: markLineLengthM([a, b]),
+    angleDeg,
+    horizontalEdge,
+    verticalEdge,
+    offsetHorizontalM,
+    offsetVerticalM,
+  };
+}
+
+export function formatMarkMetersInput(n: number): string {
+  if (!Number.isFinite(n)) return "";
+  const rounded = Math.round(n * 1000) / 1000;
+  return String(rounded);
+}
+
+export function parseMarkMetersInput(raw: string): number | null {
+  const normalized = raw.trim().replace(",", ".");
+  if (!normalized) return null;
+  const n = Number(normalized);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return n;
+}
+
+export function formatMarkDegreesInput(n: number): string {
+  if (!Number.isFinite(n)) return "";
+  const rounded = Math.round(normalizeMarkAngleDeg(n) * 10) / 10;
+  return String(rounded);
+}
+
+export function parseMarkDegreesInput(raw: string): number | null {
+  const normalized = raw.trim().replace(",", ".");
+  if (!normalized) return null;
+  const n = Number(normalized);
+  if (!Number.isFinite(n)) return null;
+  return normalizeMarkAngleDeg(n);
+}

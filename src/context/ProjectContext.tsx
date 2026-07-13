@@ -11,6 +11,7 @@ import { DEFAULT_SHEET } from "@/core/sheet-nester";
 import type { SheetConfig } from "@/core/types";
 import type { UserCut } from "@/core/user-cuts";
 import type { MarkLine } from "@/core/mark-lines";
+import type { GroupNote } from "@/core/group-notes";
 import type { Rib, Column } from "@/core/reinforcements";
 import type { FlexSpec } from "@/core/flex-bending";
 import type { AssemblyPreviewData } from "@/services/api";
@@ -31,6 +32,7 @@ interface PersistedSession {
   splits?: SplitOp[];
   marks?: number[];
   userCuts?: UserCut[];
+  notes?: GroupNote[];
   flex?: FlexSpec[];
   markLines?: MarkLine[];
   ribs?: Rib[];
@@ -79,8 +81,10 @@ interface ProjectContextType {
   setSavedMarks: (marks: number[]) => void;
   savedUserCuts: UserCut[];
   setSavedUserCuts: (cuts: UserCut[]) => void;
+  savedNotes: GroupNote[];
+  setSavedNotes: (notes: GroupNote[]) => void;
   savedMarkLines: MarkLine[];
-  setSavedMarkLines: (lines: MarkLine[]) => void;
+  setSavedMarkLines: (lines: MarkLine[] | ((prev: MarkLine[]) => MarkLine[])) => void;
   savedRibs: Rib[];
   setSavedRibs: (ribs: Rib[]) => void;
   savedColumns: Column[];
@@ -115,6 +119,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const [savedSplits, setSavedSplits] = useState<SplitOp[]>([]);
   const [savedMarks, setSavedMarks] = useState<number[]>([]);
   const [savedUserCuts, setSavedUserCuts] = useState<UserCut[]>([]);
+  const [savedNotes, setSavedNotes] = useState<GroupNote[]>([]);
   const [savedMarkLines, setSavedMarkLines] = useState<MarkLine[]>([]);
   const [savedRibs, setSavedRibs] = useState<Rib[]>([]);
   const [savedColumns, setSavedColumns] = useState<Column[]>([]);
@@ -155,6 +160,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       setSavedSplits(parsed.splits ?? []);
       setSavedMarks(parsed.marks ?? []);
       setSavedUserCuts(parsed.userCuts ?? []);
+      setSavedNotes(parsed.notes ?? []);
       setSavedMarkLines(parsed.markLines ?? []);
       setSavedRibs(parsed.ribs ?? []);
       setSavedColumns(parsed.columns ?? []);
@@ -191,6 +197,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         splits: savedSplits,
         marks: savedMarks,
         userCuts: savedUserCuts,
+        notes: savedNotes,
         markLines: savedMarkLines,
         ribs: savedRibs,
         columns: savedColumns,
@@ -200,7 +207,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     } catch {
       // Storage full
     }
-  }, [file, fileId, previewObj, phase1Result, projectFileName, scale, paper, pdfPageMode, minAreaM2, sheetConfig, savedOverrides, savedWallWallDecisions, savedMerges, savedSplits, savedMarks, savedUserCuts, savedFlex, savedMarkLines, savedRibs, savedColumns]);
+  }, [file, fileId, previewObj, phase1Result, projectFileName, scale, paper, pdfPageMode, minAreaM2, sheetConfig, savedOverrides, savedWallWallDecisions, savedMerges, savedSplits, savedMarks, savedUserCuts, savedNotes, savedFlex, savedMarkLines, savedRibs, savedColumns]);
 
   const applyRestoredState = useCallback((restored: RestoredProjectState) => {
     if (restored.projectFileName != null) setProjectFileName(restored.projectFileName);
@@ -213,6 +220,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     }
     if (restored.savedMarks != null) setSavedMarks(restored.savedMarks);
     if (restored.savedUserCuts != null) setSavedUserCuts(restored.savedUserCuts);
+    if (restored.savedNotes != null) setSavedNotes(restored.savedNotes);
     if (restored.scale != null) setScale(restored.scale);
     if (restored.paper != null) setPaper(restored.paper);
     if (restored.pdfPageMode != null) setPdfPageMode(restored.pdfPageMode);
@@ -236,6 +244,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     setSavedSplits([]);
     setSavedMarks([]);
     setSavedUserCuts([]);
+    setSavedNotes([]);
     setSavedMarkLines([]);
     setSavedRibs([]);
     setSavedColumns([]);
@@ -266,6 +275,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         savedSplits, setSavedSplits,
         savedMarks, setSavedMarks,
         savedUserCuts, setSavedUserCuts,
+        savedNotes, setSavedNotes,
         savedMarkLines, setSavedMarkLines,
         savedRibs, setSavedRibs,
         savedColumns, setSavedColumns,

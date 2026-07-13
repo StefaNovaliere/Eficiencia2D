@@ -6,6 +6,8 @@ import type { FlexSpec } from "@/core/flex-bending";
 import { serializeFlexForApi } from "@/core/flex-bending";
 import type { MarkLine } from "@/core/mark-lines";
 import { serializeMarkLinesForApi } from "@/core/mark-lines";
+import type { GroupNote } from "@/core/group-notes";
+import { serializeGroupNotesForApi } from "@/core/group-notes";
 import type { Rib, Column } from "@/core/reinforcements";
 import { serializeRibsForApi, serializeColumnsForApi } from "@/core/reinforcements";
 import {
@@ -30,6 +32,11 @@ export function flexForApi(specs: FlexSpec[]): Record<string, unknown>[] {
 /** Serializa las líneas de marca rojas al formato snake_case del backend. */
 export function markLinesForApi(lines: MarkLine[]): Record<string, unknown>[] {
   return serializeMarkLinesForApi(lines);
+}
+
+/** Serializa notas de componentes al formato snake_case del backend. */
+export function groupNotesForApi(notes: GroupNote[]): Record<string, unknown>[] {
+  return serializeGroupNotesForApi(notes);
 }
 
 /** Serializa nervios/columnas (refuerzos estructurales) al formato del backend. */

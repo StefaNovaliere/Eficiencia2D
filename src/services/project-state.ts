@@ -2,9 +2,11 @@ import type { ClassificationOverride, SplitOp } from "@/core/pipeline";
 import type { SheetConfig } from "@/core/types";
 import type { UserCut } from "@/core/user-cuts";
 import { parseUserCutsFromApi } from "@/core/user-cuts";
+import type { GroupNote } from "@/core/group-notes";
+import { parseGroupNotesFromApi } from "@/core/group-notes";
 import type { PdfPageMode } from "@/context/ProjectContext";
 import type { SplitOperation } from "@/services/api";
-import { userCutsForApi } from "@/services/api";
+import { groupNotesForApi, userCutsForApi } from "@/services/api";
 
 /** Estado consolidado del proyecto en R2 (`estado.json`). */
 export interface ProjectSavedState {
@@ -17,6 +19,7 @@ export interface ProjectSavedState {
   wall_wall_decisions?: Record<string, number>;
   marks?: number[];
   user_cuts?: Record<string, unknown>[];
+  notes?: Record<string, unknown>[];
   sheet_config?: { width_m: number; height_m: number; gap_m: number };
   scale_denom?: number;
   paper?: string;
@@ -43,6 +46,7 @@ export interface RestoredProjectState {
   savedWallWallDecisions?: Map<number, number>;
   savedMarks?: number[];
   savedUserCuts?: UserCut[];
+  savedNotes?: GroupNote[];
   scale?: number;
   paper?: string;
   pdfPageMode?: PdfPageMode;
@@ -55,6 +59,7 @@ export interface ReviewEditingSnapshot {
   wallWallDecisions: Map<number, number>;
   marks: number[];
   userCuts: UserCut[];
+  notes: GroupNote[];
 }
 
 function parseRecordOfStrings(raw: unknown): Record<string, string> | undefined {
@@ -132,6 +137,10 @@ export function parseSavedState(raw: unknown): ProjectSavedState | null {
     state.user_cuts = o.user_cuts as Record<string, unknown>[];
   }
 
+  if (Array.isArray(o.notes)) {
+    state.notes = o.notes as Record<string, unknown>[];
+  }
+
   const sheetConfig = parseSheetConfig(o.sheet_config ?? o.sheetConfig);
   if (sheetConfig) state.sheet_config = sheetConfig;
 
@@ -177,6 +186,7 @@ export function restoreProjectState(raw: unknown): RestoredProjectState | null {
   }
   if (state.marks) restored.savedMarks = state.marks;
   if (state.user_cuts) restored.savedUserCuts = parseUserCutsFromApi(state.user_cuts);
+  if (state.notes) restored.savedNotes = parseGroupNotesFromApi(state.notes);
   if (state.scale_denom != null) restored.scale = state.scale_denom;
   if (state.paper) restored.paper = state.paper;
   if (state.page_mode) restored.pdfPageMode = state.page_mode;
@@ -222,6 +232,9 @@ export function buildReviewEditingPatch(snapshot: ReviewEditingSnapshot): Projec
   }
   if (snapshot.userCuts.length > 0) {
     patch.user_cuts = userCutsForApi(snapshot.userCuts);
+  }
+  if (snapshot.notes.length > 0) {
+    patch.notes = groupNotesForApi(snapshot.notes);
   }
 
   return patch;

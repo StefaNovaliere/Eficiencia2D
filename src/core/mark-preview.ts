@@ -2,6 +2,7 @@ import type { Face3D, Vec3 } from "@/core/types";
 import type { GeometryGroup } from "@/core/group-classifier";
 import { projectFacesTo2D } from "@/core/panel-projection";
 import type { MarkLine } from "@/core/mark-lines";
+import { cutGroupOwnerId } from "@/core/cut-derived-groups";
 
 type UpAxis = "Y" | "Z";
 
@@ -118,49 +119,57 @@ export function computeMarkLines3D(
   markLines: MarkLine[],
   up: UpAxis,
   hiddenGroupIds: Set<number> = new Set(),
+  projectionGroups: GeometryGroup[] = groups,
 ): MarkOpeningGroupLines[] {
   if (markLines.length === 0) return [];
 
   const linesByGroup = new Map<number, MarkLine[]>();
   for (const l of markLines) {
-    const arr = linesByGroup.get(l.groupId);
+    const ownerId = cutGroupOwnerId(l.groupId);
+    const arr = linesByGroup.get(ownerId);
     if (arr) arr.push(l);
-    else linesByGroup.set(l.groupId, [l]);
+    else linesByGroup.set(ownerId, [l]);
   }
+
+  const projById = new Map(projectionGroups.map((g) => [g.id, g]));
 
   const result: MarkOpeningGroupLines[] = [];
   for (const group of groups) {
-    const groupLines = linesByGroup.get(group.id);
-    if (!groupLines || hiddenGroupIds.has(group.id)) continue;
+    if (hiddenGroupIds.has(group.id)) continue;
 
-    const groupFaces = group.faceIndices
+    const ownerId = cutGroupOwnerId(group.id);
+    const groupLines = linesByGroup.get(ownerId);
+    if (!groupLines) continue;
+
+    const projGroup = projById.get(ownerId) ?? group;
+    const groupFaces = projGroup.faceIndices
       .map((fi) => faces[fi])
       .filter((f): f is Face3D => !!f && f.vertices.length >= 3);
     if (groupFaces.length === 0) continue;
 
-    const projected = projectFacesTo2D(groupFaces, group.representativeNormal, up);
+    const projected = projectFacesTo2D(groupFaces, projGroup.representativeNormal, up);
     if (!projected) continue;
 
     const anchor = groupFaces[0].vertices[0];
     const { uAxis, vAxis, originU, originV } = projected;
 
     const nlen = Math.hypot(
-      group.representativeNormal.x,
-      group.representativeNormal.y,
-      group.representativeNormal.z,
+      projGroup.representativeNormal.x,
+      projGroup.representativeNormal.y,
+      projGroup.representativeNormal.z,
     );
     const bias = nlen > 1e-6 ? 0.002 : 0;
-    const nx = nlen > 1e-6 ? (group.representativeNormal.x / nlen) * bias : 0;
-    const ny = nlen > 1e-6 ? (group.representativeNormal.y / nlen) * bias : 0;
-    const nz = nlen > 1e-6 ? (group.representativeNormal.z / nlen) * bias : 0;
+    const nx = nlen > 1e-6 ? (projGroup.representativeNormal.x / nlen) * bias : 0;
+    const ny = nlen > 1e-6 ? (projGroup.representativeNormal.y / nlen) * bias : 0;
+    const nz = nlen > 1e-6 ? (projGroup.representativeNormal.z / nlen) * bias : 0;
     const normal =
       nlen > 1e-6
         ? {
-            x: group.representativeNormal.x / nlen,
-            y: group.representativeNormal.y / nlen,
-            z: group.representativeNormal.z / nlen,
+            x: projGroup.representativeNormal.x / nlen,
+            y: projGroup.representativeNormal.y / nlen,
+            z: projGroup.representativeNormal.z / nlen,
           }
-        : group.representativeNormal;
+        : projGroup.representativeNormal;
 
     const segments: MarkOpeningSegment[] = [];
     for (const line of groupLines) {

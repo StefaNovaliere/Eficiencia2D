@@ -41,6 +41,7 @@ import {
   type DerivedPanelPoly,
   type DerivedTriangleRef,
 } from "@/core/cut-derived-groups";
+import { StickyNote } from "lucide-react";
 import { useViewerPalette, type ViewerPalette } from "@/context/ThemeContext";
 import { useCameraNavigation } from "@/context/CameraNavigationContext";
 
@@ -51,6 +52,13 @@ export interface LeaderMarker {
   anchor: Vec3;     // component centroid, in pre-offset model space
   label: string;    // panel id, e.g. "A2"
   primary: boolean; // the selected wall (true) vs the joined "other" wall
+}
+
+/** Floating badge for components that have user notes (parent group id). */
+export interface GroupNoteMarker {
+  groupId: number;
+  anchor: Vec3;
+  noteCount: number;
 }
 
 // A floating panel-id badge shown in the 3D viewer when the assembly guide
@@ -1419,6 +1427,8 @@ interface SceneProps {
   appliedAxis?: "Y" | "Z";
   showCenterAxes?: boolean;
   leaderMarkers?: LeaderMarker[];
+  /** Components with user notes — tint + floating badge in the 3D view. */
+  noteMarkers?: GroupNoteMarker[];
   isSolid?: boolean;
   boxSelectActive?: boolean;
   markGroupIds?: Set<number>;
@@ -1483,6 +1493,7 @@ function Scene({
   appliedAxis = "Y",
   showCenterAxes = true,
   leaderMarkers = [],
+  noteMarkers = [],
   isSolid = false,
   boxSelectActive = false,
   markGroupIds = EMPTY_MARK_SET,
@@ -1791,6 +1802,18 @@ function Scene({
     });
   }, [leaderMarkers, bounds.diag, upVec]);
 
+  const noteBadges = useMemo(() => {
+    const len = bounds.diag * 0.07;
+    return noteMarkers.map((m) => ({
+      ...m,
+      position: [
+        m.anchor.x + upVec[0] * len,
+        m.anchor.y + upVec[1] * len,
+        m.anchor.z + upVec[2] * len,
+      ] as [number, number, number],
+    }));
+  }, [noteMarkers, bounds.diag, upVec]);
+
   // Red contours for marked openings — one overlay per group, culled by facing.
   const markOpeningGroups = useMemo(
     () =>
@@ -1806,8 +1829,16 @@ function Scene({
 
   // Líneas de marca rojas dibujadas por el usuario (mismo render rojo).
   const markLineGroups = useMemo(
-    () => computeMarkLines3D(faces, groups, markLines, appliedAxis, hiddenGroupIds),
-    [faces, groups, markLines, appliedAxis, hiddenGroupIds],
+    () =>
+      computeMarkLines3D(
+        faces,
+        groups,
+        markLines,
+        appliedAxis,
+        hiddenGroupIds,
+        projectionGroups ?? groups,
+      ),
+    [faces, groups, markLines, appliedAxis, hiddenGroupIds, projectionGroups],
   );
 
   // Preview esquemático de refuerzos (nervios/columnas).
@@ -2110,6 +2141,26 @@ function Scene({
               </div>
             </Html>
           </group>
+        ))}
+
+        {/* Note icon only — no wall tint */}
+        {noteBadges.map((m) => (
+          <Html
+            key={`note-${m.groupId}`}
+            position={m.position}
+            center
+            occlude={false}
+            zIndexRange={[80, 0]}
+            style={{ pointerEvents: "none" }}
+          >
+            <div
+              className="select-none drop-shadow-sm"
+              style={{ color: palette.highlight }}
+              title={`${m.noteCount} nota${m.noteCount !== 1 ? "s" : ""}`}
+            >
+              <StickyNote size={13} strokeWidth={2.25} fill="currentColor" fillOpacity={0.15} />
+            </div>
+          </Html>
         ))}
       </group>
     </>
@@ -2705,6 +2756,8 @@ export interface ModelViewerProps {
   appliedAxis?: "Y" | "Z";
   showCenterAxes?: boolean;
   leaderMarkers?: LeaderMarker[];
+  /** Components with user notes — tint + floating badge in the 3D view. */
+  noteMarkers?: GroupNoteMarker[];
   isSolid?: boolean;
   boxSelectActive?: boolean;
   viewerRef?: React.MutableRefObject<ModelViewerHandle | null>;
@@ -2756,6 +2809,7 @@ export default function ModelViewer({
   appliedAxis = "Y",
   showCenterAxes = true,
   leaderMarkers = [],
+  noteMarkers = [],
   isSolid = false,
   boxSelectActive = false,
   viewerRef,
@@ -2856,6 +2910,7 @@ export default function ModelViewer({
         appliedAxis={appliedAxis}
         showCenterAxes={showCenterAxes}
         leaderMarkers={leaderMarkers}
+        noteMarkers={noteMarkers}
         isSolid={isSolid}
         boxSelectActive={boxSelectActive}
         markGroupIds={markGroupIds}
