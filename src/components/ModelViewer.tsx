@@ -20,6 +20,8 @@ import {
   type CutPreviewSegment,
 } from "@/core/cut-preview";
 import { computeMeasurePreviewSegments, computeMeasureLabelPlacements } from "@/core/measure-preview";
+import { computeAnglePreviewSegments, computeAngleLabelPlacements, type AngleLabelPlacement } from "@/core/angle-measure-preview";
+import type { AngleDraftState, UserAngleMeasure } from "@/core/angle-measure";
 import { frameDistance } from "@/core/camera-frame";
 import { advanceCycle, uniqueOrdered, type ClickCycleState } from "@/core/pick-cycle";
 import { sectionPlaneParams, type SectionAxis } from "@/core/section-plane";
@@ -1141,6 +1143,12 @@ const MEASURE_PREVIEW_MATERIAL = new THREE.LineBasicMaterial({
   depthWrite: false,
 });
 
+const ANGLE_PREVIEW_MATERIAL = new THREE.LineBasicMaterial({
+  color: 0xf59e0b, // amber — distinct from sky-blue measure tool
+  depthTest: true,
+  depthWrite: false,
+});
+
 /** Preview esquemático (no autoritativo) del patrón de flexión kerf/auxético. */
 const FLEX_PREVIEW_MATERIAL = new THREE.LineBasicMaterial({
   color: 0x22d3ee,
@@ -1307,6 +1315,34 @@ function MeasureHtmlLabels({
   );
 }
 
+function AngleHtmlLabels({ placements }: { placements: AngleLabelPlacement[] }) {
+  if (placements.length === 0) return null;
+  return (
+    <>
+      {placements.map((p) => (
+        <Html
+          key={p.id}
+          position={[p.position.x, p.position.y, p.position.z]}
+          center
+          occlude={false}
+          zIndexRange={[100, 0]}
+          style={{ pointerEvents: "none" }}
+        >
+          <div
+            className={`px-2 py-0.5 rounded-lg font-mono text-xs font-semibold shadow-md border whitespace-nowrap ${
+              p.isDraft
+                ? "bg-base-100/90 border-amber-400/70 text-amber-600 dark:text-amber-300"
+                : "bg-amber-500/95 border-amber-400 text-white"
+            }`}
+          >
+            {p.label}
+          </div>
+        </Html>
+      ))}
+    </>
+  );
+}
+
 // Assembly guide labels — visible only when the panel is unobstructed from camera.
 function AssemblyLabels({
   labels,
@@ -1453,6 +1489,8 @@ interface SceneProps {
   measures?: UserMeasure[];
   measureLabelOptions?: MeasureLabelOptions;
   highlightMeasureId?: string | null;
+  angleDraft?: AngleDraftState | null;
+  angleMeasures?: UserAngleMeasure[];
   panelRaycastRef: React.MutableRefObject<PanelRaycastContext>;
   palette: ViewerPalette;
   materials: ViewerMaterials;
@@ -1511,6 +1549,8 @@ function Scene({
   measures = [],
   measureLabelOptions = DEFAULT_MEASURE_LABEL_OPTIONS,
   highlightMeasureId = null,
+  angleDraft = null,
+  angleMeasures = [],
   panelRaycastRef,
   palette,
   materials,
@@ -1918,6 +1958,16 @@ function Scene({
     [faces, groups, measures, measureDraft, appliedAxis, measureLabelOptions],
   );
 
+  const anglePreviewSegments = useMemo(
+    () => computeAnglePreviewSegments(faces, groups, angleMeasures, angleDraft ?? null, appliedAxis),
+    [faces, groups, angleMeasures, angleDraft, appliedAxis],
+  );
+
+  const angleLabelPlacements = useMemo(
+    () => computeAngleLabelPlacements(faces, groups, angleMeasures, angleDraft ?? null, appliedAxis),
+    [faces, groups, angleMeasures, angleDraft, appliedAxis],
+  );
+
   panelRaycastRef.current = {
     faces,
     groups,
@@ -2085,6 +2135,17 @@ function Scene({
           placements={measureLabelPlacements}
           highlightMeasureId={highlightMeasureId}
         />
+
+        {/* Angle (protractor) measure preview */}
+        {anglePreviewSegments.length > 0 && (
+          <PreviewOverlays
+            segments={anglePreviewSegments}
+            lookupGroups={groups}
+            centerOffset={bounds.center}
+            material={ANGLE_PREVIEW_MATERIAL}
+          />
+        )}
+        <AngleHtmlLabels placements={angleLabelPlacements} />
 
         {/* Assembly guide: panel-id badges centered on each component */}
         {assemblyPanelLabels.length > 0 && (
@@ -2787,6 +2848,8 @@ export interface ModelViewerProps {
   measures?: UserMeasure[];
   measureLabelOptions?: MeasureLabelOptions;
   highlightMeasureId?: string | null;
+  angleDraft?: AngleDraftState | null;
+  angleMeasures?: UserAngleMeasure[];
   /** Face indices to highlight for a focused merge member (subset of merged group). */
   mergeMemberFaceIndices?: number[] | null;
   /** Original topology groups for cut UV projection (parent panel frame). */
@@ -2831,6 +2894,8 @@ export default function ModelViewer({
   measures = [],
   measureLabelOptions = DEFAULT_MEASURE_LABEL_OPTIONS,
   highlightMeasureId = null,
+  angleDraft = null,
+  angleMeasures = [],
   mergeMemberFaceIndices = null,
   projectionGroups,
   derivedCutTriangles,
@@ -2931,6 +2996,8 @@ export default function ModelViewer({
         measures={measures}
         measureLabelOptions={measureLabelOptions}
         highlightMeasureId={highlightMeasureId}
+        angleDraft={angleDraft}
+        angleMeasures={angleMeasures}
         panelRaycastRef={panelRaycastRef}
         palette={palette}
         materials={materials}

@@ -4,9 +4,11 @@ import type { UserCut } from "@/core/user-cuts";
 import { parseUserCutsFromApi } from "@/core/user-cuts";
 import type { GroupNote } from "@/core/group-notes";
 import { parseGroupNotesFromApi } from "@/core/group-notes";
+import type { MarkLine } from "@/core/mark-lines";
+import { parseMarkLinesFromApi } from "@/core/mark-lines";
 import type { PdfPageMode } from "@/context/ProjectContext";
 import type { SplitOperation } from "@/services/api";
-import { groupNotesForApi, userCutsForApi } from "@/services/api";
+import { groupNotesForApi, markLinesForApi, userCutsForApi } from "@/services/api";
 
 /** Estado consolidado del proyecto en R2 (`estado.json`). */
 export interface ProjectSavedState {
@@ -20,6 +22,7 @@ export interface ProjectSavedState {
   marks?: number[];
   user_cuts?: Record<string, unknown>[];
   notes?: Record<string, unknown>[];
+  mark_lines?: Record<string, unknown>[];
   sheet_config?: { width_m: number; height_m: number; gap_m: number };
   scale_denom?: number;
   paper?: string;
@@ -47,6 +50,7 @@ export interface RestoredProjectState {
   savedMarks?: number[];
   savedUserCuts?: UserCut[];
   savedNotes?: GroupNote[];
+  savedMarkLines?: MarkLine[];
   scale?: number;
   paper?: string;
   pdfPageMode?: PdfPageMode;
@@ -60,6 +64,7 @@ export interface ReviewEditingSnapshot {
   marks: number[];
   userCuts: UserCut[];
   notes: GroupNote[];
+  markLines: MarkLine[];
 }
 
 function parseRecordOfStrings(raw: unknown): Record<string, string> | undefined {
@@ -141,6 +146,10 @@ export function parseSavedState(raw: unknown): ProjectSavedState | null {
     state.notes = o.notes as Record<string, unknown>[];
   }
 
+  if (Array.isArray(o.mark_lines)) {
+    state.mark_lines = o.mark_lines as Record<string, unknown>[];
+  }
+
   const sheetConfig = parseSheetConfig(o.sheet_config ?? o.sheetConfig);
   if (sheetConfig) state.sheet_config = sheetConfig;
 
@@ -187,6 +196,7 @@ export function restoreProjectState(raw: unknown): RestoredProjectState | null {
   if (state.marks) restored.savedMarks = state.marks;
   if (state.user_cuts) restored.savedUserCuts = parseUserCutsFromApi(state.user_cuts);
   if (state.notes) restored.savedNotes = parseGroupNotesFromApi(state.notes);
+  if (state.mark_lines) restored.savedMarkLines = parseMarkLinesFromApi(state.mark_lines);
   if (state.scale_denom != null) restored.scale = state.scale_denom;
   if (state.paper) restored.paper = state.paper;
   if (state.page_mode) restored.pdfPageMode = state.page_mode;
@@ -235,6 +245,9 @@ export function buildReviewEditingPatch(snapshot: ReviewEditingSnapshot): Projec
   }
   if (snapshot.notes.length > 0) {
     patch.notes = groupNotesForApi(snapshot.notes);
+  }
+  if (snapshot.markLines.length > 0) {
+    patch.mark_lines = markLinesForApi(snapshot.markLines);
   }
 
   return patch;

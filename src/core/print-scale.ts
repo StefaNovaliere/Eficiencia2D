@@ -17,7 +17,7 @@ export function isOriginalMeasureScale(scaleDenom: number): boolean {
 }
 
 export function formatMeasureScaleOption(scaleDenom: number): string {
-  if (isOriginalMeasureScale(scaleDenom)) return "Original (1:1)";
+  if (isOriginalMeasureScale(scaleDenom)) return "1:1";
   return formatPrintScaleRatio(scaleDenom);
 }
 
