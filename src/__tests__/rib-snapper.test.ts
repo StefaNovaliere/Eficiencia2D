@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { findNearestJoint, closestPointOnSegment } from "@/core/rib-snapper";
 import { resolveRibSizeM, DEFAULT_RIB_PHYSICAL_M } from "@/core/reinforcements";
+import { jointToEdge, jointsToPlateJoints } from "@/core/reinforcements-preview";
 import type { PlateJoint } from "@/core/pipeline";
+import type { Joint } from "@/core/joint-detector";
 
 const J = (id: number, a: [number, number, number], b: [number, number, number]): PlateJoint => ({
   cutId: id,
@@ -46,10 +48,62 @@ describe("findNearestJoint (imán)", () => {
 });
 
 describe("tamaño físico del nervio", () => {
-  it("cartela de 50 mm a 1:100 ⇒ 5 m de mundo", () => {
-    expect(DEFAULT_RIB_PHYSICAL_M).toBe(0.05);
-    expect(resolveRibSizeM(100)).toBeCloseTo(5, 9);
-    expect(resolveRibSizeM(50)).toBeCloseTo(2.5, 9);
-    expect(resolveRibSizeM(0)).toBeCloseTo(0.05, 9); // escala mínima 1
+  it("cartela de 20 mm a 1:100 ⇒ 2 m de mundo", () => {
+    expect(DEFAULT_RIB_PHYSICAL_M).toBe(0.02);
+    expect(resolveRibSizeM(100)).toBeCloseTo(2, 9);
+    expect(resolveRibSizeM(50)).toBeCloseTo(1, 9);
+    expect(resolveRibSizeM(0)).toBeCloseTo(0.02, 9); // escala mínima 1
+  });
+});
+
+// ─── jointToEdge ──────────────────────────────────────────────────────────────
+describe("jointToEdge", () => {
+  const j: Joint = {
+    groupA: 1,
+    groupB: 2,
+    totalLength: 4,
+    dihedralAngle: Math.PI / 2,
+    edgeMid: { x: 2, y: 0, z: 0 },
+    edgeDir: { x: 1, y: 0, z: 0 }, // ya unitario
+    horizontalFrac: 1,
+  };
+
+  it("reconstruye extremos a/b desde edgeMid + edgeDir × totalLength/2", () => {
+    const { a, b } = jointToEdge(j);
+    expect(a.x).toBeCloseTo(0, 9);
+    expect(b.x).toBeCloseTo(4, 9);
+    expect(a.y).toBeCloseTo(0, 9);
+  });
+
+  it("normaliza edgeDir si no es unitario", () => {
+    const j2 = { ...j, edgeDir: { x: 2, y: 0, z: 0 } }; // largo 2, no unitario
+    const { a, b } = jointToEdge(j2);
+    expect(b.x - a.x).toBeCloseTo(4, 9); // la longitud total sigue siendo 4
+  });
+});
+
+// ─── jointsToPlateJoints ──────────────────────────────────────────────────────
+describe("jointsToPlateJoints", () => {
+  const j: Joint = {
+    groupA: 10,
+    groupB: 20,
+    totalLength: 3,
+    dihedralAngle: Math.PI / 2,
+    edgeMid: { x: 0, y: 0, z: 1.5 },
+    edgeDir: { x: 0, y: 0, z: 1 },
+    horizontalFrac: 0,
+  };
+
+  it("convierte Joint → PlateJoint con cutId=groupA, cutterId=groupB", () => {
+    const pjs = jointsToPlateJoints([j]);
+    expect(pjs).toHaveLength(1);
+    expect(pjs[0].cutId).toBe(10);
+    expect(pjs[0].cutterId).toBe(20);
+    expect(pjs[0].a.z).toBeCloseTo(0, 9);
+    expect(pjs[0].b.z).toBeCloseTo(3, 9);
+  });
+
+  it("lista vacía ⇒ lista vacía", () => {
+    expect(jointsToPlateJoints([])).toHaveLength(0);
   });
 });

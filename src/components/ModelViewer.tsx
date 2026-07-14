@@ -1891,9 +1891,10 @@ function Scene({
             groups,
             faces,
             reinforcements.plateJoints,
+            projectionGroups ?? groups,
           )
         : [],
-    [reinforcements, groups, faces],
+    [reinforcements, groups, faces, projectionGroups],
   );
 
   // Preview esquemático (cian) del patrón de flexión kerf/auxético por grupo.

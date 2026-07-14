@@ -9,9 +9,11 @@ import {
   type Rib,
   type Column,
 } from "@/core/reinforcements";
-import { ribEdgeForGroups } from "@/core/reinforcements-preview";
+import { ribEdgeForGroups, computeReinforcementsGeometry } from "@/core/reinforcements-preview";
+import { toExtractedCutGroupId } from "@/core/cut-derived-groups";
 import type { GeometryGroup } from "@/core/group-classifier";
 import type { Face3D } from "@/core/types";
+import type { PlateJoint } from "@/core/pipeline";
 
 const RIB: Rib = { id: "rib-1", groupA: 2, groupB: 5, sizeM: 0.3, t: 0.5 };
 const COL: Column = { id: "col-1", position: { x: 1, y: 0, z: 2 }, heightM: 3, sizeM: 0.2 };
@@ -99,6 +101,80 @@ describe("ribEdgeForGroups (arista de intersección)", () => {
     expect(e.corner.x).toBeCloseTo(5, 6);
     expect(e.corner.y).toBeCloseTo(5, 6);
     expect(e.corner.z).toBeCloseTo(2, 6); // t=0.5 sobre z∈[0,4]
+  });
+});
+
+// ─── owner-id resolution + clamp ──────────────────────────────────────────────
+describe("computeReinforcementsGeometry — resolución de ids derivados", () => {
+  const wall = {
+    id: 175,
+    faceIndices: [0],
+    centroid: { x: 0, y: 1, z: 1.5 },
+    representativeNormal: { x: 1, y: 0, z: 0 },
+  } as unknown as GeometryGroup;
+  const floor = {
+    id: 4,
+    faceIndices: [1],
+    centroid: { x: 1.5, y: 0, z: 1.5 },
+    representativeNormal: { x: 0, y: 1, z: 0 },
+  } as unknown as GeometryGroup;
+  const faces = [
+    { normal: { x: 1, y: 0, z: 0 }, vertices: [{ x: 0, y: 0, z: 0 }, { x: 0, y: 2, z: 0 }, { x: 0, y: 2, z: 3 }, { x: 0, y: 0, z: 3 }] },
+    { normal: { x: 0, y: 1, z: 0 }, vertices: [{ x: 0, y: 0, z: 0 }, { x: 3, y: 0, z: 0 }, { x: 3, y: 0, z: 3 }, { x: 0, y: 0, z: 3 }] },
+  ] as unknown as Face3D[];
+
+  const plateJoints: PlateJoint[] = [
+    {
+      cutId: 175,
+      cutterId: 4,
+      a: { x: 0, y: 0, z: 0 },
+      b: { x: 0, y: 0, z: 3 },
+      width: 0.02,
+    },
+  ];
+
+  it("par con ids padre → produce geometría (triángulos > 0)", () => {
+    const rib: Rib = { id: "r1", groupA: 175, groupB: 4, sizeM: 2, t: 0.5 };
+    const tris = computeReinforcementsGeometry([rib], [], [wall, floor], faces, plateJoints, [wall, floor]);
+    expect(tris.length).toBeGreaterThan(0);
+  });
+
+  it("par con id DERIVADO (-175001) → resuelve al padre 175 y produce geometría", () => {
+    const derivedId = toExtractedCutGroupId(175, 0); // = -175501
+    const rib: Rib = { id: "r2", groupA: derivedId, groupB: 4, sizeM: 2, t: 0.5 };
+    // displayGroups contiene el derivado; projectionGroups contiene el padre
+    const tris = computeReinforcementsGeometry(
+      [rib], [],
+      [{ ...wall, id: derivedId }], // displayGroups: sólo el derivado
+      faces,
+      plateJoints,
+      [wall, floor],               // projectionGroups: los padres
+    );
+    expect(tris.length).toBeGreaterThan(0);
+  });
+
+  it("sin junta para el par → sin triángulos (no inventa esquina)", () => {
+    const rib: Rib = { id: "r3", groupA: 999, groupB: 888, sizeM: 2, t: 0.5 };
+    const tris = computeReinforcementsGeometry([rib], [], [wall, floor], faces, plateJoints, [wall, floor]);
+    expect(tris.length).toBe(0);
+  });
+
+  it("clamp universal: sizeM mayor que 35% del largo de junta queda reducido", () => {
+    const juntaLen = 3; // junta de 3 m
+    const bigRib: Rib = { id: "r4", groupA: 175, groupB: 4, sizeM: 99, t: 0.5 };
+    const tris = computeReinforcementsGeometry([bigRib], [], [wall, floor], faces, plateJoints, [wall, floor]);
+    // Con clamp 0.35*3=1.05m, los vértices del triángulo deben estar a ≤1.05m del corner
+    const maxCoordExpected = 1.05;
+    // Verificar que ningún vértice queda descontroladamente lejos del corner (0,0,1.5)
+    const cornerX = 0; const cornerY = 0; const cornerZ = 1.5;
+    for (let i = 0; i + 2 < tris.length; i += 3) {
+      const dx = tris[i] - cornerX;
+      const dy = tris[i+1] - cornerY;
+      const dz = tris[i+2] - cornerZ;
+      const dist = Math.hypot(dx, dy, dz);
+      expect(dist).toBeLessThanOrEqual(maxCoordExpected + 0.1); // margen por espesor
+    }
+    expect(tris.length).toBeGreaterThan(0);
   });
 });
 
