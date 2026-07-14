@@ -282,6 +282,141 @@ export function getMarkLinePrecisionSpec(
   };
 }
 
+// ---------------------------------------------------------------------------
+// Colocación precisa — Rectángulo
+// ---------------------------------------------------------------------------
+
+export interface MarkRectPrecisionSpec {
+  widthM: number;
+  heightM: number;
+  horizontalEdge: MarkHorizontalEdge;
+  verticalEdge: MarkVerticalEdge;
+  /** Distancia desde horizontalEdge al borde izquierdo del rectángulo (m). */
+  offsetHorizontalM: number;
+  /** Distancia desde verticalEdge al borde inferior/superior del rectángulo (m). */
+  offsetVerticalM: number;
+}
+
+export function markRectPointsFromSpec(
+  spec: MarkRectPrecisionSpec,
+  panelWidthM: number,
+  panelHeightM: number,
+): MarkLinePoint[] {
+  const u0 =
+    spec.horizontalEdge === "left"
+      ? clamp(spec.offsetHorizontalM, 0, panelWidthM)
+      : clamp(panelWidthM - spec.offsetHorizontalM - spec.widthM, 0, panelWidthM);
+  const v0 =
+    spec.verticalEdge === "bottom"
+      ? clamp(spec.offsetVerticalM, 0, panelHeightM)
+      : clamp(panelHeightM - spec.offsetVerticalM - spec.heightM, 0, panelHeightM);
+  const u1 = clamp(u0 + spec.widthM, 0, panelWidthM);
+  const v1 = clamp(v0 + spec.heightM, 0, panelHeightM);
+  return rectPoints(u0, v0, u1, v1);
+}
+
+/** Lee las dimensiones de un rectángulo (5 puntos cerrados) para el panel de precisión. */
+export function getMarkRectSpec(
+  points: MarkLinePoint[],
+  panelWidthM: number,
+  panelHeightM: number,
+  preferred?: Partial<Pick<MarkRectPrecisionSpec, "horizontalEdge" | "verticalEdge">>,
+): MarkRectPrecisionSpec | null {
+  if (points.length < 5) return null;
+  const minU = Math.min(...points.map((p) => p.u));
+  const maxU = Math.max(...points.map((p) => p.u));
+  const minV = Math.min(...points.map((p) => p.v));
+  const maxV = Math.max(...points.map((p) => p.v));
+  const left  = minU;
+  const right = Math.max(0, panelWidthM - maxU);
+  const bottom = minV;
+  const top    = Math.max(0, panelHeightM - maxV);
+  const horizontalEdge = preferred?.horizontalEdge ?? (left <= right ? "left" : "right");
+  const verticalEdge   = preferred?.verticalEdge   ?? (top <= bottom ? "top" : "bottom");
+  return {
+    widthM:  Math.max(0, maxU - minU),
+    heightM: Math.max(0, maxV - minV),
+    horizontalEdge,
+    verticalEdge,
+    offsetHorizontalM: horizontalEdge === "left" ? minU : Math.max(0, panelWidthM - maxU),
+    offsetVerticalM:   verticalEdge   === "bottom" ? minV : Math.max(0, panelHeightM - maxV),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Colocación precisa — Círculo / Elipse
+// ---------------------------------------------------------------------------
+
+export interface MarkCirclePrecisionSpec {
+  /** Radio horizontal (m). */
+  radiusUM: number;
+  /** Radio vertical (m). */
+  radiusVM: number;
+  horizontalEdge: MarkHorizontalEdge;
+  verticalEdge: MarkVerticalEdge;
+  /** Distancia desde horizontalEdge al CENTRO del círculo (m). */
+  offsetHorizontalM: number;
+  /** Distancia desde verticalEdge al CENTRO del círculo (m). */
+  offsetVerticalM: number;
+}
+
+export function markCirclePointsFromSpec(
+  spec: MarkCirclePrecisionSpec,
+  panelWidthM: number,
+  panelHeightM: number,
+  segments: number = MARK_CIRCLE_SEGMENTS,
+): MarkLinePoint[] {
+  const cu =
+    spec.horizontalEdge === "left"
+      ? clamp(spec.offsetHorizontalM, 0, panelWidthM)
+      : clamp(panelWidthM - spec.offsetHorizontalM, 0, panelWidthM);
+  const cv =
+    spec.verticalEdge === "bottom"
+      ? clamp(spec.offsetVerticalM, 0, panelHeightM)
+      : clamp(panelHeightM - spec.offsetVerticalM, 0, panelHeightM);
+  const ru = Math.max(0, spec.radiusUM);
+  const rv = Math.max(0, spec.radiusVM);
+  const n = Math.max(3, Math.floor(segments));
+  const pts: MarkLinePoint[] = [];
+  for (let i = 0; i <= n; i++) {
+    const a = (i / n) * Math.PI * 2;
+    pts.push({ u: cu + ru * Math.cos(a), v: cv + rv * Math.sin(a) });
+  }
+  return pts;
+}
+
+/** Lee centro y radios desde un arco de círculo/elipse para el panel de precisión. */
+export function getMarkCircleSpec(
+  points: MarkLinePoint[],
+  panelWidthM: number,
+  panelHeightM: number,
+  preferred?: Partial<Pick<MarkCirclePrecisionSpec, "horizontalEdge" | "verticalEdge">>,
+): MarkCirclePrecisionSpec | null {
+  if (points.length < 3) return null;
+  const minU = Math.min(...points.map((p) => p.u));
+  const maxU = Math.max(...points.map((p) => p.u));
+  const minV = Math.min(...points.map((p) => p.v));
+  const maxV = Math.max(...points.map((p) => p.v));
+  const cu = (minU + maxU) / 2;
+  const cv = (minV + maxV) / 2;
+  const ru = (maxU - minU) / 2;
+  const rv = (maxV - minV) / 2;
+  const left   = cu - ru;
+  const right  = Math.max(0, panelWidthM - (cu + ru));
+  const bottom = cv - rv;
+  const top    = Math.max(0, panelHeightM - (cv + rv));
+  const horizontalEdge = preferred?.horizontalEdge ?? (left <= right ? "left" : "right");
+  const verticalEdge   = preferred?.verticalEdge   ?? (top <= bottom ? "top" : "bottom");
+  return {
+    radiusUM: ru,
+    radiusVM: rv,
+    horizontalEdge,
+    verticalEdge,
+    offsetHorizontalM: horizontalEdge === "left" ? cu : Math.max(0, panelWidthM - cu),
+    offsetVerticalM:   verticalEdge   === "bottom" ? cv : Math.max(0, panelHeightM - cv),
+  };
+}
+
 export function formatMarkMetersInput(n: number): string {
   if (!Number.isFinite(n)) return "";
   const rounded = Math.round(n * 1000) / 1000;

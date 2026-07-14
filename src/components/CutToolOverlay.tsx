@@ -135,6 +135,8 @@ export default function CutToolOverlay({
   });
   const lastPlaneRef = useRef<PlaneCache | null>(null);
   const activeGroupRef = useRef<number | null>(null);
+  /** Id of the cut auto-committed from the precision panel (null = none yet). */
+  const editingCutIdRef = useRef<string | null>(null);
 
   const snapActive = edgeSnapEnabled && !altHeld;
   const showPrecision = active && supportsPrecision(shapeKind) && precisionPanelOpen;
@@ -154,6 +156,7 @@ export default function CutToolOverlay({
     if (!active) {
       setAltHeld(false);
       setPrecisionPanelOpen(false);
+      editingCutIdRef.current = null;
       return;
     }
     const onKeyDown = (e: KeyboardEvent) => {
@@ -303,6 +306,47 @@ export default function CutToolOverlay({
       scheduleDraft(snapDraft(draft));
     },
     [viewerRef, shapeKind, scheduleDraft, snapDraft],
+  );
+
+  /**
+   * Like previewCutFromSpec but commits permanently — reuses the same cut id
+   * so repeated panel edits update the same cut in place (no "Aceptar" needed).
+   */
+  const autoCommitFromSpec = useCallback(
+    (groupId: number, spec: CutPrecisionSpec) => {
+      const ps = viewerRef.current?.getPanelSize(groupId);
+      if (!ps) return;
+      if (spec.widthM < MIN_COMMIT_SIZE_M || spec.heightM < MIN_COMMIT_SIZE_M) {
+        previewCutFromSpec(groupId, spec);
+        return;
+      }
+      const coords = cutCoordsFromPrecision(spec, ps.widthM, ps.heightM);
+      const plane = lastPlaneRef.current;
+
+      if (editingCutIdRef.current) {
+        const existing = userCuts.find((c) => c.id === editingCutIdRef.current);
+        if (existing) {
+          onCommitMove({ ...existing, ...coords });
+          scheduleDraft(null);
+          return;
+        }
+        editingCutIdRef.current = null;
+      }
+
+      const newCut: UserCut = {
+        id: createUserCutId(),
+        groupId,
+        kind: shapeKind,
+        ...coords,
+        ...(plane
+          ? { surfaceNormal: plane.surfaceNormal, surfaceOffset: plane.surfaceOffset }
+          : {}),
+      };
+      editingCutIdRef.current = newCut.id;
+      onCommitCut(newCut);
+      scheduleDraft(null);
+    },
+    [viewerRef, shapeKind, userCuts, onCommitCut, onCommitMove, previewCutFromSpec, scheduleDraft],
   );
 
   useEffect(() => {
@@ -476,10 +520,10 @@ export default function CutToolOverlay({
         return;
       }
 
-      // Refine selected cut without dragging, or preview on target wall.
+      // Auto-commit on target wall (or refine selected cut — already handled above).
       if (!selectedCutId) {
         const gid = activeGroupRef.current ?? targetGroupId;
-        if (gid != null && !isDragging) previewCutFromSpec(gid, next);
+        if (gid != null && !isDragging) autoCommitFromSpec(gid, next);
         return;
       }
       const cut = userCuts.find((c) => c.id === selectedCutId);
@@ -500,6 +544,7 @@ export default function CutToolOverlay({
       targetGroupId,
       isDragging,
       previewCutFromSpec,
+      autoCommitFromSpec,
     ],
   );
 
@@ -622,6 +667,7 @@ export default function CutToolOverlay({
         surfaceOffset: hit.surfaceOffset,
       });
       setIsDragging(true);
+      editingCutIdRef.current = null; // new drag → new cut, don't reuse panel-placed id
       dragRef.current = {
         active: true,
         mode: { type: "create", groupId: hit.groupId, u0: startUv.u, v0: startUv.v, plane },
@@ -998,7 +1044,6 @@ export default function CutToolOverlay({
           spec={precision}
           liveFromDrag={isDragging}
           onChange={handlePrecisionChange}
-          onAccept={handleAccept}
         />
       )}
     </>

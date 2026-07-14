@@ -268,6 +268,7 @@ function ReviewPageContent() {
             marks,
             user_cuts: userCutsForApi(userCuts),
             notes: groupNotesForApi(notes),
+            mark_lines: markLinesForApi(savedMarkLines),
             scale_denom: scale,
             sheet_config: {
               width_m: sheetConfig.widthM,

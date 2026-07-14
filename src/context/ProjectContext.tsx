@@ -221,6 +221,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     if (restored.savedMarks != null) setSavedMarks(restored.savedMarks);
     if (restored.savedUserCuts != null) setSavedUserCuts(restored.savedUserCuts);
     if (restored.savedNotes != null) setSavedNotes(restored.savedNotes);
+    if (restored.savedMarkLines != null) setSavedMarkLines(restored.savedMarkLines);
     if (restored.scale != null) setScale(restored.scale);
     if (restored.paper != null) setPaper(restored.paper);
     if (restored.pdfPageMode != null) setPdfPageMode(restored.pdfPageMode);

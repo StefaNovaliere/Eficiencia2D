@@ -13,7 +13,6 @@ interface CutPrecisionPanelProps {
   disabled?: boolean;
   liveFromDrag?: boolean;
   onChange: (next: CutPrecisionSpec) => void;
-  onAccept: () => void;
 }
 
 function MeterField({
@@ -69,7 +68,6 @@ export default function CutPrecisionPanel({
   disabled = false,
   liveFromDrag = false,
   onChange,
-  onAccept,
 }: CutPrecisionPanelProps) {
   const patch = (partial: Partial<CutPrecisionSpec>) => {
     onChange({ ...spec, ...partial });
@@ -159,14 +157,9 @@ export default function CutPrecisionPanel({
         />
       </div>
 
-      <button
-        type="button"
-        className="btn btn-primary btn-xs w-full rounded-lg"
-        disabled={disabled || liveFromDrag}
-        onClick={onAccept}
-      >
-        Aceptar
-      </button>
+      <p className="text-[10px] text-base-content/45 leading-tight">
+        Dibujá sobre la pared o ajustá los valores · <kbd className="kbd kbd-xs">Esc</kbd> para salir
+      </p>
     </div>
   );
 }

@@ -26,6 +26,7 @@ import {
   EyeOff,
   Eye,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   Link2,
   SlidersHorizontal,
@@ -55,7 +56,9 @@ import { useReviewHistory } from "@/hooks/useReviewHistory";
 import type { ModelViewerHandle, CameraCommand, SectionState } from "@/components/ModelViewer";
 import CutToolOverlay from "@/components/CutToolOverlay";
 import MeasureToolOverlay from "@/components/MeasureToolOverlay";
+import AngleMeasureOverlay from "@/components/AngleMeasureOverlay";
 import MarkLineToolOverlay, { type MarkLineMode } from "@/components/MarkLineToolOverlay";
+import type { AngleDraftState, UserAngleMeasure } from "@/core/angle-measure";
 import type { MarkLine } from "@/core/mark-lines";
 import {
   createRibId,
@@ -69,6 +72,7 @@ import {
 } from "@/core/reinforcements";
 import RibSnapperOverlay from "@/components/RibSnapperOverlay";
 import ToolMenu from "@/components/toolbar/ToolMenu";
+import BottomToolbar, { ActiveToolBadge } from "@/components/toolbar/BottomToolbar";
 import { useUIStore } from "@/stores/uiStore";
 import { useRegisterFlowNav } from "@/hooks/useRegisterFlowNav";
 import FlexControls from "@/components/FlexControls";
@@ -154,13 +158,14 @@ export interface ReviewScreenProps {
   isGenerating?: boolean;
   /** Escala de impresión del proyecto (1:N), compartida con nesting/PDF. */
   onPrintScaleChange: (scale: number) => void;
-  /** Cambios de clasificación, uniones, marcas y cortes para autosave. */
+  /** Cambios de clasificación, uniones, marcas, cortes y líneas rojas para autosave. */
   onEditingStateChange?: (snapshot: {
     overrides: ClassificationOverride[];
     wallWallDecisions: WallWallDecisions;
     marks: number[];
     userCuts: UserCut[];
     notes: GroupNote[];
+    markLines: import("@/core/mark-lines").MarkLine[];
   }) => void;
   /** Fetches assembly guide using the current in-memory review state (not saved session). */
   onRequestAssemblyPreview?: (
@@ -194,6 +199,18 @@ const CUT_SHAPE_LABELS: Record<ActiveCutShapeKind, string> = {
 function nextCutShape(current: ActiveCutShapeKind): ActiveCutShapeKind {
   const i = CUT_SHAPE_ORDER.indexOf(current);
   return CUT_SHAPE_ORDER[(i + 1) % CUT_SHAPE_ORDER.length];
+}
+
+const MEASURE_SHAPE_ORDER: MeasureShapeKind[] = ["line", "rect"];
+function nextMeasureShape(current: MeasureShapeKind): MeasureShapeKind {
+  const i = MEASURE_SHAPE_ORDER.indexOf(current);
+  return MEASURE_SHAPE_ORDER[(i + 1) % MEASURE_SHAPE_ORDER.length];
+}
+
+const MARK_LINE_MODE_ORDER: MarkLineMode[] = ["straight", "freehand", "rect", "circle"];
+function nextMarkLineMode(current: MarkLineMode): MarkLineMode {
+  const i = MARK_LINE_MODE_ORDER.indexOf(current);
+  return MARK_LINE_MODE_ORDER[(i + 1) % MARK_LINE_MODE_ORDER.length];
 }
 
 const MEASURE_SHAPE_LABELS: Record<MeasureShapeKind, string> = {
@@ -569,6 +586,10 @@ export default function ReviewScreen({
   const [selectedMeasureId, setSelectedMeasureId] = useState<string | null>(
     null,
   );
+  // Herramienta de medición de ángulos (transportador).
+  const [angleToolMode, setAngleToolMode] = useState(false);
+  const [angleDraft, setAngleDraft] = useState<AngleDraftState | null>(null);
+  const [angleMeasures, setAngleMeasures] = useState<UserAngleMeasure[]>([]);
   // Herramienta de líneas rojas (marcar para grabar).
   const [markLineToolMode, setMarkLineToolMode] = useState(false);
   // Herramienta "Colocar nervio" (imán a la junta pared↔piso) + fantasma.
@@ -716,8 +737,9 @@ export default function ReviewScreen({
       marks: [...markGroupIds],
       userCuts,
       notes: groupNotes,
+      markLines: savedMarkLines,
     });
-  }, [overrides, wallWallDecisions, markGroupIds, userCuts, groupNotes, onEditingStateChange]);
+  }, [overrides, wallWallDecisions, markGroupIds, userCuts, groupNotes, savedMarkLines, onEditingStateChange]);
 
   useEffect(() => {
     if (!contextMenu) return;
@@ -744,6 +766,10 @@ export default function ReviewScreen({
         setCutDraft(null);
         setMeasureToolMode(false);
         setMeasureDraft(null);
+        setMarkLineToolMode(false);
+        setMarkLineDraft(null);
+        setAngleToolMode(false);
+        setAngleDraft(null);
         setBoxSelectMode(false);
         setDragRect(null);
         setSelectedGroupIds(new Set());
@@ -880,6 +906,8 @@ export default function ReviewScreen({
     setMeasureDraft(null);
     setMarkLineToolMode(false);
     setMarkLineDraft(null);
+    setAngleToolMode(false);
+    setAngleDraft(null);
     setBoxSelectMode(false);
     if (tool === "cut") setCutToolMode(true);
     else if (tool === "measure") setMeasureToolMode(true);
@@ -1891,6 +1919,114 @@ export default function ReviewScreen({
   const viewToolBtn =
     "btn btn-sm btn-ghost h-9 min-h-9 w-9 px-0 rounded-lg hover:bg-base-200/80";
 
+  // Unified tool selector for BottomToolbar
+  const handleSelectTool = useCallback(
+    (tool: "cursor" | "box" | "cut" | "measure" | "markLine" | "rib" | "angle") => {
+      // Always clear all drafts first
+      setCutDraft(null);
+      setMeasureDraft(null);
+      setMarkLineDraft(null);
+      setRibGhost(null);
+      setAngleDraft(null);
+      switch (tool) {
+        case "cursor":
+          setCutToolMode(false);
+          setMeasureToolMode(false);
+          setMarkLineToolMode(false);
+          setBoxSelectMode(false);
+          setRibToolMode(false);
+          setAngleToolMode(false);
+          break;
+        case "box":
+          setCutToolMode(false);
+          setMeasureToolMode(false);
+          setMarkLineToolMode(false);
+          setBoxSelectMode((s) => !s);
+          setRibToolMode(false);
+          setAngleToolMode(false);
+          break;
+        case "cut":
+          setMeasureToolMode(false);
+          setMarkLineToolMode(false);
+          setBoxSelectMode(false);
+          setRibToolMode(false);
+          setAngleToolMode(false);
+          setCutToolMode((active) => {
+            if (!active) return true;
+            setCutShapeKind((shape) => nextCutShape(shape));
+            return true;
+          });
+          break;
+        case "measure":
+          setCutToolMode(false);
+          setMarkLineToolMode(false);
+          setBoxSelectMode(false);
+          setRibToolMode(false);
+          setAngleToolMode(false);
+          setMeasureToolMode((active) => {
+            if (!active) return true;
+            // Already active → cycle shape: line → rect → line…
+            setMeasureDraft(null);
+            setMeasureShapeKind((shape) => nextMeasureShape(shape));
+            return true;
+          });
+          break;
+        case "markLine":
+          setCutToolMode(false);
+          setMeasureToolMode(false);
+          setBoxSelectMode(false);
+          setRibToolMode(false);
+          setAngleToolMode(false);
+          setMarkLineToolMode((active) => {
+            if (!active) return true;
+            // Already active → cycle mode: straight → freehand → rect → circle…
+            setMarkLineDraft(null);
+            setMarkLineMode((mm) => nextMarkLineMode(mm));
+            return true;
+          });
+          break;
+        case "rib":
+          setCutToolMode(false);
+          setMeasureToolMode(false);
+          setMarkLineToolMode(false);
+          setBoxSelectMode(false);
+          setAngleToolMode(false);
+          setRibToolMode((v) => !v);
+          break;
+        case "angle":
+          setCutToolMode(false);
+          setMeasureToolMode(false);
+          setMarkLineToolMode(false);
+          setBoxSelectMode(false);
+          setRibToolMode(false);
+          setAngleToolMode((a) => !a);
+          break;
+      }
+    },
+    [setCutDraft, setMeasureDraft, setMarkLineDraft, setRibGhost],
+  );
+
+  const handleCycleCutShape = useCallback(() => {
+    setCutShapeKind((shape) => nextCutShape(shape));
+    setCutDraft(null);
+  }, []);
+
+  // Derive current active tool name for BottomToolbar
+  const currentActiveTool: "cursor" | "box" | "cut" | "measure" | "markLine" | "rib" | "angle" =
+    cutToolMode
+      ? "cut"
+      : measureToolMode
+        ? "measure"
+        : markLineToolMode
+          ? "markLine"
+          : ribToolMode
+            ? "rib"
+            : angleToolMode
+              ? "angle"
+              : boxSelectMode
+                ? "box"
+                : "cursor";
+
   // Box selection pointer handlers — placed after phase1 & hiddenGroupIds
   const handleBoxPointerDown = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
@@ -1991,10 +2127,15 @@ export default function ReviewScreen({
         setCutToolMode(false);
         setCutDraft(null);
         setBoxSelectMode(false);
-        setMeasureDraft(null);
         setMarkLineToolMode(false);
         setMarkLineDraft(null);
-        setMeasureToolMode((prev) => !prev);
+        setMeasureToolMode((prev) => {
+          if (!prev) return true;
+          // Already active → cycle through shapes: line → rect → line…
+          setMeasureDraft(null);
+          setMeasureShapeKind((shape) => nextMeasureShape(shape));
+          return true;
+        });
         return;
       }
 
@@ -2008,11 +2149,8 @@ export default function ReviewScreen({
         setMarkLineDraft(null);
         setMarkLineToolMode((prev) => {
           if (!prev) return true;
-          // Re-presionar cicla los modos: recta → libre → rectángulo → círculo.
-          setMarkLineMode((mm) => {
-            const order: MarkLineMode[] = ["straight", "freehand", "rect", "circle"];
-            return order[(order.indexOf(mm) + 1) % order.length];
-          });
+          // Already active → cycle: straight → freehand → rect → circle → straight…
+          setMarkLineMode((mm) => nextMarkLineMode(mm));
           return true;
         });
         return;
@@ -3107,6 +3245,8 @@ export default function ReviewScreen({
           measures={measures}
           measureLabelOptions={measureLabelOptions}
           highlightMeasureId={selectedMeasureId}
+          angleDraft={angleDraft}
+          angleMeasures={angleMeasures}
         />
 
         <CutToolOverlay
@@ -3141,6 +3281,13 @@ export default function ReviewScreen({
           viewerRef={viewerRef}
           onDraftChange={setMarkLineDraft}
           onUpsert={handleUpsertMarkLine}
+        />
+
+        <AngleMeasureOverlay
+          active={angleToolMode}
+          viewerRef={viewerRef}
+          onDraftChange={setAngleDraft}
+          onCommit={(m) => setAngleMeasures((prev) => [...prev, m])}
         />
 
         <RibSnapperOverlay
@@ -3345,613 +3492,101 @@ export default function ReviewScreen({
           </div>
         )}
 
-        {/* Toolbar — por encima del overlay de cortes/selección (z-20) */}
+        {/* Active tool indicator — only when toolbar is fully hidden (BottomToolbar renders its own badge when visible) */}
         {hideToolbar && (
+          <ActiveToolBadge
+            activeTool={currentActiveTool}
+            cutShapeKind={cutShapeKind}
+            onCutShapeChange={(k) => { setCutDraft(null); setCutShapeKind(k); }}
+            measureShapeKind={measureShapeKind}
+            onMeasureShapeChange={(k) => { setMeasureDraft(null); setMeasureShapeKind(k); }}
+            markLineMode={markLineMode}
+            onMarkLineModeChange={(m) => { setMarkLineDraft(null); setMarkLineMode(m); }}
+            cutCount={userCuts.length}
+            measureCount={measures.length}
+            hideToolbar={true}
+          />
+        )}
+
+        {/* Toolbar — AutoCAD-style, top bar with downward flyouts */}
+        {hideToolbar ? (
           <button
             type="button"
-            className="absolute top-4 right-4 z-50 btn btn-sm btn-circle bg-base-100/80 backdrop-blur-md border border-base-300/40 shadow-lg text-base-content/80 hover:bg-base-200 pointer-events-auto"
-            onClick={() => setHideToolbar(false)}
-            title="Mostrar herramientas"
-          >
-            <ChevronDown size={18} />
-          </button>
-        )}
-        {!hideToolbar && (
-          <div
             data-viewer-chrome
-            className="absolute top-4 left-4 right-4 z-40 flex flex-col gap-2 pointer-events-none"
+            className="absolute top-0 left-1/2 -translate-x-1/2 z-50 pointer-events-auto flex items-center gap-1.5 px-4 py-1 bg-base-100/90 backdrop-blur border border-t-0 border-base-300/40 rounded-b-xl shadow-md text-base-content/70 hover:bg-primary hover:text-primary-content hover:border-primary text-xs font-medium transition-all"
+            onClick={() => setHideToolbar(false)}
+            title="Mostrar barra de herramientas"
           >
-          <div className="pointer-events-auto flex flex-wrap items-center gap-2 p-2 rounded-2xl bg-base-100/85 backdrop-blur-xl border border-base-300/40 shadow-lg shadow-base-content/5">
-            <VisibilityFilters
-              stats={stats}
-              visibleCategories={visibleCategories}
-              onToggle={handleToggleVisibility}
-            />
-
-            <div className="hidden sm:block w-px h-7 bg-base-300/50" />
-
-            <div className="inline-flex items-center gap-0.5 p-0.5 rounded-xl bg-base-200/50">
-              <div
-                className="tooltip tooltip-bottom"
-                data-tip="Deshacer (Ctrl+Z)"
-              >
-                <button
-                  type="button"
-                  className={viewToolBtn}
-                  onClick={handleUndo}
-                  disabled={!canUndo}
-                  aria-label="Deshacer"
-                >
-                  <ArrowBackIcon size={15} />
-                </button>
-              </div>
-              <div
-                className="tooltip tooltip-bottom"
-                data-tip="Rehacer (Ctrl+Y)"
-              >
-                <button
-                  type="button"
-                  className={viewToolBtn}
-                  onClick={handleRedo}
-                  disabled={!canRedo}
-                  aria-label="Rehacer"
-                >
-                  <ArrowRight size={15} />
-                </button>
-              </div>
-            </div>
-
-            <div className="hidden sm:block w-px h-7 bg-base-300/50" />
-
-            {/* Vistas: cámara y modos de visualización en un popover categorizado. */}
-            <ToolMenu
-              id="views"
-              label="Vistas"
-              icon={Eye}
-              triggerActive={xrayMode || section.enabled || walkMode}
-              items={[
-                {
-                  id: "frame",
-                  label: selectedGroupIds.size > 0 ? "Encuadrar selección" : "Encuadrar todo",
-                  icon: Crosshair,
-                  hotkey: "Z",
-                  onSelect: () =>
-                    triggerCamera(selectedGroupIds.size > 0 ? "frameSelection" : "frameAll"),
-                },
-                {
-                  id: "reset",
-                  label: "Vista general (reset)",
-                  icon: Maximize,
-                  onSelect: () => triggerCamera("reset"),
-                },
-                {
-                  id: "xray",
-                  label: "Rayos X (ver interior)",
-                  icon: ScanSearch,
-                  active: xrayMode,
-                  dividerAbove: true,
-                  onSelect: () => setXrayMode((v) => !v),
-                },
-                {
-                  id: "section",
-                  label: "Plano de corte (ver interior)",
-                  icon: Scissors,
-                  active: section.enabled,
-                  onSelect: () => setSection((s) => ({ ...s, enabled: !s.enabled })),
-                },
-                {
-                  id: "walk",
-                  label: "Caminar / volar (primera persona)",
-                  icon: Footprints,
-                  active: walkMode,
-                  onSelect: toggleWalk,
-                },
-              ]}
-              footer={!walkMode ? <CameraNavigationSelect variant="toolbar" /> : undefined}
-            />
-
-            <div className="hidden sm:block w-px h-7 bg-base-300/50" />
-
-            {/* Herramientas: selección/dibujo en un popover categorizado. La activa
-                se resalta en el trigger; sus sub-modos siguen apareciendo al lado. */}
-            <ToolMenu
-              id="tools"
-              label={
-                cutToolMode
-                  ? "Cortes"
-                  : measureToolMode
-                    ? "Medir"
-                    : markLineToolMode
-                      ? "Marcas rojas"
-                      : ribToolMode
-                        ? "Nervio 🧲"
-                        : boxSelectMode
-                          ? "Selección área"
-                          : "Herramientas"
-              }
-              icon={Wrench}
-              triggerActive={
-                cutToolMode || measureToolMode || markLineToolMode || boxSelectMode || ribToolMode
-              }
-              items={[
-                {
-                  id: "cursor",
-                  label: "Cursor / seleccionar",
-                  icon: MousePointer2,
-                  hotkey: "V",
-                  active:
-                    !boxSelectMode && !cutToolMode && !measureToolMode && !markLineToolMode && !ribToolMode,
-                  onSelect: () => {
-                    setCutToolMode(false);
-                    setCutDraft(null);
-                    setMeasureToolMode(false);
-                    setMeasureDraft(null);
-                    setMarkLineToolMode(false);
-                    setMarkLineDraft(null);
-                    setBoxSelectMode(false);
-                    setRibToolMode(false);
-                  },
-                },
-                {
-                  id: "box",
-                  label: "Selección por área",
-                  icon: Lasso,
-                  hotkey: "S",
-                  active: boxSelectMode,
-                  onSelect: () => {
-                    setCutToolMode(false);
-                    setCutDraft(null);
-                    setMeasureToolMode(false);
-                    setMeasureDraft(null);
-                    setMarkLineToolMode(false);
-                    setMarkLineDraft(null);
-                    setBoxSelectMode((s) => !s);
-                  },
-                },
-                {
-                  id: "cut",
-                  label: cutToolMode
-                    ? `Cortes · ${CUT_SHAPE_LABELS[cutShapeKind]}`
-                    : "Cortes (recortes manuales)",
-                  icon: Scissors,
-                  hotkey: "C",
-                  active: cutToolMode,
-                  dividerAbove: true,
-                  onSelect: () => {
-                    setMeasureToolMode(false);
-                    setMeasureDraft(null);
-                    setBoxSelectMode(false);
-                    setMarkLineToolMode(false);
-                    setMarkLineDraft(null);
-                    setCutDraft(null);
-                    setCutToolMode((active) => {
-                      if (!active) return true;
-                      setCutShapeKind((shape) => nextCutShape(shape));
-                      return true;
-                    });
-                  },
-                },
-                {
-                  id: "measure",
-                  label: measureToolMode
-                    ? `Medir · ${MEASURE_SHAPE_LABELS[measureShapeKind]}`
-                    : "Medir distancias y áreas",
-                  icon: Ruler,
-                  hotkey: "M",
-                  active: measureToolMode,
-                  onSelect: () => {
-                    setCutToolMode(false);
-                    setCutDraft(null);
-                    setBoxSelectMode(false);
-                    setMeasureDraft(null);
-                    setMarkLineToolMode(false);
-                    setMarkLineDraft(null);
-                    setMeasureToolMode((active) => !active);
-                  },
-                },
-                {
-                  id: "markLine",
-                  label: "Marcar con líneas rojas (grabar)",
-                  icon: PenLine,
-                  hotkey: "R",
-                  active: markLineToolMode,
-                  onSelect: () => {
-                    setCutToolMode(false);
-                    setCutDraft(null);
-                    setMeasureToolMode(false);
-                    setMeasureDraft(null);
-                    setBoxSelectMode(false);
-                    setMarkLineDraft(null);
-                    setMarkLineToolMode((a) => !a);
-                  },
-                },
-                {
-                  id: "ribSnap",
-                  label: "Colocar nervio (imán a la junta)",
-                  icon: Magnet,
-                  active: ribToolMode,
-                  dividerAbove: true,
-                  onSelect: () => {
-                    setCutToolMode(false);
-                    setCutDraft(null);
-                    setMeasureToolMode(false);
-                    setMeasureDraft(null);
-                    setMarkLineToolMode(false);
-                    setMarkLineDraft(null);
-                    setBoxSelectMode(false);
-                    setRibGhost(null);
-                    setRibToolMode((v) => !v);
-                  },
-                },
-              ]}
-            />
-
-            {markLineToolMode && (
-              <div className="inline-flex items-center gap-1 p-0.5 pl-1.5 rounded-xl bg-error/10 border border-error/25">
-                <span className="text-[11px] font-semibold text-error whitespace-nowrap hidden sm:inline">
-                  {markLineMode === "straight"
-                    ? "Recta"
-                    : markLineMode === "freehand"
-                      ? "Libre"
-                      : markLineMode === "rect"
-                        ? "Rectángulo"
-                        : "Círculo"}
-                </span>
-                {(
-                  [
-                    { m: "straight" as const, icon: Minus, tip: "Segmento recto (⇧ ortogonal)" },
-                    { m: "freehand" as const, icon: Spline, tip: "Trazo libre (mano alzada)" },
-                    { m: "rect" as const, icon: RectangleHorizontal, tip: "Rectángulo (⇧ cuadrado)" },
-                    { m: "circle" as const, icon: Circle, tip: "Círculo / elipse (⇧ círculo)" },
-                  ] as const
-                ).map(({ m, icon: Icon, tip }) => (
-                  <button
-                    key={m}
-                    type="button"
-                    className={`${viewToolBtn} ${markLineMode === m ? "bg-error/25 text-error ring-1 ring-error/40" : ""}`}
-                    title={tip}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setMarkLineDraft(null);
-                      setMarkLineMode(m);
-                    }}
-                    aria-label={tip}
-                    aria-pressed={markLineMode === m}
-                  >
-                    <Icon size={15} />
-                  </button>
-                ))}
-              </div>
-            )}
-
-            {measureToolMode && (
-              <div className="inline-flex items-center gap-1 p-0.5 pl-1.5 rounded-xl bg-secondary/10 border border-secondary/25">
-                <span className="text-[11px] font-semibold text-secondary whitespace-nowrap hidden sm:inline">
-                  {MEASURE_SHAPE_LABELS[measureShapeKind]}
-                </span>
-                {(
-                  [
-                    {
-                      kind: "line" as const,
-                      icon: Minus,
-                      tip: "Distancia (⇧ recta)",
-                    },
-                    {
-                      kind: "rect" as const,
-                      icon: RectangleHorizontal,
-                      tip: "Área / alto × ancho (⇧ cuadrado)",
-                    },
-                  ] as const
-                ).map(({ kind, icon: Icon, tip }) => (
-                  <button
-                    key={kind}
-                    type="button"
-                    className={`${viewToolBtn} ${measureShapeKind === kind ? "bg-secondary/25 text-secondary ring-1 ring-secondary/40" : ""}`}
-                    title={tip}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setMeasureDraft(null);
-                      setMeasureShapeKind(kind);
-                    }}
-                    aria-label={tip}
-                    aria-pressed={measureShapeKind === kind}
-                  >
-                    <Icon size={15} />
-                  </button>
-                ))}
-                <MeasureScaleSelect
-                  value={measureLabelScale}
-                  onChange={handleMeasureScaleChange}
-                  onClick={(e) => e.stopPropagation()}
-                  className="border-l border-secondary/25 pl-1 ml-0.5"
-                  selectClassName="select select-bordered select-xs h-8 min-h-8 w-[5.75rem] bg-base-100 font-mono text-[11px]"
-                />
-                <div
-                  className="tooltip tooltip-bottom"
-                  data-tip={
-                    cutEdgeSnap
-                      ? "Bordes pegajosos ON — Alt libera al medir"
-                      : "Bordes pegajosos OFF — clic para activar"
-                  }
-                >
-                  <button
-                    type="button"
-                    className={`${viewToolBtn} ${cutEdgeSnap ? "bg-secondary/25 text-secondary ring-1 ring-secondary/40" : "text-base-content/50"}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setCutEdgeSnap((on) => !on);
-                    }}
-                    aria-label="Bordes pegajosos"
-                    aria-pressed={cutEdgeSnap}
-                  >
-                    <Magnet size={15} />
-                  </button>
-                </div>
-                {measures.length > 0 && (
-                  <>
-                    <span className="text-[11px] font-mono font-semibold text-secondary/80 px-1">
-                      {measures.length}
-                    </span>
-                    <div
-                      className="tooltip tooltip-bottom"
-                      data-tip="Borrar todas las medidas · Supr quita la seleccionada o la última"
-                    >
-                      <button
-                        type="button"
-                        className={`${viewToolBtn} text-base-content/50 hover:text-error`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleClearMeasures();
-                        }}
-                        aria-label="Borrar medidas"
-                      >
-                        <Trash2 size={15} />
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
-
-            {cutToolMode && (
-              <div className="inline-flex items-center gap-1 p-0.5 pl-1.5 rounded-xl bg-secondary/10 border border-secondary/20">
-                <span className="text-[11px] font-semibold text-secondary whitespace-nowrap hidden sm:inline">
-                  {CUT_SHAPE_LABELS[cutShapeKind]}
-                </span>
-                {(
-                  [
-                    {
-                      kind: "rect" as const,
-                      icon: RectangleHorizontal,
-                      tip: "Rectángulo (⇧ cuadrado)",
-                    },
-                    {
-                      kind: "circle" as const,
-                      icon: Circle,
-                      tip: "Óvalo desde esquina (⇧ círculo)",
-                    },
-                    {
-                      kind: "line" as const,
-                      icon: Minus,
-                      tip: "Línea de corte (⇧ recta)",
-                    },
-                  ] as const
-                ).map(({ kind, icon: Icon, tip }) => (
-                  <button
-                    key={kind}
-                    type="button"
-                    className={`${viewToolBtn} ${cutShapeKind === kind ? "bg-secondary/25 text-secondary ring-1 ring-secondary/40" : ""}`}
-                    title={tip}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setCutDraft(null);
-                      setCutShapeKind(kind);
-                    }}
-                    aria-label={tip}
-                    aria-pressed={cutShapeKind === kind}
-                  >
-                    <Icon size={15} />
-                  </button>
-                ))}
-                <div
-                  className="tooltip tooltip-bottom"
-                  data-tip={
-                    cutEdgeSnap
-                      ? "Bordes pegajosos ON — Alt libera al dibujar"
-                      : "Bordes pegajosos OFF — clic para activar"
-                  }
-                >
-                  <button
-                    type="button"
-                    className={`${viewToolBtn} ${cutEdgeSnap ? "bg-secondary/25 text-secondary ring-1 ring-secondary/40" : "text-base-content/50"}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setCutEdgeSnap((on) => !on);
-                    }}
-                    aria-label="Bordes pegajosos"
-                    aria-pressed={cutEdgeSnap}
-                  >
-                    <Magnet size={15} />
-                  </button>
-                </div>
-                {userCuts.length > 0 && (
-                  <span className="text-[10px] font-semibold text-warning/80 px-1 tabular-nums border-l border-warning/20 ml-0.5 pl-1.5">
-                    {userCuts.length}
-                  </span>
-                )}
-              </div>
-            )}
-
-            <div className="hidden sm:block w-px h-7 bg-base-300/50" />
-
-            {/* "Mostrar ocultos" — única acción contextual en la barra. Ocultar
-                vive en el eye-off de cada fila y en el menú contextual. */}
-            {hiddenGroupIds.size > 0 && (
-              <>
-                <div className="inline-flex items-center gap-0.5 p-0.5 rounded-xl bg-base-200/50">
-                  <div
-                    className="tooltip tooltip-bottom"
-                    data-tip="Mostrar ocultos"
-                  >
-                    <button
-                      type="button"
-                      className={`${viewToolBtn} w-auto px-2 gap-1`}
-                      onClick={handleShowAllHidden}
-                    >
-                      <Eye size={14} />
-                      <span className="text-xs font-semibold tabular-nums">
-                        {hiddenGroupIds.size}
-                      </span>
-                    </button>
-                  </div>
-                </div>
-                <div className="hidden sm:block w-px h-7 bg-base-300/50" />
-              </>
-            )}
-
-            {/* Vista y opciones — divulgación progresiva en un solo menú */}
-            <div className="dropdown">
-              <div
-                tabIndex={0}
-                role="button"
-                className="btn btn-sm btn-ghost gap-1.5 rounded-lg"
-              >
-                <SlidersHorizontal size={15} />
-                <span className="text-sm font-medium hidden sm:inline">
-                  Vista
-                </span>
-                <ChevronDown size={14} className="opacity-60" />
-              </div>
-              <ul
-                tabIndex={0}
-                className="dropdown-content menu bg-base-100 rounded-2xl shadow-xl border border-base-300/40 w-64 p-2 mt-2 z-30"
-              >
-                <li>
-                  <button
-                    type="button"
-                    onClick={handleRotateAxis}
-                    disabled={isRecomputing || isGenerating}
-                    className="justify-between"
-                  >
-                    <span className="flex items-center gap-2">
-                      {isRecomputing ? (
-                        <span className="loading loading-spinner loading-xs" />
-                      ) : (
-                        <RefreshCw size={15} />
-                      )}
-                      Rotar eje vertical
-                    </span>
-                    <span className="badge badge-sm badge-ghost font-mono">
-                      {phase1.appliedAxis === "Y" ? "Y↑" : "Z↑"}
-                    </span>
-                  </button>
-                </li>
-                <li>
-                  <label className="justify-between cursor-pointer">
-                    <span className="flex items-center gap-2">
-                      <Crosshair size={15} /> Mostrar ejes
-                    </span>
-                    <input
-                      type="checkbox"
-                      className="toggle toggle-sm toggle-primary"
-                      checked={showCenterAxes}
-                      onChange={() => setShowCenterAxes((s) => !s)}
-                    />
-                  </label>
-                </li>
-                <li>
-                  <label className="justify-between cursor-pointer">
-                    <span className="flex items-center gap-2">
-                      <Box size={15} /> Vista maciza
-                    </span>
-                    <input
-                      type="checkbox"
-                      className="toggle toggle-sm toggle-primary"
-                      checked={isSolid}
-                      onChange={() => setIsSolid((s) => !s)}
-                    />
-                  </label>
-                </li>
-                <li>
-                  <label className="justify-between cursor-pointer">
-                    <span className="flex items-center gap-2">
-                      <Maximize size={15} /> Ocultar barra lateral
-                    </span>
-                    <input
-                      type="checkbox"
-                      className="toggle toggle-sm toggle-primary"
-                      checked={hideSidebar}
-                      onChange={() => setHideSidebar((s) => !s)}
-                    />
-                  </label>
-                </li>
-                <li>
-                  <label className="justify-between cursor-pointer">
-                    <span className="flex items-center gap-2">
-                      <EyeOff size={15} /> Ocultar barra superior
-                    </span>
-                    <input
-                      type="checkbox"
-                      className="toggle toggle-sm toggle-primary"
-                      checked={hideToolbar}
-                      onChange={() => setHideToolbar((s) => !s)}
-                    />
-                  </label>
-                </li>
-              </ul>
-            </div>
-            <div className="hidden sm:block w-px h-7 bg-base-300/50" />
-            <div
-              className="tooltip tooltip-bottom inline-flex items-center gap-1.5"
-              data-tip="Descartar automáticamente capas más pequeñas que el umbral"
-            >
-              <Trash2
-                size={14}
-                className="text-base-content/45 shrink-0 hidden sm:block"
-                aria-hidden
-              />
-              <label className="sr-only" htmlFor="min-area-select">
-                Descartar capas menores a
-              </label>
-              <select
-                id="min-area-select"
-                className="select select-bordered select-xs h-7 min-h-7 w-[6.25rem] bg-base-100 font-mono text-[11px] rounded-lg"
-                value={minAreaM2}
-                disabled={isRecomputing || isGenerating}
-                onClick={(e) => e.stopPropagation()}
-                onChange={(e) =>
-                  handleMinAreaChangeWithReset(Number(e.target.value))
-                }
-                aria-label="Descartar capas menores a"
-                title="Descartar capas menores a…"
-              >
-                {MIN_AREA_OPTIONS.map((a) => (
-                  <option key={a} value={a}>
-                    {formatMinAreaOption(a)}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Instructivo de armado button */}
-            {onRequestAssemblyPreview && (
-              <>
-                <div className="hidden sm:block w-px h-7 bg-base-300/50" />
-                <div className="tooltip tooltip-bottom" data-tip="Ver instructivo de armado">
-                  <button
-                    type="button"
-                    className={`btn btn-sm gap-1.5 rounded-lg ${assemblyWindowOpen ? "btn-primary" : "btn-ghost"}`}
-                    onClick={() => setAssemblyWindowOpen(true)}
-                  >
-                    <BookOpen size={15} />
-                    <span className="text-sm font-medium hidden sm:inline">Instructivo</span>
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
+            <ChevronDown size={13} />
+            <span>Herramientas</span>
+          </button>
+        ) : (
+          <BottomToolbar
+            stats={stats}
+            visibleCategories={visibleCategories}
+            onToggleVisibility={handleToggleVisibility}
+            canUndo={canUndo}
+            canRedo={canRedo}
+            onUndo={handleUndo}
+            onRedo={handleRedo}
+            xrayMode={xrayMode}
+            onToggleXray={() => setXrayMode((v) => !v)}
+            section={section}
+            onToggleSection={() => setSection((s) => ({ ...s, enabled: !s.enabled }))}
+            walkMode={walkMode}
+            onToggleWalk={toggleWalk}
+            onFrameCamera={triggerCamera}
+            selectedGroupIds={selectedGroupIds}
+            activeTool={currentActiveTool}
+            onSelectTool={handleSelectTool}
+            onCycleCutShape={handleCycleCutShape}
+            markLineMode={markLineMode}
+            onMarkLineModeChange={(m) => { setMarkLineDraft(null); setMarkLineMode(m); }}
+            measureShapeKind={measureShapeKind}
+            onMeasureShapeChange={(k) => { setMeasureDraft(null); setMeasureShapeKind(k); }}
+            measureLabelScale={measureLabelScale}
+            onMeasureScaleChange={handleMeasureScaleChange}
+            measureCount={measures.length}
+            onClearMeasures={handleClearMeasures}
+            cutShapeKind={cutShapeKind}
+            onCutShapeChange={(k) => { setCutDraft(null); setCutShapeKind(k); }}
+            cutCount={userCuts.length}
+            edgeSnap={cutEdgeSnap}
+            onToggleEdgeSnap={() => setCutEdgeSnap((on) => !on)}
+            hiddenCount={hiddenGroupIds.size}
+            onShowAllHidden={handleShowAllHidden}
+            phase1={phase1}
+            onRotateAxis={handleRotateAxis}
+            isRecomputing={isRecomputing}
+            isGenerating={isGenerating}
+            showCenterAxes={showCenterAxes}
+            onToggleCenterAxes={() => setShowCenterAxes((s) => !s)}
+            isSolid={isSolid}
+            onToggleSolid={() => setIsSolid((s) => !s)}
+            hideSidebar={hideSidebar}
+            onToggleSidebar={() => setHideSidebar((s) => !s)}
+            hideToolbar={hideToolbar}
+            onToggleToolbar={() => setHideToolbar((s) => !s)}
+            minAreaM2={minAreaM2}
+            onMinAreaChange={handleMinAreaChangeWithReset}
+            minAreaOptions={MIN_AREA_OPTIONS}
+            formatMinAreaOption={formatMinAreaOption}
+            hasInstructivo={!!onRequestAssemblyPreview}
+            assemblyWindowOpen={assemblyWindowOpen}
+            onOpenAssembly={() => setAssemblyWindowOpen(true)}
+          />
         )}
+
+        {/* ── Sidebar toggle tab — left edge of viewer, always on top ── */}
+        <button
+          type="button"
+          data-viewer-chrome
+          onClick={() => setHideSidebar((s) => !s)}
+          title={hideSidebar ? "Mostrar panel lateral" : "Ocultar panel lateral"}
+          className="absolute left-0 top-1/2 -translate-y-1/2 z-[60] pointer-events-auto flex items-center justify-center w-4 h-14 bg-base-100/90 backdrop-blur border border-l-0 border-base-300/40 rounded-r-xl shadow-md hover:w-5 hover:bg-primary hover:text-primary-content hover:border-primary transition-all duration-150"
+        >
+          {hideSidebar ? <ChevronRight size={12} /> : <ChevronLeft size={12} />}
+        </button>
           </div>
         </Panel>
       </PanelGroup>

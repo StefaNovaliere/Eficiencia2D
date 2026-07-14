@@ -4,8 +4,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   createMarkLineId,
   getMarkLinePrecisionSpec,
+  getMarkRectSpec,
+  getMarkCircleSpec,
   markLineLengthM,
   markLinePointsFromPrecision,
+  markRectPointsFromSpec,
+  markCirclePointsFromSpec,
   rectPoints,
   circlePoints,
   simplifyPolyline,
@@ -13,6 +17,8 @@ import {
   type MarkLine,
   type MarkLinePoint,
   type MarkLinePrecisionSpec,
+  type MarkRectPrecisionSpec,
+  type MarkCirclePrecisionSpec,
 } from "@/core/mark-lines";
 import type { PanelProjection } from "@/core/cut-preview";
 import { cutGroupOwnerId } from "@/core/cut-derived-groups";
@@ -50,6 +56,24 @@ const DEFAULT_PRECISION: MarkLinePrecisionSpec = {
   offsetVerticalM: 0.5,
 };
 
+const DEFAULT_RECT_PRECISION: MarkRectPrecisionSpec = {
+  widthM: 1,
+  heightM: 1,
+  horizontalEdge: "left",
+  verticalEdge: "top",
+  offsetHorizontalM: 0.5,
+  offsetVerticalM: 0.5,
+};
+
+const DEFAULT_CIRCLE_PRECISION: MarkCirclePrecisionSpec = {
+  radiusUM: 0.5,
+  radiusVM: 0.5,
+  horizontalEdge: "left",
+  verticalEdge: "top",
+  offsetHorizontalM: 1,
+  offsetVerticalM: 1,
+};
+
 function orthoConstrain(u0: number, v0: number, u1: number, v1: number): MarkLinePoint {
   return Math.abs(u1 - u0) >= Math.abs(v1 - v0) ? { u: u1, v: v0 } : { u: u0, v: v1 };
 }
@@ -77,10 +101,15 @@ export default function MarkLineToolOverlay({
   const latestRef = useRef<MarkLine | null>(null);
 
   const [precision, setPrecision] = useState<MarkLinePrecisionSpec>(DEFAULT_PRECISION);
+  const [rectPrecision, setRectPrecision] = useState<MarkRectPrecisionSpec>(DEFAULT_RECT_PRECISION);
+  const [circlePrecision, setCirclePrecision] = useState<MarkCirclePrecisionSpec>(DEFAULT_CIRCLE_PRECISION);
   const [isDragging, setIsDragging] = useState(false);
-  const [hasWallTarget, setHasWallTarget] = useState(false);
   const precisionRef = useRef(precision);
   precisionRef.current = precision;
+  const rectPrecisionRef = useRef(rectPrecision);
+  rectPrecisionRef.current = rectPrecision;
+  const circlePrecisionRef = useRef(circlePrecision);
+  circlePrecisionRef.current = circlePrecision;
 
   const precisionEdgesRef = useRef({
     horizontalEdge: DEFAULT_PRECISION.horizontalEdge,
@@ -123,7 +152,7 @@ export default function MarkLineToolOverlay({
     [mode, viewerRef],
   );
 
-  const showPrecision = active && mode === "straight";
+  const showPrecision = active && (mode === "straight" || mode === "rect" || mode === "circle");
 
   useEffect(() => {
     precisionEdgesRef.current = {
@@ -135,7 +164,6 @@ export default function MarkLineToolOverlay({
   useEffect(() => {
     if (targetGroupId != null) {
       activeGroupRef.current = resolveOwnerId(targetGroupId);
-      setHasWallTarget(true);
     }
   }, [targetGroupId, resolveOwnerId]);
 
@@ -164,9 +192,8 @@ export default function MarkLineToolOverlay({
       scheduleDraft(null);
       setIsDragging(false);
       editingLineIdRef.current = null;
-      setHasWallTarget(targetGroupId != null);
     }
-  }, [active, scheduleDraft, targetGroupId]);
+  }, [active, scheduleDraft]);
 
   const resolveGroupId = useCallback((): number | null => {
     if (activeGroupRef.current != null) return activeGroupRef.current;
@@ -175,94 +202,41 @@ export default function MarkLineToolOverlay({
     return null;
   }, [targetGroupId, resolveOwnerId]);
 
-  const buildLineFromSpec = useCallback(
-    (groupId: number, spec: MarkLinePrecisionSpec, id?: string | null): MarkLine | null => {
-      const ownerId = resolveOwnerId(groupId);
-      const ps = viewerRef.current?.getPanelSize(ownerId);
+  // Produce puntos según el modo y el spec preciso.
+  const buildPointsFromCurrentSpec = useCallback(
+    (gid: number): MarkLinePoint[] | null => {
+      const ps = viewerRef.current?.getPanelSize(gid);
       if (!ps) return null;
-      if (spec.lengthM < MIN_MARK_LINE_M) return null;
-      const points = markLinePointsFromPrecision(spec, ps.widthM, ps.heightM);
-      if (markLineLengthM(points) < MIN_MARK_LINE_M) return null;
-      return {
-        id: id ?? editingLineIdRef.current ?? createMarkLineId(),
-        groupId: ownerId,
-        points,
-      };
+      if (mode === "straight") return markLinePointsFromPrecision(precisionRef.current, ps.widthM, ps.heightM);
+      if (mode === "rect")     return markRectPointsFromSpec(rectPrecisionRef.current, ps.widthM, ps.heightM);
+      if (mode === "circle")   return markCirclePointsFromSpec(circlePrecisionRef.current, ps.widthM, ps.heightM);
+      return null;
     },
-    [viewerRef, resolveOwnerId],
+    [mode, viewerRef],
   );
 
-  /** Preview o actualización in-place según haya línea en edición. */
-  const showSpecOnWall = useCallback(
-    (spec: MarkLinePrecisionSpec) => {
-      const gid = resolveGroupId();
-      if (gid == null) {
-        scheduleDraft(null);
-        return;
-      }
-      const line = buildLineFromSpec(gid, spec);
-      if (!line) {
-        scheduleDraft(null);
-        return;
-      }
-      if (editingLineIdRef.current) {
-        onUpsertRef.current({ ...line, id: editingLineIdRef.current });
-        scheduleDraft(null);
-      } else {
-        scheduleDraft({ id: "__draft__", groupId: line.groupId, points: line.points });
-      }
+  /** Coloca la forma según el spec preciso sin mostrar draft (commit inmediato). */
+  const showShapeOnWall = useCallback(
+    (gid?: number | null) => {
+      const resolvedGid = gid ?? resolveGroupId();
+      if (resolvedGid == null) { scheduleDraft(null); return; }
+      const points = buildPointsFromCurrentSpec(resolvedGid);
+      if (!points || markLineLengthM(points) < MIN_MARK_LINE_M) { scheduleDraft(null); return; }
+      const id = editingLineIdRef.current ?? createMarkLineId();
+      editingLineIdRef.current = id;
+      onUpsertRef.current({ id, groupId: resolvedGid, points });
+      scheduleDraft(null);
     },
-    [resolveGroupId, buildLineFromSpec, scheduleDraft],
+    [resolveGroupId, buildPointsFromCurrentSpec, scheduleDraft],
   );
 
   // Preview inicial cuando hay pared seleccionada y aún no hay línea en edición.
   useEffect(() => {
-    if (!active || mode !== "straight" || isDragging) return;
+    if (!active || mode === "freehand" || isDragging) return;
     if (editingLineIdRef.current) return;
-    showSpecOnWall(precision);
-  }, [active, mode, isDragging, targetGroupId, precision, showSpecOnWall]);
-
-  const handleAccept = useCallback(
-    (specFromPanel?: MarkLinePrecisionSpec) => {
-      // Asegurar blur de inputs para no perder el último valor tipeado.
-      if (document.activeElement instanceof HTMLElement) {
-        document.activeElement.blur();
-      }
-
-      const spec = specFromPanel ?? precisionRef.current;
-      const gid = resolveGroupId();
-
-      let line: MarkLine | null = null;
-      const draft = latestRef.current;
-      if (draft && draft.points.length >= 2 && markLineLengthM(draft.points) >= MIN_MARK_LINE_M) {
-        line = {
-          id: editingLineIdRef.current ?? createMarkLineId(),
-          groupId: draft.groupId,
-          points: draft.points,
-        };
-      }
-      if (!line && gid != null) {
-        line = buildLineFromSpec(gid, spec);
-      }
-      // Si el draft quedó desfasado respecto al panel, preferir el spec del panel.
-      if (line && gid != null) {
-        const fromSpec = buildLineFromSpec(gid, spec, line.id);
-        if (fromSpec) line = fromSpec;
-      }
-
-      if (!line) {
-        // Sin pared: no hay dónde colocar — el usuario debe seleccionar/cliclear una.
-        return;
-      }
-
-      onUpsertRef.current(line);
-      editingLineIdRef.current = line.id;
-      scheduleDraft(null);
-      setPrecision(spec);
-      precisionRef.current = spec;
-    },
-    [resolveGroupId, buildLineFromSpec, scheduleDraft],
-  );
+    showShapeOnWall();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, mode, isDragging, targetGroupId]);
 
   const handlePrecisionChange = useCallback(
     (next: MarkLinePrecisionSpec) => {
@@ -277,17 +251,28 @@ export default function MarkLineToolOverlay({
         scheduleDraft({ id: "__draft__", groupId: drag.groupId, points });
         return;
       }
-
-      showSpecOnWall(next);
+      showShapeOnWall();
     },
-    [mode, viewerRef, scheduleDraft, showSpecOnWall],
+    [mode, viewerRef, scheduleDraft, showShapeOnWall],
   );
 
-  const handleNewLine = useCallback(() => {
-    editingLineIdRef.current = null;
-    scheduleDraft(null);
-    showSpecOnWall(precisionRef.current);
-  }, [scheduleDraft, showSpecOnWall]);
+  const handleRectPrecisionChange = useCallback(
+    (next: MarkRectPrecisionSpec) => {
+      setRectPrecision(next);
+      rectPrecisionRef.current = next;
+      showShapeOnWall();
+    },
+    [showShapeOnWall],
+  );
+
+  const handleCirclePrecisionChange = useCallback(
+    (next: MarkCirclePrecisionSpec) => {
+      setCirclePrecision(next);
+      circlePrecisionRef.current = next;
+      showShapeOnWall();
+    },
+    [showShapeOnWall],
+  );
 
   const handleMiddleMouse = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     const overlay = overlayRef.current;
@@ -335,7 +320,6 @@ export default function MarkLineToolOverlay({
       e.currentTarget.setPointerCapture(e.pointerId);
 
       activeGroupRef.current = resolveOwnerId(hit.groupId);
-      setHasWallTarget(true);
 
       const ps =
         mode === "straight"
@@ -423,17 +407,22 @@ export default function MarkLineToolOverlay({
 
         scheduleDraft({ id: "__draft__", groupId: drag.groupId, points });
 
-        // Sólo la recta alimenta el panel de colocación precisa.
-        if (mode === "straight" && ps) {
-          const live = getMarkLinePrecisionSpec(
-            points,
-            ps.widthM,
-            ps.heightM,
-            precisionEdgesRef.current,
-          );
-          if (live) {
-            setPrecision(live);
-            precisionRef.current = live;
+        if (ps) {
+          if (mode === "straight") {
+            const live = getMarkLinePrecisionSpec(points, ps.widthM, ps.heightM, precisionEdgesRef.current);
+            if (live) { setPrecision(live); precisionRef.current = live; }
+          } else if (mode === "rect") {
+            const live = getMarkRectSpec(points, ps.widthM, ps.heightM, {
+              horizontalEdge: rectPrecisionRef.current.horizontalEdge,
+              verticalEdge: rectPrecisionRef.current.verticalEdge,
+            });
+            if (live) { setRectPrecision(live); rectPrecisionRef.current = live; }
+          } else if (mode === "circle") {
+            const live = getMarkCircleSpec(points, ps.widthM, ps.heightM, {
+              horizontalEdge: circlePrecisionRef.current.horizontalEdge,
+              verticalEdge: circlePrecisionRef.current.verticalEdge,
+            });
+            if (live) { setCirclePrecision(live); circlePrecisionRef.current = live; }
           }
         }
       }
@@ -459,8 +448,8 @@ export default function MarkLineToolOverlay({
     }
 
     if (markLineLengthM(draft.points) < MIN_MARK_LINE_M) {
-      // Clic corto: sólo la recta repone el preview del panel de precisión.
-      if (mode === "straight") showSpecOnWall(precisionRef.current);
+      // Clic corto: reponemos el preview preciso según el modo.
+      if (mode !== "freehand") showShapeOnWall(draft.groupId);
       return;
     }
 
@@ -470,9 +459,11 @@ export default function MarkLineToolOverlay({
       groupId: draft.groupId,
       points: draft.points,
     });
-    // Sólo la recta queda "en edición" para el panel de colocación precisa.
-    if (mode === "straight") editingLineIdRef.current = id;
-  }, [mode, scheduleDraft, showSpecOnWall]);
+    // La recta queda "en edición" para ajuste fino; rect/circle también.
+    if (mode === "straight" || mode === "rect" || mode === "circle") {
+      editingLineIdRef.current = id;
+    }
+  }, [mode, scheduleDraft, showShapeOnWall]);
 
   if (!active) return null;
 
@@ -487,14 +478,28 @@ export default function MarkLineToolOverlay({
         onPointerUp={handlePointerUp}
       />
 
-      {showPrecision && (
+      {showPrecision && mode === "straight" && (
         <MarkLinePrecisionPanel
+          mode="straight"
           spec={precision}
           liveFromDrag={isDragging}
           onChange={handlePrecisionChange}
-          onAccept={handleAccept}
-          onNewLine={handleNewLine}
-          canAccept={hasWallTarget}
+        />
+      )}
+      {showPrecision && mode === "rect" && (
+        <MarkLinePrecisionPanel
+          mode="rect"
+          spec={rectPrecision}
+          liveFromDrag={isDragging}
+          onChange={handleRectPrecisionChange}
+        />
+      )}
+      {showPrecision && mode === "circle" && (
+        <MarkLinePrecisionPanel
+          mode="circle"
+          spec={circlePrecision}
+          liveFromDrag={isDragging}
+          onChange={handleCirclePrecisionChange}
         />
       )}
     </>
