@@ -103,6 +103,12 @@ export const REVIEW_KEYBOARD_SHORTCUTS: KeyboardShortcutSection[] = [
         combos: [["R"]],
       },
       {
+        id: "angle-tool",
+        label: "Transportador (medir ángulos)",
+        detail: "Activa o desactiva el transportador.",
+        combos: [["T"]],
+      },
+      {
         id: "merge",
         label: "Fusionar componentes seleccionados",
         detail: "Solo cuando hay más de un componente seleccionado y se pueden fusionar.",

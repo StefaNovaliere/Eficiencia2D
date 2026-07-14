@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import {
   Eye,
   Wrench,
-  SlidersHorizontal,
   ArrowLeft,
   ArrowRight,
   BookOpen,
@@ -29,8 +28,6 @@ import {
   ChevronDown,
   ChevronUp,
   Layers,
-  Pin,
-  PinOff,
   Tangent,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -106,23 +103,16 @@ type GroupId =
   | "visibility"
   | "views"
   | "tools"
-  | "history"
-  | "settings"
-  | "discard"
   | "instructivo";
 
 const GROUP_DEFS: { id: GroupId; label: string; icon: LucideIcon }[] = [
-  { id: "visibility", label: "Capas",         icon: Layers          },
-  { id: "views",      label: "Vistas",        icon: Eye             },
-  { id: "tools",      label: "Herramientas",  icon: Wrench          },
-  { id: "history",    label: "Historia",      icon: ArrowLeft       },
-  { id: "settings",   label: "Vista",         icon: SlidersHorizontal },
-  { id: "discard",    label: "Umbral",        icon: Trash2          },
-  { id: "instructivo",label: "Instructivo",   icon: BookOpen        },
+  { id: "visibility", label: "Capas",         icon: Layers   },
+  { id: "views",      label: "Vistas",        icon: Eye      },
+  { id: "tools",      label: "Herramientas",  icon: Wrench   },
+  { id: "instructivo",label: "Instructivo",   icon: BookOpen },
 ];
 
 const SK = "eficiencia_toolbar_groups_v2";
-const SP = "eficiencia_toolbar_pinned_v2";
 
 function loadVisible(): Record<GroupId, boolean> {
   try {
@@ -133,16 +123,6 @@ function loadVisible(): Record<GroupId, boolean> {
 }
 function saveVisible(v: Record<GroupId, boolean>) {
   try { localStorage.setItem(SK, JSON.stringify(v)); } catch { /* ignore */ }
-}
-function loadPinned(): Set<GroupId> {
-  try {
-    const r = localStorage.getItem(SP);
-    if (r) return new Set(JSON.parse(r) as GroupId[]);
-  } catch { /* ignore */ }
-  return new Set();
-}
-function savePinned(p: Set<GroupId>) {
-  try { localStorage.setItem(SP, JSON.stringify([...p])); } catch { /* ignore */ }
 }
 
 // ─── Style tokens ─────────────────────────────────────────────────────────────
@@ -211,7 +191,13 @@ function VisibilityRibbon({ stats, visibleCategories, onToggle, hiddenCount, onS
   );
 }
 
-function ViewsRibbon({ xrayMode, onToggleXray, section, onToggleSection, walkMode, onToggleWalk, onFrameCamera, selectedGroupIds }: Pick<BottomToolbarProps, "xrayMode"|"onToggleXray"|"section"|"onToggleSection"|"walkMode"|"onToggleWalk"|"onFrameCamera"|"selectedGroupIds">) {
+function ViewsRibbon({
+  xrayMode, onToggleXray, section, onToggleSection, walkMode, onToggleWalk, onFrameCamera, selectedGroupIds,
+  phase1, onRotateAxis, isRecomputing, isGenerating, showCenterAxes, onToggleCenterAxes, isSolid, onToggleSolid, hideSidebar, onToggleSidebar,
+}: Pick<BottomToolbarProps,
+  "xrayMode"|"onToggleXray"|"section"|"onToggleSection"|"walkMode"|"onToggleWalk"|"onFrameCamera"|"selectedGroupIds"|
+  "phase1"|"onRotateAxis"|"isRecomputing"|"isGenerating"|"showCenterAxes"|"onToggleCenterAxes"|"isSolid"|"onToggleSolid"|"hideSidebar"|"onToggleSidebar"
+>) {
   return (
     <>
       <button type="button" onClick={() => onFrameCamera(selectedGroupIds.size > 0 ? "frameSelection" : "frameAll")} className={`${RIB} ${RIB_OFF}`}>
@@ -238,6 +224,23 @@ function ViewsRibbon({ xrayMode, onToggleXray, section, onToggleSection, walkMod
           <CameraNavigationSelect variant="toolbar" />
         </>
       )}
+      <VDivider />
+      <button type="button" onClick={onRotateAxis} disabled={isRecomputing || isGenerating} className={`${RIB} ${RIB_OFF}`}>
+        {isRecomputing ? <span className="loading loading-spinner loading-xs" /> : <RefreshCw size={13} />}
+        Rotar eje
+        <span className="badge badge-xs badge-ghost font-mono">
+          {phase1.appliedAxis === "Y" ? "Y↑" : "Z↑"}
+        </span>
+      </button>
+      <button type="button" onClick={onToggleCenterAxes} className={`${RIB} ${showCenterAxes ? RIB_ON : RIB_OFF}`}>
+        <Crosshair size={13} /> Ejes
+      </button>
+      <button type="button" onClick={onToggleSolid} className={`${RIB} ${isSolid ? RIB_ON : RIB_OFF}`}>
+        <Box size={13} /> Vista maciza
+      </button>
+      <button type="button" onClick={onToggleSidebar} className={`${RIB} ${hideSidebar ? RIB_ON : RIB_OFF}`}>
+        <Maximize size={13} /> Sin lateral
+      </button>
     </>
   );
 }
@@ -256,8 +259,12 @@ function ToolsRibbon({
   "measureCount"|"onClearMeasures"|"cutShapeKind"|"onCutShapeChange"|
   "cutCount"|"edgeSnap"|"onToggleEdgeSnap"
 >) {
-  // "cursor" is the neutral state — never highlight it, only real active tools get RIB_ON
-  const t = (tool: typeof activeTool) => `${RIB} ${activeTool === tool && tool !== "cursor" ? RIB_ON : RIB_OFF}`;
+  const t = (tool: typeof activeTool) =>
+    activeTool === tool
+      ? tool === "cursor"
+        ? `${RIB} bg-base-200/70 text-base-content/80 ring-1 ring-base-300/60`
+        : `${RIB} ${RIB_ON}`
+      : `${RIB} ${RIB_OFF}`;
   return (
     <>
       {/* Selection */}
@@ -278,11 +285,8 @@ function ToolsRibbon({
       <button type="button" onClick={() => onSelectTool("markLine")} className={t("markLine")}>
         <PenLine size={13} /> Marcas rojas <kbd className="kbd kbd-xs">R</kbd>
       </button>
-      <button type="button" onClick={() => onSelectTool("rib")} className={t("rib")}>
-        <Magnet size={13} /> Nervio
-      </button>
       <button type="button" onClick={() => onSelectTool("angle")} className={t("angle")}>
-        <Tangent size={13} /> Transportador
+        <Tangent size={13} /> Transportador <kbd className="kbd kbd-xs">T</kbd>
       </button>
 
       {/* ── Active tool sub-modes ── */}
@@ -346,7 +350,7 @@ function ToolsRibbon({
           <span className="text-[10px] font-semibold text-secondary/60 uppercase tracking-wide self-center">Forma</span>
           {([
             { kind: "rect"   as const, icon: RectangleHorizontal, label: "Rectángulo" },
-            { kind: "circle" as const, icon: Circle,            label: "Óvalo"      },
+            { kind: "circle" as const, icon: Circle,            label: "Círculo"    },
             { kind: "line"   as const, icon: Minus,             label: "Línea"      },
           ] as const).map(({ kind, icon: Icon, label }) => (
             <button key={kind} type="button" onClick={() => onCutShapeChange(kind)}
@@ -372,72 +376,23 @@ function ToolsRibbon({
   );
 }
 
-function HistoryRibbon({ canUndo, canRedo, onUndo, onRedo }: Pick<BottomToolbarProps, "canUndo"|"canRedo"|"onUndo"|"onRedo">) {
-  return (
-    <>
-      <button type="button" onClick={onUndo} disabled={!canUndo} className={`${RIB} ${canUndo ? RIB_OFF : "opacity-30 cursor-not-allowed"}`}>
-        <ArrowLeft size={13} /> Deshacer <kbd className="kbd kbd-xs">Ctrl Z</kbd>
-      </button>
-      <button type="button" onClick={onRedo} disabled={!canRedo} className={`${RIB} ${canRedo ? RIB_OFF : "opacity-30 cursor-not-allowed"}`}>
-        <ArrowRight size={13} /> Rehacer <kbd className="kbd kbd-xs">Ctrl Y</kbd>
-      </button>
-    </>
-  );
-}
-
-function SettingsRibbon({ phase1, onRotateAxis, isRecomputing, isGenerating, showCenterAxes, onToggleCenterAxes, isSolid, onToggleSolid, hideSidebar, onToggleSidebar, hideToolbar, onToggleToolbar }: Pick<BottomToolbarProps, "phase1"|"onRotateAxis"|"isRecomputing"|"isGenerating"|"showCenterAxes"|"onToggleCenterAxes"|"isSolid"|"onToggleSolid"|"hideSidebar"|"onToggleSidebar"|"hideToolbar"|"onToggleToolbar">) {
-  return (
-    <>
-      <button type="button" onClick={onRotateAxis} disabled={isRecomputing || isGenerating} className={`${RIB} ${RIB_OFF}`}>
-        {isRecomputing ? <span className="loading loading-spinner loading-xs" /> : <RefreshCw size={13} />}
-        Rotar eje
-        <span className="badge badge-xs badge-ghost font-mono">
-          {phase1.appliedAxis === "Y" ? "Y↑" : "Z↑"}
-        </span>
-      </button>
-      <button type="button" onClick={onToggleCenterAxes} className={`${RIB} ${showCenterAxes ? RIB_ON : RIB_OFF}`}>
-        <Crosshair size={13} /> Ejes
-      </button>
-      <button type="button" onClick={onToggleSolid} className={`${RIB} ${isSolid ? RIB_ON : RIB_OFF}`}>
-        <Box size={13} /> Vista maciza
-      </button>
-      <VDivider />
-      <button type="button" onClick={onToggleSidebar} className={`${RIB} ${hideSidebar ? RIB_ON : RIB_OFF}`}>
-        <Maximize size={13} /> Sin lateral
-      </button>
-    </>
-  );
-}
-
-function DiscardRibbon({ minAreaM2, onMinAreaChange, minAreaOptions, formatMinAreaOption, isRecomputing, isGenerating }: Pick<BottomToolbarProps, "minAreaM2"|"onMinAreaChange"|"minAreaOptions"|"formatMinAreaOption"|"isRecomputing"|"isGenerating">) {
-  return (
-    <>
-      <span className="text-xs text-base-content/50 self-center whitespace-nowrap">Descartar capas &lt;</span>
-      <select
-        className="select select-bordered select-xs h-8 min-h-8 w-[6.25rem] bg-base-100 font-mono text-[11px] rounded-lg self-center"
-        value={minAreaM2}
-        disabled={isRecomputing || isGenerating}
-        onClick={(e) => e.stopPropagation()}
-        onChange={(e) => onMinAreaChange(Number(e.target.value))}
-      >
-        {minAreaOptions.map((a) => (
-          <option key={a} value={a}>{formatMinAreaOption(a)}</option>
-        ))}
-      </select>
-    </>
-  );
-}
 
 // ─── Config panel ─────────────────────────────────────────────────────────────
 
 function ConfigPanel({
-  visible, pinnedGroups,
-  onToggleVisible, onTogglePin,
+  visible,
+  onToggleVisible,
+  minAreaM2, onMinAreaChange, minAreaOptions, formatMinAreaOption,
+  isRecomputing, isGenerating,
 }: {
   visible: Record<GroupId, boolean>;
-  pinnedGroups: Set<GroupId>;
   onToggleVisible: (id: GroupId) => void;
-  onTogglePin: (id: GroupId) => void;
+  minAreaM2: number;
+  onMinAreaChange: (v: number) => void;
+  minAreaOptions: number[];
+  formatMinAreaOption: (v: number) => string;
+  isRecomputing: boolean;
+  isGenerating: boolean;
 }) {
   return (
     <div className="flex flex-col gap-0.5">
@@ -447,28 +402,33 @@ function ConfigPanel({
       {GROUP_DEFS.map((g) => {
         const Icon = g.icon;
         const on = visible[g.id];
-        const pinned = pinnedGroups.has(g.id);
         return (
-          <div key={g.id} className="flex items-center gap-1">
-            <label className="flex items-center gap-2 flex-1 px-2 py-1.5 rounded-lg hover:bg-base-200/60 cursor-pointer select-none">
-              <Icon size={13} className="text-base-content/50 shrink-0" />
-              <span className="text-xs flex-1">{g.label}</span>
-              <input type="checkbox" className="checkbox checkbox-xs checkbox-primary" checked={on} onChange={() => onToggleVisible(g.id)} />
-            </label>
-            {on && (
-              <button type="button" onClick={() => onTogglePin(g.id)}
-                title={pinned ? "Desfijar panel" : "Fijar panel siempre abierto"}
-                className={`btn btn-ghost btn-xs px-1.5 h-8 min-h-8 rounded-lg gap-1 text-[11px] ${pinned ? "text-primary bg-primary/10" : "text-base-content/30 hover:text-base-content/60"}`}
-              >
-                {pinned ? <><Pin size={10} /> Fijado</> : <><PinOff size={10} /> Fijar</>}
-              </button>
-            )}
-          </div>
+          <label key={g.id} className="flex items-center gap-2 flex-1 px-2 py-1.5 rounded-lg hover:bg-base-200/60 cursor-pointer select-none">
+            <Icon size={13} className="text-base-content/50 shrink-0" />
+            <span className="text-xs flex-1">{g.label}</span>
+            <input type="checkbox" className="checkbox checkbox-xs checkbox-primary" checked={on} onChange={() => onToggleVisible(g.id)} />
+          </label>
         );
       })}
-      <p className="text-[10px] text-base-content/35 px-2 pt-1.5 leading-tight">
-        Fijar → panel queda siempre abierto
-      </p>
+      <div className="border-t border-base-300/30 mt-1.5 pt-1.5">
+        <p className="text-[10px] font-semibold text-base-content/40 uppercase tracking-wider px-1 mb-1">
+          Descarte automático
+        </p>
+        <div className="flex items-center gap-2 px-2">
+          <span className="text-xs text-base-content/50 shrink-0">Descartar capas &lt;</span>
+          <select
+            className="select select-bordered select-xs h-8 min-h-8 w-[6.25rem] bg-base-100 font-mono text-[11px] rounded-lg"
+            value={minAreaM2}
+            disabled={isRecomputing || isGenerating}
+            onClick={(e) => e.stopPropagation()}
+            onChange={(e) => onMinAreaChange(Number(e.target.value))}
+          >
+            {minAreaOptions.map((a) => (
+              <option key={a} value={a}>{formatMinAreaOption(a)}</option>
+            ))}
+          </select>
+        </div>
+      </div>
     </div>
   );
 }
@@ -481,7 +441,7 @@ const TOOL_ICON: Record<string, LucideIcon> = {
 const TOOL_LABEL: Record<string, string> = {
   cursor: "Cursor", box: "Área", cut: "Cortes", measure: "Medir", markLine: "Marcas rojas", rib: "Nervio", angle: "Transportador",
 };
-const CUT_SHAPE_LABELS: Record<ActiveCutShapeKind, string>   = { rect: "Rectángulo", circle: "Óvalo", line: "Línea" };
+const CUT_SHAPE_LABELS: Record<ActiveCutShapeKind, string>   = { rect: "Rectángulo", circle: "Círculo", line: "Línea" };
 const MEASURE_SHAPE_LABELS: Record<MeasureShapeKind, string> = { line: "Distancia", rect: "Área" };
 const MARK_LABELS: Record<MarkLineMode, string>              = { straight: "Recta", freehand: "Libre", rect: "Rectángulo", circle: "Círculo" };
 
@@ -534,7 +494,7 @@ export function ActiveToolBadge({
     ] :
     activeTool === "cut" ? [
       { key: "rect"   as ActiveCutShapeKind,    ShapeIcon: RectangleHorizontal, label: "Rectángulo" },
-      { key: "circle" as ActiveCutShapeKind,    ShapeIcon: Circle,              label: "Óvalo"      },
+      { key: "circle" as ActiveCutShapeKind,    ShapeIcon: Circle,              label: "Círculo"    },
       { key: "line"   as ActiveCutShapeKind,    ShapeIcon: Minus,               label: "Línea"      },
     ] :
     activeTool === "measure" ? [
@@ -610,64 +570,24 @@ export default function BottomToolbar(props: BottomToolbarProps) {
     hasInstructivo, assemblyWindowOpen, onOpenAssembly,
   } = props;
 
-  const [openGroups,   setOpenGroups]   = useState<Set<GroupId | "config">>(new Set());
-  const [visible,      setVisible]      = useState<Record<GroupId, boolean>>(loadVisible);
-  const [pinnedGroups, setPinnedGroups] = useState<Set<GroupId>>(loadPinned);
+  const [openGroups, setOpenGroups] = useState<Set<GroupId | "config">>(new Set());
+  const [visible,    setVisible]    = useState<Record<GroupId, boolean>>(loadVisible);
   const rootRef = useRef<HTMLDivElement>(null);
 
-  // Restore pinned groups on mount
-  useEffect(() => {
-    if (pinnedGroups.size > 0) setOpenGroups(new Set(pinnedGroups));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Panels only close when the user explicitly clicks their tab again or via toggle.
-  // No auto-close on outside click — if they opened it, it stays open.
-
-  // Opening a panel always pins it so it stays open while working in the viewer.
-  // Clicking the tab again (or Escape) explicitly closes and unpins it.
+  // Un solo ribbon abierto a la vez: abrir uno cierra los demás.
   const toggle = (id: GroupId | "config") => {
     setOpenGroups((p) => {
-      const n = new Set(p);
-      if (n.has(id)) {
-        n.delete(id);
-      } else {
-        n.add(id);
-      }
+      const n = new Set<GroupId | "config">();
+      if (!p.has(id)) n.add(id);
       return n;
     });
-    if (id !== "config") {
-      setPinnedGroups((p) => {
-        const n = new Set(p);
-        if (n.has(id as GroupId)) {
-          n.delete(id as GroupId);
-        } else {
-          n.add(id as GroupId);
-        }
-        savePinned(n);
-        return n;
-      });
-    }
   };
 
   const toggleVisible = (id: GroupId) => {
     setVisible((p) => {
       const n = { ...p, [id]: !p[id] };
       saveVisible(n);
-      if (!n[id]) {
-        setPinnedGroups((pp) => { const np = new Set(pp); np.delete(id); savePinned(np); return np; });
-        setOpenGroups((o) => { const no = new Set(o); no.delete(id); return no; });
-      }
-      return n;
-    });
-  };
-
-  const togglePin = (id: GroupId) => {
-    setPinnedGroups((p) => {
-      const n = new Set(p);
-      if (n.has(id)) { n.delete(id); }
-      else { n.add(id); setOpenGroups((o) => new Set([...o, id])); }
-      savePinned(n);
+      if (!n[id]) setOpenGroups((o) => { const no = new Set(o); no.delete(id); return no; });
       return n;
     });
   };
@@ -686,11 +606,20 @@ export default function BottomToolbar(props: BottomToolbarProps) {
   const renderRibbon = (id: GroupId) => {
     switch (id) {
       case "visibility": return <VisibilityRibbon stats={stats} visibleCategories={visibleCategories} onToggle={onToggleVisibility} hiddenCount={hiddenCount} onShowAllHidden={onShowAllHidden} />;
-      case "views": return <ViewsRibbon xrayMode={xrayMode} onToggleXray={onToggleXray} section={section} onToggleSection={onToggleSection} walkMode={walkMode} onToggleWalk={onToggleWalk} onFrameCamera={onFrameCamera} selectedGroupIds={selectedGroupIds} />;
+      case "views": return (
+        <ViewsRibbon
+          xrayMode={xrayMode} onToggleXray={onToggleXray}
+          section={section} onToggleSection={onToggleSection}
+          walkMode={walkMode} onToggleWalk={onToggleWalk}
+          onFrameCamera={onFrameCamera} selectedGroupIds={selectedGroupIds}
+          phase1={phase1} onRotateAxis={onRotateAxis}
+          isRecomputing={isRecomputing} isGenerating={isGenerating}
+          showCenterAxes={showCenterAxes} onToggleCenterAxes={onToggleCenterAxes}
+          isSolid={isSolid} onToggleSolid={onToggleSolid}
+          hideSidebar={hideSidebar} onToggleSidebar={onToggleSidebar}
+        />
+      );
       case "tools": return <ToolsRibbon activeTool={activeTool} onSelectTool={onSelectTool} markLineMode={markLineMode} onMarkLineModeChange={onMarkLineModeChange} measureShapeKind={measureShapeKind} onMeasureShapeChange={onMeasureShapeChange} measureLabelScale={measureLabelScale} onMeasureScaleChange={onMeasureScaleChange} measureCount={measureCount} onClearMeasures={onClearMeasures} cutShapeKind={cutShapeKind} onCutShapeChange={onCutShapeChange} cutCount={cutCount} edgeSnap={edgeSnap} onToggleEdgeSnap={onToggleEdgeSnap} />;
-      case "history": return <HistoryRibbon canUndo={canUndo} canRedo={canRedo} onUndo={onUndo} onRedo={onRedo} />;
-      case "settings": return <SettingsRibbon phase1={phase1} onRotateAxis={onRotateAxis} isRecomputing={isRecomputing} isGenerating={isGenerating} showCenterAxes={showCenterAxes} onToggleCenterAxes={onToggleCenterAxes} isSolid={isSolid} onToggleSolid={onToggleSolid} hideSidebar={hideSidebar} onToggleSidebar={onToggleSidebar} hideToolbar={hideToolbar} onToggleToolbar={onToggleToolbar} />;
-      case "discard": return <DiscardRibbon minAreaM2={minAreaM2} onMinAreaChange={onMinAreaChange} minAreaOptions={minAreaOptions} formatMinAreaOption={formatMinAreaOption} isRecomputing={isRecomputing} isGenerating={isGenerating} />;
       case "instructivo": return null;
     }
   };
@@ -707,6 +636,27 @@ export default function BottomToolbar(props: BottomToolbarProps) {
       {/* ── Tab bar ─────────────────────────────────────────────── */}
       <div className="pointer-events-auto flex items-center gap-0.5 p-1 rounded-2xl bg-base-100/90 backdrop-blur-xl border border-base-300/40 shadow-lg shadow-base-content/5 overflow-hidden">
 
+        {/* Undo / Redo — siempre visibles */}
+        <button
+          type="button"
+          onClick={onUndo}
+          disabled={!canUndo}
+          title="Deshacer (Ctrl Z)"
+          className={`${TAB} px-2 ${canUndo ? TAB_OFF : "opacity-30 cursor-not-allowed"}`}
+        >
+          <ArrowLeft size={14} />
+        </button>
+        <button
+          type="button"
+          onClick={onRedo}
+          disabled={!canRedo}
+          title="Rehacer (Ctrl Y)"
+          className={`${TAB} px-2 ${canRedo ? TAB_OFF : "opacity-30 cursor-not-allowed"}`}
+        >
+          <ArrowRight size={14} />
+        </button>
+        <div className="shrink-0 self-stretch w-px bg-base-300/40 mx-1 rounded-full" />
+
         {/* Group tabs — single scrollable row */}
         <div className="flex items-center gap-0.5 flex-1 overflow-x-auto min-w-0 scrollbar-none"
           style={{ scrollbarWidth: "none" }}
@@ -717,13 +667,11 @@ export default function BottomToolbar(props: BottomToolbarProps) {
             const Icon = g.icon;
             const isOpen   = openGroups.has(g.id);
             const isActive =
-              (g.id === "views"    && (xrayMode || section.enabled || walkMode)) ||
-              (g.id === "tools"    && activeTool !== "cursor")                   ||
-              (g.id === "settings" && (isSolid || showCenterAxes))              ||
+              (g.id === "views"    && (xrayMode || section.enabled || walkMode || isSolid || showCenterAxes)) ||
+              (g.id === "tools"    && activeTool !== "cursor")                                                ||
               (g.id === "instructivo" && assemblyWindowOpen);
             const badge =
               g.id === "visibility" && hiddenCount > 0 ? hiddenCount : undefined;
-            const pinned = pinnedGroups.has(g.id);
 
             return (
               <button
@@ -732,7 +680,6 @@ export default function BottomToolbar(props: BottomToolbarProps) {
                 onClick={() => g.id === "instructivo" ? onOpenAssembly() : toggle(g.id)}
                 className={`${TAB} ${isOpen ? TAB_ON : isActive ? TAB_ACTIVE : TAB_OFF}`}
               >
-                {pinned && <Pin size={9} className="opacity-50" />}
                 <Icon size={14} />
                 <span className="hidden sm:inline">
                   {g.id === "tools" ? toolLabel : g.label}
@@ -787,13 +734,11 @@ export default function BottomToolbar(props: BottomToolbarProps) {
           {openList.map((id, idx) => {
             const content = renderRibbon(id);
             if (!content) return null;
-            const pinned = pinnedGroups.has(id);
             return (
               <div key={id} className="contents">
                 {idx > 0 && <VDivider />}
                 {/* Section label */}
-                <span className={`shrink-0 text-[10px] font-semibold uppercase tracking-wide self-center px-0.5 ${pinned ? "text-primary/60" : "text-base-content/35"}`}>
-                  {pinned && <Pin size={8} className="inline mr-0.5 -mt-px" />}
+                <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide self-center px-0.5 text-base-content/35">
                   {GROUP_DEFS.find((g) => g.id === id)?.label}
                 </span>
                 <VDivider light />
@@ -808,9 +753,13 @@ export default function BottomToolbar(props: BottomToolbarProps) {
               {openList.length > 0 && <VDivider />}
               <ConfigPanel
                 visible={visible}
-                pinnedGroups={pinnedGroups}
                 onToggleVisible={toggleVisible}
-                onTogglePin={togglePin}
+                minAreaM2={minAreaM2}
+                onMinAreaChange={onMinAreaChange}
+                minAreaOptions={minAreaOptions}
+                formatMinAreaOption={formatMinAreaOption}
+                isRecomputing={isRecomputing}
+                isGenerating={isGenerating}
               />
             </>
           )}
