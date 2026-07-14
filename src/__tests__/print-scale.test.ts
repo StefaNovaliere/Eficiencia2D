@@ -28,7 +28,7 @@ describe("print-scale", () => {
   });
 
   it("formatea opción original y de impresión", () => {
-    expect(formatMeasureScaleOption(1)).toBe("Original (1:1)");
+    expect(formatMeasureScaleOption(1)).toBe("1:1");
     expect(formatMeasureScaleOption(100)).toBe("1:100");
     expect(isOriginalMeasureScale(1)).toBe(true);
     expect(isOriginalMeasureScale(100)).toBe(false);
