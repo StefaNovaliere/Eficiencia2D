@@ -448,8 +448,9 @@ export default function MarkLineToolOverlay({
     }
 
     if (markLineLengthM(draft.points) < MIN_MARK_LINE_M) {
-      // Clic corto: reponemos el preview preciso según el modo.
-      if (mode !== "freehand") showShapeOnWall(draft.groupId);
+      // Clic corto: reponemos el preview preciso según el modo. (Freehand ya
+      // retornó arriba, así que acá siempre es recta/rect/círculo.)
+      showShapeOnWall(draft.groupId);
       return;
     }
 
