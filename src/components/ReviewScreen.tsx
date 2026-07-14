@@ -70,6 +70,7 @@ import {
   DEFAULT_COLUMN_SIZE_M,
   type Rib,
 } from "@/core/reinforcements";
+import { jointsToPlateJoints } from "@/core/reinforcements-preview";
 import RibSnapperOverlay from "@/components/RibSnapperOverlay";
 import ToolMenu from "@/components/toolbar/ToolMenu";
 import BottomToolbar, { ActiveToolBadge } from "@/components/toolbar/BottomToolbar";
@@ -827,12 +828,26 @@ export default function ReviewScreen({
 
   const canAddRib = selectedGroupIds.size === 2;
   const canAddColumn = selectedGroupIds.size >= 1;
-  // Cartela modesta: 50×50 mm físicos de maqueta, escalados al mundo del visor.
+  // Cartela modesta: 20×20 mm físicos de maqueta, escalados al mundo del visor.
   const ribSizeM = useMemo(() => resolveRibSizeM(scale), [scale]);
+
+  // Fuente de juntas unificada: preferir plateJoints del nesting (aristas exactas)
+  // y caer a los joints de phase1 cuando nestingData aún no está disponible.
+  const effectivePlateJoints = useMemo(
+    () =>
+      nestingData?.plateJoints?.length
+        ? nestingData.plateJoints
+        : jointsToPlateJoints(phase1.joints ?? []),
+    [nestingData, phase1.joints],
+  );
 
   const handleAddRib = useCallback(() => {
     if (selectedGroupIds.size !== 2) return;
-    const [groupA, groupB] = Array.from(selectedGroupIds);
+    const [rawA, rawB] = Array.from(selectedGroupIds);
+    // Resolver ids derivados (negativos) a sus dueños para que el preview y el
+    // payload al backend usen los ids reales de los grupos padre.
+    const groupA = cutGroupOwnerId(rawA);
+    const groupB = cutGroupOwnerId(rawB);
     setSavedRibs([
       ...savedRibs,
       { id: createRibId(), groupA, groupB, sizeM: ribSizeM, t: DEFAULT_RIB_T },
@@ -851,6 +866,15 @@ export default function ReviewScreen({
       setSavedRibs(savedRibs.map((r) => (r.id === id ? { ...r, t } : r)));
     },
     [savedRibs, setSavedRibs],
+  );
+
+  const handleSetRibSize = useCallback(
+    (id: string, physicalMm: number) => {
+      const mm = Math.max(10, Math.min(80, physicalMm));
+      const sizeM = (mm / 1000) * Math.max(scale, 1);
+      setSavedRibs(savedRibs.map((r) => (r.id === id ? { ...r, sizeM } : r)));
+    },
+    [savedRibs, setSavedRibs, scale],
   );
 
   const handleAddColumn = useCallback(() => {
@@ -2212,6 +2236,20 @@ export default function ReviewScreen({
         return;
       }
 
+      if (e.key === "t" || e.key === "T") {
+        e.preventDefault();
+        setCutToolMode(false);
+        setCutDraft(null);
+        setMeasureToolMode(false);
+        setMeasureDraft(null);
+        setMarkLineToolMode(false);
+        setMarkLineDraft(null);
+        setBoxSelectMode(false);
+        setRibToolMode(false);
+        setAngleToolMode((a) => !a);
+        return;
+      }
+
       if (e.key === "z" || e.key === "Z") {
         // Encuadrar (sin Ctrl/Cmd, que es deshacer). Selección o todo.
         if (e.ctrlKey || e.metaKey) return;
@@ -2433,13 +2471,15 @@ export default function ReviewScreen({
                 </button>
               </div>
               <p className="text-[10px] text-base-content/40 leading-snug">
-                🧲 acercate a una junta pared-piso y aparece el nervio (cartela de 50×50 mm de
+                🧲 acercate a una junta pared-piso y aparece el nervio (cartela de 20×20 mm de
                 maqueta). Alternativa: 2 paredes ⊥ + &quot;+ Nervio&quot;. El preview (ámbar) es
                 esquemático; el backend genera la pieza real.
               </p>
               {(savedRibs.length > 0 || savedColumns.length > 0) && (
                 <ul className="space-y-0.5 pt-0.5">
-                  {savedRibs.map((r) => (
+                  {savedRibs.map((r) => {
+                    const physMm = Math.round((r.sizeM / Math.max(scale, 1)) * 1000);
+                    return (
                     <li key={r.id} className="text-[11px] text-base-content/70">
                       <div className="flex items-center justify-between">
                         <span>
@@ -2467,8 +2507,21 @@ export default function ReviewScreen({
                           className="range range-xs range-warning flex-1"
                         />
                       </label>
+                      <label className="flex items-center gap-1.5 pl-1 pb-0.5">
+                        <span className="text-[9px] text-base-content/40 shrink-0">tamaño mm</span>
+                        <input
+                          type="number"
+                          min={10}
+                          max={80}
+                          step={1}
+                          value={physMm}
+                          onChange={(e) => handleSetRibSize(r.id, Number(e.target.value))}
+                          className="input input-xs input-bordered w-16 font-mono text-[11px] rounded-lg"
+                        />
+                      </label>
                     </li>
-                  ))}
+                    );
+                  })}
                   {savedColumns.map((c) => (
                     <li
                       key={c.id}
@@ -3231,7 +3284,7 @@ export default function ReviewScreen({
           reinforcements={{
             ribs: ribGhost ? [...savedRibs, ribGhost] : savedRibs,
             columns: savedColumns,
-            plateJoints: nestingData?.plateJoints ?? [],
+            plateJoints: effectivePlateJoints,
           }}
           flexSpecs={savedFlex}
           cameraCommand={cameraCommand}
@@ -3293,7 +3346,7 @@ export default function ReviewScreen({
         <RibSnapperOverlay
           active={ribToolMode}
           viewerRef={viewerRef}
-          plateJoints={nestingData?.plateJoints ?? []}
+          plateJoints={effectivePlateJoints}
           ribSizeM={ribSizeM}
           onGhostChange={setRibGhost}
           onCommit={handleCommitSnappedRib}

@@ -12,7 +12,9 @@
 import type { GeometryGroup } from "@/core/group-classifier";
 import type { Face3D, Vec3 } from "@/core/types";
 import type { PlateJoint } from "@/core/pipeline";
+import type { Joint } from "@/core/joint-detector";
 import { buildColumnGeometry, buildRibGeometry, type Rib, type Column } from "@/core/reinforcements";
+import { cutGroupOwnerId } from "@/core/cut-derived-groups";
 
 function sub(a: Vec3, b: Vec3): Vec3 {
   return { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z };
@@ -45,6 +47,40 @@ function groupVertices(g: GeometryGroup, faces: Face3D[]): Vec3[] {
     if (f?.vertices) out.push(...f.vertices);
   }
   return out;
+}
+
+/**
+ * Reconstruye los dos extremos de la arista a partir de un Joint de phase1.
+ * El backend provee `edgeMid` y `edgeDir` (no necesariamente unitario);
+ * los extremos son midpoint ± halfLen × dir.
+ */
+export function jointToEdge(j: Joint): { a: Vec3; b: Vec3 } {
+  const halfLen = j.totalLength / 2;
+  const d = normalize(j.edgeDir);
+  return {
+    a: {
+      x: j.edgeMid.x - d.x * halfLen,
+      y: j.edgeMid.y - d.y * halfLen,
+      z: j.edgeMid.z - d.z * halfLen,
+    },
+    b: {
+      x: j.edgeMid.x + d.x * halfLen,
+      y: j.edgeMid.y + d.y * halfLen,
+      z: j.edgeMid.z + d.z * halfLen,
+    },
+  };
+}
+
+/**
+ * Convierte los `Joint` de `phase1` a `PlateJoint[]` para usar como fuente de
+ * juntas cuando `nestingData` todavía no está disponible (review pre-nesting).
+ * Se pasan TODOS los joints; la búsqueda por par filtra el correcto.
+ */
+export function jointsToPlateJoints(joints: Joint[]): PlateJoint[] {
+  return joints.map((j) => {
+    const { a, b } = jointToEdge(j);
+    return { cutId: j.groupA, cutterId: j.groupB, a, b, width: 0.01 };
+  });
 }
 
 export interface RibEdge {
@@ -146,6 +182,9 @@ function findJointForPair(
 /**
  * Triángulos combinados (coords de mundo) de todos los refuerzos, para un mesh
  * de overlay. Columnas = caja; nervios = cartela sobre la arista de intersección.
+ *
+ * @param projectionGroups  Grupos PADRE (phase1.groups) para resolver ids derivados
+ *   (p.ej. grupos con id negativo = piezas de corte). Si se omite, se usa `groups`.
  */
 export function computeReinforcementsGeometry(
   ribs: Rib[],
@@ -153,8 +192,15 @@ export function computeReinforcementsGeometry(
   groups: GeometryGroup[],
   faces: Face3D[],
   plateJoints?: PlateJoint[],
+  projectionGroups?: GeometryGroup[],
 ): number[] {
-  const byId = new Map(groups.map((g) => [g.id, g]));
+  // Preferir grupos padre para la búsqueda de geometría; los ids derivados
+  // (negativos) no tienen geometría real propia.
+  const sourceGroups = projectionGroups ?? groups;
+  const byId = new Map<number, GeometryGroup>([
+    ...groups.map((g): [number, GeometryGroup] => [g.id, g]),
+    ...sourceGroups.map((g): [number, GeometryGroup] => [g.id, g]),
+  ]);
   const out: number[] = [];
 
   for (const c of columns) {
@@ -162,14 +208,31 @@ export function computeReinforcementsGeometry(
   }
 
   for (const r of ribs) {
-    const A = byId.get(r.groupA);
-    const B = byId.get(r.groupB);
+    // Resolver ids de dueño: un id negativo indica un fragmento derivado de un
+    // corte; el dueño es el grupo padre con el id positivo real del backend.
+    const ownerA = cutGroupOwnerId(r.groupA);
+    const ownerB = cutGroupOwnerId(r.groupB);
+    const A = byId.get(ownerA);
+    const B = byId.get(ownerB);
     if (!A || !B) continue;
-    const joint = findJointForPair(plateJoints, r.groupA, r.groupB);
+
+    const joint = findJointForPair(plateJoints, ownerA, ownerB);
+
+    // Sin junta para el par → no dibujar nada (nunca inventar esquina).
+    if (!joint) continue;
+
+    // Clamp universal: la cartela no puede exceder el 35% del largo de la junta.
+    const jointLen = Math.hypot(
+      joint.b.x - joint.a.x,
+      joint.b.y - joint.a.y,
+      joint.b.z - joint.a.z,
+    );
+    const effectiveSizeM = jointLen > 1e-6 ? Math.min(r.sizeM, 0.35 * jointLen) : r.sizeM;
+
     const edge = ribEdgeForGroups(A, B, faces, r.t, joint);
     if (!edge) continue;
-    const thicknessM = Math.max(r.sizeM * 0.06, 0.01);
-    const g = buildRibGeometry(edge.corner, edge.dirA, edge.dirB, r.sizeM, thicknessM);
+    const thicknessM = Math.max(effectiveSizeM * 0.06, 0.01);
+    const g = buildRibGeometry(edge.corner, edge.dirA, edge.dirB, effectiveSizeM, thicknessM);
     out.push(...g.caps, ...g.walls);
   }
 

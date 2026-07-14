@@ -32,7 +32,7 @@ Es decir: el `pos_t`, `group_a/b` y `position` que manda el front son **sólo pi
 
 | Campo | Uso |
 |-------|-----|
-| `ribs[].size_m` | Cateto del triángulo en metros de MUNDO (edificio real). ⚠️ Viene de un tamaño FÍSICO modesto: **50×50 mm de maqueta × escala** (a 1:100 ⇒ 5.0 m de mundo). El backend corta la cartela al tamaño físico: `size_m / escala` — **piezas chicas para dar escuadra, NO nervios gigantes**. |
+| `ribs[].size_m` | Cateto del triángulo en metros de MUNDO (edificio real). ⚠️ Viene de un tamaño FÍSICO modesto: **20×20 mm de maqueta × escala** (a 1:100 ⇒ 2.0 m de mundo). El backend corta la cartela al tamaño físico: `size_m / escala` — **piezas chicas para dar escuadra, NO nervios gigantes**. |
 | `ribs[].group_a/b`, `pos_t` | Pista de ubicación para el preview 3D del front (no afecta el corte). |
 | `columns[].height_m`, `size_m` | Alto y lado de sección de la columna. **Definen la pieza.** |
 | `columns[].position` | Pista visual (dónde la sugiere el usuario); no obliga nada en el corte. |
