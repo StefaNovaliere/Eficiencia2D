@@ -15,6 +15,8 @@ export interface ProjectSavedState {
   nombre?: string;
   axis?: "Y" | "Z";
   min_area_m2?: number;
+  /** Si true, los grupos de la toolbar pueden quedar abiertos a la vez. */
+  pin_tools?: boolean;
   merges?: number[][];
   splits?: SplitOperation[];
   overrides?: Record<string, string>;
@@ -43,6 +45,7 @@ export interface ProjectStatePatchResponse {
 export interface RestoredProjectState {
   projectFileName?: string;
   minAreaM2?: number;
+  pinTools?: boolean;
   savedMerges?: number[][];
   savedSplits?: SplitOp[];
   savedOverrides?: ClassificationOverride[];
@@ -123,6 +126,9 @@ export function parseSavedState(raw: unknown): ProjectSavedState | null {
   const minArea = Number(o.min_area_m2 ?? o.minAreaM2);
   if (Number.isFinite(minArea)) state.min_area_m2 = minArea;
 
+  const pinTools = o.pin_tools ?? o.pinTools;
+  if (typeof pinTools === "boolean") state.pin_tools = pinTools;
+
   if (Array.isArray(o.merges)) state.merges = o.merges as number[][];
 
   const splits = parseSplits(o.splits);
@@ -174,6 +180,7 @@ export function restoreProjectState(raw: unknown): RestoredProjectState | null {
 
   if (state.nombre) restored.projectFileName = state.nombre;
   if (state.min_area_m2 != null) restored.minAreaM2 = state.min_area_m2;
+  if (state.pin_tools != null) restored.pinTools = state.pin_tools;
   if (state.merges) restored.savedMerges = state.merges;
   if (state.splits) {
     restored.savedSplits = state.splits.map((s) => ({

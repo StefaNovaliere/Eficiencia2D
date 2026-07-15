@@ -51,6 +51,8 @@ function ReviewPageContent() {
     setPhase1Result,
     minAreaM2,
     setMinAreaM2,
+    pinTools,
+    setPinTools,
     savedOverrides,
     setSavedOverrides,
     savedWallWallDecisions,
@@ -178,6 +180,14 @@ function ReviewPageContent() {
       void runRecompute({ min_area_m2: newArea });
     },
     [setMinAreaM2, runRecompute, setSavedOverrides],
+  );
+
+  const handlePinToolsChange = useCallback(
+    (pin: boolean) => {
+      setPinTools(pin);
+      if (token && fileId) queuePatch({ pin_tools: pin });
+    },
+    [setPinTools, token, fileId, queuePatch],
   );
 
   const handleAddMerge = useCallback(
@@ -350,6 +360,8 @@ function ReviewPageContent() {
       onAddSplit={handleAddSplit}
       minAreaM2={minAreaM2}
       onMinAreaChange={handleMinAreaChange}
+      pinTools={pinTools}
+      onPinToolsChange={handlePinToolsChange}
       initialOverrides={savedOverrides}
       initialWallWallDecisions={savedWallWallDecisions}
       initialMarks={savedMarks}

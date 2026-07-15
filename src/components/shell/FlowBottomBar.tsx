@@ -19,7 +19,7 @@ export default function FlowBottomBar() {
   return (
     <div className="fixed bottom-0 inset-x-0 z-50 h-14 border-t border-base-300/50 bg-base-100/95 backdrop-blur-md flex items-center justify-between gap-3 px-3 sm:px-4">
       {/* Izquierda: Atrás (posición fija) */}
-      <div className="flex-1 flex justify-start min-w-0">
+      <div className="flex-1 flex gap-10 justify-start min-w-0">
         {nav.onBack && (
           <button
             type="button"
@@ -31,11 +31,11 @@ export default function FlowBottomBar() {
             <span className="hidden sm:inline">{nav.backLabel ?? "Atrás"}</span>
           </button>
         )}
+        <CameraNavigationSelect variant="toolbar-bottom" className="hidden sm:flex" />
       </div>
 
       {/* Centro: configuración de navegación/teclado + entrada visible al palette */}
       <div className="flex items-center gap-2 min-w-0">
-        <CameraNavigationSelect variant="toolbar-bottom" className="hidden sm:flex" />
         <button
           type="button"
           onClick={openPalette}

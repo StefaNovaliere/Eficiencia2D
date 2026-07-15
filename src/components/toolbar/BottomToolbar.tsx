@@ -22,7 +22,6 @@ import {
   Spline,
   RefreshCw,
   Box,
-  Settings2,
   ChevronDown,
   ChevronUp,
   Layers,
@@ -32,12 +31,10 @@ import {
   Navigation2,
   Palette,
   Rotate3D,
-
   SquareDashedMousePointer,
   SquareBottomDashedScissors,
   Camera,
   ScanEye,
-
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import CameraNavigationSelect from "@/components/CameraNavigationSelect";
@@ -48,6 +45,7 @@ import type { MarkLineMode } from "@/components/MarkLineToolOverlay";
 import type { ActiveCutShapeKind } from "@/core/user-cuts";
 import type { MeasureShapeKind } from "@/core/measure-tool";
 import type { Phase1Result } from "@/core/pipeline";
+import ConfigButtom from "./ConfigButtom";
 
 // ─── Public props ─────────────────────────────────────────────────────────────
 
@@ -99,6 +97,8 @@ export interface BottomToolbarProps {
   onToggleToolbar: () => void;
   minAreaM2: number;
   onMinAreaChange: (v: number) => void;
+  pinTools: boolean;
+  onPinToolsChange: (pin: boolean) => void;
   minAreaOptions: number[];
   formatMinAreaOption: (v: number) => string;
   angleMeasureMode: "off" | "line" | "panels";
@@ -417,56 +417,30 @@ function ToolsRibbon({
 // ─── Config panel ─────────────────────────────────────────────────────────────
 
 function ConfigPanel({
-  visible,
-  onToggleVisible,
   minAreaM2, onMinAreaChange, minAreaOptions, formatMinAreaOption,
   isRecomputing, isGenerating,
+  pinTools, onPinToolsChange,
 }: {
-  visible: Record<GroupId, boolean>;
-  onToggleVisible: (id: GroupId) => void;
   minAreaM2: number;
   onMinAreaChange: (v: number) => void;
   minAreaOptions: number[];
   formatMinAreaOption: (v: number) => string;
   isRecomputing: boolean;
   isGenerating: boolean;
+  pinTools: boolean;
+  onPinToolsChange: (pin: boolean) => void;
 }) {
   return (
-    <div className="flex flex-col gap-0.5">
-      <p className="text-[10px] font-semibold text-base-content/40 uppercase tracking-wider px-1 mb-1.5">
-        Personalizar barra
-      </p>
-      {GROUP_DEFS.map((g) => {
-        const Icon = g.icon;
-        const on = visible[g.id];
-        return (
-          <label key={g.id} className="flex items-center gap-2 flex-1 px-2 py-1.5 rounded-lg hover:bg-base-200/60 cursor-pointer select-none">
-            <Icon size={13} className="text-base-content/50 shrink-0" />
-            <span className="text-xs flex-1">{g.label}</span>
-            <input type="checkbox" className="checkbox checkbox-xs checkbox-primary" checked={on} onChange={() => onToggleVisible(g.id)} />
-          </label>
-        );
-      })}
-      <div className="border-t border-base-300/30 mt-1.5 pt-1.5">
-        <p className="text-[10px] font-semibold text-base-content/40 uppercase tracking-wider px-1 mb-1">
-          Descarte automático
-        </p>
-        <div className="flex items-center gap-2 px-2">
-          <span className="text-xs text-base-content/50 shrink-0">Descartar capas &lt;</span>
-          <select
-            className="select select-bordered select-xs h-8 min-h-8 w-[6.25rem] bg-base-100 font-mono text-[11px] rounded-lg"
-            value={minAreaM2}
-            disabled={isRecomputing || isGenerating}
-            onClick={(e) => e.stopPropagation()}
-            onChange={(e) => onMinAreaChange(Number(e.target.value))}
-          >
-            {minAreaOptions.map((a) => (
-              <option key={a} value={a}>{formatMinAreaOption(a)}</option>
-            ))}
-          </select>
-        </div>
-      </div>
-    </div>
+    <ConfigButtom
+      minAreaM2={minAreaM2}
+      onMinAreaChange={onMinAreaChange}
+      minAreaOptions={minAreaOptions}
+      formatMinAreaOption={formatMinAreaOption}
+      isRecomputing={isRecomputing}
+      isGenerating={isGenerating}
+      pinTools={pinTools}
+      onPinToolsChange={onPinToolsChange}
+    />
   );
 }
 
@@ -617,21 +591,39 @@ export default function BottomToolbar(props: BottomToolbarProps) {
     showCenterAxes, onToggleCenterAxes, isSolid, onToggleSolid,
     hideSidebar, onToggleSidebar, hideToolbar, onToggleToolbar,
     minAreaM2, onMinAreaChange, minAreaOptions, formatMinAreaOption,
+    pinTools, onPinToolsChange,
     angleMeasureMode, onSetAngleMeasureMode,
   } = props;
 
-  const [openGroups, setOpenGroups] = useState<Set<GroupId | "config">>(new Set());
+  const [openGroups, setOpenGroups] = useState<Set<GroupId>>(new Set());
   const [visible,    setVisible]    = useState<Record<GroupId, boolean>>(loadVisible);
   const rootRef = useRef<HTMLDivElement>(null);
 
-  // Un solo ribbon abierto a la vez: abrir uno cierra los demás.
-  const toggle = (id: GroupId | "config") => {
-    setOpenGroups((p) => {
-      const n = new Set<GroupId | "config">();
-      if (!p.has(id)) n.add(id);
-      return n;
+  // pinTools ON  → al abrir un grupo se suma a los ya abiertos (no reemplaza).
+  // pinTools OFF → solo un grupo abierto a la vez.
+  const toggle = (id: GroupId) => {
+    setOpenGroups((prev) => {
+      if (pinTools) {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return next;
+      }
+      // Sin acumular: click en el abierto lo cierra; click en otro lo reemplaza.
+      if (prev.has(id) && prev.size === 1) return new Set();
+      return new Set<GroupId>([id]);
     });
   };
+
+  // Si se desactiva acumular con varios abiertos, dejar solo el primero.
+  useEffect(() => {
+    if (pinTools) return;
+    setOpenGroups((prev) => {
+      if (prev.size <= 1) return prev;
+      const first = GROUP_DEFS.find((g) => prev.has(g.id))?.id;
+      return first ? new Set<GroupId>([first]) : new Set();
+    });
+  }, [pinTools]);
 
   const toggleVisible = (id: GroupId) => {
     setVisible((p) => {
@@ -644,8 +636,7 @@ export default function BottomToolbar(props: BottomToolbarProps) {
 
   // Which groups are visible AND open (preserving GROUP_DEFS order)
   const openList = GROUP_DEFS.filter((g) => visible[g.id] && openGroups.has(g.id)).map((g) => g.id);
-  const configOpen = openGroups.has("config");
-  const anyOpen = openList.length > 0 || configOpen;
+  const anyOpen = openList.length > 0;
 
   const toolLabel =
     activeTool === "cut" ? "Cortes" : activeTool === "measure" ? "Medir" :
@@ -687,7 +678,7 @@ export default function BottomToolbar(props: BottomToolbarProps) {
       className="absolute top-4 left-4 right-4 z-40 flex flex-col gap-1.5 pointer-events-none"
     >
       {/* ── Tab bar ─────────────────────────────────────────────── */}
-      <div className="pointer-events-auto flex items-center gap-0.5 p-1 rounded-2xl bg-base-100/90 backdrop-blur-xl border border-base-300/40 shadow-lg shadow-base-content/5 overflow-hidden">
+        <div className="pointer-events-auto relative z-50 flex items-center gap-0.5 p-1 rounded-2xl bg-base-100/90 backdrop-blur-xl border border-base-300/40 shadow-lg shadow-base-content/5">
 
         {/* Undo / Redo — siempre visibles */}
         <button
@@ -749,18 +740,18 @@ export default function BottomToolbar(props: BottomToolbarProps) {
           })}
         </div>
 
-        {/* Config button — always on the right */}
+        {/* Config dropdown — always on the right */}
         <div className="shrink-0 self-stretch w-px bg-base-300/40 mx-1 rounded-full" />
-        <button
-          type="button"
-          onClick={() => toggle("config")}
-          className={`${TAB} ${configOpen ? TAB_ON : TAB_OFF}`}
-          title="Personalizar barra de herramientas"
-        >
-          <Settings2 size={14} />
-          <span className="hidden sm:inline">Config</span>
-          <ChevronDown size={11} className={`opacity-40 transition-transform duration-150 ${configOpen ? "rotate-180" : ""}`} />
-        </button>
+        <ConfigPanel
+          minAreaM2={minAreaM2}
+          onMinAreaChange={onMinAreaChange}
+          minAreaOptions={minAreaOptions}
+          formatMinAreaOption={formatMinAreaOption}
+          isRecomputing={isRecomputing}
+          isGenerating={isGenerating}
+          pinTools={pinTools}
+          onPinToolsChange={onPinToolsChange}
+        />
 
         {/* Toolbar collapse chevron — always visible at far right */}
         <div className="shrink-0 self-stretch w-px bg-base-300/30 mx-1 rounded-full" />
@@ -777,7 +768,7 @@ export default function BottomToolbar(props: BottomToolbarProps) {
       {/* ── Ribbon row — all open groups merged, scrollable ──────── */}
       {anyOpen && (
         <div
-          className="pointer-events-auto flex items-center gap-x-0.5 px-2 py-1.5 rounded-2xl bg-base-100/95 backdrop-blur-xl border border-base-300/45 shadow-lg shadow-base-content/8 overflow-x-auto"
+          className="pointer-events-auto relative z-40 flex items-center gap-x-0.5 px-2 py-1.5 rounded-2xl bg-base-100/95 backdrop-blur-xl border border-base-300/45 shadow-lg shadow-base-content/8 overflow-x-auto"
           style={{ scrollbarWidth: "none" }}
         >
 
@@ -796,23 +787,6 @@ export default function BottomToolbar(props: BottomToolbarProps) {
               </div>
             );
           })}
-
-          {/* Config panel — inline at the end */}
-          {configOpen && (
-            <>
-              {openList.length > 0 && <VDivider />}
-              <ConfigPanel
-                visible={visible}
-                onToggleVisible={toggleVisible}
-                minAreaM2={minAreaM2}
-                onMinAreaChange={onMinAreaChange}
-                minAreaOptions={minAreaOptions}
-                formatMinAreaOption={formatMinAreaOption}
-                isRecomputing={isRecomputing}
-                isGenerating={isGenerating}
-              />
-            </>
-          )}
         </div>
       )}
 

@@ -185,27 +185,6 @@ export default function UserSettingsForm() {
             );
           })}
         </div>
-
-
-      </section>
-
-      <section className="space-y-3 pt-2 border-t border-base-300/40">
-        <div className="flex items-start gap-3">
-          <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-primary/10 text-primary shrink-0">
-            <Rotate3d size={18} />
-          </div>
-          <div className="flex-1 min-w-0">
-            <h2 className="text-sm font-semibold text-base-content">
-              Navegación de cámara (3D)
-            </h2>
-            <p className="text-xs text-base-content/55 mt-1">
-              {isAuthenticated
-                ? "Elegí el estilo de controles del visor. Se aplica al instante y se guarda en tu cuenta."
-                : "Elegí el estilo de controles del visor. Se guarda en este dispositivo."}
-            </p>
-          </div>
-        </div>
-        <CameraNavigationSelect variant="settings" />
       </section>
 
       {isAuthenticated && (
