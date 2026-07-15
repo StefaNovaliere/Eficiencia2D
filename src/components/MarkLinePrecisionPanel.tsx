@@ -383,9 +383,6 @@ export default function MarkLinePrecisionPanel(props: PrecisionPanelProps) {
         />
       )}
 
-      <p className="text-[10px] text-base-content/45 leading-tight">
-        Dibujá sobre la pared o ajustá los valores · <kbd className="kbd kbd-xs">Esc</kbd> para salir
-      </p>
     </div>
   );
 }

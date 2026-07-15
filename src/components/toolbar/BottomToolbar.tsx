@@ -3,10 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Eye,
-  Wrench,
   ArrowLeft,
   ArrowRight,
-  BookOpen,
   Trash2,
   Crosshair,
   Maximize,
@@ -29,6 +27,17 @@ import {
   ChevronUp,
   Layers,
   Tangent,
+  PencilRuler,
+  Move3D,
+  Navigation2,
+  Palette,
+  Rotate3D,
+
+  SquareDashedMousePointer,
+  SquareBottomDashedScissors,
+  Camera,
+  ScanEye,
+
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import CameraNavigationSelect from "@/components/CameraNavigationSelect";
@@ -92,27 +101,29 @@ export interface BottomToolbarProps {
   onMinAreaChange: (v: number) => void;
   minAreaOptions: number[];
   formatMinAreaOption: (v: number) => string;
-  hasInstructivo: boolean;
-  assemblyWindowOpen: boolean;
-  onOpenAssembly: () => void;
+  angleMeasureMode: "off" | "line" | "panels";
+  onSetAngleMeasureMode: (m: "line" | "panels") => void;
 }
 
 // ─── Groups ───────────────────────────────────────────────────────────────────
 
-type GroupId =
+export type GroupId =
   | "visibility"
-  | "views"
-  | "tools"
-  | "instructivo";
+  | "nav"
+  | "visualizacion"
+  | "tools";
 
 const GROUP_DEFS: { id: GroupId; label: string; icon: LucideIcon }[] = [
-  { id: "visibility", label: "Capas",         icon: Layers   },
-  { id: "views",      label: "Vistas",        icon: Eye      },
-  { id: "tools",      label: "Herramientas",  icon: Wrench   },
-  { id: "instructivo",label: "Instructivo",   icon: BookOpen },
+  { id: "visibility",    label: "Capas",         icon: Layers      },
+  { id: "nav",           label: "Cámara",        icon: Camera      },
+  { id: "visualizacion", label: "Visualización", icon: ScanEye     },
+  { id: "tools",         label: "Herramientas",  icon: PencilRuler },
 ];
 
-const SK = "eficiencia_toolbar_groups_v2";
+export const TOOLBAR_GROUPS_SK = "eficiencia_toolbar_groups_v3";
+const SK = TOOLBAR_GROUPS_SK;
+
+export { GROUP_DEFS };
 
 function loadVisible(): Record<GroupId, boolean> {
   try {
@@ -191,12 +202,13 @@ function VisibilityRibbon({ stats, visibleCategories, onToggle, hiddenCount, onS
   );
 }
 
-function ViewsRibbon({
-  xrayMode, onToggleXray, section, onToggleSection, walkMode, onToggleWalk, onFrameCamera, selectedGroupIds,
-  phase1, onRotateAxis, isRecomputing, isGenerating, showCenterAxes, onToggleCenterAxes, isSolid, onToggleSolid, hideSidebar, onToggleSidebar,
+/** Cámara — todo lo que mueve u orienta la cámara respecto al espacio. */
+function NavRibbon({
+  walkMode, onToggleWalk, onFrameCamera, selectedGroupIds,
+  phase1, onRotateAxis, isRecomputing, isGenerating,
 }: Pick<BottomToolbarProps,
-  "xrayMode"|"onToggleXray"|"section"|"onToggleSection"|"walkMode"|"onToggleWalk"|"onFrameCamera"|"selectedGroupIds"|
-  "phase1"|"onRotateAxis"|"isRecomputing"|"isGenerating"|"showCenterAxes"|"onToggleCenterAxes"|"isSolid"|"onToggleSolid"|"hideSidebar"|"onToggleSidebar"
+  "walkMode"|"onToggleWalk"|"onFrameCamera"|"selectedGroupIds"|
+  "phase1"|"onRotateAxis"|"isRecomputing"|"isGenerating"
 >) {
   return (
     <>
@@ -209,37 +221,43 @@ function ViewsRibbon({
         <Maximize size={13} /> Vista general
       </button>
       <VDivider />
-      <button type="button" onClick={onToggleXray} className={`${RIB} ${xrayMode ? RIB_ON : RIB_OFF}`}>
-        <ScanSearch size={13} /> Rayos X
-      </button>
-      <button type="button" onClick={onToggleSection} className={`${RIB} ${section.enabled ? RIB_ON : RIB_OFF}`}>
-        <Scissors size={13} /> Plano de corte
-      </button>
       <button type="button" onClick={onToggleWalk} className={`${RIB} ${walkMode ? RIB_ON : RIB_OFF}`}>
         <Footprints size={13} /> Caminar
       </button>
-      {!walkMode && (
-        <>
-          <VDivider />
-          <CameraNavigationSelect variant="toolbar" />
-        </>
-      )}
       <VDivider />
       <button type="button" onClick={onRotateAxis} disabled={isRecomputing || isGenerating} className={`${RIB} ${RIB_OFF}`}>
-        {isRecomputing ? <span className="loading loading-spinner loading-xs" /> : <RefreshCw size={13} />}
+        {isRecomputing ? <span className="loading loading-spinner loading-xs" /> : <Rotate3D size={13} />}
         Rotar eje
         <span className="badge badge-xs badge-ghost font-mono">
           {phase1.appliedAxis === "Y" ? "Y↑" : "Z↑"}
         </span>
       </button>
-      <button type="button" onClick={onToggleCenterAxes} className={`${RIB} ${showCenterAxes ? RIB_ON : RIB_OFF}`}>
-        <Crosshair size={13} /> Ejes
-      </button>
+    </>
+  );
+}
+
+/** Apariencia — estilos visuales y ayudas gráficas sin mover la cámara. */
+function VisualizationRibbon({
+  xrayMode, onToggleXray, section, onToggleSection,
+  showCenterAxes, onToggleCenterAxes, isSolid, onToggleSolid,
+}: Pick<BottomToolbarProps,
+  "xrayMode"|"onToggleXray"|"section"|"onToggleSection"|
+  "showCenterAxes"|"onToggleCenterAxes"|"isSolid"|"onToggleSolid"
+>) {
+  return (
+    <>
       <button type="button" onClick={onToggleSolid} className={`${RIB} ${isSolid ? RIB_ON : RIB_OFF}`}>
         <Box size={13} /> Vista maciza
       </button>
-      <button type="button" onClick={onToggleSidebar} className={`${RIB} ${hideSidebar ? RIB_ON : RIB_OFF}`}>
-        <Maximize size={13} /> Sin lateral
+      <button type="button" onClick={onToggleXray} className={`${RIB} ${xrayMode ? RIB_ON : RIB_OFF}`}>
+        <SquareDashedMousePointer size={13} /> Rayos X
+      </button>
+      <button type="button" onClick={onToggleSection} className={`${RIB} ${section.enabled ? RIB_ON : RIB_OFF}`}>
+        <SquareBottomDashedScissors size={13} /> Plano de corte
+      </button>
+      <VDivider />
+      <button type="button" onClick={onToggleCenterAxes} className={`${RIB} ${showCenterAxes ? RIB_ON : RIB_OFF}`}>
+        <Move3D size={13} /> Ejes
       </button>
     </>
   );
@@ -253,11 +271,12 @@ function ToolsRibbon({
   measureCount, onClearMeasures,
   cutShapeKind, onCutShapeChange,
   cutCount, edgeSnap, onToggleEdgeSnap,
+  angleMeasureMode, onSetAngleMeasureMode,
 }: Pick<BottomToolbarProps,
   "activeTool"|"onSelectTool"|"markLineMode"|"onMarkLineModeChange"|
   "measureShapeKind"|"onMeasureShapeChange"|"measureLabelScale"|"onMeasureScaleChange"|
   "measureCount"|"onClearMeasures"|"cutShapeKind"|"onCutShapeChange"|
-  "cutCount"|"edgeSnap"|"onToggleEdgeSnap"
+  "cutCount"|"edgeSnap"|"onToggleEdgeSnap"|"angleMeasureMode"|"onSetAngleMeasureMode"
 >) {
   const t = (tool: typeof activeTool) =>
     activeTool === tool
@@ -286,10 +305,28 @@ function ToolsRibbon({
         <PenLine size={13} /> Marcas rojas <kbd className="kbd kbd-xs">R</kbd>
       </button>
       <button type="button" onClick={() => onSelectTool("angle")} className={t("angle")}>
-        <Tangent size={13} /> Transportador <kbd className="kbd kbd-xs">T</kbd>
+        <Tangent size={13} />
+        {activeTool === "angle" && angleMeasureMode === "panels" ? "Transportador (2P)" : "Transportador"}
+        <kbd className="kbd kbd-xs">T</kbd>
       </button>
 
       {/* ── Active tool sub-modes ── */}
+      {activeTool === "angle" && (
+        <>
+          <VDivider light />
+          <span className="text-[10px] font-semibold text-primary/60 uppercase tracking-wide self-center">Modo</span>
+          <button type="button" onClick={() => onSetAngleMeasureMode("line")}
+            className={`${RIB} ${angleMeasureMode === "line" ? RIB_ON : RIB_OFF}`}
+          >
+            <Tangent size={13} /> Línea
+          </button>
+          <button type="button" onClick={() => onSetAngleMeasureMode("panels")}
+            className={`${RIB} ${angleMeasureMode === "panels" ? RIB_ON : RIB_OFF}`}
+          >
+            <Layers size={13} /> Entre componentes
+          </button>
+        </>
+      )}
       {activeTool === "markLine" && (
         <>
           <VDivider light />
@@ -452,6 +489,7 @@ export function ActiveToolBadge({
   markLineMode, onMarkLineModeChange,
   cutCount, measureCount,
   hideToolbar,
+  angleMeasureMode, onSetAngleMeasureMode,
 }: {
   activeTool: BottomToolbarProps["activeTool"];
   cutShapeKind: ActiveCutShapeKind;
@@ -463,6 +501,8 @@ export function ActiveToolBadge({
   cutCount: number;
   measureCount: number;
   hideToolbar: boolean;
+  angleMeasureMode?: "off" | "line" | "panels";
+  onSetAngleMeasureMode?: (m: "line" | "panels") => void;
 }) {
   // Hide the badge if no tool is active
   if (activeTool === "cursor") return null;
@@ -500,17 +540,23 @@ export function ActiveToolBadge({
     activeTool === "measure" ? [
       { key: "line" as MeasureShapeKind,        ShapeIcon: Minus,               label: "Distancia"  },
       { key: "rect" as MeasureShapeKind,        ShapeIcon: RectangleHorizontal, label: "Área"       },
+    ] :
+    activeTool === "angle" ? [
+      { key: "line"   as "line"|"panels",       ShapeIcon: Tangent,             label: "Línea"      },
+      { key: "panels" as "line"|"panels",       ShapeIcon: Layers,              label: "Componentes"},
     ] : ([] as { key: string; ShapeIcon: LucideIcon; label: string }[]);
 
   const currentKey =
     activeTool === "markLine" ? markLineMode :
     activeTool === "cut"      ? cutShapeKind :
-    activeTool === "measure"  ? measureShapeKind : null;
+    activeTool === "measure"  ? measureShapeKind :
+    activeTool === "angle"    ? (angleMeasureMode === "off" ? "line" : angleMeasureMode) : null;
 
   const handleShapeClick = (key: string) => {
     if (activeTool === "markLine") onMarkLineModeChange(key as MarkLineMode);
     else if (activeTool === "cut") onCutShapeChange(key as ActiveCutShapeKind);
     else if (activeTool === "measure") onMeasureShapeChange(key as MeasureShapeKind);
+    else if (activeTool === "angle") onSetAngleMeasureMode?.(key as "line" | "panels");
   };
 
   return (
@@ -521,7 +567,11 @@ export function ActiveToolBadge({
       {/* Tool name pill */}
       <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl shadow-lg backdrop-blur-md text-xs font-semibold self-end ${accentHeader}`}>
         {ToolIcon && <ToolIcon size={13} />}
-        <span>{TOOL_LABEL[activeTool]}</span>
+        <span>
+          {activeTool === "angle" && angleMeasureMode === "panels"
+            ? "Transportador (2P)"
+            : TOOL_LABEL[activeTool]}
+        </span>
         {count > 0 && (
           <span className="ml-0.5 px-1.5 py-0.5 rounded-full bg-black/20 tabular-nums text-[10px] font-bold">{count}</span>
         )}
@@ -567,7 +617,7 @@ export default function BottomToolbar(props: BottomToolbarProps) {
     showCenterAxes, onToggleCenterAxes, isSolid, onToggleSolid,
     hideSidebar, onToggleSidebar, hideToolbar, onToggleToolbar,
     minAreaM2, onMinAreaChange, minAreaOptions, formatMinAreaOption,
-    hasInstructivo, assemblyWindowOpen, onOpenAssembly,
+    angleMeasureMode, onSetAngleMeasureMode,
   } = props;
 
   const [openGroups, setOpenGroups] = useState<Set<GroupId | "config">>(new Set());
@@ -600,27 +650,30 @@ export default function BottomToolbar(props: BottomToolbarProps) {
   const toolLabel =
     activeTool === "cut" ? "Cortes" : activeTool === "measure" ? "Medir" :
     activeTool === "markLine" ? "Marcas" : activeTool === "rib" ? "Nervio" :
-    activeTool === "angle" ? "Transportador" :
-    activeTool === "box" ? "Área" : "Herramientas";
+    activeTool === "angle"
+      ? (angleMeasureMode === "panels" ? "Transportador (2P)" : "Transportador")
+      : activeTool === "box" ? "Área" : "Herramientas";
 
   const renderRibbon = (id: GroupId) => {
     switch (id) {
       case "visibility": return <VisibilityRibbon stats={stats} visibleCategories={visibleCategories} onToggle={onToggleVisibility} hiddenCount={hiddenCount} onShowAllHidden={onShowAllHidden} />;
-      case "views": return (
-        <ViewsRibbon
-          xrayMode={xrayMode} onToggleXray={onToggleXray}
-          section={section} onToggleSection={onToggleSection}
+      case "nav": return (
+        <NavRibbon
           walkMode={walkMode} onToggleWalk={onToggleWalk}
           onFrameCamera={onFrameCamera} selectedGroupIds={selectedGroupIds}
           phase1={phase1} onRotateAxis={onRotateAxis}
           isRecomputing={isRecomputing} isGenerating={isGenerating}
-          showCenterAxes={showCenterAxes} onToggleCenterAxes={onToggleCenterAxes}
-          isSolid={isSolid} onToggleSolid={onToggleSolid}
-          hideSidebar={hideSidebar} onToggleSidebar={onToggleSidebar}
         />
       );
-      case "tools": return <ToolsRibbon activeTool={activeTool} onSelectTool={onSelectTool} markLineMode={markLineMode} onMarkLineModeChange={onMarkLineModeChange} measureShapeKind={measureShapeKind} onMeasureShapeChange={onMeasureShapeChange} measureLabelScale={measureLabelScale} onMeasureScaleChange={onMeasureScaleChange} measureCount={measureCount} onClearMeasures={onClearMeasures} cutShapeKind={cutShapeKind} onCutShapeChange={onCutShapeChange} cutCount={cutCount} edgeSnap={edgeSnap} onToggleEdgeSnap={onToggleEdgeSnap} />;
-      case "instructivo": return null;
+      case "visualizacion": return (
+        <VisualizationRibbon
+          xrayMode={xrayMode} onToggleXray={onToggleXray}
+          section={section} onToggleSection={onToggleSection}
+          showCenterAxes={showCenterAxes} onToggleCenterAxes={onToggleCenterAxes}
+          isSolid={isSolid} onToggleSolid={onToggleSolid}
+        />
+      );
+      case "tools": return <ToolsRibbon activeTool={activeTool} onSelectTool={onSelectTool} markLineMode={markLineMode} onMarkLineModeChange={onMarkLineModeChange} measureShapeKind={measureShapeKind} onMeasureShapeChange={onMeasureShapeChange} measureLabelScale={measureLabelScale} onMeasureScaleChange={onMeasureScaleChange} measureCount={measureCount} onClearMeasures={onClearMeasures} cutShapeKind={cutShapeKind} onCutShapeChange={onCutShapeChange} cutCount={cutCount} edgeSnap={edgeSnap} onToggleEdgeSnap={onToggleEdgeSnap} angleMeasureMode={angleMeasureMode} onSetAngleMeasureMode={onSetAngleMeasureMode} />;
     }
   };
 
@@ -663,13 +716,12 @@ export default function BottomToolbar(props: BottomToolbarProps) {
         >
           {GROUP_DEFS.map((g, i) => {
             if (!visible[g.id]) return null;
-            if (g.id === "instructivo" && !hasInstructivo) return null;
             const Icon = g.icon;
             const isOpen   = openGroups.has(g.id);
             const isActive =
-              (g.id === "views"    && (xrayMode || section.enabled || walkMode || isSolid || showCenterAxes)) ||
-              (g.id === "tools"    && activeTool !== "cursor")                                                ||
-              (g.id === "instructivo" && assemblyWindowOpen);
+              (g.id === "nav"           && walkMode)                                                    ||
+              (g.id === "visualizacion" && (xrayMode || section.enabled || isSolid || showCenterAxes)) ||
+              (g.id === "tools"         && activeTool !== "cursor");
             const badge =
               g.id === "visibility" && hiddenCount > 0 ? hiddenCount : undefined;
 
@@ -677,7 +729,7 @@ export default function BottomToolbar(props: BottomToolbarProps) {
               <button
                 key={g.id}
                 type="button"
-                onClick={() => g.id === "instructivo" ? onOpenAssembly() : toggle(g.id)}
+                onClick={() => toggle(g.id)}
                 className={`${TAB} ${isOpen ? TAB_ON : isActive ? TAB_ACTIVE : TAB_OFF}`}
               >
                 <Icon size={14} />
@@ -689,9 +741,7 @@ export default function BottomToolbar(props: BottomToolbarProps) {
                     {badge}
                   </span>
                 )}
-                {g.id !== "instructivo" && (
-                  <ChevronDown size={11} className={`opacity-40 transition-transform duration-150 ${isOpen ? "rotate-180" : ""}`} />
-                )}
+                <ChevronDown size={11} className={`opacity-40 transition-transform duration-150 ${isOpen ? "rotate-180" : ""}`} />
                 {/* Separator after each visible group */}
                 {i < GROUP_DEFS.length - 1 && <span />}
               </button>
@@ -781,6 +831,8 @@ export default function BottomToolbar(props: BottomToolbarProps) {
         cutCount={cutCount}
         measureCount={measureCount}
         hideToolbar={false}
+        angleMeasureMode={angleMeasureMode}
+        onSetAngleMeasureMode={onSetAngleMeasureMode}
       />
     )}
     </>

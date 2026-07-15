@@ -1,7 +1,8 @@
 "use client";
 
-import { ArrowLeft, ArrowRight, Search } from "lucide-react";
+import { ArrowLeft, ArrowRight, BookOpen, Search } from "lucide-react";
 import { useUIStore } from "@/stores/uiStore";
+import CameraNavigationSelect from "@/components/CameraNavigationSelect";
 
 /**
  * Barra de navegación CONSTANTE del flujo. Atrás (izquierda) y Continuar
@@ -32,13 +33,9 @@ export default function FlowBottomBar() {
         )}
       </div>
 
-      {/* Centro: entrada visible al palette + hint contextual */}
+      {/* Centro: configuración de navegación/teclado + entrada visible al palette */}
       <div className="flex items-center gap-2 min-w-0">
-        {nav.hint && (
-          <span className="hidden md:inline text-[11px] text-warning/80 truncate max-w-[16rem]">
-            {nav.hint}
-          </span>
-        )}
+        <CameraNavigationSelect variant="toolbar-bottom" className="hidden sm:flex" />
         <button
           type="button"
           onClick={openPalette}
@@ -52,8 +49,19 @@ export default function FlowBottomBar() {
         </button>
       </div>
 
-      {/* Derecha: Continuar / Exportar (posición fija) */}
-      <div className="flex-1 flex justify-end min-w-0">
+      {/* Derecha: Instructivo + Continuar (posición fija) */}
+      <div className="flex-1 flex justify-end items-center gap-2 min-w-0">
+        {nav.onInstructivo && (
+          <button
+            type="button"
+            onClick={nav.onInstructivo}
+            className="btn btn-ghost btn-sm rounded-xl gap-1.5 border border-base-300/40"
+            title="Ver instructivo de armado"
+          >
+            <BookOpen size={15} />
+            <span className="hidden sm:inline">Instructivo</span>
+          </button>
+        )}
         {nav.onNext && (
           <button
             type="button"

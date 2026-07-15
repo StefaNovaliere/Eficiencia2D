@@ -1315,6 +1315,39 @@ function MeasureHtmlLabels({
   );
 }
 
+/** SVG arc indicator rendered inside the angle label for panels mode. */
+function AngleArcSvg({ deg }: { deg: number }) {
+  const r = 14;
+  const halfRad = (deg * Math.PI) / 360; // half the angle in radians
+  const sx = -r * Math.sin(halfRad);
+  const sy = -r * Math.cos(halfRad);
+  const ex = r * Math.sin(halfRad);
+  const ey = -r * Math.cos(halfRad);
+  const largeArc = deg > 180 ? 1 : 0;
+  const vb = r + 2;
+  return (
+    <svg
+      width={vb * 2}
+      height={vb + 4}
+      viewBox={`${-vb} ${-vb} ${vb * 2} ${vb + 4}`}
+      style={{ display: "block", margin: "0 auto" }}
+    >
+      {/* Left arm */}
+      <line x1="0" y1="0" x2={sx} y2={sy} stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      {/* Right arm */}
+      <line x1="0" y1="0" x2={ex} y2={ey} stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      {/* Arc */}
+      <path
+        d={`M ${sx.toFixed(2)},${sy.toFixed(2)} A ${r},${r} 0 ${largeArc},1 ${ex.toFixed(2)},${ey.toFixed(2)}`}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 function AngleHtmlLabels({ placements }: { placements: AngleLabelPlacement[] }) {
   if (placements.length === 0) return null;
   return (
@@ -1328,15 +1361,32 @@ function AngleHtmlLabels({ placements }: { placements: AngleLabelPlacement[] }) 
           zIndexRange={[100, 0]}
           style={{ pointerEvents: "none" }}
         >
-          <div
-            className={`px-2 py-0.5 rounded-lg font-mono text-xs font-semibold shadow-md border whitespace-nowrap ${
-              p.isDraft
-                ? "bg-base-100/90 border-amber-400/70 text-amber-600 dark:text-amber-300"
-                : "bg-amber-500/95 border-amber-400 text-white"
-            }`}
-          >
-            {p.label}
-          </div>
+          {p.isInstruction ? (
+            /* Pulsing instruction badge for panels first-click draft */
+            <div
+              className="px-2 py-1 rounded-xl text-[11px] font-semibold shadow-lg border border-amber-400/70 bg-amber-500/20 text-amber-500 whitespace-nowrap backdrop-blur-sm"
+              style={{ animation: "pulse 1.4s cubic-bezier(0.4,0,0.6,1) infinite" }}
+            >
+              <span className="mr-1">●</span>{p.label}
+            </div>
+          ) : p.arcDeg !== undefined ? (
+            /* Panels committed: angle value + SVG arc indicator */
+            <div className="flex flex-col items-center gap-0.5 bg-amber-500/95 border border-amber-400 text-white rounded-xl shadow-lg px-2 pt-1.5 pb-1 select-none">
+              <AngleArcSvg deg={p.arcDeg} />
+              <span className="font-mono text-xs font-semibold leading-none">{p.label}</span>
+            </div>
+          ) : (
+            /* Line mode or regular draft */
+            <div
+              className={`px-2 py-0.5 rounded-lg font-mono text-xs font-semibold shadow-md border whitespace-nowrap ${
+                p.isDraft
+                  ? "bg-base-100/90 border-amber-400/70 text-amber-600 dark:text-amber-300"
+                  : "bg-amber-500/95 border-amber-400 text-white"
+              }`}
+            >
+              {p.label}
+            </div>
+          )}
         </Html>
       ))}
     </>

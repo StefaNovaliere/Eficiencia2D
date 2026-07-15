@@ -2,13 +2,13 @@
 
 /**
  * Angle measurement (protractor) overlay.
- * Uses a 3-click model:
- *   Click 1 → vertex (corner of the angle)
- *   Click 2 → end of arm 1
- *   Click 3 → end of arm 2 → commits the angle
  *
- * While placing, middle-mouse is forwarded to the canvas for orbiting.
+ * mode "line"   → 2 clicks on the SAME panel → shows line angle vs horizontal
+ * mode "panels" → 2 clicks on ANY panels     → shows dihedral angle between panels
+ *
+ * Middle-mouse is forwarded to the canvas for orbiting.
  * Escape cancels the current placement and resets to idle.
+ * Changing `mode` while placing auto-resets the draft.
  */
 
 import { useCallback, useEffect, useRef } from "react";
@@ -22,24 +22,26 @@ import type { ModelViewerHandle } from "@/components/ModelViewer";
 
 interface AngleMeasureOverlayProps {
   active: boolean;
+  mode: "line" | "panels";
   viewerRef: React.RefObject<ModelViewerHandle | null>;
   onDraftChange: (draft: AngleDraftState | null) => void;
   onCommit: (measure: UserAngleMeasure) => void;
 }
 
-type ClickPhase = "idle" | "placingArm1" | "placingArm2";
+type ClickPhase = "idle" | "placingPoint2";
 
 export default function AngleMeasureOverlay({
   active,
+  mode,
   viewerRef,
   onDraftChange,
   onCommit,
 }: AngleMeasureOverlayProps) {
-  const phaseRef = useRef<ClickPhase>("idle");
-  const draftRef = useRef<AngleDraftState | null>(null);
-  const overlayRef = useRef<HTMLDivElement>(null);
-  const rafRef = useRef<number | null>(null);
-  const latestDraftRef = useRef<AngleDraftState | null>(null);
+  const phaseRef        = useRef<ClickPhase>("idle");
+  const draftRef        = useRef<AngleDraftState | null>(null);
+  const overlayRef      = useRef<HTMLDivElement>(null);
+  const rafRef          = useRef<number | null>(null);
+  const latestDraftRef  = useRef<AngleDraftState | null>(null);
 
   const flushDraft = useCallback((draft: AngleDraftState | null) => {
     latestDraftRef.current = draft;
@@ -61,13 +63,22 @@ export default function AngleMeasureOverlay({
     onDraftChange(null);
   }, [onDraftChange]);
 
-  // Reset when tool is deactivated
+  // Reset when tool is deactivated or mode changes while mid-placement
   useEffect(() => {
     if (!active) {
       phaseRef.current = "idle";
       clearDraft();
     }
   }, [active, clearDraft]);
+
+  useEffect(() => {
+    if (phaseRef.current !== "idle") {
+      phaseRef.current = "idle";
+      clearDraft();
+    }
+  // intentionally only on mode change
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
 
   // Escape → cancel current placement
   useEffect(() => {
@@ -115,10 +126,11 @@ export default function AngleMeasureOverlay({
   const handlePointerMove = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
       if (!active || phaseRef.current === "idle") return;
+      const current = latestDraftRef.current;
+      if (!current || current.mode !== "line") return; // cursor tracking only for line mode
 
       const hit = viewerRef.current?.raycastMeasure(e.clientX, e.clientY);
-      const current = latestDraftRef.current;
-      if (!hit || !current || hit.hitGroupId !== current.groupId) return;
+      if (!hit || hit.hitGroupId !== current.groupId) return;
 
       flushDraft({ ...current, cursor: { u: hit.u, v: hit.v } });
     },
@@ -140,62 +152,62 @@ export default function AngleMeasureOverlay({
       const uv = { u: hit.u, v: hit.v };
 
       if (phaseRef.current === "idle") {
-        // 1st click — place vertex
-        phaseRef.current = "placingArm1";
-        const draft: AngleDraftState = { groupId: hit.hitGroupId, vertex: uv, cursor: uv };
+        // ── First click: anchor point 1 ──────────────────────────────────
+        phaseRef.current = "placingPoint2";
+
+        const draft: AngleDraftState =
+          mode === "line"
+            ? { mode: "line", groupId: hit.hitGroupId, point1: uv, cursor: uv }
+            : { mode: "panels", groupId1: hit.hitGroupId, point1: uv };
+
         latestDraftRef.current = draft;
         draftRef.current = draft;
         onDraftChange(draft);
 
-      } else if (phaseRef.current === "placingArm1") {
+      } else {
+        // ── Second click: commit ─────────────────────────────────────────
         const current = draftRef.current;
-        if (!current || hit.hitGroupId !== current.groupId) return;
-        const armLen = Math.hypot(uv.u - current.vertex.u, uv.v - current.vertex.v);
-        if (armLen < MIN_ANGLE_ARM_LENGTH) return;
+        if (!current) return;
 
-        // 2nd click — place arm 1
-        phaseRef.current = "placingArm2";
-        const draft: AngleDraftState = { ...current, arm1: uv, cursor: uv };
-        latestDraftRef.current = draft;
-        draftRef.current = draft;
-        onDraftChange(draft);
+        if (current.mode === "line") {
+          if (hit.hitGroupId !== current.groupId) return;
+          const len = Math.hypot(uv.u - current.point1.u, uv.v - current.point1.v);
+          if (len < MIN_ANGLE_ARM_LENGTH) return;
 
-      } else if (phaseRef.current === "placingArm2") {
-        const current = draftRef.current;
-        if (!current?.arm1 || hit.hitGroupId !== current.groupId) return;
-        const armLen = Math.hypot(uv.u - current.vertex.u, uv.v - current.vertex.v);
-        if (armLen < MIN_ANGLE_ARM_LENGTH) return;
+          onCommit({
+            mode: "line",
+            id: createAngleMeasureId(),
+            groupId: current.groupId,
+            point1: current.point1,
+            point2: uv,
+          });
 
-        // 3rd click — commit
-        onCommit({
-          id: createAngleMeasureId(),
-          groupId: current.groupId,
-          vertex: current.vertex,
-          arm1: current.arm1,
-          arm2: uv,
-        });
+        } else {
+          // panels mode — no group restriction, any distance ok
+          onCommit({
+            mode: "panels",
+            id: createAngleMeasureId(),
+            groupId1: current.groupId1,
+            groupId2: hit.hitGroupId,
+            point1: current.point1,
+            point2: uv,
+          });
+        }
 
-        // Reset for placing the next angle immediately
         phaseRef.current = "idle";
         clearDraft();
       }
     },
-    [active, viewerRef, forwardMiddleMouse, onDraftChange, onCommit, clearDraft],
+    [active, mode, viewerRef, forwardMiddleMouse, onDraftChange, onCommit, clearDraft],
   );
 
   if (!active) return null;
-
-  // Crosshair cursor in all phases; show "+" to indicate click-based interaction
-  const cursorStyle =
-    phaseRef.current === "idle"       ? "crosshair" :
-    phaseRef.current === "placingArm1" ? "crosshair" :
-    "crosshair";
 
   return (
     <div
       ref={overlayRef}
       className="absolute inset-0 z-20"
-      style={{ cursor: cursorStyle }}
+      style={{ cursor: "crosshair" }}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
     />

@@ -588,7 +588,7 @@ export default function ReviewScreen({
     null,
   );
   // Herramienta de medición de ángulos (transportador).
-  const [angleToolMode, setAngleToolMode] = useState(false);
+  const [angleMeasureMode, setAngleMeasureMode] = useState<"off" | "line" | "panels">("off");
   const [angleDraft, setAngleDraft] = useState<AngleDraftState | null>(null);
   const [angleMeasures, setAngleMeasures] = useState<UserAngleMeasure[]>([]);
   // Herramienta de líneas rojas (marcar para grabar).
@@ -769,7 +769,7 @@ export default function ReviewScreen({
         setMeasureDraft(null);
         setMarkLineToolMode(false);
         setMarkLineDraft(null);
-        setAngleToolMode(false);
+        setAngleMeasureMode('off');
         setAngleDraft(null);
         setBoxSelectMode(false);
         setDragRect(null);
@@ -930,7 +930,7 @@ export default function ReviewScreen({
     setMeasureDraft(null);
     setMarkLineToolMode(false);
     setMarkLineDraft(null);
-    setAngleToolMode(false);
+    setAngleMeasureMode('off');
     setAngleDraft(null);
     setBoxSelectMode(false);
     if (tool === "cut") setCutToolMode(true);
@@ -1600,6 +1600,7 @@ export default function ReviewScreen({
       overrides.size > 0
         ? `${overrides.size} clasificación${overrides.size !== 1 ? "es" : ""} modificada${overrides.size !== 1 ? "s" : ""}`
         : undefined,
+    onInstructivo: onRequestAssemblyPreview ? () => setAssemblyWindowOpen(true) : undefined,
   });
 
   // Stats (per effective category).
@@ -1959,7 +1960,7 @@ export default function ReviewScreen({
           setMarkLineToolMode(false);
           setBoxSelectMode(false);
           setRibToolMode(false);
-          setAngleToolMode(false);
+          setAngleMeasureMode('off');
           break;
         case "box":
           setCutToolMode(false);
@@ -1967,14 +1968,14 @@ export default function ReviewScreen({
           setMarkLineToolMode(false);
           setBoxSelectMode((s) => !s);
           setRibToolMode(false);
-          setAngleToolMode(false);
+          setAngleMeasureMode('off');
           break;
         case "cut":
           setMeasureToolMode(false);
           setMarkLineToolMode(false);
           setBoxSelectMode(false);
           setRibToolMode(false);
-          setAngleToolMode(false);
+          setAngleMeasureMode('off');
           setCutToolMode((active) => {
             if (!active) return true;
             setCutShapeKind((shape) => nextCutShape(shape));
@@ -1986,7 +1987,7 @@ export default function ReviewScreen({
           setMarkLineToolMode(false);
           setBoxSelectMode(false);
           setRibToolMode(false);
-          setAngleToolMode(false);
+          setAngleMeasureMode('off');
           setMeasureToolMode((active) => {
             if (!active) return true;
             // Already active → cycle shape: line → rect → line…
@@ -2000,7 +2001,7 @@ export default function ReviewScreen({
           setMeasureToolMode(false);
           setBoxSelectMode(false);
           setRibToolMode(false);
-          setAngleToolMode(false);
+          setAngleMeasureMode('off');
           setMarkLineToolMode((active) => {
             if (!active) return true;
             // Already active → cycle mode: straight → freehand → rect → circle…
@@ -2014,7 +2015,7 @@ export default function ReviewScreen({
           setMeasureToolMode(false);
           setMarkLineToolMode(false);
           setBoxSelectMode(false);
-          setAngleToolMode(false);
+          setAngleMeasureMode('off');
           setRibToolMode((v) => !v);
           break;
         case "angle":
@@ -2023,7 +2024,7 @@ export default function ReviewScreen({
           setMarkLineToolMode(false);
           setBoxSelectMode(false);
           setRibToolMode(false);
-          setAngleToolMode((a) => !a);
+          setAngleMeasureMode((m) => m === "off" ? "line" : m === "line" ? "panels" : "off");
           break;
       }
     },
@@ -2045,7 +2046,7 @@ export default function ReviewScreen({
           ? "markLine"
           : ribToolMode
             ? "rib"
-            : angleToolMode
+            : angleMeasureMode !== "off"
               ? "angle"
               : boxSelectMode
                 ? "box"
@@ -2246,7 +2247,7 @@ export default function ReviewScreen({
         setMarkLineDraft(null);
         setBoxSelectMode(false);
         setRibToolMode(false);
-        setAngleToolMode((a) => !a);
+        setAngleMeasureMode((m) => m === "off" ? "line" : m === "line" ? "panels" : "off");
         return;
       }
 
@@ -3337,7 +3338,8 @@ export default function ReviewScreen({
         />
 
         <AngleMeasureOverlay
-          active={angleToolMode}
+          active={angleMeasureMode !== "off"}
+          mode={angleMeasureMode === "off" ? "line" : angleMeasureMode}
           viewerRef={viewerRef}
           onDraftChange={setAngleDraft}
           onCommit={(m) => setAngleMeasures((prev) => [...prev, m])}
@@ -3624,9 +3626,15 @@ export default function ReviewScreen({
             onMinAreaChange={handleMinAreaChangeWithReset}
             minAreaOptions={MIN_AREA_OPTIONS}
             formatMinAreaOption={formatMinAreaOption}
-            hasInstructivo={!!onRequestAssemblyPreview}
-            assemblyWindowOpen={assemblyWindowOpen}
-            onOpenAssembly={() => setAssemblyWindowOpen(true)}
+            angleMeasureMode={angleMeasureMode}
+            onSetAngleMeasureMode={(m) => {
+              setCutToolMode(false);
+              setMeasureToolMode(false);
+              setMarkLineToolMode(false);
+              setBoxSelectMode(false);
+              setRibToolMode(false);
+              setAngleMeasureMode(m);
+            }}
           />
         )}
 
