@@ -156,10 +156,6 @@ export default function CutPrecisionPanel({
           onCommit={(offsetVerticalM) => patch({ offsetVerticalM })}
         />
       </div>
-
-      <p className="text-[10px] text-base-content/45 leading-tight">
-        Dibujá sobre la pared o ajustá los valores · <kbd className="kbd kbd-xs">Esc</kbd> para salir
-      </p>
     </div>
   );
 }

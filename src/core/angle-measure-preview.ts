@@ -1,6 +1,9 @@
 /**
  * 3D geometry for the angle measurement tool.
- * Produces line segments (two rays + arc) and a floating label placement.
+ *
+ * mode "line"   → line segment + label at midpoint (angle vs horizontal)
+ * mode "panels" → crosshair on each clicked point + label between them
+ *                 (dihedral angle between the two panel normals)
  */
 
 import type { Face3D, Vec3 } from "@/core/types";
@@ -8,7 +11,7 @@ import type { GeometryGroup } from "@/core/group-classifier";
 import { getGroupProjection } from "@/core/cut-preview";
 import type { CutPreviewSegment } from "@/core/cut-preview";
 import {
-  computeAngleDeg,
+  computeLineDeg,
   formatAngleDeg,
   type AngleDraftState,
   type AnglePoint,
@@ -86,70 +89,60 @@ function uvTo3D(p: AnglePoint, ctx: ProjCtx, sign: 1 | -1): Vec3 {
 
 // ─── Segment builders ─────────────────────────────────────────────────────────
 
-function raysAndArcSegments(
-  vertex: AnglePoint,
-  arm1: AnglePoint,
-  arm2: AnglePoint,
+/** Single line segment P1→P2, drawn on both sides of the panel (mode "line"). */
+function lineSegments(
+  point1: AnglePoint,
+  point2: AnglePoint,
   groupId: number,
   ctx: ProjCtx,
 ): CutPreviewSegment[] {
   const segs: CutPreviewSegment[] = [];
-
   for (const sign of [1, -1] as const) {
-    const v3 = uvTo3D(vertex, ctx, sign);
-    const a3 = uvTo3D(arm1, ctx, sign);
-    const b3 = uvTo3D(arm2, ctx, sign);
-
-    // Ray 1: vertex → arm1
-    segs.push({ groupId, normal: ctx.normal, a: v3, b: a3 });
-    // Ray 2: vertex → arm2
-    segs.push({ groupId, normal: ctx.normal, a: v3, b: b3 });
-
-    // Arc at 35 % of the shorter arm length
-    const r1 = Math.hypot(arm1.u - vertex.u, arm1.v - vertex.v);
-    const r2 = Math.hypot(arm2.u - vertex.u, arm2.v - vertex.v);
-    const arcRadius = Math.min(r1, r2) * 0.35;
-
-    if (arcRadius > 0.008) {
-      const angle1 = Math.atan2(arm1.v - vertex.v, arm1.u - vertex.u);
-      const angle2 = Math.atan2(arm2.v - vertex.v, arm2.u - vertex.u);
-
-      // Choose the smaller of the two possible arcs
-      let da = angle2 - angle1;
-      if (da > Math.PI) da -= 2 * Math.PI;
-      if (da < -Math.PI) da += 2 * Math.PI;
-
-      const STEPS = 20;
-      let prev: Vec3 | null = null;
-      for (let i = 0; i <= STEPS; i++) {
-        const t = i / STEPS;
-        const ang = angle1 + da * t;
-        const pu = vertex.u + Math.cos(ang) * arcRadius;
-        const pv = vertex.v + Math.sin(ang) * arcRadius;
-        const p3 = uvTo3D({ u: pu, v: pv }, ctx, sign);
-        if (prev) segs.push({ groupId, normal: ctx.normal, a: prev, b: p3 });
-        prev = p3;
-      }
-    }
+    segs.push({ groupId, normal: ctx.normal, a: uvTo3D(point1, ctx, sign), b: uvTo3D(point2, ctx, sign) });
   }
-
   return segs;
 }
 
-function draftSegments(draft: AngleDraftState, ctx: ProjCtx): CutPreviewSegment[] {
+/** Small + crosshair at a UV point (mode "panels" marker). */
+function crosshairSegments(
+  pt: AnglePoint,
+  groupId: number,
+  ctx: ProjCtx,
+  size = 0.035,
+): CutPreviewSegment[] {
   const segs: CutPreviewSegment[] = [];
-  const end1 = draft.arm1 ?? draft.cursor;
-  if (!end1) return segs;
-
   for (const sign of [1, -1] as const) {
-    const v3 = uvTo3D(draft.vertex, ctx, sign);
-    segs.push({ groupId: draft.groupId, normal: ctx.normal, a: v3, b: uvTo3D(end1, ctx, sign) });
-    if (draft.arm1 && draft.cursor) {
-      segs.push({ groupId: draft.groupId, normal: ctx.normal, a: v3, b: uvTo3D(draft.cursor, ctx, sign) });
-    }
+    segs.push({
+      groupId, normal: ctx.normal,
+      a: uvTo3D({ u: pt.u - size, v: pt.v }, ctx, sign),
+      b: uvTo3D({ u: pt.u + size, v: pt.v }, ctx, sign),
+    });
+    segs.push({
+      groupId, normal: ctx.normal,
+      a: uvTo3D({ u: pt.u, v: pt.v - size }, ctx, sign),
+      b: uvTo3D({ u: pt.u, v: pt.v + size }, ctx, sign),
+    });
   }
-
   return segs;
+}
+
+
+/** Draft preview line for mode "line" (point1 → cursor). */
+function draftLineSegments(draft: Extract<AngleDraftState, { mode: "line" }>, ctx: ProjCtx): CutPreviewSegment[] {
+  const end = draft.cursor;
+  if (!end) return [];
+  return lineSegments(draft.point1, end, draft.groupId, ctx);
+}
+
+// ─── Dihedral angle ───────────────────────────────────────────────────────────
+
+function dihedralDeg(n1: Vec3, n2: Vec3): number {
+  const dot = n1.x * n2.x + n1.y * n2.y + n1.z * n2.z;
+  const l1 = Math.hypot(n1.x, n1.y, n1.z);
+  const l2 = Math.hypot(n2.x, n2.y, n2.z);
+  if (l1 < 1e-9 || l2 < 1e-9) return 0;
+  const cos = Math.max(-1, Math.min(1, dot / (l1 * l2)));
+  return Math.acos(cos) * (180 / Math.PI);
 }
 
 // ─── Label placement ──────────────────────────────────────────────────────────
@@ -160,38 +153,28 @@ export interface AngleLabelPlacement {
   position: Vec3;
   label: string;
   isDraft: boolean;
+  /** Angle in degrees for the SVG arc indicator (panels mode only). */
+  arcDeg?: number;
+  /** Instruction label shown during panels draft (first point placed). */
+  isInstruction?: boolean;
 }
 
-function makeLabelPlacement(
-  vertex: AnglePoint,
-  arm1: AnglePoint,
-  arm2: AnglePoint,
+/** Label for mode "line": sits at midpoint of the line. */
+function makeLineLabelPlacement(
+  point1: AnglePoint,
+  point2: AnglePoint,
   id: string,
   groupId: number,
   ctx: ProjCtx,
   isDraft: boolean,
 ): AngleLabelPlacement {
-  const deg = computeAngleDeg(vertex, arm1, arm2);
-
-  const angle1 = Math.atan2(arm1.v - vertex.v, arm1.u - vertex.u);
-  const angle2 = Math.atan2(arm2.v - vertex.v, arm2.u - vertex.u);
-  let da = angle2 - angle1;
-  if (da > Math.PI) da -= 2 * Math.PI;
-  if (da < -Math.PI) da += 2 * Math.PI;
-  const bisector = angle1 + da / 2;
-
-  const r1 = Math.hypot(arm1.u - vertex.u, arm1.v - vertex.v);
-  const r2 = Math.hypot(arm2.u - vertex.u, arm2.v - vertex.v);
-  const labelDist = Math.min(r1, r2) * 0.5 + 0.1;
-
-  const lu = vertex.u + Math.cos(bisector) * labelDist;
-  const lv = vertex.v + Math.sin(bisector) * labelDist;
-  const pos = panel2DTo3D(lu, lv, ctx.uAxis, ctx.vAxis, ctx.anchor, ctx.originU, ctx.originV);
+  const deg = computeLineDeg(point1, point2);
+  const mu = (point1.u + point2.u) / 2;
+  const mv = (point1.v + point2.v) / 2;
+  const pos = panel2DTo3D(mu, mv, ctx.uAxis, ctx.vAxis, ctx.anchor, ctx.originU, ctx.originV);
   const lift = ctx.bias > 0 ? 0.014 : 0;
-
   return {
-    id,
-    groupId,
+    id, groupId,
     position: {
       x: pos.x + ctx.normal.x * lift,
       y: pos.y + ctx.normal.y * lift,
@@ -199,6 +182,30 @@ function makeLabelPlacement(
     },
     label: formatAngleDeg(deg),
     isDraft,
+  };
+}
+
+/** Label for mode "panels": floats between the two clicked 3D points, with arc indicator. */
+function makePanelLabelPlacement(
+  m: Extract<UserAngleMeasure, { mode: "panels" }>,
+  ctx1: ProjCtx,
+  ctx2: ProjCtx,
+  isDraft: boolean,
+): AngleLabelPlacement {
+  const deg = dihedralDeg(ctx1.normal, ctx2.normal);
+  const p1 = uvTo3D(m.point1, ctx1, 1);
+  const p2 = uvTo3D(m.point2, ctx2, 1);
+  return {
+    id: m.id,
+    groupId: m.groupId1,
+    position: {
+      x: (p1.x + p2.x) / 2,
+      y: (p1.y + p2.y) / 2 + 0.06,
+      z: (p1.z + p2.z) / 2,
+    },
+    label: formatAngleDeg(deg),
+    isDraft,
+    arcDeg: deg,
   };
 }
 
@@ -214,13 +221,33 @@ export function computeAnglePreviewSegments(
   const segs: CutPreviewSegment[] = [];
 
   for (const m of angleMeasures) {
-    const ctx = getCtx(faces, groups, m.groupId, up);
-    if (ctx) segs.push(...raysAndArcSegments(m.vertex, m.arm1, m.arm2, m.groupId, ctx));
+    if (m.mode === "line") {
+      const ctx = getCtx(faces, groups, m.groupId, up);
+      if (ctx) segs.push(...lineSegments(m.point1, m.point2, m.groupId, ctx));
+    } else {
+      const ctx1 = getCtx(faces, groups, m.groupId1, up);
+      const ctx2 = getCtx(faces, groups, m.groupId2, up);
+      // Crosshairs mark the two clicked points
+      if (ctx1) segs.push(...crosshairSegments(m.point1, m.groupId1, ctx1));
+      if (ctx2) segs.push(...crosshairSegments(m.point2, m.groupId2, ctx2));
+      // A short connection line between the two markers (always-visible via HTML label arc)
+      if (ctx1 && ctx2) {
+        const p1 = uvTo3D(m.point1, ctx1, 1);
+        const p2 = uvTo3D(m.point2, ctx2, 1);
+        segs.push({ groupId: m.groupId1, normal: ctx1.normal, a: p1, b: p2 });
+      }
+    }
   }
 
   if (draft) {
-    const ctx = getCtx(faces, groups, draft.groupId, up);
-    if (ctx) segs.push(...draftSegments(draft, ctx));
+    if (draft.mode === "line") {
+      const ctx = getCtx(faces, groups, draft.groupId, up);
+      if (ctx) segs.push(...draftLineSegments(draft, ctx));
+    } else {
+      // panels draft: show crosshair at the first clicked point
+      const ctx1 = getCtx(faces, groups, draft.groupId1, up);
+      if (ctx1) segs.push(...crosshairSegments(draft.point1, draft.groupId1, ctx1));
+    }
   }
 
   return segs;
@@ -236,15 +263,35 @@ export function computeAngleLabelPlacements(
   const out: AngleLabelPlacement[] = [];
 
   for (const m of angleMeasures) {
-    const ctx = getCtx(faces, groups, m.groupId, up);
-    if (ctx) out.push(makeLabelPlacement(m.vertex, m.arm1, m.arm2, m.id, m.groupId, ctx, false));
+    if (m.mode === "line") {
+      const ctx = getCtx(faces, groups, m.groupId, up);
+      if (ctx) out.push(makeLineLabelPlacement(m.point1, m.point2, m.id, m.groupId, ctx, false));
+    } else {
+      const ctx1 = getCtx(faces, groups, m.groupId1, up);
+      const ctx2 = getCtx(faces, groups, m.groupId2, up);
+      if (ctx1 && ctx2) out.push(makePanelLabelPlacement(m, ctx1, ctx2, false));
+    }
   }
 
-  // Show draft label once both arm1 and cursor are known (2nd phase)
-  if (draft?.arm1 && draft.cursor) {
+  // Live label while placing second point in line mode
+  if (draft?.mode === "line" && draft.cursor) {
     const ctx = getCtx(faces, groups, draft.groupId, up);
-    if (ctx) {
-      out.push(makeLabelPlacement(draft.vertex, draft.arm1, draft.cursor, "__angle_draft__", draft.groupId, ctx, true));
+    if (ctx) out.push(makeLineLabelPlacement(draft.point1, draft.cursor, "__angle_draft__", draft.groupId, ctx, true));
+  }
+
+  // Panels draft: show a pulsing instruction badge at the first clicked point
+  if (draft?.mode === "panels") {
+    const ctx1 = getCtx(faces, groups, draft.groupId1, up);
+    if (ctx1) {
+      const p1 = uvTo3D(draft.point1, ctx1, 1);
+      out.push({
+        id: "__panels_draft__",
+        groupId: draft.groupId1,
+        position: { x: p1.x, y: p1.y + 0.08, z: p1.z },
+        label: "Clic en el 2do componente",
+        isDraft: true,
+        isInstruction: true,
+      });
     }
   }
 

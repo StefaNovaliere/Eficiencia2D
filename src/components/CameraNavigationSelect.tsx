@@ -5,7 +5,6 @@ import {
   Check,
   ChevronDown,
   Hand,
-  Info,
   Mouse,
   Move,
   Rotate3d,
@@ -56,8 +55,8 @@ function CommandList({
 }
 
 export interface CameraNavigationSelectProps {
-  /** `settings` = panel de configuración; `toolbar` = barra del visor 3D. */
-  variant?: "settings" | "toolbar";
+  /** `settings` = panel de configuración; `toolbar` = barra del visor 3D; `toolbar-bottom` = barra inferior (abre hacia arriba). */
+  variant?: "settings" | "toolbar" | "toolbar-bottom";
   className?: string;
 }
 
@@ -75,14 +74,15 @@ export default function CameraNavigationSelect({
     [activePreset.commands],
   );
 
+  const isToolbar = variant === "toolbar" || variant === "toolbar-bottom";
   const triggerClass =
-    variant === "toolbar"
+    isToolbar
       ? "btn btn-sm btn-ghost gap-1.5 rounded-lg h-8 min-h-8 px-2.5 font-normal"
       : "btn btn-outline btn-sm rounded-xl border-base-300 gap-2 h-9 min-h-9 font-normal w-full sm:w-auto justify-between";
 
   return (
     <div className={`flex items-center gap-2 ${className}`}>
-      <div className={`dropdown dropdown-end ${open ? "dropdown-open" : ""}`}>
+      <div className={`dropdown dropdown-end ${variant === "toolbar-bottom" ? "dropdown-top" : ""} ${open ? "dropdown-open" : ""}`}>
         <button
           type="button"
           tabIndex={0}
@@ -99,8 +99,8 @@ export default function CameraNavigationSelect({
             }
           }}
         >
-          <Rotate3d size={variant === "toolbar" ? 15 : 16} className="shrink-0 opacity-80" />
-          <span className={variant === "toolbar" ? "hidden md:inline text-sm" : "text-sm"}>
+          <Rotate3d size={isToolbar ? 15 : 16} className="shrink-0 opacity-80" />
+          <span className={isToolbar ? "hidden md:inline text-sm" : "text-sm"}>
             {activePreset.label}
           </span>
           <ChevronDown size={14} className="opacity-60 shrink-0" />
@@ -144,27 +144,6 @@ export default function CameraNavigationSelect({
             );
           })}
         </ul>
-      </div>
-
-      <div className="dropdown dropdown-hover dropdown-end z-[70]">
-        <button
-          type="button"
-          tabIndex={-1}
-          className={
-            variant === "toolbar"
-              ? "btn btn-ghost btn-xs btn-circle h-7 min-h-7 w-7"
-              : "btn btn-ghost btn-sm btn-circle"
-          }
-          aria-label="Ver atajos de navegación"
-        >
-          <Info size={variant === "toolbar" ? 14 : 16} className="opacity-70" />
-        </button>
-        <div tabIndex={0} className="dropdown-content z-[70] menu p-3 shadow-xl bg-base-100/98 border border-base-300/60 backdrop-blur-md rounded-2xl w-64 mt-1.5 pointer-events-none">
-          <p className="text-[11px] font-medium text-base-content/55 mb-2">
-            Atajos — {activePreset.label}
-          </p>
-          <CommandList style={navigationStyle} compact={true} />
-        </div>
       </div>
 
       {variant === "settings" && (

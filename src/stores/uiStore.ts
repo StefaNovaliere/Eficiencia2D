@@ -30,6 +30,8 @@ export interface FlowNav {
   nextBusy?: boolean;
   /** Texto contextual mostrado en la barra (p.ej. "N clasificaciones modificadas"). */
   hint?: string;
+  /** Botón de instructivo de armado (izquierda del Continuar). Solo cuando hay guía disponible. */
+  onInstructivo?: () => void;
 }
 
 const EMPTY_NAV: FlowNav = {};

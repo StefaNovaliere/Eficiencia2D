@@ -1,10 +1,13 @@
 /**
  * Angle measurement (protractor) tool — session-only, not persisted.
  *
- * Interaction model: 3 sequential clicks
- *   1st click → vertex (the corner of the angle)
- *   2nd click → end of arm 1
- *   3rd click → end of arm 2 → commits
+ * Two measurement modes selectable by pressing T repeatedly:
+ *
+ *  "line"   — 2 clicks on the SAME panel.  Shows the angle the drawn line
+ *             makes with the horizontal (U axis).  0° = horizontal, 90° = vertical.
+ *
+ *  "panels" — 2 clicks on ANY panel (can be different components).  Shows the
+ *             dihedral (face-to-face) angle between the two panels.
  */
 
 export interface AnglePoint {
@@ -12,51 +15,67 @@ export interface AnglePoint {
   v: number;
 }
 
-/** Live draft state shown as the user places the three points. */
-export interface AngleDraftState {
-  groupId: number;
-  /** Corner of the angle (1st click). */
-  vertex: AnglePoint;
-  /** End of arm 1 (set after 2nd click). */
-  arm1?: AnglePoint;
-  /** Current cursor position — used for the live preview ray. */
-  cursor?: AnglePoint;
-}
+// ─── Draft states ─────────────────────────────────────────────────────────────
 
-/** A fully committed angle measure. */
-export interface UserAngleMeasure {
-  id: string;
-  groupId: number;
-  vertex: AnglePoint;
-  arm1: AnglePoint;
-  arm2: AnglePoint;
-}
+export type AngleDraftState =
+  | {
+      mode: "line";
+      groupId: number;
+      point1: AnglePoint;
+      /** Live cursor position for the preview line. */
+      cursor?: AnglePoint;
+    }
+  | {
+      mode: "panels";
+      groupId1: number;
+      point1: AnglePoint;
+    };
+
+// ─── Committed measures ───────────────────────────────────────────────────────
+
+export type UserAngleMeasure =
+  | {
+      mode: "line";
+      id: string;
+      groupId: number;
+      point1: AnglePoint;
+      point2: AnglePoint;
+    }
+  | {
+      mode: "panels";
+      id: string;
+      groupId1: number;
+      groupId2: number;
+      point1: AnglePoint;
+      point2: AnglePoint;
+    };
+
+// ─── Utilities ────────────────────────────────────────────────────────────────
 
 export function createAngleMeasureId(): string {
   return `angle-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-/** Compute the angle in degrees between vertex→arm1 and vertex→arm2. */
-export function computeAngleDeg(
-  vertex: AnglePoint,
-  arm1: AnglePoint,
-  arm2: AnglePoint,
-): number {
-  const v1u = arm1.u - vertex.u;
-  const v1v = arm1.v - vertex.v;
-  const v2u = arm2.u - vertex.u;
-  const v2v = arm2.v - vertex.v;
-  const dot = v1u * v2u + v1v * v2v;
-  const len1 = Math.hypot(v1u, v1v);
-  const len2 = Math.hypot(v2u, v2v);
-  if (len1 < 1e-9 || len2 < 1e-9) return 0;
-  const cos = Math.max(-1, Math.min(1, dot / (len1 * len2)));
-  return Math.acos(cos) * (180 / Math.PI);
+/**
+ * Angle in degrees that the line P1→P2 makes with the horizontal (U axis),
+ * normalized to 0°–180°.  Used for mode "line".
+ */
+export function computeLineDeg(point1: AnglePoint, point2: AnglePoint): number {
+  const du = point2.u - point1.u;
+  const dv = point2.v - point1.v;
+  if (Math.hypot(du, dv) < 1e-9) return 0;
+  let deg = Math.atan2(dv, du) * (180 / Math.PI);
+  if (deg < 0) deg += 180;
+  if (deg >= 180) deg -= 180;
+  return deg;
 }
 
 export function formatAngleDeg(deg: number): string {
   return `${deg.toFixed(1).replace(".", ",")}°`;
 }
 
-/** Minimum arm length in UV space (~3 cm) required to confirm an arm. */
+/** Minimum distance (UV metres, ~3 cm) required to confirm a placement. */
 export const MIN_ANGLE_ARM_LENGTH = 0.03;
+
+// Keep legacy export name so existing callers don't break
+export const computeAngleDeg = computeLineDeg;
