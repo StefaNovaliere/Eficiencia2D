@@ -63,6 +63,9 @@ interface ProjectContextType {
   setPdfPageMode: (mode: PdfPageMode) => void;
   minAreaM2: number;
   setMinAreaM2: (area: number) => void;
+  /** Si true, los grupos de la toolbar pueden quedar abiertos a la vez. */
+  pinTools: boolean;
+  setPinTools: (pin: boolean) => void;
   phase1Result: Phase1Result | null;
   setPhase1Result: (res: Phase1Result | null) => void;
   nestingData: NestingPreviewData | null;
@@ -111,6 +114,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const [paper, setPaper] = useState("A4");
   const [pdfPageMode, setPdfPageMode] = useState<PdfPageMode>("one_per_sheet");
   const [minAreaM2, setMinAreaM2] = useState(1.0);
+  const [pinTools, setPinTools] = useState(true);
   const [phase1Result, setPhase1Result] = useState<Phase1Result | null>(null);
   const [nestingData, setNestingData] = useState<NestingPreviewData | null>(null);
   const [savedOverrides, setSavedOverrides] = useState<ClassificationOverride[]>([]);
@@ -212,6 +216,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const applyRestoredState = useCallback((restored: RestoredProjectState) => {
     if (restored.projectFileName != null) setProjectFileName(restored.projectFileName);
     if (restored.minAreaM2 != null) setMinAreaM2(restored.minAreaM2);
+    if (restored.pinTools != null) setPinTools(restored.pinTools);
     if (restored.savedMerges != null) setSavedMerges(restored.savedMerges);
     if (restored.savedSplits != null) setSavedSplits(restored.savedSplits);
     if (restored.savedOverrides != null) setSavedOverrides(restored.savedOverrides);
@@ -237,6 +242,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     setPaper("A4");
     setPdfPageMode("one_per_sheet");
     setMinAreaM2(1.0);
+    setPinTools(true);
     setPhase1Result(null);
     setNestingData(null);
     setSavedOverrides([]);
@@ -267,6 +273,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         paper, setPaper,
         pdfPageMode, setPdfPageMode,
         minAreaM2, setMinAreaM2,
+        pinTools, setPinTools,
         phase1Result, setPhase1Result,
         nestingData, setNestingData,
         sheetConfig, setSheetConfig,

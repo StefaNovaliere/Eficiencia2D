@@ -82,7 +82,7 @@ export default function CameraNavigationSelect({
 
   return (
     <div className={`flex items-center gap-2 ${className}`}>
-      <div className={`dropdown dropdown-end ${variant === "toolbar-bottom" ? "dropdown-top" : ""} ${open ? "dropdown-open" : ""}`}>
+      <div className={`dropdown dropdown-top ${open ? "dropdown-open" : ""}`}>
         <button
           type="button"
           tabIndex={0}

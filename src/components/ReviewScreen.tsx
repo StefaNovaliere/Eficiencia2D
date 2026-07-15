@@ -149,6 +149,8 @@ export interface ReviewScreenProps {
   onAddSplit: (groupId: number, mode: "components" | "panels") => void;
   minAreaM2: number;
   onMinAreaChange: (area: number) => void;
+  pinTools: boolean;
+  onPinToolsChange: (pin: boolean) => void;
   initialOverrides?: ClassificationOverride[];
   initialWallWallDecisions?: WallWallDecisions;
   initialMarks?: number[];
@@ -496,6 +498,8 @@ export default function ReviewScreen({
   onAddSplit,
   minAreaM2,
   onMinAreaChange,
+  pinTools,
+  onPinToolsChange,
   initialOverrides,
   initialWallWallDecisions,
   initialMarks,
@@ -3624,6 +3628,8 @@ export default function ReviewScreen({
             onToggleToolbar={() => setHideToolbar((s) => !s)}
             minAreaM2={minAreaM2}
             onMinAreaChange={handleMinAreaChangeWithReset}
+            pinTools={pinTools}
+            onPinToolsChange={onPinToolsChange}
             minAreaOptions={MIN_AREA_OPTIONS}
             formatMinAreaOption={formatMinAreaOption}
             angleMeasureMode={angleMeasureMode}
