@@ -168,6 +168,27 @@ const VALID_THEMES = new Set<string>(THEMES.map((t) => t.id));
 
 export const BASE_THEME_STORAGE_KEY = "e2dBaseTheme";
 
+/** Overrides de color del modelo (accesibilidad). Persisten por navegador. */
+export const MODEL_WALL_COLOR_KEY = "e2dModelWallColor";
+export const MODEL_FLOOR_COLOR_KEY = "e2dModelFloorColor";
+
+export interface ModelColorOverrides {
+  /** Color de pared elegido por el usuario, o `null` = el del tema. */
+  wall: string | null;
+  /** Color de piso elegido por el usuario, o `null` = el del tema. */
+  floor: string | null;
+}
+
+function readStoredColor(key: string): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const v = localStorage.getItem(key);
+    return v && /^#[0-9a-fA-F]{6}$/.test(v) ? v.toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Tema base de la app (sin Neón): oscuro por defecto. */
 export function getBaseThemeId(): ThemeId {
   if (typeof window === "undefined") return "dark";
@@ -199,6 +220,12 @@ export function getStoredThemeId(): ThemeId {
 interface ThemeContextValue {
   theme: ThemeId;
   setTheme: (theme: ThemeId) => void;
+  /** Colores del modelo elegidos por el usuario (paredes/pisos). */
+  modelColors: ModelColorOverrides;
+  /** Fija (o limpia con `null`) el color de paredes o pisos. */
+  setModelColor: (kind: "wall" | "floor", hex: string | null) => void;
+  /** Vuelve ambos colores al default del tema. */
+  resetModelColors: () => void;
 }
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
@@ -219,8 +246,24 @@ function applyTheme(theme: ThemeId) {
   root.setProperty("--viewer-highlight", palette.highlight);
 }
 
+/**
+ * Aplica los overrides de pared/piso a las CSS vars que consumen la lista de
+ * capas, los filtros y la barra (mantiene todo en sincronía con el visor 3D).
+ */
+function applyModelColorVars(theme: ThemeId, colors: ModelColorOverrides) {
+  if (typeof document === "undefined") return;
+  const palette = getViewerPalette(theme);
+  const root = document.documentElement.style;
+  root.setProperty("--viewer-wall", colors.wall ?? palette.wall);
+  root.setProperty("--viewer-floor", colors.floor ?? palette.floor);
+}
+
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setThemeState] = useState<ThemeId>("dark");
+  const [modelColors, setModelColors] = useState<ModelColorOverrides>({
+    wall: null,
+    floor: null,
+  });
 
   useEffect(() => {
     try {
@@ -237,6 +280,39 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     const initial = resolveInitialTheme();
     setThemeState(initial);
     applyTheme(initial);
+    setModelColors({
+      wall: readStoredColor(MODEL_WALL_COLOR_KEY),
+      floor: readStoredColor(MODEL_FLOOR_COLOR_KEY),
+    });
+  }, []);
+
+  // Mantiene las CSS vars del modelo alineadas con el override (o el tema).
+  useEffect(() => {
+    applyModelColorVars(theme, modelColors);
+  }, [theme, modelColors]);
+
+  const setModelColor = useCallback(
+    (kind: "wall" | "floor", hex: string | null) => {
+      setModelColors((prev) => ({ ...prev, [kind]: hex }));
+      try {
+        const key = kind === "wall" ? MODEL_WALL_COLOR_KEY : MODEL_FLOOR_COLOR_KEY;
+        if (hex) localStorage.setItem(key, hex);
+        else localStorage.removeItem(key);
+      } catch {
+        /* ignore */
+      }
+    },
+    [],
+  );
+
+  const resetModelColors = useCallback(() => {
+    setModelColors({ wall: null, floor: null });
+    try {
+      localStorage.removeItem(MODEL_WALL_COLOR_KEY);
+      localStorage.removeItem(MODEL_FLOOR_COLOR_KEY);
+    } catch {
+      /* ignore */
+    }
   }, []);
 
   const setTheme = useCallback((next: ThemeId) => {
@@ -253,7 +329,9 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <ThemeContext.Provider value={{ theme, setTheme }}>
+    <ThemeContext.Provider
+      value={{ theme, setTheme, modelColors, setModelColor, resetModelColors }}
+    >
       {children}
     </ThemeContext.Provider>
   );
@@ -268,8 +346,16 @@ export function useTheme() {
 }
 
 export function useViewerPalette(): ViewerPalette {
-  const { theme } = useTheme();
-  return useMemo(() => getViewerPalette(theme), [theme]);
+  const { theme, modelColors } = useTheme();
+  return useMemo(() => {
+    const base = getViewerPalette(theme);
+    if (!modelColors.wall && !modelColors.floor) return base;
+    return {
+      ...base,
+      wall: modelColors.wall ?? base.wall,
+      floor: modelColors.floor ?? base.floor,
+    };
+  }, [theme, modelColors]);
 }
 
 function hexToRgba(hex: string, alpha: number): string {
