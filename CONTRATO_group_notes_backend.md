@@ -59,6 +59,7 @@ Agregar al documento de estado del proyecto:
 | `id` | string | sí | Id único generado por el front (o el back si crea notas). |
 | `group_id` | int | sí | Id de grupo de topología (padre, ≥ 0). |
 | `cut_id` | string | no | Si está, la nota pertenece a ese corte (`user_cuts[].id`), no al componente. |
+| `component_id` | int | no | Id del componente de display (puede ser negativo si es pieza derivada). Sin esto y sin `cut_id`, la nota es del `group_id` padre. |
 | `text` | string | sí | Contenido (1–2000 chars recomendado). Trim; no vacío. |
 | `created_at` | string ISO8601 | no | Si falta, el back puede setearlo al guardar. |
 | `updated_at` | string ISO8601 | no | Actualizar en cada edición. |

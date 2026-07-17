@@ -96,6 +96,7 @@ import GroupNotesPanel from "@/components/GroupNotesPanel";
 import {
   buildDisplayGroupsFromCuts,
   cutGroupOwnerId,
+  userCutForDerivedExtract,
 } from "@/core/cut-derived-groups";
 import type {
   MeasureDragState,
@@ -1023,14 +1024,19 @@ export default function ReviewScreen({
   );
 
   const handleSelectGroup = useCallback((id: number) => {
-    setSelectedCutId(null);
+    if (id === -1) {
+      setSelectedCutId(null);
+    } else {
+      const extractCut = userCutForDerivedExtract(id, userCuts);
+      setSelectedCutId(extractCut?.id ?? null);
+    }
     setSelectedGroupIds((prev) => {
       if (id === -1) return new Set();
       if (prev.size === 1 && prev.has(id)) return new Set();
       return new Set([id]);
     });
     setSelectedJointIndex(null);
-  }, []);
+  }, [userCuts]);
 
   const handleToggleGroup = useCallback((id: number) => {
     setSelectedGroupIds((prev) => {
@@ -1116,45 +1122,62 @@ export default function ReviewScreen({
     return userCuts.filter((c) => c.groupId === ownerId);
   }, [selectedGroup, userCuts]);
 
-  const selectedNoteOwnerId = useMemo(
-    () => (selectedGroup ? cutGroupOwnerId(selectedGroup.id) : null),
+  /** Componente de display seleccionado (no el padre de topología). */
+  const selectedNoteComponentId = useMemo(
+    () => (selectedGroup ? selectedGroup.id : null),
     [selectedGroup],
   );
 
-  /** Corte activo solo si pertenece al componente seleccionado. */
+  /**
+   * Corte activo: selección explícita en la lista de cortes, o pieza
+   * extraída seleccionada en el visor/lista de componentes.
+   */
   const activeNoteCutId = useMemo(() => {
-    if (!selectedCutId || selectedNoteOwnerId == null) return null;
+    if (selectedGroup) {
+      const fromPiece = userCutForDerivedExtract(selectedGroup.id, userCuts);
+      if (fromPiece) return fromPiece.id;
+    }
+    if (!selectedCutId || !selectedGroup) return null;
+    const ownerId = cutGroupOwnerId(selectedGroup.id);
     const cut = userCuts.find((c) => c.id === selectedCutId);
-    if (!cut || cut.groupId !== selectedNoteOwnerId) return null;
+    if (!cut || cut.groupId !== ownerId) return null;
     return selectedCutId;
-  }, [selectedCutId, selectedNoteOwnerId, userCuts]);
+  }, [selectedCutId, selectedGroup, userCuts]);
 
   const noteCounts = useMemo(() => noteCountByGroupId(groupNotes), [groupNotes]);
   const cutNoteCounts = useMemo(() => noteCountByCutId(groupNotes), [groupNotes]);
 
   const noteMarkers = useMemo<GroupNoteMarker[]>(() => {
     if (noteCounts.size === 0) return [];
-    const byId = new Map(phase1.groups.map((g) => [g.id, g]));
+    const byId = new Map(displayGroups.map((g) => [g.id, g]));
     const out: GroupNoteMarker[] = [];
-    for (const [gid, count] of noteCounts) {
-      if (count <= 0 || hiddenGroupIds.has(gid)) continue;
-      const g = byId.get(gid);
+    for (const [cid, count] of noteCounts) {
+      if (count <= 0) continue;
+      const g = byId.get(cid);
       if (!g) continue;
-      const cat = overrides.get(gid) ?? g.category;
+      if (hiddenGroupIds.has(cid) || hiddenGroupIds.has(cutGroupOwnerId(cid))) continue;
+      const cat = overrides.get(cutGroupOwnerId(cid)) ?? g.category;
       if (!visibleCategories.has(cat)) continue;
-      out.push({ groupId: gid, anchor: g.centroid, noteCount: count });
+      out.push({ groupId: cid, anchor: g.centroid, noteCount: count });
     }
     return out;
-  }, [noteCounts, phase1.groups, hiddenGroupIds, overrides, visibleCategories]);
+  }, [noteCounts, displayGroups, hiddenGroupIds, overrides, visibleCategories]);
 
-  const groupLabelsForNotes = useMemo(() => {
+  const componentLabelsForNotes = useMemo(() => {
     const map = new Map<number, string>();
+    for (const g of displayGroups) {
+      const ownerId = cutGroupOwnerId(g.id);
+      const pid = phase1.panelIdByGroup?.[ownerId];
+      map.set(g.id, pid ? `${pid} · ${g.label}` : g.label);
+    }
+    // Padres de topología (por si hay notas legacy / de corte).
     for (const g of phase1.groups) {
+      if (map.has(g.id)) continue;
       const pid = phase1.panelIdByGroup?.[g.id];
       map.set(g.id, pid ? `${pid} · ${g.label}` : g.label);
     }
     return map;
-  }, [phase1.groups, phase1.panelIdByGroup]);
+  }, [displayGroups, phase1.groups, phase1.panelIdByGroup]);
 
   const cutLabelsForNotes = useMemo(() => {
     const map = new Map<string, string>();
@@ -2444,10 +2467,10 @@ export default function ReviewScreen({
             <div className="px-4 py-3 border-b border-base-300/30 bg-base-100/60">
               <GroupNotesPanel
                 notes={groupNotes}
-                selectedGroupId={selectedNoteOwnerId}
-                selectedGroupLabel={
-                  selectedNoteOwnerId != null
-                    ? groupLabelsForNotes.get(selectedNoteOwnerId) ??
+                selectedComponentId={selectedNoteComponentId}
+                selectedComponentLabel={
+                  selectedNoteComponentId != null
+                    ? componentLabelsForNotes.get(selectedNoteComponentId) ??
                       selectedGroup?.label
                     : undefined
                 }
@@ -2457,11 +2480,11 @@ export default function ReviewScreen({
                     ? cutLabelsForNotes.get(activeNoteCutId)
                     : undefined
                 }
-                groupLabels={groupLabelsForNotes}
+                componentLabels={componentLabelsForNotes}
                 cutLabels={cutLabelsForNotes}
                 onChange={setGroupNotes}
-                onSelectGroup={(gid) => {
-                  handleSelectGroup(gid);
+                onSelectComponent={(cid) => {
+                  handleSelectGroup(cid);
                   setSidebarTab("seleccion");
                 }}
                 onSelectCut={(gid, cutId) => {
