@@ -26,6 +26,8 @@ export interface GroupListProps {
   visibleCategories: Set<FaceCategory>;
   /** When true, scroll the primary selected row into view (e.g. tab became visible). */
   listActive?: boolean;
+  /** Estado inicial del colapso (el cajón "Explorar componentes" arranca cerrado). */
+  initialCollapsed?: boolean;
   onSelectGroup: (id: number) => void;
   onToggleGroup: (id: number) => void;
   onHideGroup: (id: number) => void;
@@ -44,6 +46,7 @@ export default function GroupList({
   categoryOverrides,
   visibleCategories,
   listActive = true,
+  initialCollapsed = false,
   onSelectGroup,
   onToggleGroup,
   onHideGroup,
@@ -53,7 +56,7 @@ export default function GroupList({
   onOpenContextMenu,
   noteCountByGroupId,
 }: GroupListProps) {
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(initialCollapsed);
   const listRef = useRef<HTMLDivElement>(null);
   const selectedRef = useRef<HTMLDivElement>(null);
 

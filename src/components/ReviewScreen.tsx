@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from "react-resizable-panels";
 import GroupList from "./GroupList";
 import MeasureList from "./MeasureList";
+import InspectorSection from "./InspectorSection";
 import MeasureScaleSelect from "./MeasureScaleSelect";
 import CameraNavigationSelect from "./CameraNavigationSelect";
 import VisibilityFilters from "./VisibilityFilters";
@@ -492,6 +493,27 @@ function applyBulkYieldOthersDecisions(
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
+
+/** Secciones del acordeón del inspector (una abierta a la vez). */
+type InspectorSectionId =
+  | "notas"
+  | "curvado"
+  | "refuerzos"
+  | "uniones"
+  | "cortes"
+  | "similares";
+
+/** Color/etiqueta del header del inspector según la categoría del componente. */
+const SELECTION_DOT: Record<string, string> = {
+  wall: "var(--viewer-wall, #9c9c9c)",
+  floor: "var(--viewer-floor, #cf9567)",
+  discard: "var(--viewer-discard, #8b95a3)",
+};
+const CATEGORY_LABEL_ES: Record<string, string> = {
+  wall: "Pared",
+  floor: "Piso",
+  discard: "Descartado",
+};
 
 export default function ReviewScreen({
   phase1,
@@ -1836,6 +1858,50 @@ export default function ReviewScreen({
     });
   }, [selectedGroupIds.size, hasSelectionTabContent]);
 
+  // --- Inspector (acordeón): una sección abierta a la vez ---
+  const [inspectorSection, setInspectorSection] =
+    useState<InspectorSectionId | null>(null);
+  const toggleInspector = useCallback(
+    (id: InspectorSectionId) =>
+      setInspectorSection((cur) => (cur === id ? null : id)),
+    [],
+  );
+
+  const showCurvadoSection =
+    selectedGroupIds.size === 1 && selectedGroup?.category === "wall";
+  const showUnionesSection =
+    (selectedGroupIds.size === 1 && displayMergeMembers.length >= 2) ||
+    encountersWallId != null ||
+    selectedGroupIds.size >= 2;
+  const showCortesSection =
+    selectedGroupIds.size === 1 && cutsForSelectedGroup.length > 0;
+  const showSimilaresSection =
+    selectedGroupIds.size === 1 &&
+    (sameAreaMatches.length > 0 || sameAreaDiscardMatches.length > 0);
+
+  // Badges del acordeón.
+  const notasBadge =
+    selectedNoteComponentId != null
+      ? noteCounts.get(selectedNoteComponentId)
+      : undefined;
+  const unionesBadge =
+    selectedGroupIds.size >= 2
+      ? selectedGroupIds.size
+      : displayMergeMembers.length >= 2
+        ? displayMergeMembers.length
+        : undefined;
+  const similaresBadge =
+    sameAreaMatches.length + sameAreaDiscardMatches.length || undefined;
+
+  // Auto-abrir la sección más relevante al cambiar la selección (calma por defecto).
+  useEffect(() => {
+    if (selectedGroupIds.size === 0) setInspectorSection(null);
+    else if (showUnionesSection) setInspectorSection("uniones");
+    else setInspectorSection(null);
+    // Sólo al cambiar la selección o sus uniones, no al alternar secciones.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedGroupIds, showUnionesSection]);
+
   const handleBulkYieldOthers = useCallback(
     (useFullFacade: boolean) => {
       if (!facadeRefGroup || facadeReferenceResolved < 0) return;
@@ -2391,81 +2457,62 @@ export default function ReviewScreen({
             </div>
           )}
 
-          {/* Pestañas: lista de componentes vs acciones de la selección */}
-          <div
-            role="tablist"
-            className="tabs tabs-bordered px-2 shrink-0 bg-base-100"
-          >
-            <button
-              type="button"
-              role="tab"
-              className={`tab gap-1.5 text-xs ${sidebarTab === "capas" ? "tab-active" : ""}`}
-              onClick={() => setSidebarTab("capas")}
-            >
-              Componentes
-              <span className="badge badge-xs badge-neutral font-mono">
-                {displayGroups.length}
-              </span>
-              {measures.length > 0 && (
-                <span className="badge badge-xs badge-info font-mono">
-                  {measures.length}
-                </span>
-              )}
-            </button>
-            <button
-              type="button"
-              role="tab"
-              className={`tab gap-1.5 text-xs ${sidebarTab === "seleccion" ? "tab-active" : ""}`}
-              onClick={() => setSidebarTab("seleccion")}
-            >
-              Selección
-              {selectedGroupIds.size > 0 && (
-                <span className="badge badge-xs badge-primary font-mono">
-                  {selectedGroupIds.size}
-                </span>
-              )}
-            </button>
-          </div>
+          {/* Inspector: contexto de la selección (una sección a la vez) */}
+          <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar flex flex-col">
+            {selectedGroupIds.size === 0 && (
+              <div className="flex flex-col items-center justify-center flex-1 text-center px-6 gap-2 text-base-content/50 py-12">
+                <ScanSearch size={26} className="text-base-content/25" />
+                <p className="text-sm">Seleccioná un componente en el modelo 3D</p>
+                <p className="text-xs text-base-content/35">
+                  Sus propiedades y herramientas aparecen acá.
+                </p>
+              </div>
+            )}
 
-          {/* Pestaña: Capas */}
-          <div
-            className={`flex-1 min-h-0 flex flex-col ${sidebarTab === "capas" ? "" : "hidden"}`}
-          >
-            <MeasureList
-              measures={measures}
-              groups={displayGroups}
-              labelOptions={measureLabelOptions}
-              measureScaleDenom={measureLabelScale}
-              onMeasureScaleChange={handleMeasureScaleChange}
-              selectedMeasureId={selectedMeasureId}
-              onSelectMeasure={handleSelectMeasure}
-              onRemoveMeasure={handleRemoveMeasure}
-              onClearMeasures={handleClearMeasures}
-            />
-            <GroupList
-              groups={displayGroups}
-              selectedGroupIds={selectedGroupIds}
-              hiddenGroupIds={hiddenGroupIds}
-              categoryOverrides={overrides}
-              visibleCategories={visibleCategories}
-              noteCountByGroupId={noteCounts}
-              listActive={sidebarTab === "capas"}
-              onSelectGroup={handleSelectGroup}
-              onToggleGroup={handleToggleGroup}
-              onHideGroup={handleHideGroup}
-              onShowGroup={handleShowGroup}
-              onShowAllHidden={handleShowAllHidden}
-              onChangeCategory={handleChangeCategory}
-              onOpenContextMenu={openViewerContextMenu}
-            />
-          </div>
-
-          {/* Pestaña: Selección */}
-          <div
-            className={`flex-1 min-h-0 overflow-y-auto custom-scrollbar ${sidebarTab === "seleccion" ? "" : "hidden"}`}
-          >
-            <div className="px-4 py-3 border-b border-base-300/30 bg-base-100/60">
-              <GroupNotesPanel
+            {selectedGroupIds.size >= 1 && (
+              <div className="px-4 py-3 border-b border-base-300/30 bg-base-100/70 shrink-0">
+                {selectedGroupIds.size === 1 && selectedGroup ? (
+                  <div className="flex items-center gap-2.5">
+                    <span
+                      className="h-3.5 w-3.5 shrink-0 rounded-full ring-1 ring-base-content/15"
+                      style={{
+                        background:
+                          SELECTION_DOT[getEffectiveCategory(selectedGroup, overrides)],
+                      }}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <h3 className="truncate text-sm font-semibold text-base-content leading-tight">
+                        {selectedGroup.label}
+                      </h3>
+                      <p className="text-[11px] text-base-content/45 mt-0.5">
+                        {CATEGORY_LABEL_ES[getEffectiveCategory(selectedGroup, overrides)]}
+                        {" · "}
+                        {selectedGroup.totalArea.toFixed(1)} m²
+                      </p>
+                    </div>
+                    {panelIdByGroup.get(selectedGroup.id) && (
+                      <span className="font-mono text-[10px] text-base-content/45 bg-base-100 border border-base-300/40 px-1 rounded shrink-0">
+                        {panelIdByGroup.get(selectedGroup.id)}
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-sm font-semibold text-base-content">
+                    {selectedGroupIds.size} componentes seleccionados
+                  </p>
+                )}
+              </div>
+            )}
+            {selectedGroupIds.size >= 1 && (
+              <InspectorSection
+                icon={<StickyNote size={14} />}
+                title="Notas"
+                badge={notasBadge}
+                open={inspectorSection === "notas"}
+                onToggle={() => toggleInspector("notas")}
+              >
+                <div className="px-4 py-3 bg-base-100/60">
+                  <GroupNotesPanel
                 notes={groupNotes}
                 selectedComponentId={selectedNoteComponentId}
                 selectedComponentLabel={
@@ -2494,9 +2541,18 @@ export default function ReviewScreen({
                 }}
                 focusDraftKey={noteFocusKey}
               />
-            </div>
+                </div>
+              </InspectorSection>
+            )}
 
-            {/* Superficies curvas: kerf/auxético — sólo en paredes (no pisos) */}
+            {/* Curvado: kerf/auxético — sólo en paredes */}
+            {showCurvadoSection && (
+              <InspectorSection
+                icon={<Spline size={14} />}
+                title="Curvado"
+                open={inspectorSection === "curvado"}
+                onToggle={() => toggleInspector("curvado")}
+              >
             {selectedGroupIds.size === 1 && (() => {
               const gid = Array.from(selectedGroupIds)[0];
               const dg = displayGroups.find((gr) => gr.id === gid);
@@ -2521,9 +2577,18 @@ export default function ReviewScreen({
                 />
               );
             })()}
+              </InspectorSection>
+            )}
 
             {/* Refuerzos estructurales: nervios (cartelas) y columnas */}
-            <div className="px-4 py-3 border-b border-base-300/30 space-y-2">
+            {selectedGroupIds.size >= 1 && (
+              <InspectorSection
+                icon={<Wrench size={14} />}
+                title="Refuerzos"
+                open={inspectorSection === "refuerzos"}
+                onToggle={() => toggleInspector("refuerzos")}
+              >
+            <div className="px-4 py-3 space-y-2">
               <p className="text-[11px] font-semibold uppercase tracking-widest text-base-content/50">
                 Refuerzos estructurales
               </p>
@@ -2644,8 +2709,18 @@ export default function ReviewScreen({
                 </ul>
               )}
             </div>
+              </InspectorSection>
+            )}
 
-            {/* Grupo fusionado: ver paredes, enfocar y desfusionar solo una */}
+            {/* Uniones: fusión, encuentros pared-pared y fachada */}
+            {showUnionesSection && (
+              <InspectorSection
+                icon={<Link2 size={14} />}
+                title="Uniones"
+                badge={unionesBadge}
+                open={inspectorSection === "uniones"}
+                onToggle={() => toggleInspector("uniones")}
+              >
             {selectedGroupIds.size === 1 && displayMergeMembers.length >= 2 && (
               <div className="px-4 py-3 border-b border-base-300/30 bg-primary/5 space-y-2">
                 <p className="text-[11px] font-semibold uppercase tracking-widest text-primary/60">
@@ -3143,18 +3218,6 @@ export default function ReviewScreen({
                 );
               })()}
 
-            {selectedGroupIds.size === 0 && (
-              <div className="flex flex-col items-center justify-center h-full text-center px-6 gap-2 text-base-content/50">
-                <ScanSearch size={26} className="text-base-content/25" />
-                <p className="text-sm">
-                  Seleccioná una capa para ver sus acciones
-                </p>
-                <p className="text-xs text-base-content/35">
-                  Tipo, fusión/división y opciones por tamaño.
-                </p>
-              </div>
-            )}
-
             {/* Lista de capas cuando hay 2 o más seleccionadas */}
             {selectedGroupIds.size >= 2 &&
               (() => {
@@ -3239,9 +3302,20 @@ export default function ReviewScreen({
                 )}
               </div>
             )}
+              </InspectorSection>
+            )}
 
+            {/* Cortes */}
+            {showCortesSection && (
+              <InspectorSection
+                icon={<Scissors size={14} />}
+                title="Cortes"
+                badge={cutsForSelectedGroup.length}
+                open={inspectorSection === "cortes"}
+                onToggle={() => toggleInspector("cortes")}
+              >
             {selectedGroupIds.size === 1 && cutsForSelectedGroup.length > 0 && (
-              <div className="px-4 py-3 border-b border-base-300/30 bg-warning/5">
+              <div className="px-4 py-3 bg-warning/5">
                 <div className="flex items-center justify-between mb-2">
                   <p className="text-[11px] font-semibold uppercase tracking-widest text-warning/70">
                     Cortes · {cutsForSelectedGroup.length}
@@ -3323,9 +3397,20 @@ export default function ReviewScreen({
                 </div>
               </div>
             )}
+              </InspectorSection>
+            )}
 
+            {/* Similares: piezas del mismo tamaño */}
+            {showSimilaresSection && (
+              <InspectorSection
+                icon={<Copy size={14} />}
+                title="Piezas iguales"
+                badge={similaresBadge}
+                open={inspectorSection === "similares"}
+                onToggle={() => toggleInspector("similares")}
+              >
             {selectedGroupIds.size === 1 && sameAreaMatches.length > 0 && (
-              <div className="px-4 py-2 border-b border-base-300/30 bg-base-100/60">
+              <div className="px-4 py-2 bg-base-100/60">
                 <p className="text-[11px] text-base-content/45 mb-2">
                   {sameAreaMatches.length} capa
                   {sameAreaMatches.length !== 1 ? "s" : ""} más con{" "}
@@ -3375,8 +3460,40 @@ export default function ReviewScreen({
                   </div>
                 </div>
               )}
+              </InspectorSection>
+            )}
           </div>
-          {/* /Pestaña: Selección */}
+          {/* /Inspector */}
+
+          {/* Explorar componentes: la lista completa, colapsada por defecto */}
+          <MeasureList
+            measures={measures}
+            groups={displayGroups}
+            labelOptions={measureLabelOptions}
+            measureScaleDenom={measureLabelScale}
+            onMeasureScaleChange={handleMeasureScaleChange}
+            selectedMeasureId={selectedMeasureId}
+            onSelectMeasure={handleSelectMeasure}
+            onRemoveMeasure={handleRemoveMeasure}
+            onClearMeasures={handleClearMeasures}
+          />
+          <GroupList
+            groups={displayGroups}
+            selectedGroupIds={selectedGroupIds}
+            hiddenGroupIds={hiddenGroupIds}
+            categoryOverrides={overrides}
+            visibleCategories={visibleCategories}
+            noteCountByGroupId={noteCounts}
+            listActive
+            initialCollapsed
+            onSelectGroup={handleSelectGroup}
+            onToggleGroup={handleToggleGroup}
+            onHideGroup={handleHideGroup}
+            onShowGroup={handleShowGroup}
+            onShowAllHidden={handleShowAllHidden}
+            onChangeCategory={handleChangeCategory}
+            onOpenContextMenu={openViewerContextMenu}
+          />
 
               </aside>
             </Panel>
