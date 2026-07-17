@@ -12,11 +12,23 @@ function renderWheel() {
 }
 
 describe("ModelColorWheel", () => {
-  it("monta con las dos manijas y el disco interactivo", () => {
+  it("monta con las tres manijas (pared/piso/fondo) y el disco interactivo", () => {
     renderWheel();
     expect(screen.getByRole("application")).toBeInTheDocument();
     expect(screen.getByText("Pared")).toBeInTheDocument();
     expect(screen.getByText("Piso")).toBeInTheDocument();
+    expect(screen.getByText("Fondo")).toBeInTheDocument();
+    cleanup();
+  });
+
+  it("el canal Fondo edita el color de fondo del visor", () => {
+    renderWheel();
+    fireEvent.click(screen.getByText("Fondo"));
+    const bgHex = screen.getByLabelText("Código hex de fondo") as HTMLInputElement;
+    fireEvent.change(bgHex, { target: { value: "0a0a0a" } });
+    expect(
+      (screen.getByLabelText("Código hex de fondo") as HTMLInputElement).value,
+    ).toBe("0a0a0a");
     cleanup();
   });
 
