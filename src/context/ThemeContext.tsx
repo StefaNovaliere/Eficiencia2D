@@ -4,6 +4,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useLayoutEffect,
   useMemo,
   useState,
@@ -30,6 +31,39 @@ export {
 const VALID_THEMES = new Set<string>(THEMES.map((t) => t.id));
 
 export const BASE_THEME_STORAGE_KEY = "e2dBaseTheme";
+
+/** Overrides de color del modelo (accesibilidad). Persisten por navegador. */
+export const MODEL_WALL_COLOR_KEY = "e2dModelWallColor";
+export const MODEL_FLOOR_COLOR_KEY = "e2dModelFloorColor";
+export const MODEL_BG_COLOR_KEY = "e2dModelBgColor";
+
+/** Canal de color personalizable por el usuario. */
+export type ModelColorChannel = "wall" | "floor" | "background";
+
+export interface ModelColorOverrides {
+  /** Color de pared elegido por el usuario, o `null` = el del tema. */
+  wall: string | null;
+  /** Color de piso elegido por el usuario, o `null` = el del tema. */
+  floor: string | null;
+  /** Color de fondo del visor 3D elegido por el usuario, o `null` = el del tema. */
+  background: string | null;
+}
+
+const MODEL_COLOR_KEYS: Record<ModelColorChannel, string> = {
+  wall: MODEL_WALL_COLOR_KEY,
+  floor: MODEL_FLOOR_COLOR_KEY,
+  background: MODEL_BG_COLOR_KEY,
+};
+
+function readStoredColor(key: string): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const v = localStorage.getItem(key);
+    return v && /^#[0-9a-fA-F]{6}$/.test(v) ? v.toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
 
 export function getBaseThemeId(): ThemeId {
   if (typeof window === "undefined") return "dark";
@@ -61,10 +95,17 @@ export function getStoredThemeId(): ThemeId {
 interface ThemeContextValue {
   theme: ThemeId;
   setTheme: (theme: ThemeId) => void;
+  /** Colores del modelo elegidos por el usuario (paredes/pisos/fondo). */
+  modelColors: ModelColorOverrides;
+  /** Fija (o limpia con `null`) el color de un canal (pared/piso/fondo). */
+  setModelColor: (kind: ModelColorChannel, hex: string | null) => void;
+  /** Vuelve todos los colores al default del tema. */
+  resetModelColors: () => void;
 }
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
+/** Aplica data-theme + CSS vars base del tema (`viewer-palettes.ts`). */
 export function applyViewerTheme(theme: ThemeId) {
   if (typeof document === "undefined") return;
   document.documentElement.setAttribute("data-theme", theme);
@@ -78,14 +119,94 @@ export function applyViewerTheme(theme: ThemeId) {
   root.setProperty("--viewer-highlight", palette.highlight);
 }
 
+/**
+ * Aplica los overrides de pared/piso/fondo a las CSS vars (lista de capas,
+ * filtros, barra) para mantener sincronía con el visor 3D.
+ */
+function applyModelColorVars(theme: ThemeId, colors: ModelColorOverrides) {
+  if (typeof document === "undefined") return;
+  const palette = getViewerPalette(theme);
+  const root = document.documentElement.style;
+  root.setProperty("--viewer-wall", colors.wall ?? palette.wall);
+  root.setProperty("--viewer-floor", colors.floor ?? palette.floor);
+  root.setProperty("--viewer-bg", colors.background ?? palette.background);
+}
+
+/** Paleta efectiva = tema + overrides del usuario. */
+export function resolveViewerPalette(
+  theme: ThemeId,
+  modelColors: ModelColorOverrides,
+): ViewerPalette {
+  const base = getViewerPalette(theme);
+  if (!modelColors.wall && !modelColors.floor && !modelColors.background) {
+    return base;
+  }
+  return {
+    ...base,
+    wall: modelColors.wall ?? base.wall,
+    floor: modelColors.floor ?? base.floor,
+    background: modelColors.background ?? base.background,
+  };
+}
+
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setThemeState] = useState<ThemeId>(() =>
     typeof window !== "undefined" ? getStoredThemeId() : "dark",
   );
+  const [modelColors, setModelColors] = useState<ModelColorOverrides>({
+    wall: null,
+    floor: null,
+    background: null,
+  });
+
+  useEffect(() => {
+    try {
+      const base = localStorage.getItem(BASE_THEME_STORAGE_KEY);
+      const saved = localStorage.getItem("theme");
+      if (!base && saved === "light") {
+        localStorage.setItem("theme", "dark");
+        localStorage.setItem(BASE_THEME_STORAGE_KEY, "dark");
+      }
+    } catch {
+      /* ignore */
+    }
+
+    setModelColors({
+      wall: readStoredColor(MODEL_WALL_COLOR_KEY),
+      floor: readStoredColor(MODEL_FLOOR_COLOR_KEY),
+      background: readStoredColor(MODEL_BG_COLOR_KEY),
+    });
+  }, []);
 
   useLayoutEffect(() => {
     applyViewerTheme(theme);
-  }, [theme]);
+    applyModelColorVars(theme, modelColors);
+  }, [theme, modelColors]);
+
+  const setModelColor = useCallback(
+    (kind: ModelColorChannel, hex: string | null) => {
+      setModelColors((prev) => ({ ...prev, [kind]: hex }));
+      try {
+        const key = MODEL_COLOR_KEYS[kind];
+        if (hex) localStorage.setItem(key, hex);
+        else localStorage.removeItem(key);
+      } catch {
+        /* ignore */
+      }
+    },
+    [],
+  );
+
+  const resetModelColors = useCallback(() => {
+    setModelColors({ wall: null, floor: null, background: null });
+    try {
+      for (const key of Object.values(MODEL_COLOR_KEYS)) {
+        localStorage.removeItem(key);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   const setTheme = useCallback((next: ThemeId) => {
     setThemeState(next);
@@ -100,7 +221,10 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const value = useMemo(() => ({ theme, setTheme }), [theme, setTheme]);
+  const value = useMemo(
+    () => ({ theme, setTheme, modelColors, setModelColor, resetModelColors }),
+    [theme, setTheme, modelColors, setModelColor, resetModelColors],
+  );
 
   return (
     <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>
@@ -115,7 +239,11 @@ export function useTheme() {
   return ctx;
 }
 
+/** Paleta del visor = colores del tema + overrides del usuario (rueda). */
 export function useViewerPalette(): ViewerPalette {
-  const { theme } = useTheme();
-  return getViewerPalette(theme);
+  const { theme, modelColors } = useTheme();
+  return useMemo(
+    () => resolveViewerPalette(theme, modelColors),
+    [theme, modelColors],
+  );
 }
