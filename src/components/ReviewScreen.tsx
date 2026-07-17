@@ -51,6 +51,7 @@ import {
   Magnet,
   Ruler,
   BookOpen,
+  StickyNote,
 } from "lucide-react";
 import { useReviewHistory } from "@/hooks/useReviewHistory";
 import type { ModelViewerHandle, CameraCommand, SectionState } from "@/components/ModelViewer";
@@ -85,7 +86,12 @@ import type {
 } from "@/core/user-cuts";
 import { cutDimensionsLabel } from "@/core/user-cuts";
 import type { GroupNote } from "@/core/group-notes";
-import { noteCountByGroupId } from "@/core/group-notes";
+import {
+  noteCountByCutId,
+  noteCountByGroupId,
+  removeNotesForCut,
+  removeNotesForCuts,
+} from "@/core/group-notes";
 import GroupNotesPanel from "@/components/GroupNotesPanel";
 import {
   buildDisplayGroupsFromCuts,
@@ -541,6 +547,8 @@ export default function ReviewScreen({
   const [isSolid, setIsSolid] = useState(false);
   const [hideSidebar, setHideSidebar] = useState(false);
   const [hideToolbar, setHideToolbar] = useState(false);
+  /** Señal para enfocar el borrador de notas (atajo N / Command Palette). */
+  const [noteFocusKey, setNoteFocusKey] = useState(0);
   // Which wall-wall joint (by jointIndex) is highlighted with leader labels in
   // the 3D viewer. Null = none selected.
   const [selectedJointIndex, setSelectedJointIndex] = useState<number | null>(
@@ -1015,6 +1023,7 @@ export default function ReviewScreen({
   );
 
   const handleSelectGroup = useCallback((id: number) => {
+    setSelectedCutId(null);
     setSelectedGroupIds((prev) => {
       if (id === -1) return new Set();
       if (prev.size === 1 && prev.has(id)) return new Set();
@@ -1112,7 +1121,16 @@ export default function ReviewScreen({
     [selectedGroup],
   );
 
+  /** Corte activo solo si pertenece al componente seleccionado. */
+  const activeNoteCutId = useMemo(() => {
+    if (!selectedCutId || selectedNoteOwnerId == null) return null;
+    const cut = userCuts.find((c) => c.id === selectedCutId);
+    if (!cut || cut.groupId !== selectedNoteOwnerId) return null;
+    return selectedCutId;
+  }, [selectedCutId, selectedNoteOwnerId, userCuts]);
+
   const noteCounts = useMemo(() => noteCountByGroupId(groupNotes), [groupNotes]);
+  const cutNoteCounts = useMemo(() => noteCountByCutId(groupNotes), [groupNotes]);
 
   const noteMarkers = useMemo<GroupNoteMarker[]>(() => {
     if (noteCounts.size === 0) return [];
@@ -1137,6 +1155,14 @@ export default function ReviewScreen({
     }
     return map;
   }, [phase1.groups, phase1.panelIdByGroup]);
+
+  const cutLabelsForNotes = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const cut of userCuts) {
+      map.set(cut.id, `${cut.kind} · ${cutDimensionsLabel(cut)}`);
+    }
+    return map;
+  }, [userCuts]);
 
   const sameAreaMatches = useMemo(() => {
     if (!selectedGroup) return [];
@@ -1370,6 +1396,14 @@ export default function ReviewScreen({
     setSelectedJointIndex(null);
   }, [selectedMergeIndex, onRemoveMerge, displayMergeMembers]);
 
+  /** Atajo N / Command Palette: abrir panel de notas y enfocar el borrador. */
+  const handleStartNote = useCallback(() => {
+    if (selectedGroupIds.size !== 1) return;
+    setHideSidebar(false);
+    setSidebarTab("seleccion");
+    setNoteFocusKey((k) => k + 1);
+  }, [selectedGroupIds.size]);
+
   // Remove ONLY the currently selected wall from its merge cluster.
   // If the remaining cluster is still 2+ walls, re-add it; otherwise drop it.
   const handleRemoveSelectedFromMerge = useCallback(() => {
@@ -1486,6 +1520,9 @@ export default function ReviewScreen({
       case "split":
         handleDivideMerged();
         break;
+      case "note":
+        handleStartNote();
+        break;
       case "markOpenings":
         setSidebarTab("seleccion");
         for (const id of ids) handleToggleMark(id);
@@ -1536,6 +1573,7 @@ export default function ReviewScreen({
     (cutId: string) => {
       pushHistory();
       setUserCuts((prev) => prev.filter((c) => c.id !== cutId));
+      setGroupNotes((prev) => removeNotesForCut(prev, cutId));
       setSelectedCutId((prev) => (prev === cutId ? null : prev));
     },
     [pushHistory],
@@ -2258,6 +2296,12 @@ export default function ReviewScreen({
         return;
       }
 
+      if ((e.key === "n" || e.key === "N") && selectedGroupIds.size === 1) {
+        e.preventDefault();
+        handleStartNote();
+        return;
+      }
+
       if (e.key === "t" || e.key === "T") {
         e.preventDefault();
         setCutToolMode(false);
@@ -2286,6 +2330,7 @@ export default function ReviewScreen({
     handleMergeSelected,
     canSplitMerged,
     handleDivideMerged,
+    handleStartNote,
     measureToolMode,
     selectedMeasureId,
     handleRemoveMeasure,
@@ -2406,12 +2451,25 @@ export default function ReviewScreen({
                       selectedGroup?.label
                     : undefined
                 }
+                selectedCutId={activeNoteCutId}
+                selectedCutLabel={
+                  activeNoteCutId != null
+                    ? cutLabelsForNotes.get(activeNoteCutId)
+                    : undefined
+                }
                 groupLabels={groupLabelsForNotes}
+                cutLabels={cutLabelsForNotes}
                 onChange={setGroupNotes}
                 onSelectGroup={(gid) => {
                   handleSelectGroup(gid);
                   setSidebarTab("seleccion");
                 }}
+                onSelectCut={(gid, cutId) => {
+                  setSelectedGroupIds(new Set([gid]));
+                  setSelectedCutId(cutId);
+                  setSidebarTab("seleccion");
+                }}
+                focusDraftKey={noteFocusKey}
               />
             </div>
 
@@ -3169,10 +3227,16 @@ export default function ReviewScreen({
                     type="button"
                     className="btn btn-ghost btn-xs gap-1 text-base-content/50 hover:text-warning"
                     onClick={() => {
+                      const ownerId = cutGroupOwnerId(selectedGroup!.id);
+                      const removedIds = userCuts
+                        .filter((c) => c.groupId === ownerId)
+                        .map((c) => c.id);
                       pushHistory();
                       setUserCuts((prev) =>
-                        prev.filter((c) => c.groupId !== selectedGroup!.id),
+                        prev.filter((c) => c.groupId !== ownerId),
                       );
+                      setGroupNotes((prev) => removeNotesForCuts(prev, removedIds));
+                      setSelectedCutId(null);
                     }}
                   >
                     <Trash2 size={11} />
@@ -3180,7 +3244,9 @@ export default function ReviewScreen({
                   </button>
                 </div>
                 <div className="flex flex-col gap-1">
-                  {cutsForSelectedGroup.map((cut) => (
+                  {cutsForSelectedGroup.map((cut) => {
+                    const cutNotes = cutNoteCounts.get(cut.id) ?? 0;
+                    return (
                     <div
                       key={cut.id}
                       role="button"
@@ -3190,11 +3256,17 @@ export default function ReviewScreen({
                           ? "bg-warning/15 border-warning/50 ring-1 ring-warning/30"
                           : "bg-base-100/80 border-warning/20 hover:bg-warning/10"
                       }`}
-                      onClick={() => setSelectedCutId(cut.id)}
+                      onClick={() =>
+                        setSelectedCutId((prev) =>
+                          prev === cut.id ? null : cut.id,
+                        )
+                      }
                       onKeyDown={(e) => {
                         if (e.key === "Enter" || e.key === " ") {
                           e.preventDefault();
-                          setSelectedCutId(cut.id);
+                          setSelectedCutId((prev) =>
+                            prev === cut.id ? null : cut.id,
+                          );
                         }
                       }}
                     >
@@ -3202,6 +3274,15 @@ export default function ReviewScreen({
                       <span className="flex-1 font-mono text-[11px] text-base-content/70">
                         {cut.kind} · {cutDimensionsLabel(cut)}
                       </span>
+                      {cutNotes > 0 && (
+                        <span
+                          className="badge badge-ghost badge-xs gap-0.5 shrink-0"
+                          title={`${cutNotes} nota${cutNotes !== 1 ? "s" : ""} del corte`}
+                        >
+                          <StickyNote size={9} />
+                          {cutNotes}
+                        </span>
+                      )}
                       <button
                         type="button"
                         className="btn btn-ghost btn-xs btn-circle opacity-50 hover:opacity-100 hover:text-error"
@@ -3214,7 +3295,8 @@ export default function ReviewScreen({
                         <X size={10} />
                       </button>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}
