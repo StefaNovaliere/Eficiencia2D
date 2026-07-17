@@ -27,13 +27,25 @@ export const BASE_THEME_STORAGE_KEY = "e2dBaseTheme";
 /** Overrides de color del modelo (accesibilidad). Persisten por navegador. */
 export const MODEL_WALL_COLOR_KEY = "e2dModelWallColor";
 export const MODEL_FLOOR_COLOR_KEY = "e2dModelFloorColor";
+export const MODEL_BG_COLOR_KEY = "e2dModelBgColor";
+
+/** Canal de color personalizable por el usuario. */
+export type ModelColorChannel = "wall" | "floor" | "background";
 
 export interface ModelColorOverrides {
   /** Color de pared elegido por el usuario, o `null` = el del tema. */
   wall: string | null;
   /** Color de piso elegido por el usuario, o `null` = el del tema. */
   floor: string | null;
+  /** Color de fondo del visor 3D elegido por el usuario, o `null` = el del tema. */
+  background: string | null;
 }
+
+const MODEL_COLOR_KEYS: Record<ModelColorChannel, string> = {
+  wall: MODEL_WALL_COLOR_KEY,
+  floor: MODEL_FLOOR_COLOR_KEY,
+  background: MODEL_BG_COLOR_KEY,
+};
 
 function readStoredColor(key: string): string | null {
   if (typeof window === "undefined") return null;
@@ -76,11 +88,11 @@ export function getStoredThemeId(): ThemeId {
 interface ThemeContextValue {
   theme: ThemeId;
   setTheme: (theme: ThemeId) => void;
-  /** Colores del modelo elegidos por el usuario (paredes/pisos). */
+  /** Colores del modelo elegidos por el usuario (paredes/pisos/fondo). */
   modelColors: ModelColorOverrides;
-  /** Fija (o limpia con `null`) el color de paredes o pisos. */
-  setModelColor: (kind: "wall" | "floor", hex: string | null) => void;
-  /** Vuelve ambos colores al default del tema. */
+  /** Fija (o limpia con `null`) el color de un canal (pared/piso/fondo). */
+  setModelColor: (kind: ModelColorChannel, hex: string | null) => void;
+  /** Vuelve todos los colores al default del tema. */
   resetModelColors: () => void;
 }
 
@@ -113,6 +125,7 @@ function applyModelColorVars(theme: ThemeId, colors: ModelColorOverrides) {
   const root = document.documentElement.style;
   root.setProperty("--viewer-wall", colors.wall ?? palette.wall);
   root.setProperty("--viewer-floor", colors.floor ?? palette.floor);
+  root.setProperty("--viewer-bg", colors.background ?? palette.background);
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
@@ -120,6 +133,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [modelColors, setModelColors] = useState<ModelColorOverrides>({
     wall: null,
     floor: null,
+    background: null,
   });
   const palette = getViewerPalette(theme);
   const paletteKey = viewerPaletteKey(palette);
@@ -142,14 +156,15 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     setModelColors({
       wall: readStoredColor(MODEL_WALL_COLOR_KEY),
       floor: readStoredColor(MODEL_FLOOR_COLOR_KEY),
+      background: readStoredColor(MODEL_BG_COLOR_KEY),
     });
   }, []);
 
   const setModelColor = useCallback(
-    (kind: "wall" | "floor", hex: string | null) => {
+    (kind: ModelColorChannel, hex: string | null) => {
       setModelColors((prev) => ({ ...prev, [kind]: hex }));
       try {
-        const key = kind === "wall" ? MODEL_WALL_COLOR_KEY : MODEL_FLOOR_COLOR_KEY;
+        const key = MODEL_COLOR_KEYS[kind];
         if (hex) localStorage.setItem(key, hex);
         else localStorage.removeItem(key);
       } catch {
@@ -160,10 +175,11 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   );
 
   const resetModelColors = useCallback(() => {
-    setModelColors({ wall: null, floor: null });
+    setModelColors({ wall: null, floor: null, background: null });
     try {
-      localStorage.removeItem(MODEL_WALL_COLOR_KEY);
-      localStorage.removeItem(MODEL_FLOOR_COLOR_KEY);
+      for (const key of Object.values(MODEL_COLOR_KEYS)) {
+        localStorage.removeItem(key);
+      }
     } catch {
       /* ignore */
     }
@@ -214,11 +230,14 @@ export function useViewerPalette(): ViewerPalette {
   // modelo), y fusioná los overrides de color del usuario por encima del tema.
   return useMemo(() => {
     const base = getViewerPalette(theme);
-    if (!modelColors.wall && !modelColors.floor) return base;
+    if (!modelColors.wall && !modelColors.floor && !modelColors.background) {
+      return base;
+    }
     return {
       ...base,
       wall: modelColors.wall ?? base.wall,
       floor: modelColors.floor ?? base.floor,
+      background: modelColors.background ?? base.background,
     };
   }, [theme, key, modelColors]);
 }

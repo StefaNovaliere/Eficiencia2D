@@ -11,7 +11,20 @@ import {
   wheelXYToHs,
 } from "@/core/color";
 
-type Channel = "wall" | "floor";
+type Channel = "wall" | "floor" | "background";
+
+const CHANNELS: Channel[] = ["wall", "floor", "background"];
+const LABEL: Record<Channel, string> = {
+  wall: "Pared",
+  floor: "Piso",
+  background: "Fondo",
+};
+/** Etiqueta corta de 2 letras dentro de cada manija (legible a 8px). */
+const GLYPH: Record<Channel, string> = {
+  wall: "Pa",
+  floor: "Pi",
+  background: "Fo",
+};
 
 const WHEEL_PX = 168;
 const HANDLE_PX = 20;
@@ -38,14 +51,22 @@ export default function ModelColorWheel() {
   const colors: Record<Channel, string> = {
     wall: modelColors.wall ?? palette.wall,
     floor: modelColors.floor ?? palette.floor,
+    background: modelColors.background ?? palette.background,
   };
 
   const hsv: Record<Channel, ReturnType<typeof hexToHsv>> = useMemo(
-    () => ({ wall: hexToHsv(colors.wall), floor: hexToHsv(colors.floor) }),
-    [colors.wall, colors.floor],
+    () => ({
+      wall: hexToHsv(colors.wall),
+      floor: hexToHsv(colors.floor),
+      background: hexToHsv(colors.background),
+    }),
+    [colors.wall, colors.floor, colors.background],
   );
 
-  const isCustom = modelColors.wall != null || modelColors.floor != null;
+  const isCustom =
+    modelColors.wall != null ||
+    modelColors.floor != null ||
+    modelColors.background != null;
 
   const handlePos = useCallback((ch: Channel) => {
     const { x, y } = hsvToWheelXY(hsv[ch].h, hsv[ch].s);
@@ -78,7 +99,7 @@ export default function ModelColorWheel() {
       // ¿Se agarró una manija concreta? Si no, se mueve la activa.
       let target: Channel = active;
       let best = GRAB_PX;
-      for (const ch of ["wall", "floor"] as Channel[]) {
+      for (const ch of CHANNELS) {
         const pos = handlePos(ch);
         const d = Math.hypot(px - pos.left, py - pos.top);
         if (d <= best) {
@@ -139,7 +160,7 @@ export default function ModelColorWheel() {
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
       >
-        {(["floor", "wall"] as Channel[]).map((ch) => {
+        {CHANNELS.map((ch) => {
           const pos = handlePos(ch);
           const isActive = ch === active;
           return (
@@ -159,7 +180,7 @@ export default function ModelColorWheel() {
               }}
             >
               <span className="text-[8px] font-bold text-white mix-blend-difference select-none">
-                {ch === "wall" ? "P" : "◱"}
+                {GLYPH[ch]}
               </span>
             </div>
           );
@@ -167,25 +188,25 @@ export default function ModelColorWheel() {
       </div>
 
       {/* Selector de canal (leyenda + qué controla el brillo) */}
-      <div className="flex w-full gap-1.5">
-        {(["wall", "floor"] as Channel[]).map((ch) => {
+      <div className="flex w-full gap-1">
+        {CHANNELS.map((ch) => {
           const isActive = ch === active;
           return (
             <button
               key={ch}
               type="button"
               onClick={() => setActive(ch)}
-              className={`flex flex-1 items-center gap-1.5 rounded-xl border px-2 py-1.5 text-xs transition-colors ${
+              className={`flex flex-1 items-center justify-center gap-1 rounded-xl border px-1.5 py-1.5 text-xs transition-colors ${
                 isActive
                   ? "border-primary/40 bg-primary/10 text-base-content"
                   : "border-base-300/40 text-base-content/60 hover:bg-base-200/60"
               }`}
             >
               <span
-                className="h-3.5 w-3.5 shrink-0 rounded-full ring-1 ring-base-content/15"
+                className="h-3 w-3 shrink-0 rounded-full ring-1 ring-base-content/15"
                 style={{ background: colors[ch] }}
               />
-              <span className="font-medium">{ch === "wall" ? "Pared" : "Piso"}</span>
+              <span className="font-medium">{LABEL[ch]}</span>
             </button>
           );
         })}
@@ -203,7 +224,7 @@ export default function ModelColorWheel() {
           value={Math.round(hsv[active].v * 100)}
           onChange={(e) => setValue(Number(e.target.value) / 100)}
           className="range range-primary range-xs flex-1"
-          aria-label={`Brillo de ${active === "wall" ? "pared" : "piso"}`}
+          aria-label={`Brillo de ${LABEL[active].toLowerCase()}`}
         />
       </div>
 
@@ -218,7 +239,7 @@ export default function ModelColorWheel() {
             spellCheck={false}
             maxLength={6}
             className="w-full bg-transparent font-mono text-xs uppercase outline-none"
-            aria-label={`Código hex de ${active === "wall" ? "pared" : "piso"}`}
+            aria-label={`Código hex de ${LABEL[active].toLowerCase()}`}
           />
         </label>
         <button

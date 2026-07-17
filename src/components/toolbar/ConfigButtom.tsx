@@ -107,7 +107,7 @@ export default function ConfigButtom({
                 Colores del modelo
               </span>
               <span className="block text-[11px] leading-tight text-base-content/40">
-                Elegí un color para paredes y otro para pisos
+                Color de paredes, pisos y fondo del visor
               </span>
             </span>
             <ChevronDown
