@@ -227,11 +227,20 @@ function LivePaletteSync({
   materials: ViewerMaterials;
 }) {
   const { gl } = useThree();
+  const { modelColors } = useTheme();
   const lastKey = useRef("");
   useFrame(() => {
-    // Namespace import = binding vivo: al guardar viewer-palettes.ts, el próximo frame ya tiene los hex nuevos.
-    const p = ViewerPalettes.getViewerPalette(theme);
-    const key = ViewerPalettes.viewerPaletteKey(p);
+    // Binding vivo al módulo + overrides de la rueda de color.
+    const base = ViewerPalettes.getViewerPalette(theme);
+    const p = {
+      ...base,
+      wall: modelColors.wall ?? base.wall,
+      floor: modelColors.floor ?? base.floor,
+      background: modelColors.background ?? base.background,
+    };
+    const key =
+      ViewerPalettes.viewerPaletteKey(p) +
+      `|${modelColors.wall}|${modelColors.floor}|${modelColors.background}`;
     if (key === lastKey.current) return;
     lastKey.current = key;
     paintMaterialsFromPalette(materials, p);
