@@ -1,10 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { StickyNote, Trash2, Plus, Pencil, Check, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { StickyNote, Trash2, Plus, Pencil, Check, X, Scissors } from "lucide-react";
 import {
   createGroupNote,
-  notesForGroup,
+  notesForTarget,
   type GroupNote,
 } from "@/core/group-notes";
 
@@ -13,28 +13,64 @@ interface GroupNotesPanelProps {
   /** Grupo actualmente seleccionado (padre). Si null, solo se muestra el listado global. */
   selectedGroupId: number | null;
   selectedGroupLabel?: string;
+  /**
+   * Corte seleccionado. Si está definido, las notas se crean/listan para ese
+   * corte (no para el componente contenedor).
+   */
+  selectedCutId?: string | null;
+  selectedCutLabel?: string;
   /** Mapa groupId → etiqueta legible. */
   groupLabels: Map<number, string>;
+  /** Mapa cutId → etiqueta legible (p. ej. "rect · 0.80×1.20 m"). */
+  cutLabels?: Map<string, string>;
   onChange: (notes: GroupNote[]) => void;
   onSelectGroup?: (groupId: number) => void;
+  /** Al elegir una nota de corte en el listado global. */
+  onSelectCut?: (groupId: number, cutId: string) => void;
+  /**
+   * Señal para enfocar el campo de borrador (atajo N). Cualquier cambio de
+   * valor dispara el focus.
+   */
+  focusDraftKey?: number;
 }
 
 export default function GroupNotesPanel({
   notes,
   selectedGroupId,
   selectedGroupLabel,
+  selectedCutId = null,
+  selectedCutLabel,
   groupLabels,
+  cutLabels,
   onChange,
   onSelectGroup,
+  onSelectCut,
+  focusDraftKey = 0,
 }: GroupNotesPanelProps) {
   const [draft, setDraft] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
   const [showAll, setShowAll] = useState(true);
+  const draftRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (!focusDraftKey || selectedGroupId == null) return;
+    // Esperar a que el panel sea visible (pestaña / sidebar).
+    const t = window.setTimeout(() => {
+      draftRef.current?.focus();
+      draftRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }, 50);
+    return () => window.clearTimeout(t);
+  }, [focusDraftKey, selectedGroupId, selectedCutId]);
+
+  const isCutContext = Boolean(selectedCutId);
 
   const selectedNotes = useMemo(
-    () => (selectedGroupId != null ? notesForGroup(notes, selectedGroupId) : []),
-    [notes, selectedGroupId],
+    () =>
+      selectedGroupId != null
+        ? notesForTarget(notes, selectedGroupId, selectedCutId)
+        : [],
+    [notes, selectedGroupId, selectedCutId],
   );
 
   const sortedAll = useMemo(
@@ -47,11 +83,22 @@ export default function GroupNotesPanel({
     [notes],
   );
 
+  const contextTitle = isCutContext
+    ? `Notas · Corte · ${selectedCutLabel ?? selectedCutId}`
+    : `Notas · ${selectedGroupLabel ?? (selectedGroupId != null ? `Grupo ${selectedGroupId}` : "")}`;
+
+  const placeholder = isCutContext
+    ? "Ej: marco de ventana, pulir borde…"
+    : "Ej: pintar de amarillo, reforzar esquina…";
+
   function handleAdd() {
     if (selectedGroupId == null) return;
     const text = draft.trim();
     if (!text) return;
-    onChange([...notes, createGroupNote(selectedGroupId, text)]);
+    onChange([
+      ...notes,
+      createGroupNote(selectedGroupId, text, selectedCutId ?? undefined),
+    ]);
     setDraft("");
   }
 
@@ -79,9 +126,23 @@ export default function GroupNotesPanel({
     setEditText("");
   }
 
+  function handleSelectNoteOwner(note: GroupNote) {
+    if (note.cutId) {
+      onSelectCut?.(note.groupId, note.cutId);
+      return;
+    }
+    onSelectGroup?.(note.groupId);
+  }
+
+  function ownerLabel(note: GroupNote): string {
+    const groupLabel = groupLabels.get(note.groupId) ?? `Grupo ${note.groupId}`;
+    if (!note.cutId) return groupLabel;
+    const cutLabel = cutLabels?.get(note.cutId) ?? note.cutId;
+    return `${groupLabel} · corte ${cutLabel}`;
+  }
+
   function renderNoteRow(note: GroupNote, showGroupLabel: boolean) {
     const isEditing = editingId === note.id;
-    const label = groupLabels.get(note.groupId) ?? `Grupo ${note.groupId}`;
 
     return (
       <div
@@ -91,10 +152,11 @@ export default function GroupNotesPanel({
         {showGroupLabel && (
           <button
             type="button"
-            className="text-[10px] font-semibold uppercase tracking-wide text-primary/80 hover:underline text-left"
-            onClick={() => onSelectGroup?.(note.groupId)}
+            className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-primary/80 hover:underline text-left"
+            onClick={() => handleSelectNoteOwner(note)}
           >
-            {label}
+            {note.cutId && <Scissors size={9} className="shrink-0 opacity-70" />}
+            {ownerLabel(note)}
           </button>
         )}
 
@@ -157,16 +219,31 @@ export default function GroupNotesPanel({
 
   return (
     <div className="space-y-3">
-      {/* Notas del componente seleccionado */}
+      {/* Notas del componente o del corte seleccionado */}
       {selectedGroupId != null && (
         <div className="space-y-2">
           <div className="flex items-center gap-2">
-            <StickyNote size={12} className="text-primary shrink-0" />
-            <p className="text-[11px] font-semibold uppercase tracking-widest text-base-content/45">
-              Notas · {selectedGroupLabel ?? `Grupo ${selectedGroupId}`}
+            {isCutContext ? (
+              <Scissors size={12} className="text-warning shrink-0" />
+            ) : (
+              <StickyNote size={12} className="text-primary shrink-0" />
+            )}
+            <p
+              className={`text-[11px] font-semibold uppercase tracking-widest ${
+                isCutContext ? "text-warning/70" : "text-base-content/45"
+              }`}
+            >
+              {contextTitle}
             </p>
             <span className="badge badge-ghost badge-xs">{selectedNotes.length}</span>
           </div>
+
+          {isCutContext && (
+            <p className="text-[10px] text-base-content/45 leading-relaxed px-0.5">
+              Estas notas son solo del corte. Deseleccioná el corte para ver
+              las del componente.
+            </p>
+          )}
 
           {selectedNotes.length > 0 && (
             <div className="flex flex-col gap-1.5">
@@ -176,8 +253,9 @@ export default function GroupNotesPanel({
 
           <div className="flex gap-1.5">
             <textarea
+              ref={draftRef}
               className="textarea textarea-bordered textarea-xs flex-1 min-h-[2.5rem] text-xs leading-relaxed"
-              placeholder="Ej: pintar de amarillo, reforzar esquina…"
+              placeholder={placeholder}
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => {
@@ -189,10 +267,12 @@ export default function GroupNotesPanel({
             />
             <button
               type="button"
-              className="btn btn-primary btn-sm self-end rounded-lg gap-1"
+              className={`btn btn-sm self-end rounded-lg gap-1 ${
+                isCutContext ? "btn-warning" : "btn-primary"
+              }`}
               disabled={!draft.trim()}
               onClick={handleAdd}
-              title="Agregar nota"
+              title={isCutContext ? "Agregar nota al corte" : "Agregar nota al componente"}
             >
               <Plus size={14} />
             </button>
@@ -219,7 +299,8 @@ export default function GroupNotesPanel({
         {showAll && (
           notes.length === 0 ? (
             <p className="text-[11px] text-base-content/45 px-1 leading-relaxed">
-              Todavía no hay notas. Seleccioná un componente y agregá una.
+              Todavía no hay notas. Seleccioná un componente (o un corte) y
+              agregá una.
             </p>
           ) : (
             <div className="flex flex-col gap-1.5 max-h-56 overflow-y-auto pr-0.5">
