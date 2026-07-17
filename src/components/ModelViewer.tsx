@@ -44,7 +44,9 @@ import {
   type DerivedTriangleRef,
 } from "@/core/cut-derived-groups";
 import { StickyNote } from "lucide-react";
-import { useViewerPalette, type ViewerPalette } from "@/context/ThemeContext";
+import { useTheme, type ViewerPalette } from "@/context/ThemeContext";
+import * as ViewerPalettes from "@/theme/viewer-palettes";
+import type { ThemeId } from "@/theme/viewer-palettes";
 import { useCameraNavigation } from "@/context/CameraNavigationContext";
 
 // A floating reference label (panel id) anchored to a component in 3D, drawn
@@ -185,6 +187,64 @@ function disposeViewerMaterials(materials: ViewerMaterials) {
     materials.edge,
   ];
   for (const m of all) m.dispose();
+}
+
+/** Reaplica hex sobre materiales ya creados (garantiza que el visor tome viewer-palettes.ts). */
+function paintMaterialsFromPalette(materials: ViewerMaterials, palette: ViewerPalette) {
+  const paint = (m: THREE.MeshStandardMaterial, hex: string) => {
+    m.color.set(hex);
+    m.needsUpdate = true;
+  };
+  const cats: FaceCategory[] = ["floor", "wall", "discard"];
+  const byCat = {
+    floor: palette.floor,
+    wall: palette.wall,
+    discard: palette.discard,
+  } as const;
+  for (const cat of cats) {
+    const hex = byCat[cat];
+    paint(materials.normal[cat], hex);
+    paint(materials.solid[cat], hex);
+    paint(materials.dimmed[cat], hex);
+    paint(materials.xray[cat], hex);
+  }
+  paint(materials.highlight, palette.highlight);
+  materials.highlightWire.color.set(palette.highlight);
+  materials.edge.color.set(palette.edge);
+  materials.edge.opacity = palette.edgeOpacity;
+  materials.edge.needsUpdate = true;
+}
+
+/**
+ * Dentro del Canvas: cada frame lee viewer-palettes.ts y, si cambió un hex
+ * (HMR al guardar), repinta materiales + clear color. Sin depender de React.
+ */
+function LivePaletteSync({
+  theme,
+  materials,
+}: {
+  theme: ThemeId;
+  materials: ViewerMaterials;
+}) {
+  const { gl } = useThree();
+  const lastKey = useRef("");
+  useFrame(() => {
+    // Namespace import = binding vivo: al guardar viewer-palettes.ts, el próximo frame ya tiene los hex nuevos.
+    const p = ViewerPalettes.getViewerPalette(theme);
+    const key = ViewerPalettes.viewerPaletteKey(p);
+    if (key === lastKey.current) return;
+    lastKey.current = key;
+    paintMaterialsFromPalette(materials, p);
+    gl.setClearColor(new THREE.Color(p.background), 1);
+    const root = document.documentElement.style;
+    root.setProperty("--viewer-bg", p.background);
+    root.setProperty("--viewer-floor", p.floor);
+    root.setProperty("--viewer-wall", p.wall);
+    root.setProperty("--viewer-discard", p.discard);
+    root.setProperty("--viewer-edge", p.edge);
+    root.setProperty("--viewer-highlight", p.highlight);
+  });
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -2953,8 +3013,13 @@ export default function ModelViewer({
   derivedPanelPolys,
   assemblyPanelLabels = [],
 }: ModelViewerProps) {
-  const palette = useViewerPalette();
-  const materials = useMemo(() => createViewerMaterials(palette), [palette]);
+  const { theme } = useTheme();
+  const palette = ViewerPalettes.getViewerPalette(theme);
+  const materials = useMemo(
+    () => createViewerMaterials(ViewerPalettes.getViewerPalette(theme)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [theme],
+  );
   useEffect(() => () => disposeViewerMaterials(materials), [materials]);
 
   const panelRaycastRef = useRef<PanelRaycastContext>({
@@ -3012,6 +3077,7 @@ export default function ModelViewer({
       }}
       dpr={[1, 1.5]}
     >
+      <LivePaletteSync theme={theme} materials={materials} />
       <ambientLight intensity={palette.ambientLight} />
       <directionalLight position={[100, 200, 100]} intensity={palette.keyLight} />
       <directionalLight position={[-100, 50, -100]} intensity={palette.fillLight} />
