@@ -120,6 +120,12 @@ export const REVIEW_KEYBOARD_SHORTCUTS: KeyboardShortcutSection[] = [
         detail: "Solo cuando el componente seleccionado es una fusión.",
         combos: [["D"]],
       },
+      {
+        id: "note",
+        label: "Nueva nota",
+        detail: "Abre el panel de notas del componente (o del corte) seleccionado.",
+        combos: [["N"]],
+      },
     ],
   },
   {

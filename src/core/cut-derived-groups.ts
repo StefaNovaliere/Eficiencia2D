@@ -55,6 +55,23 @@ export function cutGroupOwnerId(groupId: number): number {
   return cutDerivedParentId(groupId) ?? groupId;
 }
 
+/**
+ * Si el id es una pieza extraída de un corte, devuelve ese `UserCut`.
+ * El índice coincide con `toExtractedCutGroupId` (cortes no-línea del padre).
+ */
+export function userCutForDerivedExtract(
+  derivedGroupId: number,
+  userCuts: { id: string; groupId: number; kind: string }[],
+): { id: string; groupId: number; kind: string } | null {
+  const extractIdx = cutDerivedExtractIndex(derivedGroupId);
+  if (extractIdx == null) return null;
+  const parentId = cutGroupOwnerId(derivedGroupId);
+  const subtractive = userCuts.filter(
+    (c) => c.groupId === parentId && c.kind !== "line",
+  );
+  return subtractive[extractIdx] ?? null;
+}
+
 interface PanelFrame {
   uAxis: Vec3;
   vAxis: Vec3;
