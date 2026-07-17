@@ -33,6 +33,8 @@ import {
   Rotate3D,
   SquareDashedMousePointer,
   SquareBottomDashedScissors,
+  SquareSplitHorizontal,
+  Link2,
   Camera,
   ScanEye,
 } from "lucide-react";
@@ -103,6 +105,14 @@ export interface BottomToolbarProps {
   formatMinAreaOption: (v: number) => string;
   angleMeasureMode: "off" | "line" | "panels";
   onSetAngleMeasureMode: (m: "line" | "panels") => void;
+  /** Fusionar (unir) paredes seleccionadas — atajo F. */
+  canMerge: boolean;
+  onMerge: () => void;
+  mergeTitle?: string;
+  /** Dividir (desfusionar) el componente fusionado — atajo D. */
+  canSplit: boolean;
+  onSplit: () => void;
+  splitTitle?: string;
 }
 
 // ─── Groups ───────────────────────────────────────────────────────────────────
@@ -272,11 +282,14 @@ function ToolsRibbon({
   cutShapeKind, onCutShapeChange,
   cutCount, edgeSnap, onToggleEdgeSnap,
   angleMeasureMode, onSetAngleMeasureMode,
+  canMerge, onMerge, mergeTitle,
+  canSplit, onSplit, splitTitle,
 }: Pick<BottomToolbarProps,
   "activeTool"|"onSelectTool"|"markLineMode"|"onMarkLineModeChange"|
   "measureShapeKind"|"onMeasureShapeChange"|"measureLabelScale"|"onMeasureScaleChange"|
   "measureCount"|"onClearMeasures"|"cutShapeKind"|"onCutShapeChange"|
-  "cutCount"|"edgeSnap"|"onToggleEdgeSnap"|"angleMeasureMode"|"onSetAngleMeasureMode"
+  "cutCount"|"edgeSnap"|"onToggleEdgeSnap"|"angleMeasureMode"|"onSetAngleMeasureMode"|
+  "canMerge"|"onMerge"|"mergeTitle"|"canSplit"|"onSplit"|"splitTitle"
 >) {
   const t = (tool: typeof activeTool) =>
     activeTool === tool
@@ -292,6 +305,26 @@ function ToolsRibbon({
       </button>
       <button type="button" onClick={() => onSelectTool("box")} className={t("box")}>
         <Lasso size={13} /> Selección área <kbd className="kbd kbd-xs">S</kbd>
+      </button>
+      <VDivider />
+      {/* Unir / Dividir (mismos atajos F / D) */}
+      <button
+        type="button"
+        onClick={onMerge}
+        disabled={!canMerge}
+        title={mergeTitle ?? (canMerge ? "Unir paredes seleccionadas (F)" : "Seleccioná 2 o más paredes para unir")}
+        className={`${RIB} ${canMerge ? RIB_OFF : "opacity-30 cursor-not-allowed"}`}
+      >
+        <Link2 size={13} /> Unir <kbd className="kbd kbd-xs">F</kbd>
+      </button>
+      <button
+        type="button"
+        onClick={onSplit}
+        disabled={!canSplit}
+        title={splitTitle ?? (canSplit ? "Dividir fusión (D)" : "Seleccioná un componente fusionado para dividir")}
+        className={`${RIB} ${canSplit ? RIB_OFF : "opacity-30 cursor-not-allowed"}`}
+      >
+        <SquareSplitHorizontal size={13} /> Dividir <kbd className="kbd kbd-xs">D</kbd>
       </button>
       <VDivider />
       {/* Drawing */}
@@ -593,6 +626,8 @@ export default function BottomToolbar(props: BottomToolbarProps) {
     minAreaM2, onMinAreaChange, minAreaOptions, formatMinAreaOption,
     pinTools, onPinToolsChange,
     angleMeasureMode, onSetAngleMeasureMode,
+    canMerge, onMerge, mergeTitle,
+    canSplit, onSplit, splitTitle,
   } = props;
 
   const [openGroups, setOpenGroups] = useState<Set<GroupId>>(new Set());
@@ -664,7 +699,20 @@ export default function BottomToolbar(props: BottomToolbarProps) {
           isSolid={isSolid} onToggleSolid={onToggleSolid}
         />
       );
-      case "tools": return <ToolsRibbon activeTool={activeTool} onSelectTool={onSelectTool} markLineMode={markLineMode} onMarkLineModeChange={onMarkLineModeChange} measureShapeKind={measureShapeKind} onMeasureShapeChange={onMeasureShapeChange} measureLabelScale={measureLabelScale} onMeasureScaleChange={onMeasureScaleChange} measureCount={measureCount} onClearMeasures={onClearMeasures} cutShapeKind={cutShapeKind} onCutShapeChange={onCutShapeChange} cutCount={cutCount} edgeSnap={edgeSnap} onToggleEdgeSnap={onToggleEdgeSnap} angleMeasureMode={angleMeasureMode} onSetAngleMeasureMode={onSetAngleMeasureMode} />;
+      case "tools": return (
+        <ToolsRibbon
+          activeTool={activeTool} onSelectTool={onSelectTool}
+          markLineMode={markLineMode} onMarkLineModeChange={onMarkLineModeChange}
+          measureShapeKind={measureShapeKind} onMeasureShapeChange={onMeasureShapeChange}
+          measureLabelScale={measureLabelScale} onMeasureScaleChange={onMeasureScaleChange}
+          measureCount={measureCount} onClearMeasures={onClearMeasures}
+          cutShapeKind={cutShapeKind} onCutShapeChange={onCutShapeChange}
+          cutCount={cutCount} edgeSnap={edgeSnap} onToggleEdgeSnap={onToggleEdgeSnap}
+          angleMeasureMode={angleMeasureMode} onSetAngleMeasureMode={onSetAngleMeasureMode}
+          canMerge={canMerge} onMerge={onMerge} mergeTitle={mergeTitle}
+          canSplit={canSplit} onSplit={onSplit} splitTitle={splitTitle}
+        />
+      );
     }
   };
 

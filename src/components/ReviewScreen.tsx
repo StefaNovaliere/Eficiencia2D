@@ -3658,6 +3658,20 @@ export default function ReviewScreen({
               setRibToolMode(false);
               setAngleMeasureMode(m);
             }}
+            canMerge={canMergeSelected}
+            onMerge={handleMergeSelected}
+            mergeTitle={
+              canMergeSelected
+                ? `${mergeLabel} (F)`
+                : (mergeBlockedReason ?? "Seleccioná 2 o más paredes para unir (F)")
+            }
+            canSplit={canSplitMerged}
+            onSplit={handleDivideMerged}
+            splitTitle={
+              canSplitMerged
+                ? `${divideAllLabel} (D)`
+                : "Seleccioná un componente fusionado para dividir (D)"
+            }
           />
         )}
 
