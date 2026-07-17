@@ -1087,6 +1087,20 @@ export default function ReviewScreen({
     return displayGroups.find((g) => g.id === selId) ?? null;
   }, [selectedGroupIds, displayGroups]);
 
+  /**
+   * Grupo de pared "dueño" de la selección. Si la selección es una pieza
+   * derivada de un corte (id negativo, "· resto"/"· recorte"), su pared original
+   * está oculta y sólo se pueden seleccionar las piezas derivadas; para los
+   * encuentros pared-pared (que viven en ids originales) hay que remontar al
+   * padre. Para paredes sin cortar, el dueño es la propia selección.
+   */
+  const selectedWallOwnerGroup = useMemo(() => {
+    if (!selectedGroup) return null;
+    const ownerId = cutGroupOwnerId(selectedGroup.id);
+    if (ownerId === selectedGroup.id) return selectedGroup;
+    return phase1.groups.find((g) => g.id === ownerId) ?? selectedGroup;
+  }, [selectedGroup, phase1.groups]);
+
   const cutsForSelectedGroup = useMemo(() => {
     if (!selectedGroup) return [];
     const ownerId = cutGroupOwnerId(selectedGroup.id);
@@ -1652,25 +1666,25 @@ export default function ReviewScreen({
   /** Todas las paredes coplanares visibles (misma fachada / mismo plano). */
   const coplanarFacadeIds = useMemo(() => {
     if (
-      !selectedGroup ||
-      getEffectiveCategory(selectedGroup, overrides) !== "wall"
+      !selectedWallOwnerGroup ||
+      getEffectiveCategory(selectedWallOwnerGroup, overrides) !== "wall"
     )
       return [];
-    return listCoplanarFacadeIds(selectedGroup, phase1.groups, overrides);
-  }, [selectedGroup, phase1.groups, overrides]);
+    return listCoplanarFacadeIds(selectedWallOwnerGroup, phase1.groups, overrides);
+  }, [selectedWallOwnerGroup, phase1.groups, overrides]);
 
   const facadeReferenceResolved = useMemo(() => {
-    if (!selectedGroup) return -1;
-    return resolveWallId(selectedGroup.id, wallIdAliasMap);
-  }, [selectedGroup, wallIdAliasMap]);
+    if (!selectedWallOwnerGroup) return -1;
+    return resolveWallId(selectedWallOwnerGroup.id, wallIdAliasMap);
+  }, [selectedWallOwnerGroup, wallIdAliasMap]);
 
   const facadeRefGroup = useMemo(() => {
     if (facadeReferenceResolved < 0) return null;
     return (
       phase1.groups.find((g) => g.id === facadeReferenceResolved) ??
-      selectedGroup
+      selectedWallOwnerGroup
     );
-  }, [facadeReferenceResolved, phase1.groups, selectedGroup]);
+  }, [facadeReferenceResolved, phase1.groups, selectedWallOwnerGroup]);
 
   const bulkYieldCountForWall = useMemo(() => {
     if (!facadeRefGroup || facadeReferenceResolved < 0) return 0;
@@ -1843,9 +1857,12 @@ export default function ReviewScreen({
   ]);
 
   // Abrir panel de encuentros al seleccionar una pared con cruces (solo si aún no está abierto).
+  // Si la selección es una pieza derivada de un corte (id negativo), se remonta a
+  // la pared original (los encuentros pared-pared viven en ids originales).
   useEffect(() => {
     if (selectedGroupIds.size !== 1) return;
-    const id = Array.from(selectedGroupIds)[0];
+    const rawId = Array.from(selectedGroupIds)[0];
+    const id = cutGroupOwnerId(rawId);
     const hasJoints = wallWallList.some(
       ({ ww }) => ww.groupA === id || ww.groupB === id,
     );
