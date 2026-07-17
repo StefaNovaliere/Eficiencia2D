@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, Eye, EyeOff, Layers, StickyNote } from "lucide-react";
 import type { FaceCategory, GeometryGroup } from "@/core/group-classifier";
-import { cutGroupOwnerId } from "@/core/cut-derived-groups";
 
 const CATEGORY_COLORS: Record<FaceCategory, string> = {
   floor: "var(--viewer-floor, #2d4f3e)",
@@ -173,7 +172,7 @@ export default function GroupList({
           const effectiveCat = categoryOverrides.get(group.id) ?? group.category;
           const isSelected = selectedGroupIds.has(group.id);
           const color = CATEGORY_COLORS[effectiveCat];
-          const notesCount = noteCountByGroupId?.get(cutGroupOwnerId(group.id)) ?? 0;
+          const notesCount = noteCountByGroupId?.get(group.id) ?? 0;
 
           return (
             <div
