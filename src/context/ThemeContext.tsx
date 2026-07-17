@@ -6,6 +6,7 @@ import {
   getNestingCanvasColors,
   getViewerBackground,
   getViewerPalette,
+  viewerPaletteKey,
   type ThemeId,
   type ViewerPalette,
 } from "@/theme/viewer-palettes";
@@ -16,6 +17,7 @@ export {
   getNestingCanvasColors,
   getViewerBackground,
   getViewerPalette,
+  viewerPaletteKey,
 };
 
 const VALID_THEMES = new Set<string>(THEMES.map((t) => t.id));
@@ -76,6 +78,8 @@ function applyTheme(theme: ThemeId) {
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setThemeState] = useState<ThemeId>("dark");
+  const palette = getViewerPalette(theme);
+  const paletteKey = viewerPaletteKey(palette);
 
   useEffect(() => {
     try {
@@ -93,6 +97,11 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     setThemeState(initial);
     applyTheme(initial);
   }, []);
+
+  // Reaplica CSS vars cuando cambia el tema O cuando editás hex en viewer-palettes (HMR).
+  useEffect(() => {
+    applyTheme(theme);
+  }, [theme, paletteKey]);
 
   const setTheme = useCallback((next: ThemeId) => {
     setThemeState(next);
@@ -124,5 +133,8 @@ export function useTheme() {
 
 export function useViewerPalette(): ViewerPalette {
   const { theme } = useTheme();
-  return useMemo(() => getViewerPalette(theme), [theme]);
+  const palette = getViewerPalette(theme);
+  const key = viewerPaletteKey(palette);
+  // Dependé del contenido (hex), no solo del id de tema — así el HMR refresca el modelo.
+  return useMemo(() => getViewerPalette(theme), [theme, key]);
 }

@@ -75,7 +75,7 @@ export const VIEWER_PALETTES: Record<ThemeId, ViewerPalette> = {
     background: "#070709",
     isDark: true,
     wall: "#8BA8B8",
-    floor: "#A855B8",
+    floor: "#00CC63",
     discard: "#5B6B7A",
     edge: "#E0F7FA",
     edgeOpacity: 0.4,
@@ -296,6 +296,26 @@ export const THEMES: {
 
 export function getViewerPalette(theme: ThemeId): ViewerPalette {
   return VIEWER_PALETTES[theme] ?? VIEWER_PALETTES.light;
+}
+
+/** Clave estable de contenido: cambia si editás hex (útil para HMR / materiales). */
+export function viewerPaletteKey(palette: ViewerPalette): string {
+  return [
+    palette.background,
+    palette.wall,
+    palette.floor,
+    palette.discard,
+    palette.edge,
+    palette.edgeOpacity,
+    palette.highlight,
+    palette.leaderPrimary,
+    palette.leaderSecondary,
+    palette.ambientLight,
+    palette.keyLight,
+    palette.fillLight,
+    palette.gizmoLabel,
+    palette.isDark ? "1" : "0",
+  ].join("|");
 }
 
 export function getViewerBackground(theme: ThemeId): string {
