@@ -1,6 +1,13 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useLayoutEffect,
+  useMemo,
+  useState,
+} from "react";
 import {
   THEMES,
   getNestingCanvasColors,
@@ -24,7 +31,6 @@ const VALID_THEMES = new Set<string>(THEMES.map((t) => t.id));
 
 export const BASE_THEME_STORAGE_KEY = "e2dBaseTheme";
 
-/** Tema base de la app (sin Neón): oscuro por defecto. */
 export function getBaseThemeId(): ThemeId {
   if (typeof window === "undefined") return "dark";
   try {
@@ -59,12 +65,8 @@ interface ThemeContextValue {
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
-function resolveInitialTheme(): ThemeId {
-  return getStoredThemeId();
-}
-
-/** Aplica data-theme + CSS vars del visor desde `viewer-palettes.ts`. */
-function applyTheme(theme: ThemeId) {
+export function applyViewerTheme(theme: ThemeId) {
+  if (typeof document === "undefined") return;
   document.documentElement.setAttribute("data-theme", theme);
   const palette = getViewerPalette(theme);
   const root = document.documentElement.style;
@@ -77,35 +79,17 @@ function applyTheme(theme: ThemeId) {
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setThemeState] = useState<ThemeId>("dark");
-  const palette = getViewerPalette(theme);
-  const paletteKey = viewerPaletteKey(palette);
+  const [theme, setThemeState] = useState<ThemeId>(() =>
+    typeof window !== "undefined" ? getStoredThemeId() : "dark",
+  );
 
-  useEffect(() => {
-    try {
-      const base = localStorage.getItem(BASE_THEME_STORAGE_KEY);
-      const saved = localStorage.getItem("theme");
-      if (!base && saved === "light") {
-        localStorage.setItem("theme", "dark");
-        localStorage.setItem(BASE_THEME_STORAGE_KEY, "dark");
-      }
-    } catch {
-      /* ignore */
-    }
-
-    const initial = resolveInitialTheme();
-    setThemeState(initial);
-    applyTheme(initial);
-  }, []);
-
-  // Reaplica CSS vars cuando cambia el tema O cuando editás hex en viewer-palettes (HMR).
-  useEffect(() => {
-    applyTheme(theme);
-  }, [theme, paletteKey]);
+  useLayoutEffect(() => {
+    applyViewerTheme(theme);
+  }, [theme]);
 
   const setTheme = useCallback((next: ThemeId) => {
     setThemeState(next);
-    applyTheme(next);
+    applyViewerTheme(next);
     try {
       localStorage.setItem("theme", next);
       if (next !== "neon") {
@@ -116,10 +100,10 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const value = useMemo(() => ({ theme, setTheme }), [theme, setTheme]);
+
   return (
-    <ThemeContext.Provider value={{ theme, setTheme }}>
-      {children}
-    </ThemeContext.Provider>
+    <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>
   );
 }
 
@@ -133,8 +117,5 @@ export function useTheme() {
 
 export function useViewerPalette(): ViewerPalette {
   const { theme } = useTheme();
-  const palette = getViewerPalette(theme);
-  const key = viewerPaletteKey(palette);
-  // Dependé del contenido (hex), no solo del id de tema — así el HMR refresca el modelo.
-  return useMemo(() => getViewerPalette(theme), [theme, key]);
+  return getViewerPalette(theme);
 }

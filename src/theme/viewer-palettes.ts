@@ -1,32 +1,9 @@
 /**
- * Paletas del visor 3D por tema (fondo + colores del modelo).
+ * Paletas del visor 3D por tema.
  *
- * ──────────────────────────────────────────────────────────────
- * DÓNDE EDITAR
- * ──────────────────────────────────────────────────────────────
- * • Este archivo (`src/theme/viewer-palettes.ts`):
- *     `VIEWER_PALETTES` → `background`, `wall`, `floor`, `discard`,
- *     `edge`, `highlight`, luces, etc. por cada ThemeId.
- *
- * • `src/styles/globals.css`:
- *     - Temas DaisyUI (UI de la app: primary, base-100, botones…):
- *       `@plugin "daisyui"` y `@plugin "daisyui/theme"` (p. ej. neon).
- *     - Fallbacks CSS `--viewer-*` en `:root` (solo si JS aún no aplicó el tema).
- *     - Estilos extra de neon en `[data-theme="neon"]`.
- *
- * • `src/context/ThemeContext.tsx`:
- *     Aplica la paleta al DOM (`--viewer-bg`, `--viewer-wall`, …).
- *     No hardcodear colores del modelo ahí.
- *
- * • Consumidores (leen CSS vars o `useViewerPalette()`):
- *     ModelViewer, NestingPreview, GroupList, VisibilityFilters, BottomToolbar.
- *
- * ──────────────────────────────────────────────────────────────
- * Criterio de sugerencias
- * ──────────────────────────────────────────────────────────────
- * Cada tema tiene paredes/pisos propios tintados por su primary,
- * manteniendo contraste sobre el fondo (no reutilizar la misma
- * pareja gris+madera en todos los temas claros/oscuros).
+ * EDITÁ LOS HEX EN `VIEWER_PALETTES` ABAJO.
+ * Con el tema activo en la app (p. ej. Neón), al guardar deberías ver el
+ * cambio al instante en el modelo (fondo / paredes / pisos).
  */
 
 export type ThemeId =
@@ -72,10 +49,10 @@ export const VIEWER_PALETTES: Record<ThemeId, ViewerPalette> = {
    * Fondo casi negro; paredes plateado frío; piso violeta-magenta.
    */
   neon: {
-    background: "#070709",
+    background: "#293233",
     isDark: true,
     wall: "#8BA8B8",
-    floor: "#00CC63",
+    floor: "#1F9399",
     discard: "#5B6B7A",
     edge: "#E0F7FA",
     edgeOpacity: 0.4,
