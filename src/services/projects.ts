@@ -37,6 +37,11 @@ export interface UserProject {
   url_archivo?: string;
 }
 
+export interface RenameUserProjectResult extends UserProject {
+  estado_sincronizado: boolean;
+  estado_actualizado_at: string | null;
+}
+
 export interface UserProjectsListResult {
   proyectos: UserProject[];
   total: number;
@@ -164,6 +169,45 @@ export async function fetchUserProject(token: string, projectId: string): Promis
   }
 
   return project;
+}
+
+/** Renombra el proyecto en BD y sincroniza `nombre` en estado.json si existe. */
+export async function renameUserProject(
+  token: string,
+  projectId: string,
+  nombre: string,
+): Promise<RenameUserProjectResult> {
+  const trimmed = nombre.trim();
+  if (!trimmed) {
+    throw new Error("El nombre del proyecto no puede estar vacío");
+  }
+
+  const res = await apiFetch(
+    `/api/projects/${projectId}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nombre: trimmed }),
+    },
+    { token },
+  );
+
+  if (!res.ok) {
+    await parseApiError(res, "No se pudo renombrar el proyecto");
+  }
+
+  const raw = (await res.json()) as Record<string, unknown>;
+  const project = normalizeProject(raw);
+  if (!project) {
+    throw new Error("Respuesta de proyecto inválida");
+  }
+
+  return {
+    ...project,
+    estado_sincronizado: Boolean(raw.estado_sincronizado),
+    estado_actualizado_at:
+      typeof raw.estado_actualizado_at === "string" ? raw.estado_actualizado_at : null,
+  };
 }
 
 /** Reprocesa el archivo desde R2 y devuelve topología + preview (como al subir). */
