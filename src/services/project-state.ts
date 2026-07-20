@@ -236,28 +236,16 @@ export function decisionsToStateRecord(
 }
 
 export function buildReviewEditingPatch(snapshot: ReviewEditingSnapshot): ProjectStatePatch {
-  const patch: ProjectStatePatch = {};
-
-  if (snapshot.overrides.length > 0) {
-    patch.overrides = overridesToStateRecord(snapshot.overrides);
-  }
-  if (snapshot.wallWallDecisions.size > 0) {
-    patch.wall_wall_decisions = decisionsToStateRecord(snapshot.wallWallDecisions);
-  }
-  if (snapshot.marks.length > 0) {
-    patch.marks = snapshot.marks;
-  }
-  if (snapshot.userCuts.length > 0) {
-    patch.user_cuts = userCutsForApi(snapshot.userCuts);
-  }
-  if (snapshot.notes.length > 0) {
-    patch.notes = groupNotesForApi(snapshot.notes);
-  }
-  if (snapshot.markLines.length > 0) {
-    patch.mark_lines = markLinesForApi(snapshot.markLines);
-  }
-
-  return patch;
+  // Siempre mandar el snapshot completo (incluye arrays/objetos vacíos).
+  // Si omitimos vacíos, el merge shallow del backend conserva cortes/notas viejos.
+  return {
+    overrides: overridesToStateRecord(snapshot.overrides),
+    wall_wall_decisions: decisionsToStateRecord(snapshot.wallWallDecisions),
+    marks: [...snapshot.marks],
+    user_cuts: userCutsForApi(snapshot.userCuts),
+    notes: groupNotesForApi(snapshot.notes),
+    mark_lines: markLinesForApi(snapshot.markLines),
+  };
 }
 
 export function savedStateNeedsRecompute(

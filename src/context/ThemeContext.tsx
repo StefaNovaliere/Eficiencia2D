@@ -65,6 +65,27 @@ function readStoredColor(key: string): string | null {
   }
 }
 
+function readModelColorsFromStorage(): ModelColorOverrides {
+  return {
+    wall: readStoredColor(MODEL_WALL_COLOR_KEY),
+    floor: readStoredColor(MODEL_FLOOR_COLOR_KEY),
+    background: readStoredColor(MODEL_BG_COLOR_KEY),
+  };
+}
+
+function writeModelColorsToStorage(colors: ModelColorOverrides) {
+  try {
+    for (const kind of Object.keys(MODEL_COLOR_KEYS) as ModelColorChannel[]) {
+      const key = MODEL_COLOR_KEYS[kind];
+      const hex = colors[kind];
+      if (hex) localStorage.setItem(key, hex);
+      else localStorage.removeItem(key);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
 export function getBaseThemeId(): ThemeId {
   if (typeof window === "undefined") return "dark";
   try {
@@ -101,6 +122,8 @@ interface ThemeContextValue {
   setModelColor: (kind: ModelColorChannel, hex: string | null) => void;
   /** Vuelve todos los colores al default del tema. */
   resetModelColors: () => void;
+  /** Reemplaza overrides (p. ej. al hidratar desde settings de cuenta). */
+  hydrateModelColors: (colors: ModelColorOverrides) => void;
 }
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
@@ -171,11 +194,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       /* ignore */
     }
 
-    setModelColors({
-      wall: readStoredColor(MODEL_WALL_COLOR_KEY),
-      floor: readStoredColor(MODEL_FLOOR_COLOR_KEY),
-      background: readStoredColor(MODEL_BG_COLOR_KEY),
-    });
+    setModelColors(readModelColorsFromStorage());
   }, []);
 
   useLayoutEffect(() => {
@@ -183,29 +202,23 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     applyModelColorVars(theme, modelColors);
   }, [theme, modelColors]);
 
-  const setModelColor = useCallback(
-    (kind: ModelColorChannel, hex: string | null) => {
-      setModelColors((prev) => ({ ...prev, [kind]: hex }));
-      try {
-        const key = MODEL_COLOR_KEYS[kind];
-        if (hex) localStorage.setItem(key, hex);
-        else localStorage.removeItem(key);
-      } catch {
-        /* ignore */
-      }
-    },
-    [],
-  );
+  const hydrateModelColors = useCallback((colors: ModelColorOverrides) => {
+    setModelColors(colors);
+    writeModelColorsToStorage(colors);
+  }, []);
+
+  const setModelColor = useCallback((kind: ModelColorChannel, hex: string | null) => {
+    setModelColors((prev) => {
+      const next = { ...prev, [kind]: hex };
+      writeModelColorsToStorage(next);
+      return next;
+    });
+  }, []);
 
   const resetModelColors = useCallback(() => {
-    setModelColors({ wall: null, floor: null, background: null });
-    try {
-      for (const key of Object.values(MODEL_COLOR_KEYS)) {
-        localStorage.removeItem(key);
-      }
-    } catch {
-      /* ignore */
-    }
+    const cleared = { wall: null, floor: null, background: null };
+    setModelColors(cleared);
+    writeModelColorsToStorage(cleared);
   }, []);
 
   const setTheme = useCallback((next: ThemeId) => {
@@ -222,8 +235,15 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ theme, setTheme, modelColors, setModelColor, resetModelColors }),
-    [theme, setTheme, modelColors, setModelColor, resetModelColors],
+    () => ({
+      theme,
+      setTheme,
+      modelColors,
+      setModelColor,
+      resetModelColors,
+      hydrateModelColors,
+    }),
+    [theme, setTheme, modelColors, setModelColor, resetModelColors, hydrateModelColors],
   );
 
   return (

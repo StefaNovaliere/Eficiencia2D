@@ -2,7 +2,8 @@
 
 import { useCallback, useMemo, useRef, useState } from "react";
 import { RotateCcw } from "lucide-react";
-import { useTheme, useViewerPalette } from "@/context/ThemeContext";
+import { useViewerPalette } from "@/context/ThemeContext";
+import { usePersistedModelColors } from "@/hooks/usePersistedModelColors";
 import {
   hexToHsv,
   hsvToHex,
@@ -42,7 +43,7 @@ const WHEEL_BG =
  */
 export default function ModelColorWheel() {
   const palette = useViewerPalette();
-  const { modelColors, setModelColor, resetModelColors } = useTheme();
+  const { modelColors, setModelColor, resetModelColors } = usePersistedModelColors();
   const [active, setActive] = useState<Channel>("wall");
   const wheelRef = useRef<HTMLDivElement>(null);
   const draggingRef = useRef<Channel | null>(null);
