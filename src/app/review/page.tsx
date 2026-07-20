@@ -69,6 +69,7 @@ function ReviewPageContent() {
     setSavedNotes,
     savedFlex,
     savedMarkLines,
+    setSavedMarkLines,
     savedRibs,
     savedColumns,
     fileId,
@@ -85,8 +86,9 @@ function ReviewPageContent() {
 
   const [isGenerating, setIsGenerating] = useState(false);
   const [isRecomputing, setIsRecomputing] = useState(false);
+  const [isSavingOnExit, setIsSavingOnExit] = useState(false);
 
-  const { queuePatch } = useProjectStateAutosave({
+  const { queuePatch, flushPatch, hasPendingChanges } = useProjectStateAutosave({
     token,
     projectId: fileId,
     enabled: Boolean(token && fileId),
@@ -105,20 +107,35 @@ function ReviewPageContent() {
     [token, fileId, queuePatch],
   );
 
-  const skipInitialEditingAutosave = useRef(true);
+  const lastEditingPatchKey = useRef<string | null>(null);
 
   const handleEditingStateChange = useCallback(
     (snapshot: Parameters<typeof buildReviewEditingPatch>[0]) => {
-      if (skipInitialEditingAutosave.current) {
-        skipInitialEditingAutosave.current = false;
-        return;
-      }
-      const patch = buildReviewEditingPatch(snapshot);
-      if (Object.keys(patch).length > 0) {
-        queuePatch(patch);
-      }
+      // Mantener el contexto al día (también al borrar).
+      setSavedOverrides(snapshot.overrides);
+      setSavedWallWallDecisions(snapshot.wallWallDecisions);
+      setSavedMarks(snapshot.marks);
+      setSavedUserCuts(snapshot.userCuts);
+      setSavedNotes(snapshot.notes);
+      setSavedMarkLines(snapshot.markLines);
+
+      const fullPatch = buildReviewEditingPatch(snapshot);
+      const patchKey = JSON.stringify(fullPatch);
+      if (lastEditingPatchKey.current === patchKey) return;
+      lastEditingPatchKey.current = patchKey;
+
+      // Autosave periódico (debounce): útil si se corta la luz / se cierra la pestaña.
+      queuePatch(fullPatch);
     },
-    [queuePatch],
+    [
+      queuePatch,
+      setSavedOverrides,
+      setSavedWallWallDecisions,
+      setSavedMarks,
+      setSavedUserCuts,
+      setSavedNotes,
+      setSavedMarkLines,
+    ],
   );
 
   useEffect(() => {
@@ -323,10 +340,56 @@ function ReviewPageContent() {
     ],
   );
 
-  const handleReviewCancel = useCallback(() => {
-    resetProject();
-    router.replace("/home");
-  }, [resetProject, router]);
+  const handleReviewCancel = useCallback(
+    async (snapshot: Parameters<typeof buildReviewEditingPatch>[0]) => {
+      if (isSavingOnExit) return;
+      setIsSavingOnExit(true);
+
+      // Sincronizar contexto + encolar el snapshot actual (incluye borrados).
+      setSavedOverrides(snapshot.overrides);
+      setSavedWallWallDecisions(snapshot.wallWallDecisions);
+      setSavedMarks(snapshot.marks);
+      setSavedUserCuts(snapshot.userCuts);
+      setSavedNotes(snapshot.notes);
+      setSavedMarkLines(snapshot.markLines);
+
+      const patch = buildReviewEditingPatch(snapshot);
+      lastEditingPatchKey.current = JSON.stringify(patch);
+      queuePatch(patch);
+
+      try {
+        // Si hay cambios encolados (o un PATCH en curso), esperar a que terminen.
+        if (hasPendingChanges()) {
+          await flushPatch();
+        }
+        resetProject();
+        router.replace("/home");
+      } catch (err) {
+        console.error(err);
+        alert(
+          err instanceof Error
+            ? `No se pudieron guardar los cambios: ${err.message}`
+            : "No se pudieron guardar los cambios. Revisá la conexión e intentá de nuevo.",
+        );
+      } finally {
+        setIsSavingOnExit(false);
+      }
+    },
+    [
+      isSavingOnExit,
+      hasPendingChanges,
+      queuePatch,
+      flushPatch,
+      resetProject,
+      router,
+      setSavedOverrides,
+      setSavedWallWallDecisions,
+      setSavedMarks,
+      setSavedUserCuts,
+      setSavedNotes,
+      setSavedMarkLines,
+    ],
+  );
 
   // El instructivo se construye en el FRONT desde la topología (el backend no
   // tiene endpoint de preview; sólo genera la guía dentro del ZIP). La geometría
@@ -369,6 +432,7 @@ function ReviewPageContent() {
       initialNotes={savedNotes}
       isRecomputing={isRecomputing}
       isGenerating={isGenerating}
+      isSavingOnExit={isSavingOnExit}
       onPrintScaleChange={(nextScale) => {
         setScale(nextScale);
         if (token && fileId) queuePatch({ scale_denom: nextScale });

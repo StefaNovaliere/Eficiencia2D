@@ -20,22 +20,37 @@ export function useProjectStateAutosave({
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingRef = useRef<ProjectStatePatch>({});
   const inFlightRef = useRef(false);
-  const tokenRef = useRef(token);
-  const projectIdRef = useRef(projectId);
+  const flightPromiseRef = useRef<Promise<void> | null>(null);
+  /** Últimas credenciales válidas: no se limpian al hacer resetProject al salir. */
+  const tokenRef = useRef<string | null>(token);
+  const projectIdRef = useRef<string | null>(projectId);
   const enabledRef = useRef(enabled);
 
-  tokenRef.current = token;
-  projectIdRef.current = projectId;
+  if (token) tokenRef.current = token;
+  if (projectId) projectIdRef.current = projectId;
   enabledRef.current = enabled;
+
+  const hasPendingChanges = useCallback(() => {
+    return (
+      Object.keys(pendingRef.current).length > 0 ||
+      inFlightRef.current ||
+      timerRef.current != null
+    );
+  }, []);
 
   const flushPatch = useCallback(async (opts?: { keepalive?: boolean }) => {
     const activeToken = tokenRef.current;
     const activeProjectId = projectIdRef.current;
-    if (!enabledRef.current || !activeToken || !activeProjectId) return;
+    if (!activeToken || !activeProjectId) return;
 
     if (timerRef.current) {
       clearTimeout(timerRef.current);
       timerRef.current = null;
+    }
+
+    if (inFlightRef.current && flightPromiseRef.current) {
+      await flightPromiseRef.current;
+      if (Object.keys(pendingRef.current).length === 0) return;
     }
 
     if (Object.keys(pendingRef.current).length === 0) return;
@@ -45,33 +60,45 @@ export function useProjectStateAutosave({
     pendingRef.current = {};
     inFlightRef.current = true;
 
-    try {
-      await patchProjectState(activeToken, activeProjectId, patch, {
-        keepalive: opts?.keepalive,
-      });
-    } catch (err) {
-      console.warn("No se pudo guardar el estado del proyecto:", err);
-      pendingRef.current = { ...patch, ...pendingRef.current };
-    } finally {
-      inFlightRef.current = false;
-      if (Object.keys(pendingRef.current).length > 0) {
-        timerRef.current = setTimeout(() => {
-          void flushPatch();
-        }, AUTOSAVE_DELAY_MS);
+    const flight = (async () => {
+      try {
+        await patchProjectState(activeToken, activeProjectId, patch, {
+          keepalive: opts?.keepalive,
+        });
+      } catch (err) {
+        console.warn("No se pudo guardar el estado del proyecto:", err);
+        pendingRef.current = { ...patch, ...pendingRef.current };
+        throw err;
+      } finally {
+        inFlightRef.current = false;
+        flightPromiseRef.current = null;
       }
+    })();
+
+    flightPromiseRef.current = flight.catch(() => {
+      /* el caller decide si reintenta */
+    });
+
+    await flight;
+
+    if (Object.keys(pendingRef.current).length > 0) {
+      await flushPatch(opts);
     }
   }, []);
 
-  const queuePatch = useCallback((patch: ProjectStatePatch) => {
-    if (!enabledRef.current || !tokenRef.current || !projectIdRef.current) return;
+  const queuePatch = useCallback(
+    (patch: ProjectStatePatch) => {
+      if (!enabledRef.current || !tokenRef.current || !projectIdRef.current) return;
 
-    pendingRef.current = { ...pendingRef.current, ...patch };
+      pendingRef.current = { ...pendingRef.current, ...patch };
 
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => {
-      void flushPatch();
-    }, AUTOSAVE_DELAY_MS);
-  }, [flushPatch]);
+      if (timerRef.current) clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(() => {
+        void flushPatch();
+      }, AUTOSAVE_DELAY_MS);
+    },
+    [flushPatch],
+  );
 
   useEffect(() => {
     const flushOnLeave = () => {
@@ -96,5 +123,5 @@ export function useProjectStateAutosave({
     };
   }, [flushPatch]);
 
-  return { queuePatch, flushPatch };
+  return { queuePatch, flushPatch, hasPendingChanges };
 }

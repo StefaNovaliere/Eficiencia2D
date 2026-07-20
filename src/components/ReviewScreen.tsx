@@ -144,7 +144,15 @@ export interface ReviewScreenProps {
     userCuts: UserCut[],
     notes: GroupNote[],
   ) => void;
-  onCancel: () => void;
+  /** Vuelve al home; recibe el snapshot actual para guardar cambios pendientes. */
+  onCancel: (snapshot: {
+    overrides: ClassificationOverride[];
+    wallWallDecisions: WallWallDecisions;
+    marks: number[];
+    userCuts: UserCut[];
+    notes: GroupNote[];
+    markLines: import("@/core/mark-lines").MarkLine[];
+  }) => void | Promise<void>;
   /** Alterna el eje vertical (Y/Z) vía recompute en el backend. */
   onRotateAxis: () => void;
   /** Agrega una fusión y dispara recompute. */
@@ -167,6 +175,8 @@ export interface ReviewScreenProps {
   /** El backend está recalculando la topología (deshabilita controles). */
   isRecomputing?: boolean;
   isGenerating?: boolean;
+  /** Guardando cambios pendientes al pulsar Volver. */
+  isSavingOnExit?: boolean;
   /** Escala de impresión del proyecto (1:N), compartida con nesting/PDF. */
   onPrintScaleChange: (scale: number) => void;
   /** Cambios de clasificación, uniones, marcas, cortes y líneas rojas para autosave. */
@@ -536,6 +546,7 @@ export default function ReviewScreen({
   initialNotes,
   isRecomputing = false,
   isGenerating = false,
+  isSavingOnExit = false,
   onPrintScaleChange,
   onEditingStateChange,
   onRequestAssemblyPreview,
@@ -1689,13 +1700,38 @@ export default function ReviewScreen({
     onConfirm(result, wallWallDecisions, [...markGroupIds], userCuts, groupNotes);
   }, [overrides, wallWallDecisions, markGroupIds, userCuts, groupNotes, onConfirm]);
 
+  const handleBack = useCallback(() => {
+    if (isSavingOnExit) return;
+    void onCancel({
+      overrides: Array.from(overrides.entries()).map(([groupId, newCategory]) => ({
+        groupId,
+        newCategory,
+      })),
+      wallWallDecisions,
+      marks: [...markGroupIds],
+      userCuts,
+      notes: groupNotes,
+      markLines: savedMarkLines,
+    });
+  }, [
+    isSavingOnExit,
+    onCancel,
+    overrides,
+    wallWallDecisions,
+    markGroupIds,
+    userCuts,
+    groupNotes,
+    savedMarkLines,
+  ]);
+
   // Navegación de flujo constante (barra del shell). Reemplaza el footer propio.
   useRegisterFlowNav({
     backLabel: "Volver",
-    onBack: onCancel,
+    onBack: handleBack,
+    backBusy: isSavingOnExit,
     nextLabel: "Continuar",
     onNext: handleConfirm,
-    canNext: !isGenerating,
+    canNext: !isGenerating && !isSavingOnExit,
     nextBusy: isGenerating,
     hint:
       overrides.size > 0
