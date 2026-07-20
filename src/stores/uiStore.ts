@@ -23,6 +23,8 @@ export type ToolId =
 export interface FlowNav {
   backLabel?: string;
   onBack?: () => void;
+  /** Muestra el botón "atrás" en estado ocupado (p.ej. guardando al volver). */
+  backBusy?: boolean;
   nextLabel?: string;
   onNext?: () => void;
   canNext?: boolean;

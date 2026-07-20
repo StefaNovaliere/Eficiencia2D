@@ -71,22 +71,23 @@ export interface ReviewEditingSnapshot {
 }
 
 function parseRecordOfStrings(raw: unknown): Record<string, string> | undefined {
-  if (!raw || typeof raw !== "object") return undefined;
+  if (raw == null || typeof raw !== "object" || Array.isArray(raw)) return undefined;
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
     if (value != null && value !== "") out[String(key)] = String(value);
   }
-  return Object.keys(out).length > 0 ? out : undefined;
+  // Conservar `{}` para poder limpiar overrides al restaurar.
+  return out;
 }
 
 function parseRecordOfNumbers(raw: unknown): Record<string, number> | undefined {
-  if (!raw || typeof raw !== "object") return undefined;
+  if (raw == null || typeof raw !== "object" || Array.isArray(raw)) return undefined;
   const out: Record<string, number> = {};
   for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
     const n = Number(value);
     if (Number.isFinite(n)) out[String(key)] = n;
   }
-  return Object.keys(out).length > 0 ? out : undefined;
+  return out;
 }
 
 function parseSplits(raw: unknown): SplitOperation[] | undefined {
@@ -188,22 +189,22 @@ export function restoreProjectState(raw: unknown): RestoredProjectState | null {
       mode: s.mode,
     }));
   }
-  if (state.overrides) {
+  if (state.overrides != null) {
     restored.savedOverrides = Object.entries(state.overrides).map(([groupId, newCategory]) => ({
       groupId: Number(groupId),
       // Los overrides persistidos son strings sueltos; el dominio sólo usa FaceCategory.
       newCategory: newCategory as ClassificationOverride["newCategory"],
     }));
   }
-  if (state.wall_wall_decisions) {
+  if (state.wall_wall_decisions != null) {
     restored.savedWallWallDecisions = new Map(
       Object.entries(state.wall_wall_decisions).map(([k, v]) => [Number(k), v]),
     );
   }
-  if (state.marks) restored.savedMarks = state.marks;
-  if (state.user_cuts) restored.savedUserCuts = parseUserCutsFromApi(state.user_cuts);
-  if (state.notes) restored.savedNotes = parseGroupNotesFromApi(state.notes);
-  if (state.mark_lines) restored.savedMarkLines = parseMarkLinesFromApi(state.mark_lines);
+  if (state.marks != null) restored.savedMarks = state.marks;
+  if (state.user_cuts != null) restored.savedUserCuts = parseUserCutsFromApi(state.user_cuts);
+  if (state.notes != null) restored.savedNotes = parseGroupNotesFromApi(state.notes);
+  if (state.mark_lines != null) restored.savedMarkLines = parseMarkLinesFromApi(state.mark_lines);
   if (state.scale_denom != null) restored.scale = state.scale_denom;
   if (state.paper) restored.paper = state.paper;
   if (state.page_mode) restored.pdfPageMode = state.page_mode;
@@ -238,12 +239,16 @@ export function decisionsToStateRecord(
 export function buildReviewEditingPatch(snapshot: ReviewEditingSnapshot): ProjectStatePatch {
   // Siempre mandar el snapshot completo (incluye arrays/objetos vacíos).
   // Si omitimos vacíos, el merge shallow del backend conserva cortes/notas viejos.
+  // Filtrar notas inválidas: un 422 en `notes` abortaba todo el PATCH (también el borrado).
+  const validNotes = snapshot.notes.filter(
+    (n) => n.id?.trim() && n.text?.trim() && Number.isFinite(n.groupId) && n.groupId >= 0,
+  );
   return {
     overrides: overridesToStateRecord(snapshot.overrides),
     wall_wall_decisions: decisionsToStateRecord(snapshot.wallWallDecisions),
     marks: [...snapshot.marks],
     user_cuts: userCutsForApi(snapshot.userCuts),
-    notes: groupNotesForApi(snapshot.notes),
+    notes: groupNotesForApi(validNotes),
     mark_lines: markLinesForApi(snapshot.markLines),
   };
 }

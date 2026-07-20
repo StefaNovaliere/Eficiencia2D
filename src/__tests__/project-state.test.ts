@@ -46,6 +46,24 @@ describe("restoreProjectState", () => {
     expect(restored?.pinTools).toBe(false);
     expect(restored?.sheetConfig).toEqual({ widthM: 1, heightM: 0.6, gapM: 0.003 });
   });
+
+  it("restaura borrados (arrays/objetos vacíos) sin ignorarlos", () => {
+    const restored = restoreProjectState({
+      overrides: {},
+      wall_wall_decisions: {},
+      marks: [],
+      user_cuts: [],
+      notes: [],
+      mark_lines: [],
+    });
+
+    expect(restored?.savedOverrides).toEqual([]);
+    expect(restored?.savedWallWallDecisions?.size).toBe(0);
+    expect(restored?.savedMarks).toEqual([]);
+    expect(restored?.savedUserCuts).toEqual([]);
+    expect(restored?.savedNotes).toEqual([]);
+    expect(restored?.savedMarkLines).toEqual([]);
+  });
 });
 
 describe("savedStateNeedsRecompute", () => {

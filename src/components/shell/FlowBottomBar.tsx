@@ -24,11 +24,20 @@ export default function FlowBottomBar() {
           <button
             type="button"
             onClick={nav.onBack}
-            disabled={nav.nextBusy}
+            disabled={nav.nextBusy || nav.backBusy}
             className="btn btn-ghost btn-sm rounded-xl gap-1.5 border border-base-300/40"
           >
-            <ArrowLeft size={15} />
-            <span className="hidden sm:inline">{nav.backLabel ?? "Atrás"}</span>
+            {nav.backBusy ? (
+              <>
+                <span className="loading loading-spinner loading-xs" />
+                <span className="hidden sm:inline">Guardando…</span>
+              </>
+            ) : (
+              <>
+                <ArrowLeft size={15} />
+                <span className="hidden sm:inline">{nav.backLabel ?? "Atrás"}</span>
+              </>
+            )}
           </button>
         )}
         <CameraNavigationSelect variant="toolbar-bottom" className="hidden sm:flex" />
