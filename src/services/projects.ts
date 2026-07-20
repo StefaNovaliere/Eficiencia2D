@@ -271,6 +271,7 @@ export async function patchProjectState(
   token: string,
   projectId: string,
   patch: ProjectStatePatch,
+  options?: { keepalive?: boolean },
 ): Promise<ProjectStatePatchResponse> {
   const res = await apiFetch(
     `/api/projects/${projectId}/state`,
@@ -278,6 +279,7 @@ export async function patchProjectState(
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(patch),
+      ...(options?.keepalive ? { keepalive: true } : {}),
     },
     { token },
   );

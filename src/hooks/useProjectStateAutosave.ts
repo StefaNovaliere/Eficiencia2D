@@ -20,22 +20,35 @@ export function useProjectStateAutosave({
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingRef = useRef<ProjectStatePatch>({});
   const inFlightRef = useRef(false);
+  const tokenRef = useRef(token);
+  const projectIdRef = useRef(projectId);
+  const enabledRef = useRef(enabled);
 
-  const flushPatch = useCallback(async () => {
-    if (!enabled || !token || !projectId) return;
+  tokenRef.current = token;
+  projectIdRef.current = projectId;
+  enabledRef.current = enabled;
+
+  const flushPatch = useCallback(async (opts?: { keepalive?: boolean }) => {
+    const activeToken = tokenRef.current;
+    const activeProjectId = projectIdRef.current;
+    if (!enabledRef.current || !activeToken || !activeProjectId) return;
+
     if (timerRef.current) {
       clearTimeout(timerRef.current);
       timerRef.current = null;
     }
 
-    const patch = pendingRef.current;
-    if (Object.keys(patch).length === 0 || inFlightRef.current) return;
+    if (Object.keys(pendingRef.current).length === 0) return;
+    if (inFlightRef.current) return;
 
+    const patch = pendingRef.current;
     pendingRef.current = {};
     inFlightRef.current = true;
 
     try {
-      await patchProjectState(token, projectId, patch);
+      await patchProjectState(activeToken, activeProjectId, patch, {
+        keepalive: opts?.keepalive,
+      });
     } catch (err) {
       console.warn("No se pudo guardar el estado del proyecto:", err);
       pendingRef.current = { ...patch, ...pendingRef.current };
@@ -47,27 +60,41 @@ export function useProjectStateAutosave({
         }, AUTOSAVE_DELAY_MS);
       }
     }
-  }, [enabled, token, projectId]);
+  }, []);
 
-  const queuePatch = useCallback(
-    (patch: ProjectStatePatch) => {
-      if (!enabled || !token || !projectId) return;
+  const queuePatch = useCallback((patch: ProjectStatePatch) => {
+    if (!enabledRef.current || !tokenRef.current || !projectIdRef.current) return;
 
-      pendingRef.current = { ...pendingRef.current, ...patch };
+    pendingRef.current = { ...pendingRef.current, ...patch };
 
-      if (timerRef.current) clearTimeout(timerRef.current);
-      timerRef.current = setTimeout(() => {
-        void flushPatch();
-      }, AUTOSAVE_DELAY_MS);
-    },
-    [enabled, token, projectId, flushPatch],
-  );
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => {
+      void flushPatch();
+    }, AUTOSAVE_DELAY_MS);
+  }, [flushPatch]);
 
   useEffect(() => {
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
+    const flushOnLeave = () => {
+      void flushPatch({ keepalive: true });
     };
-  }, []);
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") flushOnLeave();
+    };
+
+    window.addEventListener("pagehide", flushOnLeave);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      window.removeEventListener("pagehide", flushOnLeave);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+      void flushPatch({ keepalive: true });
+    };
+  }, [flushPatch]);
 
   return { queuePatch, flushPatch };
 }

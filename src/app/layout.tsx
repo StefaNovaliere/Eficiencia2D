@@ -49,10 +49,10 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
       <body className="min-h-screen bg-base-200 text-base-content antialiased font-sans">
-        <ThemeProvider>
-          <AuthProvider>
-            <UserProfileProvider>
-              <SettingsProvider>
+        <AuthProvider>
+          <UserProfileProvider>
+            <SettingsProvider>
+              <ThemeProvider>
                 <SettingsThemeSync />
                 <CameraNavigationProvider>
                   <SubscriptionProvider>
@@ -61,10 +61,10 @@ export default function RootLayout({
                     </ProjectProvider>
                   </SubscriptionProvider>
                 </CameraNavigationProvider>
-              </SettingsProvider>
-            </UserProfileProvider>
-          </AuthProvider>
-        </ThemeProvider>
+              </ThemeProvider>
+            </SettingsProvider>
+          </UserProfileProvider>
+        </AuthProvider>
       </body>
     </html>
   );

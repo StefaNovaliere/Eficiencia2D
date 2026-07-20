@@ -1,7 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
-import { ThemeProvider } from "@/context/ThemeContext";
+import { ThemeProvider, useTheme } from "@/context/ThemeContext";
 import ModelColorWheel from "@/components/ModelColorWheel";
+
+vi.mock("@/hooks/usePersistedModelColors", () => ({
+  usePersistedModelColors: () => {
+    const { modelColors, setModelColor, resetModelColors } = useTheme();
+    return { modelColors, setModelColor, resetModelColors };
+  },
+}));
 
 function renderWheel() {
   return render(

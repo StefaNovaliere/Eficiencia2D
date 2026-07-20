@@ -12,6 +12,12 @@ export interface AtajosPreferencias {
   [key: string]: string | undefined;
 }
 
+export interface ColoresModelo {
+  wall?: string | null;
+  floor?: string | null;
+  background?: string | null;
+}
+
 export interface PreferenciasInterfaz {
   atajos?: AtajosPreferencias;
   vista_defecto?: string;
@@ -19,6 +25,8 @@ export interface PreferenciasInterfaz {
   unidades?: string;
   /** Preset de navegación 3D: blender | cad | touchpad | tinkercad | revit */
   navegacion_camara?: string;
+  /** Overrides de color del visor 3D (#RRGGBB por canal; null = default del tema). */
+  colores_modelo?: ColoresModelo | null;
   [key: string]: unknown;
 }
 
@@ -98,6 +106,46 @@ export function themeIdToTemaColor(themeId: ThemeId): string {
     default:
       return themeId;
   }
+}
+
+const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
+
+function normalizeHexColor(value: unknown): string | null {
+  if (value == null || value === "") return null;
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return HEX_COLOR_RE.test(trimmed) ? trimmed.toLowerCase() : null;
+}
+
+/** Parsea `preferencias_interfaz.colores_modelo` del backend. */
+export function parseColoresModeloFromSettings(
+  raw: unknown,
+): { wall: string | null; floor: string | null; background: string | null } | null {
+  if (raw === null) {
+    return { wall: null, floor: null, background: null };
+  }
+  if (!raw || typeof raw !== "object") return null;
+
+  const o = raw as Record<string, unknown>;
+  return {
+    wall: normalizeHexColor(o.wall),
+    floor: normalizeHexColor(o.floor),
+    background: normalizeHexColor(o.background),
+  };
+}
+
+/** Serializa overrides del visor para PATCH settings (null = reset total). */
+export function coloresModeloFromOverrides(colors: {
+  wall: string | null;
+  floor: string | null;
+  background: string | null;
+}): ColoresModelo | null {
+  if (!colors.wall && !colors.floor && !colors.background) return null;
+  return {
+    wall: colors.wall,
+    floor: colors.floor,
+    background: colors.background,
+  };
 }
 
 export async function fetchUserSettings(token: string): Promise<UserSettings> {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildReviewEditingPatch,
   parseSavedState,
   restoreProjectState,
   savedStateNeedsRecompute,
@@ -58,5 +59,25 @@ describe("savedStateNeedsRecompute", () => {
     expect(
       savedStateNeedsRecompute({ savedOverrides: [{ groupId: 1, newCategory: "wall" }] }, "Y"),
     ).toBe(false);
+  });
+});
+
+describe("buildReviewEditingPatch", () => {
+  it("incluye arrays vacíos para poder borrar ediciones en el backend", () => {
+    const patch = buildReviewEditingPatch({
+      overrides: [],
+      wallWallDecisions: new Map(),
+      marks: [],
+      userCuts: [],
+      notes: [],
+      markLines: [],
+    });
+
+    expect(patch.overrides).toEqual({});
+    expect(patch.wall_wall_decisions).toEqual({});
+    expect(patch.marks).toEqual([]);
+    expect(patch.user_cuts).toEqual([]);
+    expect(patch.notes).toEqual([]);
+    expect(patch.mark_lines).toEqual([]);
   });
 });
