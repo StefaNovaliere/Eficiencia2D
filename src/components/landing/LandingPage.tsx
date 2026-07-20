@@ -21,7 +21,6 @@ export default function LandingPage() {
   const containerRef = useRef<HTMLDivElement>(null);
   const navRef = useRef<HTMLElement>(null);
   const footerRef = useRef<HTMLElement>(null);
-  const footerInnerRef = useRef<HTMLDivElement>(null);
 
   useLayoutEffect(() => {
     gsap.registerPlugin(ScrollTrigger);
@@ -43,8 +42,8 @@ export default function LandingPage() {
 
         tailCleanup = setupLandingTail({
           snapSections: [plans, cta],
+          ctaSection: cta,
           footer: footerRef.current,
-          footerInner: footerInnerRef.current,
         });
         scheduleLandingScrollRefresh();
       });
@@ -101,12 +100,10 @@ export default function LandingPage() {
 
       <footer
         ref={footerRef}
-        className="landing-footer border-t border-base-300/40 py-10 px-4 md:px-8"
+        className="landing-footer border-t border-base-300/40 py-8 md:py-10 px-4 md:px-8"
       >
-        <div
-          ref={footerInnerRef}
-          className="max-w-5xl mx-auto flex flex-col md:flex-row items-center justify-between gap-8"
-        >
+        <div className="max-w-5xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6 md:gap-8">
+
           <div className="flex items-center gap-3">
             <img
               src="/images/logoFaviconE2d.svg"

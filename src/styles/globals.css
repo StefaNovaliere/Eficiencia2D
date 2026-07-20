@@ -1104,6 +1104,14 @@
   overflow: hidden;
   width: 100%;
   perspective: 900px;
+  transition: padding-bottom 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Espacio para el footer que sube sobre esta sección */
+.landing-cta-section--footer-visible .landing-cta-pin {
+  padding-bottom: min(11rem, 28vh);
+  align-items: flex-start;
+  padding-top: clamp(4rem, 12vh, 7rem);
 }
 
 .landing-cta-bridge {
@@ -1163,10 +1171,22 @@
   will-change: transform, opacity;
 }
 
+/* Footer fijo: arranca abajo del viewport y sube al enfocar #probar */
 .landing-footer {
-  position: relative;
-  z-index: 3;
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 45;
   background: var(--color-base-100);
+  transform: translateY(100%);
+  will-change: transform;
+  box-shadow: 0 -12px 40px color-mix(in oklch, var(--color-base-content) 8%, transparent);
+  pointer-events: none;
+}
+
+.landing-footer[data-landing-footer="visible"] {
+  pointer-events: auto;
 }
 
 /* —— Recorrido del flujo —— */
