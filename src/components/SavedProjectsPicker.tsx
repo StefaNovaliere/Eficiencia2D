@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ArrowRight,
   FolderOpen,
   Loader2,
   MoreVertical,
@@ -64,8 +63,11 @@ function ProjectActionsMenu({
       <button
         type="button"
         disabled={disabled}
-        onClick={() => setOpen((v) => !v)}
-        className={`btn btn-ghost btn-sm rounded-xl shrink-0 px-2 h-auto min-h-0 ${
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
+        className={`btn btn-ghost btn-sm rounded-xl rounded-l-none shrink-0 px-2 h-auto min-h-0 border-0 shadow-none hover:bg-base-200/70 ${
           open ? "bg-base-200 text-base-content" : "text-base-content/55 hover:text-base-content"
         }`}
         aria-label={`Más opciones para ${projectName}`}
@@ -90,7 +92,8 @@ function ProjectActionsMenu({
             role="menuitem"
             disabled={disabled}
             className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-base-200/80 disabled:opacity-50"
-            onClick={() => {
+            onClick={(e) => {
+              e.stopPropagation();
               setOpen(false);
               onRename();
             }}
@@ -103,7 +106,8 @@ function ProjectActionsMenu({
             role="menuitem"
             disabled={disabled}
             className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-error hover:bg-error/10 disabled:opacity-50"
-            onClick={() => {
+            onClick={(e) => {
+              e.stopPropagation();
               setOpen(false);
               onDelete();
             }}
@@ -372,12 +376,12 @@ export default function SavedProjectsPicker({
                     </button>
                   </form>
                 ) : (
-                  <>
+                  <div className="flex-1 min-w-0 flex items-stretch rounded-xl border border-base-300/60 bg-base-100/50 transition-colors hover:border-primary/30 hover:bg-primary/5 has-[:disabled]:opacity-60">
                     <button
                       type="button"
                       disabled={isBusy}
                       onClick={() => void onOpenProject(project)}
-                      className="flex-1 min-w-0 flex items-center gap-3 rounded-xl border border-base-300/60 bg-base-100/50 px-3 py-3 text-left transition-colors hover:border-primary/30 hover:bg-primary/5 disabled:opacity-60"
+                      className="flex-1 btn btn-ghost min-w-0 h-auto min-h-0 flex items-center gap-3 rounded-xl rounded-r-none border-0 bg-transparent px-3 py-3 text-left shadow-none hover:bg-transparent disabled:opacity-100"
                     >
                       <div className="min-w-0 flex-1">
                         <p className="font-medium text-sm truncate">{project.nombre}</p>
@@ -390,13 +394,8 @@ export default function SavedProjectsPicker({
                           {groups != null ? ` · ${groups} grupos` : ""}
                         </p>
                       </div>
-                      {isOpening ? (
+                      {isOpening && (
                         <Loader2 className="h-4 w-4 animate-spin text-primary shrink-0" />
-                      ) : (
-                        <span className="btn btn-primary btn-sm btn-outline rounded-lg gap-1 shrink-0 pointer-events-none">
-                          Abrir
-                          <ArrowRight size={14} />
-                        </span>
                       )}
                     </button>
                     <ProjectActionsMenu
@@ -406,7 +405,7 @@ export default function SavedProjectsPicker({
                       onRename={() => startRename(project)}
                       onDelete={() => void handleDeleteProject(project)}
                     />
-                  </>
+                  </div>
                 )}
               </li>
             );
