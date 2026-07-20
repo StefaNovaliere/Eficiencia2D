@@ -6,6 +6,7 @@ import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { ArrowRight } from "lucide-react";
 import { revealOnSectionLand, scheduleLandingScrollRefresh } from "./landingScroll";
+import LandingFooter from "./LandingFooter";
 
 function LandingCta() {
   const sectionRef = useRef<HTMLElement>(null);
@@ -85,6 +86,8 @@ function LandingCta() {
           </div>
         </div>
       </div>
+
+      <LandingFooter />
     </section>
   );
 }

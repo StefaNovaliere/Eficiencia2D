@@ -208,108 +208,17 @@ export function setupLandingSectionSnap(sections: Element[]): () => void {
 }
 
 /**
- * Snap a Planes + Probar, y cuando el foco está en Probar el footer
- * sube solo desde abajo (sin scrollear) tras un delay.
+ * Snap magnético en Planes + Probar al final del landing.
  */
 export function setupLandingTail(options: {
   snapSections: Element[];
-  ctaSection: Element | null;
-  footer: HTMLElement | null;
 }): () => void {
   const cleanups: Array<() => void> = [];
 
   cleanups.push(setupLandingSectionSnap(options.snapSections));
 
-  const { ctaSection, footer } = options;
-  if (ctaSection && footer) {
-    cleanups.push(setupCtaFooterReveal(ctaSection, footer));
-  }
-
   ScrollTrigger.sort();
   ScrollTrigger.refresh();
 
   return () => cleanups.forEach((cleanup) => cleanup());
-}
-
-/** Footer fixed: oculto abajo; a los 2s de enfocar #probar sube al viewport. */
-function setupCtaFooterReveal(ctaSection: Element, footer: HTMLElement): () => void {
-  gsap.registerPlugin(ScrollTrigger);
-
-  const reducedMotion =
-    typeof window !== "undefined" &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const showDelayMs = reducedMotion ? 0 : 2000;
-
-  gsap.set(footer, { yPercent: 100 });
-  footer.setAttribute("data-landing-footer", "hidden");
-
-  let showTimer: number | null = null;
-  let shown = false;
-
-  const clearTimer = () => {
-    if (showTimer === null) return;
-    window.clearTimeout(showTimer);
-    showTimer = null;
-  };
-
-  const showFooter = () => {
-    if (shown) return;
-    shown = true;
-    clearTimer();
-    footer.setAttribute("data-landing-footer", "visible");
-    ctaSection.classList.add("landing-cta-section--footer-visible");
-    gsap.to(footer, {
-      yPercent: 0,
-      duration: reducedMotion ? 0.01 : 0.85,
-      ease: "power3.out",
-      overwrite: "auto",
-    });
-  };
-
-  const hideFooter = () => {
-    clearTimer();
-    if (!shown && footer.getAttribute("data-landing-footer") === "hidden") return;
-    shown = false;
-    footer.setAttribute("data-landing-footer", "hidden");
-    ctaSection.classList.remove("landing-cta-section--footer-visible");
-    gsap.to(footer, {
-      yPercent: 100,
-      duration: reducedMotion ? 0.01 : 0.45,
-      ease: "power2.in",
-      overwrite: "auto",
-    });
-  };
-
-  const scheduleShow = () => {
-    if (shown || showTimer !== null) return;
-    showTimer = window.setTimeout(() => {
-      showTimer = null;
-      showFooter();
-    }, showDelayMs);
-  };
-
-  const isCtaFocused = () => {
-    const top = ctaSection.getBoundingClientRect().top;
-    return top < window.innerHeight * 0.28 && top > -window.innerHeight * 0.55;
-  };
-
-  const st = ScrollTrigger.create({
-    trigger: ctaSection,
-    start: "top 28%",
-    end: "bottom top",
-    onEnter: scheduleShow,
-    onEnterBack: scheduleShow,
-    onLeaveBack: hideFooter,
-  });
-
-  // Si el snap ya dejó #probar enfocada al montar, arrancar el timer
-  if (isCtaFocused()) scheduleShow();
-
-  return () => {
-    clearTimer();
-    st.kill();
-    gsap.set(footer, { clearProps: "transform" });
-    footer.removeAttribute("data-landing-footer");
-    ctaSection.classList.remove("landing-cta-section--footer-visible");
-  };
 }
