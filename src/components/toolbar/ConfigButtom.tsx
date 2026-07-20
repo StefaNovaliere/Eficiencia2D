@@ -1,7 +1,8 @@
 "use client";
 
-import { ChevronDown, Settings2 } from "lucide-react";
+import { ChevronDown, Palette, Settings2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import ModelColorWheel from "@/components/ModelColorWheel";
 
 export interface ConfigButtomProps {
   minAreaM2: number;
@@ -25,6 +26,7 @@ export default function ConfigButtom({
   onPinToolsChange,
 }: ConfigButtomProps) {
   const [configOpen, setConfigOpen] = useState(false);
+  const [colorsOpen, setColorsOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -89,6 +91,35 @@ export default function ConfigButtom({
               </select>
             </div>
           </div>
+
+          <div className="divider my-2" />
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 rounded-xl px-1 py-1.5 text-left transition-colors hover:bg-base-200/60"
+            aria-expanded={colorsOpen}
+            onClick={() => setColorsOpen((v) => !v)}
+          >
+            <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
+              <Palette size={14} />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-xs font-semibold text-base-content/70">
+                Colores del modelo
+              </span>
+              <span className="block text-[11px] leading-tight text-base-content/40">
+                Color de paredes, pisos y fondo del visor
+              </span>
+            </span>
+            <ChevronDown
+              size={13}
+              className={`opacity-40 transition-transform duration-150 ${colorsOpen ? "rotate-180" : ""}`}
+            />
+          </button>
+          {colorsOpen && (
+            <div className="pb-1 pt-2">
+              <ModelColorWheel />
+            </div>
+          )}
 
           <div className="divider my-2" />
           <p className="text-[12px] font-semibold text-base-content/40 uppercase tracking-wider px-1 mb-1">

@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, Eye, EyeOff, Layers, StickyNote } from "lucide-react";
 import type { FaceCategory, GeometryGroup } from "@/core/group-classifier";
-import { cutGroupOwnerId } from "@/core/cut-derived-groups";
 
 const CATEGORY_COLORS: Record<FaceCategory, string> = {
   floor: "var(--viewer-floor, #2d4f3e)",
@@ -27,6 +26,8 @@ export interface GroupListProps {
   visibleCategories: Set<FaceCategory>;
   /** When true, scroll the primary selected row into view (e.g. tab became visible). */
   listActive?: boolean;
+  /** Estado inicial del colapso (el cajón "Explorar componentes" arranca cerrado). */
+  initialCollapsed?: boolean;
   onSelectGroup: (id: number) => void;
   onToggleGroup: (id: number) => void;
   onHideGroup: (id: number) => void;
@@ -45,6 +46,7 @@ export default function GroupList({
   categoryOverrides,
   visibleCategories,
   listActive = true,
+  initialCollapsed = false,
   onSelectGroup,
   onToggleGroup,
   onHideGroup,
@@ -54,7 +56,7 @@ export default function GroupList({
   onOpenContextMenu,
   noteCountByGroupId,
 }: GroupListProps) {
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(initialCollapsed);
   const listRef = useRef<HTMLDivElement>(null);
   const selectedRef = useRef<HTMLDivElement>(null);
 
@@ -173,7 +175,7 @@ export default function GroupList({
           const effectiveCat = categoryOverrides.get(group.id) ?? group.category;
           const isSelected = selectedGroupIds.has(group.id);
           const color = CATEGORY_COLORS[effectiveCat];
-          const notesCount = noteCountByGroupId?.get(cutGroupOwnerId(group.id)) ?? 0;
+          const notesCount = noteCountByGroupId?.get(group.id) ?? 0;
 
           return (
             <div

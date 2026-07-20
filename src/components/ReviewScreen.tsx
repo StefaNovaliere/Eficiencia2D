@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from "react-resizable-panels";
 import GroupList from "./GroupList";
 import MeasureList from "./MeasureList";
+import InspectorSection from "./InspectorSection";
 import MeasureScaleSelect from "./MeasureScaleSelect";
 import CameraNavigationSelect from "./CameraNavigationSelect";
 import VisibilityFilters from "./VisibilityFilters";
@@ -51,6 +52,7 @@ import {
   Magnet,
   Ruler,
   BookOpen,
+  StickyNote,
 } from "lucide-react";
 import { useReviewHistory } from "@/hooks/useReviewHistory";
 import type { ModelViewerHandle, CameraCommand, SectionState } from "@/components/ModelViewer";
@@ -85,11 +87,17 @@ import type {
 } from "@/core/user-cuts";
 import { cutDimensionsLabel } from "@/core/user-cuts";
 import type { GroupNote } from "@/core/group-notes";
-import { noteCountByGroupId } from "@/core/group-notes";
+import {
+  noteCountByCutId,
+  noteCountByGroupId,
+  removeNotesForCut,
+  removeNotesForCuts,
+} from "@/core/group-notes";
 import GroupNotesPanel from "@/components/GroupNotesPanel";
 import {
   buildDisplayGroupsFromCuts,
   cutGroupOwnerId,
+  userCutForDerivedExtract,
 } from "@/core/cut-derived-groups";
 import type {
   MeasureDragState,
@@ -486,6 +494,27 @@ function applyBulkYieldOthersDecisions(
 // Component
 // ---------------------------------------------------------------------------
 
+/** Secciones del acordeón del inspector (una abierta a la vez). */
+type InspectorSectionId =
+  | "notas"
+  | "curvado"
+  | "refuerzos"
+  | "uniones"
+  | "cortes"
+  | "similares";
+
+/** Color/etiqueta del header del inspector según la categoría del componente. */
+const SELECTION_DOT: Record<string, string> = {
+  wall: "var(--viewer-wall, #9c9c9c)",
+  floor: "var(--viewer-floor, #cf9567)",
+  discard: "var(--viewer-discard, #8b95a3)",
+};
+const CATEGORY_LABEL_ES: Record<string, string> = {
+  wall: "Pared",
+  floor: "Piso",
+  discard: "Descartado",
+};
+
 export default function ReviewScreen({
   phase1,
   merges,
@@ -541,6 +570,8 @@ export default function ReviewScreen({
   const [isSolid, setIsSolid] = useState(false);
   const [hideSidebar, setHideSidebar] = useState(false);
   const [hideToolbar, setHideToolbar] = useState(false);
+  /** Señal para enfocar el borrador de notas (atajo N / Command Palette). */
+  const [noteFocusKey, setNoteFocusKey] = useState(0);
   // Which wall-wall joint (by jointIndex) is highlighted with leader labels in
   // the 3D viewer. Null = none selected.
   const [selectedJointIndex, setSelectedJointIndex] = useState<number | null>(
@@ -1015,13 +1046,19 @@ export default function ReviewScreen({
   );
 
   const handleSelectGroup = useCallback((id: number) => {
+    if (id === -1) {
+      setSelectedCutId(null);
+    } else {
+      const extractCut = userCutForDerivedExtract(id, userCuts);
+      setSelectedCutId(extractCut?.id ?? null);
+    }
     setSelectedGroupIds((prev) => {
       if (id === -1) return new Set();
       if (prev.size === 1 && prev.has(id)) return new Set();
       return new Set([id]);
     });
     setSelectedJointIndex(null);
-  }, []);
+  }, [userCuts]);
 
   const handleToggleGroup = useCallback((id: number) => {
     setSelectedGroupIds((prev) => {
@@ -1087,42 +1124,90 @@ export default function ReviewScreen({
     return displayGroups.find((g) => g.id === selId) ?? null;
   }, [selectedGroupIds, displayGroups]);
 
+  /**
+   * Grupo de pared "dueño" de la selección. Si la selección es una pieza
+   * derivada de un corte (id negativo, "· resto"/"· recorte"), su pared original
+   * está oculta y sólo se pueden seleccionar las piezas derivadas; para los
+   * encuentros pared-pared (que viven en ids originales) hay que remontar al
+   * padre. Para paredes sin cortar, el dueño es la propia selección.
+   */
+  const selectedWallOwnerGroup = useMemo(() => {
+    if (!selectedGroup) return null;
+    const ownerId = cutGroupOwnerId(selectedGroup.id);
+    if (ownerId === selectedGroup.id) return selectedGroup;
+    return phase1.groups.find((g) => g.id === ownerId) ?? selectedGroup;
+  }, [selectedGroup, phase1.groups]);
+
   const cutsForSelectedGroup = useMemo(() => {
     if (!selectedGroup) return [];
     const ownerId = cutGroupOwnerId(selectedGroup.id);
     return userCuts.filter((c) => c.groupId === ownerId);
   }, [selectedGroup, userCuts]);
 
-  const selectedNoteOwnerId = useMemo(
-    () => (selectedGroup ? cutGroupOwnerId(selectedGroup.id) : null),
+  /** Componente de display seleccionado (no el padre de topología). */
+  const selectedNoteComponentId = useMemo(
+    () => (selectedGroup ? selectedGroup.id : null),
     [selectedGroup],
   );
 
+  /**
+   * Corte activo: selección explícita en la lista de cortes, o pieza
+   * extraída seleccionada en el visor/lista de componentes.
+   */
+  const activeNoteCutId = useMemo(() => {
+    if (selectedGroup) {
+      const fromPiece = userCutForDerivedExtract(selectedGroup.id, userCuts);
+      if (fromPiece) return fromPiece.id;
+    }
+    if (!selectedCutId || !selectedGroup) return null;
+    const ownerId = cutGroupOwnerId(selectedGroup.id);
+    const cut = userCuts.find((c) => c.id === selectedCutId);
+    if (!cut || cut.groupId !== ownerId) return null;
+    return selectedCutId;
+  }, [selectedCutId, selectedGroup, userCuts]);
+
   const noteCounts = useMemo(() => noteCountByGroupId(groupNotes), [groupNotes]);
+  const cutNoteCounts = useMemo(() => noteCountByCutId(groupNotes), [groupNotes]);
 
   const noteMarkers = useMemo<GroupNoteMarker[]>(() => {
     if (noteCounts.size === 0) return [];
-    const byId = new Map(phase1.groups.map((g) => [g.id, g]));
+    const byId = new Map(displayGroups.map((g) => [g.id, g]));
     const out: GroupNoteMarker[] = [];
-    for (const [gid, count] of noteCounts) {
-      if (count <= 0 || hiddenGroupIds.has(gid)) continue;
-      const g = byId.get(gid);
+    for (const [cid, count] of noteCounts) {
+      if (count <= 0) continue;
+      const g = byId.get(cid);
       if (!g) continue;
-      const cat = overrides.get(gid) ?? g.category;
+      if (hiddenGroupIds.has(cid) || hiddenGroupIds.has(cutGroupOwnerId(cid))) continue;
+      const cat = overrides.get(cutGroupOwnerId(cid)) ?? g.category;
       if (!visibleCategories.has(cat)) continue;
-      out.push({ groupId: gid, anchor: g.centroid, noteCount: count });
+      out.push({ groupId: cid, anchor: g.centroid, noteCount: count });
     }
     return out;
-  }, [noteCounts, phase1.groups, hiddenGroupIds, overrides, visibleCategories]);
+  }, [noteCounts, displayGroups, hiddenGroupIds, overrides, visibleCategories]);
 
-  const groupLabelsForNotes = useMemo(() => {
+  const componentLabelsForNotes = useMemo(() => {
     const map = new Map<number, string>();
+    for (const g of displayGroups) {
+      const ownerId = cutGroupOwnerId(g.id);
+      const pid = phase1.panelIdByGroup?.[ownerId];
+      map.set(g.id, pid ? `${pid} · ${g.label}` : g.label);
+    }
+    // Padres de topología (por si hay notas legacy / de corte).
     for (const g of phase1.groups) {
+      if (map.has(g.id)) continue;
       const pid = phase1.panelIdByGroup?.[g.id];
       map.set(g.id, pid ? `${pid} · ${g.label}` : g.label);
     }
     return map;
-  }, [phase1.groups, phase1.panelIdByGroup]);
+  }, [displayGroups, phase1.groups, phase1.panelIdByGroup]);
+
+  const cutLabelsForNotes = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const cut of userCuts) {
+      map.set(cut.id, `${cut.kind} · ${cutDimensionsLabel(cut)}`);
+    }
+    return map;
+  }, [userCuts]);
 
   const sameAreaMatches = useMemo(() => {
     if (!selectedGroup) return [];
@@ -1356,6 +1441,14 @@ export default function ReviewScreen({
     setSelectedJointIndex(null);
   }, [selectedMergeIndex, onRemoveMerge, displayMergeMembers]);
 
+  /** Atajo N / Command Palette: abrir panel de notas y enfocar el borrador. */
+  const handleStartNote = useCallback(() => {
+    if (selectedGroupIds.size !== 1) return;
+    setHideSidebar(false);
+    setSidebarTab("seleccion");
+    setNoteFocusKey((k) => k + 1);
+  }, [selectedGroupIds.size]);
+
   // Remove ONLY the currently selected wall from its merge cluster.
   // If the remaining cluster is still 2+ walls, re-add it; otherwise drop it.
   const handleRemoveSelectedFromMerge = useCallback(() => {
@@ -1472,6 +1565,9 @@ export default function ReviewScreen({
       case "split":
         handleDivideMerged();
         break;
+      case "note":
+        handleStartNote();
+        break;
       case "markOpenings":
         setSidebarTab("seleccion");
         for (const id of ids) handleToggleMark(id);
@@ -1522,6 +1618,7 @@ export default function ReviewScreen({
     (cutId: string) => {
       pushHistory();
       setUserCuts((prev) => prev.filter((c) => c.id !== cutId));
+      setGroupNotes((prev) => removeNotesForCut(prev, cutId));
       setSelectedCutId((prev) => (prev === cutId ? null : prev));
     },
     [pushHistory],
@@ -1652,25 +1749,25 @@ export default function ReviewScreen({
   /** Todas las paredes coplanares visibles (misma fachada / mismo plano). */
   const coplanarFacadeIds = useMemo(() => {
     if (
-      !selectedGroup ||
-      getEffectiveCategory(selectedGroup, overrides) !== "wall"
+      !selectedWallOwnerGroup ||
+      getEffectiveCategory(selectedWallOwnerGroup, overrides) !== "wall"
     )
       return [];
-    return listCoplanarFacadeIds(selectedGroup, phase1.groups, overrides);
-  }, [selectedGroup, phase1.groups, overrides]);
+    return listCoplanarFacadeIds(selectedWallOwnerGroup, phase1.groups, overrides);
+  }, [selectedWallOwnerGroup, phase1.groups, overrides]);
 
   const facadeReferenceResolved = useMemo(() => {
-    if (!selectedGroup) return -1;
-    return resolveWallId(selectedGroup.id, wallIdAliasMap);
-  }, [selectedGroup, wallIdAliasMap]);
+    if (!selectedWallOwnerGroup) return -1;
+    return resolveWallId(selectedWallOwnerGroup.id, wallIdAliasMap);
+  }, [selectedWallOwnerGroup, wallIdAliasMap]);
 
   const facadeRefGroup = useMemo(() => {
     if (facadeReferenceResolved < 0) return null;
     return (
       phase1.groups.find((g) => g.id === facadeReferenceResolved) ??
-      selectedGroup
+      selectedWallOwnerGroup
     );
-  }, [facadeReferenceResolved, phase1.groups, selectedGroup]);
+  }, [facadeReferenceResolved, phase1.groups, selectedWallOwnerGroup]);
 
   const bulkYieldCountForWall = useMemo(() => {
     if (!facadeRefGroup || facadeReferenceResolved < 0) return 0;
@@ -1761,6 +1858,50 @@ export default function ReviewScreen({
     });
   }, [selectedGroupIds.size, hasSelectionTabContent]);
 
+  // --- Inspector (acordeón): una sección abierta a la vez ---
+  const [inspectorSection, setInspectorSection] =
+    useState<InspectorSectionId | null>(null);
+  const toggleInspector = useCallback(
+    (id: InspectorSectionId) =>
+      setInspectorSection((cur) => (cur === id ? null : id)),
+    [],
+  );
+
+  const showCurvadoSection =
+    selectedGroupIds.size === 1 && selectedGroup?.category === "wall";
+  const showUnionesSection =
+    (selectedGroupIds.size === 1 && displayMergeMembers.length >= 2) ||
+    encountersWallId != null ||
+    selectedGroupIds.size >= 2;
+  const showCortesSection =
+    selectedGroupIds.size === 1 && cutsForSelectedGroup.length > 0;
+  const showSimilaresSection =
+    selectedGroupIds.size === 1 &&
+    (sameAreaMatches.length > 0 || sameAreaDiscardMatches.length > 0);
+
+  // Badges del acordeón.
+  const notasBadge =
+    selectedNoteComponentId != null
+      ? noteCounts.get(selectedNoteComponentId)
+      : undefined;
+  const unionesBadge =
+    selectedGroupIds.size >= 2
+      ? selectedGroupIds.size
+      : displayMergeMembers.length >= 2
+        ? displayMergeMembers.length
+        : undefined;
+  const similaresBadge =
+    sameAreaMatches.length + sameAreaDiscardMatches.length || undefined;
+
+  // Auto-abrir la sección más relevante al cambiar la selección (calma por defecto).
+  useEffect(() => {
+    if (selectedGroupIds.size === 0) setInspectorSection(null);
+    else if (showUnionesSection) setInspectorSection("uniones");
+    else setInspectorSection(null);
+    // Sólo al cambiar la selección o sus uniones, no al alternar secciones.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedGroupIds, showUnionesSection]);
+
   const handleBulkYieldOthers = useCallback(
     (useFullFacade: boolean) => {
       if (!facadeRefGroup || facadeReferenceResolved < 0) return;
@@ -1843,9 +1984,12 @@ export default function ReviewScreen({
   ]);
 
   // Abrir panel de encuentros al seleccionar una pared con cruces (solo si aún no está abierto).
+  // Si la selección es una pieza derivada de un corte (id negativo), se remonta a
+  // la pared original (los encuentros pared-pared viven en ids originales).
   useEffect(() => {
     if (selectedGroupIds.size !== 1) return;
-    const id = Array.from(selectedGroupIds)[0];
+    const rawId = Array.from(selectedGroupIds)[0];
+    const id = cutGroupOwnerId(rawId);
     const hasJoints = wallWallList.some(
       ({ ww }) => ww.groupA === id || ww.groupB === id,
     );
@@ -2241,6 +2385,12 @@ export default function ReviewScreen({
         return;
       }
 
+      if ((e.key === "n" || e.key === "N") && selectedGroupIds.size === 1) {
+        e.preventDefault();
+        handleStartNote();
+        return;
+      }
+
       if (e.key === "t" || e.key === "T") {
         e.preventDefault();
         setCutToolMode(false);
@@ -2269,6 +2419,7 @@ export default function ReviewScreen({
     handleMergeSelected,
     canSplitMerged,
     handleDivideMerged,
+    handleStartNote,
     measureToolMode,
     selectedMeasureId,
     handleRemoveMeasure,
@@ -2306,99 +2457,102 @@ export default function ReviewScreen({
             </div>
           )}
 
-          {/* Pestañas: lista de componentes vs acciones de la selección */}
-          <div
-            role="tablist"
-            className="tabs tabs-bordered px-2 shrink-0 bg-base-100"
-          >
-            <button
-              type="button"
-              role="tab"
-              className={`tab gap-1.5 text-xs ${sidebarTab === "capas" ? "tab-active" : ""}`}
-              onClick={() => setSidebarTab("capas")}
-            >
-              Componentes
-              <span className="badge badge-xs badge-neutral font-mono">
-                {displayGroups.length}
-              </span>
-              {measures.length > 0 && (
-                <span className="badge badge-xs badge-info font-mono">
-                  {measures.length}
-                </span>
-              )}
-            </button>
-            <button
-              type="button"
-              role="tab"
-              className={`tab gap-1.5 text-xs ${sidebarTab === "seleccion" ? "tab-active" : ""}`}
-              onClick={() => setSidebarTab("seleccion")}
-            >
-              Selección
-              {selectedGroupIds.size > 0 && (
-                <span className="badge badge-xs badge-primary font-mono">
-                  {selectedGroupIds.size}
-                </span>
-              )}
-            </button>
-          </div>
+          {/* Inspector: contexto de la selección (una sección a la vez) */}
+          <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar flex flex-col">
+            {selectedGroupIds.size === 0 && (
+              <div className="flex flex-col items-center justify-center flex-1 text-center px-6 gap-2 text-base-content/50 py-12">
+                <ScanSearch size={26} className="text-base-content/25" />
+                <p className="text-sm">Seleccioná un componente en el modelo 3D</p>
+                <p className="text-xs text-base-content/35">
+                  Sus propiedades y herramientas aparecen acá.
+                </p>
+              </div>
+            )}
 
-          {/* Pestaña: Capas */}
-          <div
-            className={`flex-1 min-h-0 flex flex-col ${sidebarTab === "capas" ? "" : "hidden"}`}
-          >
-            <MeasureList
-              measures={measures}
-              groups={displayGroups}
-              labelOptions={measureLabelOptions}
-              measureScaleDenom={measureLabelScale}
-              onMeasureScaleChange={handleMeasureScaleChange}
-              selectedMeasureId={selectedMeasureId}
-              onSelectMeasure={handleSelectMeasure}
-              onRemoveMeasure={handleRemoveMeasure}
-              onClearMeasures={handleClearMeasures}
-            />
-            <GroupList
-              groups={displayGroups}
-              selectedGroupIds={selectedGroupIds}
-              hiddenGroupIds={hiddenGroupIds}
-              categoryOverrides={overrides}
-              visibleCategories={visibleCategories}
-              noteCountByGroupId={noteCounts}
-              listActive={sidebarTab === "capas"}
-              onSelectGroup={handleSelectGroup}
-              onToggleGroup={handleToggleGroup}
-              onHideGroup={handleHideGroup}
-              onShowGroup={handleShowGroup}
-              onShowAllHidden={handleShowAllHidden}
-              onChangeCategory={handleChangeCategory}
-              onOpenContextMenu={openViewerContextMenu}
-            />
-          </div>
-
-          {/* Pestaña: Selección */}
-          <div
-            className={`flex-1 min-h-0 overflow-y-auto custom-scrollbar ${sidebarTab === "seleccion" ? "" : "hidden"}`}
-          >
-            <div className="px-4 py-3 border-b border-base-300/30 bg-base-100/60">
-              <GroupNotesPanel
+            {selectedGroupIds.size >= 1 && (
+              <div className="px-4 py-3 border-b border-base-300/30 bg-base-100/70 shrink-0">
+                {selectedGroupIds.size === 1 && selectedGroup ? (
+                  <div className="flex items-center gap-2.5">
+                    <span
+                      className="h-3.5 w-3.5 shrink-0 rounded-full ring-1 ring-base-content/15"
+                      style={{
+                        background:
+                          SELECTION_DOT[getEffectiveCategory(selectedGroup, overrides)],
+                      }}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <h3 className="truncate text-sm font-semibold text-base-content leading-tight">
+                        {selectedGroup.label}
+                      </h3>
+                      <p className="text-[11px] text-base-content/45 mt-0.5">
+                        {CATEGORY_LABEL_ES[getEffectiveCategory(selectedGroup, overrides)]}
+                        {" · "}
+                        {selectedGroup.totalArea.toFixed(1)} m²
+                      </p>
+                    </div>
+                    {panelIdByGroup.get(selectedGroup.id) && (
+                      <span className="font-mono text-[10px] text-base-content/45 bg-base-100 border border-base-300/40 px-1 rounded shrink-0">
+                        {panelIdByGroup.get(selectedGroup.id)}
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-sm font-semibold text-base-content">
+                    {selectedGroupIds.size} componentes seleccionados
+                  </p>
+                )}
+              </div>
+            )}
+            {selectedGroupIds.size >= 1 && (
+              <InspectorSection
+                icon={<StickyNote size={14} />}
+                title="Notas"
+                badge={notasBadge}
+                open={inspectorSection === "notas"}
+                onToggle={() => toggleInspector("notas")}
+              >
+                <div className="px-4 py-3 bg-base-100/60">
+                  <GroupNotesPanel
                 notes={groupNotes}
-                selectedGroupId={selectedNoteOwnerId}
-                selectedGroupLabel={
-                  selectedNoteOwnerId != null
-                    ? groupLabelsForNotes.get(selectedNoteOwnerId) ??
+                selectedComponentId={selectedNoteComponentId}
+                selectedComponentLabel={
+                  selectedNoteComponentId != null
+                    ? componentLabelsForNotes.get(selectedNoteComponentId) ??
                       selectedGroup?.label
                     : undefined
                 }
-                groupLabels={groupLabelsForNotes}
+                selectedCutId={activeNoteCutId}
+                selectedCutLabel={
+                  activeNoteCutId != null
+                    ? cutLabelsForNotes.get(activeNoteCutId)
+                    : undefined
+                }
+                componentLabels={componentLabelsForNotes}
+                cutLabels={cutLabelsForNotes}
                 onChange={setGroupNotes}
-                onSelectGroup={(gid) => {
-                  handleSelectGroup(gid);
+                onSelectComponent={(cid) => {
+                  handleSelectGroup(cid);
                   setSidebarTab("seleccion");
                 }}
+                onSelectCut={(gid, cutId) => {
+                  setSelectedGroupIds(new Set([gid]));
+                  setSelectedCutId(cutId);
+                  setSidebarTab("seleccion");
+                }}
+                focusDraftKey={noteFocusKey}
               />
-            </div>
+                </div>
+              </InspectorSection>
+            )}
 
-            {/* Superficies curvas: kerf/auxético — sólo en paredes (no pisos) */}
+            {/* Curvado: kerf/auxético — sólo en paredes */}
+            {showCurvadoSection && (
+              <InspectorSection
+                icon={<Spline size={14} />}
+                title="Curvado"
+                open={inspectorSection === "curvado"}
+                onToggle={() => toggleInspector("curvado")}
+              >
             {selectedGroupIds.size === 1 && (() => {
               const gid = Array.from(selectedGroupIds)[0];
               const dg = displayGroups.find((gr) => gr.id === gid);
@@ -2423,9 +2577,18 @@ export default function ReviewScreen({
                 />
               );
             })()}
+              </InspectorSection>
+            )}
 
             {/* Refuerzos estructurales: nervios (cartelas) y columnas */}
-            <div className="px-4 py-3 border-b border-base-300/30 space-y-2">
+            {selectedGroupIds.size >= 1 && (
+              <InspectorSection
+                icon={<Wrench size={14} />}
+                title="Refuerzos"
+                open={inspectorSection === "refuerzos"}
+                onToggle={() => toggleInspector("refuerzos")}
+              >
+            <div className="px-4 py-3 space-y-2">
               <p className="text-[11px] font-semibold uppercase tracking-widest text-base-content/50">
                 Refuerzos estructurales
               </p>
@@ -2546,8 +2709,18 @@ export default function ReviewScreen({
                 </ul>
               )}
             </div>
+              </InspectorSection>
+            )}
 
-            {/* Grupo fusionado: ver paredes, enfocar y desfusionar solo una */}
+            {/* Uniones: fusión, encuentros pared-pared y fachada */}
+            {showUnionesSection && (
+              <InspectorSection
+                icon={<Link2 size={14} />}
+                title="Uniones"
+                badge={unionesBadge}
+                open={inspectorSection === "uniones"}
+                onToggle={() => toggleInspector("uniones")}
+              >
             {selectedGroupIds.size === 1 && displayMergeMembers.length >= 2 && (
               <div className="px-4 py-3 border-b border-base-300/30 bg-primary/5 space-y-2">
                 <p className="text-[11px] font-semibold uppercase tracking-widest text-primary/60">
@@ -3045,18 +3218,6 @@ export default function ReviewScreen({
                 );
               })()}
 
-            {selectedGroupIds.size === 0 && (
-              <div className="flex flex-col items-center justify-center h-full text-center px-6 gap-2 text-base-content/50">
-                <ScanSearch size={26} className="text-base-content/25" />
-                <p className="text-sm">
-                  Seleccioná una capa para ver sus acciones
-                </p>
-                <p className="text-xs text-base-content/35">
-                  Tipo, fusión/división y opciones por tamaño.
-                </p>
-              </div>
-            )}
-
             {/* Lista de capas cuando hay 2 o más seleccionadas */}
             {selectedGroupIds.size >= 2 &&
               (() => {
@@ -3141,9 +3302,20 @@ export default function ReviewScreen({
                 )}
               </div>
             )}
+              </InspectorSection>
+            )}
 
+            {/* Cortes */}
+            {showCortesSection && (
+              <InspectorSection
+                icon={<Scissors size={14} />}
+                title="Cortes"
+                badge={cutsForSelectedGroup.length}
+                open={inspectorSection === "cortes"}
+                onToggle={() => toggleInspector("cortes")}
+              >
             {selectedGroupIds.size === 1 && cutsForSelectedGroup.length > 0 && (
-              <div className="px-4 py-3 border-b border-base-300/30 bg-warning/5">
+              <div className="px-4 py-3 bg-warning/5">
                 <div className="flex items-center justify-between mb-2">
                   <p className="text-[11px] font-semibold uppercase tracking-widest text-warning/70">
                     Cortes · {cutsForSelectedGroup.length}
@@ -3152,10 +3324,16 @@ export default function ReviewScreen({
                     type="button"
                     className="btn btn-ghost btn-xs gap-1 text-base-content/50 hover:text-warning"
                     onClick={() => {
+                      const ownerId = cutGroupOwnerId(selectedGroup!.id);
+                      const removedIds = userCuts
+                        .filter((c) => c.groupId === ownerId)
+                        .map((c) => c.id);
                       pushHistory();
                       setUserCuts((prev) =>
-                        prev.filter((c) => c.groupId !== selectedGroup!.id),
+                        prev.filter((c) => c.groupId !== ownerId),
                       );
+                      setGroupNotes((prev) => removeNotesForCuts(prev, removedIds));
+                      setSelectedCutId(null);
                     }}
                   >
                     <Trash2 size={11} />
@@ -3163,7 +3341,9 @@ export default function ReviewScreen({
                   </button>
                 </div>
                 <div className="flex flex-col gap-1">
-                  {cutsForSelectedGroup.map((cut) => (
+                  {cutsForSelectedGroup.map((cut) => {
+                    const cutNotes = cutNoteCounts.get(cut.id) ?? 0;
+                    return (
                     <div
                       key={cut.id}
                       role="button"
@@ -3173,11 +3353,17 @@ export default function ReviewScreen({
                           ? "bg-warning/15 border-warning/50 ring-1 ring-warning/30"
                           : "bg-base-100/80 border-warning/20 hover:bg-warning/10"
                       }`}
-                      onClick={() => setSelectedCutId(cut.id)}
+                      onClick={() =>
+                        setSelectedCutId((prev) =>
+                          prev === cut.id ? null : cut.id,
+                        )
+                      }
                       onKeyDown={(e) => {
                         if (e.key === "Enter" || e.key === " ") {
                           e.preventDefault();
-                          setSelectedCutId(cut.id);
+                          setSelectedCutId((prev) =>
+                            prev === cut.id ? null : cut.id,
+                          );
                         }
                       }}
                     >
@@ -3185,6 +3371,15 @@ export default function ReviewScreen({
                       <span className="flex-1 font-mono text-[11px] text-base-content/70">
                         {cut.kind} · {cutDimensionsLabel(cut)}
                       </span>
+                      {cutNotes > 0 && (
+                        <span
+                          className="badge badge-ghost badge-xs gap-0.5 shrink-0"
+                          title={`${cutNotes} nota${cutNotes !== 1 ? "s" : ""} del corte`}
+                        >
+                          <StickyNote size={9} />
+                          {cutNotes}
+                        </span>
+                      )}
                       <button
                         type="button"
                         className="btn btn-ghost btn-xs btn-circle opacity-50 hover:opacity-100 hover:text-error"
@@ -3197,13 +3392,25 @@ export default function ReviewScreen({
                         <X size={10} />
                       </button>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}
+              </InspectorSection>
+            )}
 
+            {/* Similares: piezas del mismo tamaño */}
+            {showSimilaresSection && (
+              <InspectorSection
+                icon={<Copy size={14} />}
+                title="Piezas iguales"
+                badge={similaresBadge}
+                open={inspectorSection === "similares"}
+                onToggle={() => toggleInspector("similares")}
+              >
             {selectedGroupIds.size === 1 && sameAreaMatches.length > 0 && (
-              <div className="px-4 py-2 border-b border-base-300/30 bg-base-100/60">
+              <div className="px-4 py-2 bg-base-100/60">
                 <p className="text-[11px] text-base-content/45 mb-2">
                   {sameAreaMatches.length} capa
                   {sameAreaMatches.length !== 1 ? "s" : ""} más con{" "}
@@ -3253,8 +3460,40 @@ export default function ReviewScreen({
                   </div>
                 </div>
               )}
+              </InspectorSection>
+            )}
           </div>
-          {/* /Pestaña: Selección */}
+          {/* /Inspector */}
+
+          {/* Explorar componentes: la lista completa, colapsada por defecto */}
+          <MeasureList
+            measures={measures}
+            groups={displayGroups}
+            labelOptions={measureLabelOptions}
+            measureScaleDenom={measureLabelScale}
+            onMeasureScaleChange={handleMeasureScaleChange}
+            selectedMeasureId={selectedMeasureId}
+            onSelectMeasure={handleSelectMeasure}
+            onRemoveMeasure={handleRemoveMeasure}
+            onClearMeasures={handleClearMeasures}
+          />
+          <GroupList
+            groups={displayGroups}
+            selectedGroupIds={selectedGroupIds}
+            hiddenGroupIds={hiddenGroupIds}
+            categoryOverrides={overrides}
+            visibleCategories={visibleCategories}
+            noteCountByGroupId={noteCounts}
+            listActive
+            initialCollapsed
+            onSelectGroup={handleSelectGroup}
+            onToggleGroup={handleToggleGroup}
+            onHideGroup={handleHideGroup}
+            onShowGroup={handleShowGroup}
+            onShowAllHidden={handleShowAllHidden}
+            onChangeCategory={handleChangeCategory}
+            onOpenContextMenu={openViewerContextMenu}
+          />
 
               </aside>
             </Panel>
@@ -3641,6 +3880,20 @@ export default function ReviewScreen({
               setRibToolMode(false);
               setAngleMeasureMode(m);
             }}
+            canMerge={canMergeSelected}
+            onMerge={handleMergeSelected}
+            mergeTitle={
+              canMergeSelected
+                ? `${mergeLabel} (F)`
+                : (mergeBlockedReason ?? "Seleccioná 2 o más paredes para unir (F)")
+            }
+            canSplit={canSplitMerged}
+            onSplit={handleDivideMerged}
+            splitTitle={
+              canSplitMerged
+                ? `${divideAllLabel} (D)`
+                : "Seleccioná un componente fusionado para dividir (D)"
+            }
           />
         )}
 

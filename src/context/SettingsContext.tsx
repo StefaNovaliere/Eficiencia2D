@@ -121,7 +121,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   );
 }
 
-/** Aplica tema del backend (o localStorage al cerrar sesión). */
+/** Aplica tema: prioriza localStorage (elección en este navegador) para no pisar Neón al recargar. */
 export function SettingsThemeSync() {
   const { settings, isLoadingSettings } = useSettings();
   const { isLoadingAuth } = useAuth();
@@ -133,6 +133,18 @@ export function SettingsThemeSync() {
     if (!settings) {
       setTheme(getStoredThemeId());
       return;
+    }
+
+    // Si el usuario ya eligió un tema en esta máquina (p. ej. Neón), respetarlo.
+    // El form de Configuración y el switch Neón escriben localStorage + backend.
+    try {
+      const saved = localStorage.getItem("theme");
+      if (saved === "neon" || saved === "light" || saved === "dark" || saved === "aqua" || saved === "valentine" || saved === "sunset" || saved === "halloween") {
+        setTheme(saved);
+        return;
+      }
+    } catch {
+      /* ignore */
     }
 
     setTheme(parseTemaColorToThemeId(settings.tema_color));

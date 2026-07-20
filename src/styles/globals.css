@@ -50,11 +50,15 @@
  *  · Íconos lucide: 14–16px inline / 22–28px en encabezados.
  */
 
+/*
+ * Fallbacks del visor 3D (antes de que ThemeContext aplique el tema).
+ * La fuente de verdad por tema es: src/theme/viewer-palettes.ts
+ */
 :root {
   --viewer-bg: #eef0f4;
-  --viewer-floor: #2d4f3e;
-  --viewer-wall: #556068;
-  --viewer-discard: #434c57;
+  --viewer-floor: #5F7D68;
+  --viewer-wall: #B0B5BE;
+  --viewer-discard: #8A929E;
   --viewer-edge: #0f1419;
   --viewer-highlight: #d97706;
 }
