@@ -270,16 +270,24 @@ export async function getMiSuscripcion(token: string): Promise<SuscripcionFetch>
 // Escritura (requiere backend; los errores se propagan, NO se ocultan).
 // ---------------------------------------------------------------------------
 
+export type SeleccionarPlanOptions = {
+  cuponCodigo?: string;
+  /** Pago único ya aprobado (Wallet Brick). Activa el plan sin preapproval. */
+  mpPaymentId?: string;
+  /** Bypass de desarrollo (MP_BYPASS_KEY del backend). */
+  bypassKey?: string;
+};
+
 /**
  * Selecciona/cambia el plan.
- * - Plan gratis → el backend responde 200 con la suscripción → `kind:"activa"`.
- * - Plan pago → 200 con `checkout_url` (MercadoPago) → `kind:"checkout"` (redirigir).
- * - Error (401/404/500/…) → **tira** con el `detail` del backend (la UI lo muestra).
+ * - Plan gratis / cupón → `kind:"activa"`.
+ * - Con `mpPaymentId` / `bypassKey` → activa plan pago.
+ * - Plan pago sin pago → puede devolver `checkout_url` (preapproval legacy).
  */
 export async function seleccionarPlan(
   token: string,
   plan: Plan,
-  options?: { cuponCodigo?: string },
+  options?: SeleccionarPlanOptions,
 ): Promise<SeleccionPlanResult> {
   const payload: Record<string, string | number> = {
     plan_id: resolvePlanNumericId(plan),
@@ -287,6 +295,12 @@ export async function seleccionarPlan(
   const cuponCodigo = options?.cuponCodigo?.trim().toUpperCase();
   if (cuponCodigo) {
     payload.cupon_codigo = cuponCodigo;
+  }
+  if (options?.mpPaymentId?.trim()) {
+    payload.mp_payment_id = options.mpPaymentId.trim();
+  }
+  if (options?.bypassKey?.trim()) {
+    payload.bypass_key = options.bypassKey.trim();
   }
 
   const res = await apiFetch(

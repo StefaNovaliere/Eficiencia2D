@@ -7,8 +7,8 @@ import { useSubscription } from "@/context/SubscriptionContext";
 import { useAuth } from "@/context/AuthContext";
 import type { Plan } from "@/services/planes";
 import { findPlanByNumericId } from "@/services/planes";
+import { savePlanCheckout } from "@/services/planCheckout";
 import {
-  formatCuponBeneficio,
   resolverPrecioFinalDescuento,
   validarCuponPorCodigo,
   type ValidarCuponResult,
@@ -138,19 +138,40 @@ export default function PlanSelector({ hideHeader = false }: { hideHeader?: bool
       return;
     }
 
+    const precioConDescuento = getPrecioFinalDescuento(plan);
+    const amount =
+      precioConDescuento != null ? precioConDescuento : plan.precio_mensual;
+    const esCuponPlan =
+      appliedCupon?.tipo === "plan" && appliedCupon.cupon.plan_id === plan.plan_id;
+    const requierePago = amount > 0 && !esCuponPlan;
+
+    // Plan pago: ir a cobrar con Wallet Brick (Next/MP). No llamar al preapproval
+    // del backend acá — en el VPS suele colgarse y el front muestra "no se pudo conectar".
+    if (requierePago) {
+      const periodo = plan.periodo === "año" ? "año" : "mes";
+      savePlanCheckout({
+        planId: plan.id,
+        planNumericId: plan.plan_id,
+        planNombre: plan.nombre,
+        amount,
+        moneda: plan.moneda || "ARS",
+        periodo,
+        cuponCodigo: appliedCupon?.cupon.codigo,
+      });
+      clearCupon();
+      router.push("/payment?from=plan");
+      return;
+    }
+
     setBusyId(plan.id);
     setNotice(null);
     setActionError(null);
     try {
-      const result = await selectPlan(plan, {
+      await selectPlan(plan, {
         cuponCodigo: appliedCupon?.cupon.codigo,
       });
-      if (result.kind === "checkout") {
-        setNotice("Redirigiéndote al pago…");
-      } else {
-        setNotice(`Plan ${plan.nombre} activado.`);
-        clearCupon();
-      }
+      setNotice(`Plan ${plan.nombre} activado.`);
+      clearCupon();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "No se pudo elegir el plan");
     } finally {

@@ -12,6 +12,7 @@ import {
 } from "@/services/auth";
 import { getRols, type Rol } from "@/services/rols";
 import { Mail, CheckCircle2, ArrowRight, Eye, EyeOff } from "lucide-react";
+import TermsAcceptance from "@/components/TermsAcceptance";
 
 type AuthMode = "login" | "register";
 
@@ -38,6 +39,7 @@ export default function AuthForm({ mode, passwordUpdatedNotice }: AuthFormProps)
   const [unverifiedEmail, setUnverifiedEmail] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [pendingEmail, setPendingEmail] = useState<string | null>(null);
+  const [aceptoTerminos, setAceptoTerminos] = useState(false);
 
   const isRegister = mode === "register";
 
@@ -100,6 +102,10 @@ export default function AuthForm({ mode, passwordUpdatedNotice }: AuthFormProps)
         setError("Seleccioná un rol para tu cuenta.");
         return;
       }
+      if (!aceptoTerminos) {
+        setError("Debés aceptar los términos y condiciones para registrarte.");
+        return;
+      }
     }
 
     setIsLoading(true);
@@ -113,6 +119,7 @@ export default function AuthForm({ mode, passwordUpdatedNotice }: AuthFormProps)
           password,
           selectedRolId,
           nombre.trim() || undefined,
+          true,
         );
         setPendingEmail(res.email);
       } else {
@@ -197,10 +204,10 @@ export default function AuthForm({ mode, passwordUpdatedNotice }: AuthFormProps)
   }
 
   return (
-    <main className="flex flex-col min-h-screen items-center py-2 px-4 md:px-8 relative">
+    <main className="flex flex-col min-h-screen items-center py-6 px-4 md:px-8 relative">
       <BackgroundSymbols />
 
-      <div className="text-center mb-8 mt-8 md:mt-12 z-10">
+      <div className="text-center mb-8 mt-6 md:mt-10 z-10">
         <img
           src="/images/logoFaviconE2d.svg"
           alt="Eficiencia2D"
@@ -220,8 +227,8 @@ export default function AuthForm({ mode, passwordUpdatedNotice }: AuthFormProps)
 
       <div className="w-full max-w-md z-10">
         <div className="card bg-base-100 shadow-2xl border border-base-200">
-          <div className="card-body p-6 md:p-8">
-            <form onSubmit={handleSubmit} className="space-y-6">
+          <div className="card-body gap-0 p-6 md:p-8">
+            <form onSubmit={handleSubmit} className="flex flex-col gap-5">
               {passwordUpdatedNotice && !isRegister && (
                 <div className="alert alert-success rounded-xl text-sm">
                   <span>Contraseña actualizada. Ya podés iniciar sesión.</span>
@@ -229,8 +236,8 @@ export default function AuthForm({ mode, passwordUpdatedNotice }: AuthFormProps)
               )}
 
               {isRegister && (
-                <label className="form-control w-full">
-                  <span className="label-text font-medium mb-1">Nombre</span>
+                <label className="form-control w-full gap-1.5">
+                  <span className="label-text font-medium">Nombre</span>
                   <input
                     type="text"
                     className="input input-bordered w-full bg-base-100"
@@ -243,8 +250,8 @@ export default function AuthForm({ mode, passwordUpdatedNotice }: AuthFormProps)
                 </label>
               )}
 
-              <label className="form-control w-full">
-                <span className="label-text font-medium mb-1">Email</span>
+              <label className="form-control w-full gap-1.5">
+                <span className="label-text font-medium">Email</span>
                 <input
                   type="email"
                   className="input input-bordered w-full bg-base-100"
@@ -256,46 +263,46 @@ export default function AuthForm({ mode, passwordUpdatedNotice }: AuthFormProps)
                 />
               </label>
 
-              <label className="form-control w-full">
-                <span className="label-text font-medium mb-1">Contraseña</span>
-                <div className="relative">
-                  <input
-                    type={showPassword ? "text" : "password"}
-                    className="input input-bordered w-full bg-base-100 pr-11"
-                    placeholder={isRegister ? "Mínimo 6 caracteres" : "Tu contraseña"}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    required
-                    minLength={isRegister ? PASSWORD_MIN_LENGTH : 1}
-                    maxLength={isRegister ? PASSWORD_MAX_LENGTH : undefined}
-                    autoComplete={isRegister ? "new-password" : "current-password"}
-                  />
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm btn-circle absolute right-1 top-1/2 -translate-y-1/2"
-                    onClick={() => setShowPassword((v) => !v)}
-                    aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
-                  >
-                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                  </button>
-                </div>
-              </label>
-
-                  
-              {!isRegister && (
-                <div className="text-right mt-1">
-                  <Link
-                    href="/olvide-contrasena"
-                    className="text-sm text-primary font-medium hover:underline"
-                  >
-                    ¿Olvidaste tu contraseña?
-                  </Link>
-                </div>
-              )}
+              <div className="flex flex-col gap-1.5">
+                <label className="form-control w-full gap-1.5">
+                  <span className="label-text font-medium">Contraseña</span>
+                  <div className="relative">
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      className="input input-bordered w-full bg-base-100 pr-11"
+                      placeholder={isRegister ? "Mínimo 6 caracteres" : "Tu contraseña"}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      required
+                      minLength={isRegister ? PASSWORD_MIN_LENGTH : 1}
+                      maxLength={isRegister ? PASSWORD_MAX_LENGTH : undefined}
+                      autoComplete={isRegister ? "new-password" : "current-password"}
+                    />
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm btn-circle absolute right-1 top-1/2 -translate-y-1/2"
+                      onClick={() => setShowPassword((v) => !v)}
+                      aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+                    >
+                      {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                  </div>
+                </label>
+                {!isRegister && (
+                  <div className="text-right">
+                    <Link
+                      href="/olvide-contrasena"
+                      className="text-sm text-primary font-medium hover:underline"
+                    >
+                      ¿Olvidaste tu contraseña?
+                    </Link>
+                  </div>
+                )}
+              </div>
 
               {isRegister && (
-                <label className="form-control w-full">
-                  <span className="label-text font-medium mb-1">Confirmar contraseña</span>
+                <label className="form-control w-full gap-1.5">
+                  <span className="label-text font-medium">Confirmar contraseña</span>
                   <div className="relative">
                     <input
                       type={showConfirmPassword ? "text" : "password"}
@@ -312,7 +319,9 @@ export default function AuthForm({ mode, passwordUpdatedNotice }: AuthFormProps)
                       type="button"
                       className="btn btn-ghost btn-sm btn-circle absolute right-1 top-1/2 -translate-y-1/2"
                       onClick={() => setShowConfirmPassword((v) => !v)}
-                      aria-label={showConfirmPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+                      aria-label={
+                        showConfirmPassword ? "Ocultar contraseña" : "Mostrar contraseña"
+                      }
                     >
                       {showConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                     </button>
@@ -320,10 +329,9 @@ export default function AuthForm({ mode, passwordUpdatedNotice }: AuthFormProps)
                 </label>
               )}
 
-
-{isRegister && (
-                <label className="form-control w-full">
-                  <span className="label-text font-medium mb-1">Rol</span>
+              {isRegister && (
+                <label className="form-control w-full gap-1.5">
+                  <span className="label-text font-medium">Rol</span>
                   <select
                     className="select select-bordered w-full bg-base-100"
                     value={selectedRolId}
@@ -346,6 +354,16 @@ export default function AuthForm({ mode, passwordUpdatedNotice }: AuthFormProps)
                 </label>
               )}
 
+              {isRegister && (
+                <TermsAcceptance
+                  id="registro-acepto-terminos"
+                  checked={aceptoTerminos}
+                  onChange={setAceptoTerminos}
+                  disabled={isLoading}
+                  className="pt-1"
+                />
+              )}
+
               {error && (
                 <div className="alert alert-error rounded-xl flex-col items-start gap-1">
                   <span>{error}</span>
@@ -362,7 +380,11 @@ export default function AuthForm({ mode, passwordUpdatedNotice }: AuthFormProps)
 
               <button
                 type="submit"
-                disabled={isLoading || (isRegister && (isLoadingRols || selectedRolId === ""))}
+                disabled={
+                  isLoading ||
+                  (isRegister &&
+                    (isLoadingRols || selectedRolId === "" || !aceptoTerminos))
+                }
                 className="btn btn-primary btn-block rounded-xl shadow-lg shadow-primary/20 mt-2"
               >
                 {isLoading ? (
@@ -375,7 +397,7 @@ export default function AuthForm({ mode, passwordUpdatedNotice }: AuthFormProps)
               </button>
             </form>
 
-            <p className="text-center text-sm text-base-content/70 mt-4">
+            <p className="text-center text-sm text-base-content/70 mt-6 pt-2">
               {isRegister ? (
                 <>
                   ¿Ya tenés cuenta?{" "}

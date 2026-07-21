@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useState, useCallback, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { BookOpen } from "lucide-react";
 import { useProjectContext } from "@/context/ProjectContext";
 import { useAuth } from "@/context/AuthContext";
+import { useSubscription } from "@/context/SubscriptionContext";
 import PaymentScreen from "@/components/PaymentScreen";
 import {
   base64ToBlob,
@@ -17,6 +18,12 @@ import {
   type SplitOperation,
 } from "@/services/api";
 import { extractAssemblyGuideFromZip } from "@/core/assembly-guide";
+import {
+  clearPlanCheckout,
+  loadPlanCheckout,
+  type PlanCheckoutPayload,
+} from "@/services/planCheckout";
+import { aceptarTerminos } from "@/services/users";
 
 function overridesToRecord(
   overrides: { groupId: number; newCategory: string }[],
@@ -32,8 +39,144 @@ function decisionsToRecord(decisions: Map<number, number>): Record<number, numbe
   return out;
 }
 
-export default function PaymentPage() {
+function PlanPaymentView({ checkout }: { checkout: PlanCheckoutPayload }) {
   const router = useRouter();
+  const { token } = useAuth();
+  const { planes, selectPlan, refresh } = useSubscription();
+  const [error, setError] = useState("");
+  const [activating, setActivating] = useState(false);
+
+  const periodoLabel = checkout.periodo === "año" ? "año" : "mes";
+  const plan =
+    planes.find((p) => p.plan_id === checkout.planNumericId || p.id === checkout.planId) ??
+    null;
+
+  const handleCancel = useCallback(() => {
+    clearPlanCheckout();
+    router.push("/planes");
+  }, [router]);
+
+  const activatePlan = useCallback(
+    async (options: { mpPaymentId?: string; bypassKey?: string }) => {
+      if (!token) {
+        setError("Tenés que iniciar sesión para activar el plan.");
+        return;
+      }
+
+      const planForApi =
+        plan ??
+        ({
+          id: checkout.planId,
+          plan_id: checkout.planNumericId,
+          slug: String(checkout.planId),
+          nombre: checkout.planNombre,
+          precio_mensual: checkout.amount,
+          moneda: checkout.moneda,
+          periodo: checkout.periodo,
+          descripcion: "",
+          features: [],
+        } as const);
+
+      setActivating(true);
+      setError("");
+      try {
+        const result = await selectPlan(planForApi, {
+          cuponCodigo: checkout.cuponCodigo,
+          mpPaymentId: options.mpPaymentId,
+          bypassKey: options.bypassKey,
+        });
+        if (result.kind === "checkout") {
+          window.location.href = result.url;
+          return;
+        }
+        clearPlanCheckout();
+        await refresh();
+        router.push("/planes?paid=1");
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "No se pudo activar el plan");
+      } finally {
+        setActivating(false);
+      }
+    },
+    [token, plan, selectPlan, checkout, refresh, router],
+  );
+
+  const handleBypassSuccess = useCallback(async () => {
+    const bypassKey = localStorage.getItem("e2d_bypass") ?? "";
+    await activatePlan({ bypassKey });
+  }, [activatePlan]);
+
+  const handlePaymentApproved = useCallback(
+    async (paymentId: string) => {
+      try {
+        const res = await fetch("/api/mp/verify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ paymentId }),
+        });
+        const data = await res.json();
+        if (!data.verified) {
+          setError(
+            `Pago no verificado (estado: ${data.status ?? "desconocido"}). Intentá de nuevo.`,
+          );
+          return;
+        }
+        await activatePlan({ mpPaymentId: paymentId });
+      } catch {
+        setError("Error al verificar el pago.");
+      }
+    },
+    [activatePlan],
+  );
+
+  const handleAcceptTerms = useCallback(async () => {
+    if (!token) throw new Error("Tenés que iniciar sesión para continuar.");
+    await aceptarTerminos(token);
+  }, [token]);
+
+  if (activating) {
+    return (
+      <div className="flex flex-col min-h-screen items-center justify-center p-4">
+        <div className="card bg-base-100 shadow-2xl border border-base-200 w-full max-w-md">
+          <div className="card-body items-center justify-center py-16 gap-4">
+            <span className="loading loading-spinner loading-lg text-primary" />
+            <p className="font-medium text-base-content/80">Activando tu plan…</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col min-h-screen items-center justify-center p-4">
+      {error && (
+        <div className="alert alert-error shadow-lg mb-6 max-w-md w-full">
+          <span>{error}</span>
+        </div>
+      )}
+      <PaymentScreen
+        amount={checkout.amount}
+        currency={checkout.moneda}
+        title={`Suscripción ${checkout.planNombre}`}
+        description={`Activá el plan ${checkout.planNombre}: ${checkout.moneda} ${checkout.amount.toLocaleString("es-AR")}/${periodoLabel}.`}
+        showStepIndicator={false}
+        checkoutUrl={checkout.checkoutUrl}
+        preferenceTitle={`Eficiencia2D - Plan ${checkout.planNombre}`}
+        preferenceItemId={`plan-${checkout.planNumericId}`}
+        onPaymentApproved={(id) => void handlePaymentApproved(id)}
+        onPaymentError={setError}
+        onCancel={handleCancel}
+        onBypassSuccess={() => void handleBypassSuccess()}
+        onAcceptTerms={handleAcceptTerms}
+      />
+    </div>
+  );
+}
+
+function PaymentPageContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const fromPlan = searchParams.get("from") === "plan";
   const { token } = useAuth();
   const {
     file,
@@ -60,27 +203,37 @@ export default function PaymentPage() {
     setAssemblyGuideData,
   } = useProjectContext();
 
+  const [planCheckout, setPlanCheckout] = useState<PlanCheckoutPayload | null>(null);
+  const [planCheckoutReady, setPlanCheckoutReady] = useState(!fromPlan);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState("");
   const [guidePdfMissing, setGuidePdfMissing] = useState(false);
-  // ZIP generado y listo para (re)descargar. Reemplaza el window.alert de éxito.
   const [download, setDownload] = useState<{ url: string; name: string } | null>(null);
 
   useEffect(() => {
+    if (!fromPlan) return;
+    const stored = loadPlanCheckout();
+    if (!stored) {
+      router.replace("/planes");
+      return;
+    }
+    setPlanCheckout(stored);
+    setPlanCheckoutReady(true);
+  }, [fromPlan, router]);
+
+  useEffect(() => {
+    if (fromPlan) return;
     if (!isLoadingSession && !phase1Result) {
       router.replace("/home");
     }
-  }, [isLoadingSession, phase1Result, router]);
+  }, [fromPlan, isLoadingSession, phase1Result, router]);
 
-  // Liberar el blob al desmontar para no filtrar memoria.
   useEffect(() => {
     return () => {
       if (download) URL.revokeObjectURL(download.url);
     };
   }, [download]);
 
-  // Dispara la descarga y muestra el estado de éxito en pantalla (sin
-  // window.alert), conservando el blob para permitir "Descargar de nuevo".
   const triggerDownload = useCallback((blob: Blob, name: string) => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -210,6 +363,16 @@ export default function PaymentPage() {
   const handlePaymentError = useCallback((msg: string) => setError(msg), []);
   const handlePaymentCancel = useCallback(() => router.push("/review"), [router]);
   const handleBypassSuccess = useCallback(() => proceedToGeneration(), [proceedToGeneration]);
+  const handleAcceptTerms = useCallback(async () => {
+    if (!token) throw new Error("Tenés que iniciar sesión para continuar.");
+    await aceptarTerminos(token);
+  }, [token]);
+
+  if (fromPlan) {
+    if (!planCheckoutReady) return null;
+    if (!planCheckout) return null;
+    return <PlanPaymentView checkout={planCheckout} />;
+  }
 
   if (isLoadingSession) return null;
   if (!phase1Result) return null;
@@ -285,7 +448,16 @@ export default function PaymentPage() {
         onPaymentError={handlePaymentError}
         onCancel={handlePaymentCancel}
         onBypassSuccess={handleBypassSuccess}
+        onAcceptTerms={handleAcceptTerms}
       />
     </div>
+  );
+}
+
+export default function PaymentPage() {
+  return (
+    <Suspense fallback={null}>
+      <PaymentPageContent />
+    </Suspense>
   );
 }
