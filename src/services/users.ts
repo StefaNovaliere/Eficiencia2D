@@ -101,4 +101,19 @@ export async function changeUserPassword(
   return res.json();
 }
 
+/** Persiste la aceptación de términos en el usuario autenticado. */
+export async function aceptarTerminos(token: string): Promise<{ message: string; acepto_terminos_at: string }> {
+  const res = await apiFetch(
+    "/api/users/me/aceptar-terminos",
+    { method: "POST" },
+    { token },
+  );
+
+  if (!res.ok) {
+    await parseApiError(res, "No se pudo registrar la aceptación de términos");
+  }
+
+  return res.json();
+}
+
 export { PASSWORD_MIN_LENGTH, PASSWORD_MAX_LENGTH, NOMBRE_MAX_LENGTH };

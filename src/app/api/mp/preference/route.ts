@@ -1,6 +1,15 @@
 import { NextResponse } from "next/server";
 import { MercadoPagoConfig, Preference } from "mercadopago";
 
+const DEFAULT_AMOUNT = 30000;
+
+type PreferenceBody = {
+  amount?: number;
+  currency?: string;
+  title?: string;
+  itemId?: string;
+};
+
 export async function POST(request: Request) {
   const accessToken = process.env.MP_ACCESS_TOKEN;
   if (!accessToken) {
@@ -9,6 +18,30 @@ export async function POST(request: Request) {
       { status: 500 },
     );
   }
+
+  let body: PreferenceBody = {};
+  try {
+    const text = await request.text();
+    if (text) body = JSON.parse(text) as PreferenceBody;
+  } catch {
+    body = {};
+  }
+
+  const amount =
+    typeof body.amount === "number" && Number.isFinite(body.amount) && body.amount > 0
+      ? body.amount
+      : DEFAULT_AMOUNT;
+  const currency = typeof body.currency === "string" && body.currency.trim()
+    ? body.currency.trim().toUpperCase()
+    : "ARS";
+  const title =
+    typeof body.title === "string" && body.title.trim()
+      ? body.title.trim()
+      : "Eficiencia2D - Planos de Corte Láser";
+  const itemId =
+    typeof body.itemId === "string" && body.itemId.trim()
+      ? body.itemId.trim()
+      : "planos";
 
   const client = new MercadoPagoConfig({ accessToken });
   const preference = new Preference(client);
@@ -21,11 +54,11 @@ export async function POST(request: Request) {
       body: {
         items: [
           {
-            id: "planos",
-            title: "Eficiencia2D - Planos de Corte Láser",
+            id: itemId,
+            title,
             quantity: 1,
-            unit_price: 30000,
-            currency_id: "ARS",
+            unit_price: amount,
+            currency_id: currency,
           },
         ],
         back_urls: {

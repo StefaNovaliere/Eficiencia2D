@@ -116,12 +116,14 @@ export async function registerUser(
   password: string,
   rolId: number,
   nombre?: string,
+  aceptoTerminos = false,
 ): Promise<RegisterResponse> {
   const trimmedNombre = nombre?.trim();
-  const body: Record<string, string | number> = {
+  const body: Record<string, string | number | boolean> = {
     email: normalizeEmail(email),
     password,
     rol_id: rolId,
+    acepto_terminos: aceptoTerminos,
   };
   if (trimmedNombre) {
     body.nombre = trimmedNombre.slice(0, NOMBRE_MAX_LENGTH);

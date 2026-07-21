@@ -29,8 +29,11 @@ interface SubscriptionContextType {
   error: string | null;
   /** true si el estado se resolvió localmente (backend no disponible). */
   unavailable: boolean;
-  /** Selecciona un plan. Si devuelve checkout, redirige a pagar. */
-  selectPlan: (plan: Plan, options?: { cuponCodigo?: string }) => Promise<SeleccionPlanResult>;
+  /** Selecciona un plan. Si es pago, devuelve `checkout` (la UI lleva a /payment). */
+  selectPlan: (
+    plan: Plan,
+    options?: { cuponCodigo?: string; mpPaymentId?: string; bypassKey?: string },
+  ) => Promise<SeleccionPlanResult>;
   cancelar: () => Promise<void>;
   refresh: () => Promise<void>;
 }
@@ -134,14 +137,15 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
     null;
 
   const selectPlan = useCallback(
-    async (plan: Plan, options?: { cuponCodigo?: string }): Promise<SeleccionPlanResult> => {
+    async (
+      plan: Plan,
+      options?: { cuponCodigo?: string; mpPaymentId?: string; bypassKey?: string },
+    ): Promise<SeleccionPlanResult> => {
       if (!token) throw new Error("Tenés que iniciar sesión para elegir un plan");
       const result = await seleccionarPlan(token, plan, options);
-      if (result.kind === "checkout") {
-        if (typeof window !== "undefined") window.location.href = result.url;
-        return result;
+      if (result.kind === "activa") {
+        setSuscripcion(result.suscripcion);
       }
-      setSuscripcion(result.suscripcion);
       return result;
     },
     [token],
