@@ -704,6 +704,8 @@ interface CategoryMeshProps {
   onContextMenu?: (detail: { clientX: number; clientY: number; groupId: number | null }) => void;
   onHover?: (groupId: number | null, clientX: number, clientY: number) => void;
   cycleRef?: React.MutableRefObject<ClickCycleState | null>;
+  /** Plano de sección activo (mundo) para ignorar hits del lado recortado. */
+  clipRef?: React.MutableRefObject<THREE.Plane | null>;
 }
 
 /** Candidatos (groupId) bajo el cursor, ordenados por distancia (frontal→fondo), únicos. */
@@ -719,6 +721,25 @@ function candidateGroupIdsFromIntersections(intersections: THREE.Intersection[])
 }
 
 const PICK_DEPTH_EPS = 0.02;
+
+/** Tolerancia (mundo) para no descartar hits justo sobre el plano de corte. */
+const SECTION_PICK_EPS = 0.02;
+
+/**
+ * El clipping de three.js recorta el DIBUJO pero NO el raycast: los hits del lado
+ * oculto por el plano de sección siguen bloqueando la selección de piezas
+ * interiores. Filtramos esos hits (mismo criterio que el shader: se conserva el
+ * lado con distancia ≥ 0) para poder seleccionar lo que ahora sí se ve.
+ */
+function intersectionsVisibleUnderSection(
+  intersections: THREE.Intersection[],
+  clip: THREE.Plane | null,
+): THREE.Intersection[] {
+  if (!clip) return intersections;
+  return intersections.filter(
+    (hit) => !hit.point || clip.distanceToPoint(hit.point) >= -SECTION_PICK_EPS,
+  );
+}
 
 function pickGroupFromIntersections(
   intersections: THREE.Intersection[],
@@ -746,7 +767,7 @@ function pickGroupFromIntersections(
   return bestId;
 }
 
-function CategoryMesh({ mesh, isDimmed, isSolid, xray = false, groupAreaById, materials, onPick, onTogglePick, onContextMenu, onHover, cycleRef }: CategoryMeshProps) {
+function CategoryMesh({ mesh, isDimmed, isSolid, xray = false, groupAreaById, materials, onPick, onTogglePick, onContextMenu, onHover, cycleRef, clipRef }: CategoryMeshProps) {
   const material = xray
     ? materials.xray[mesh.category]
     : isDimmed
@@ -766,7 +787,11 @@ function CategoryMesh({ mesh, isDimmed, isSolid, xray = false, groupAreaById, ma
           // Middle/right buttons are for camera controls — never pick components.
           if (btn !== 0) return;
           e.stopPropagation();
-          const smart = pickGroupFromIntersections(e.intersections, groupAreaById);
+          const hits = intersectionsVisibleUnderSection(
+            e.intersections,
+            clipRef?.current ?? null,
+          );
+          const smart = pickGroupFromIntersections(hits, groupAreaById);
           if (smart == null) return;
           if (e.nativeEvent.ctrlKey || e.nativeEvent.metaKey) {
             if (cycleRef) cycleRef.current = null;
@@ -776,7 +801,7 @@ function CategoryMesh({ mesh, isDimmed, isSolid, xray = false, groupAreaById, ma
           // Click cíclico: repetir click ~en el mismo píxel rota entre las piezas
           // superpuestas (frontal→fondo). El primer click usa el pick inteligente.
           if (cycleRef) {
-            const ids = candidateGroupIdsFromIntersections(e.intersections);
+            const ids = candidateGroupIdsFromIntersections(hits);
             const defaultIndex = Math.max(0, ids.indexOf(smart));
             const next = advanceCycle(
               cycleRef.current,
@@ -793,7 +818,11 @@ function CategoryMesh({ mesh, isDimmed, isSolid, xray = false, groupAreaById, ma
         }}
         onPointerMove={(e) => {
           if (!onHover) return;
-          const groupId = pickGroupFromIntersections(e.intersections, groupAreaById);
+          const hits = intersectionsVisibleUnderSection(
+            e.intersections,
+            clipRef?.current ?? null,
+          );
+          const groupId = pickGroupFromIntersections(hits, groupAreaById);
           onHover(groupId, e.nativeEvent.clientX, e.nativeEvent.clientY);
         }}
         onPointerOut={() => onHover?.(null, 0, 0)}
@@ -854,15 +883,24 @@ function SectionPlane({
   max,
   center,
   materials,
+  clipOutRef,
 }: {
   section: SectionState;
   min: Vec3;
   max: Vec3;
   center: Vec3;
   materials: ViewerMaterials;
+  /** Publica el plano activo (mundo) para filtrar el raycast de selección. */
+  clipOutRef?: React.MutableRefObject<THREE.Plane | null>;
 }) {
   const { gl } = useThree();
   const planeRef = useRef(new THREE.Plane(new THREE.Vector3(-1, 0, 0), 0));
+
+  useEffect(() => {
+    return () => {
+      if (clipOutRef) clipOutRef.current = null;
+    };
+  }, [clipOutRef]);
 
   useEffect(() => {
     gl.localClippingEnabled = true;
@@ -890,6 +928,7 @@ function SectionPlane({
   const { normal, constant } = sectionPlaneParams(section.axis, section.pos, min, max, center);
   planeRef.current.normal.set(normal.x, normal.y, normal.z);
   planeRef.current.constant = constant;
+  if (clipOutRef) clipOutRef.current = section.enabled ? planeRef.current : null;
 
   return null;
 }
@@ -2101,6 +2140,9 @@ function Scene({
   // va a seleccionar). Click cíclico: rotar entre superpuestos.
   const [hoveredGroupId, setHoveredGroupId] = useState<number | null>(null);
   const cycleRef = useRef<ClickCycleState | null>(null);
+  // Plano de sección activo (mundo), compartido con la selección para que el
+  // raycast ignore la geometría recortada (que no se ve pero sí se raycastea).
+  const sectionClipRef = useRef<THREE.Plane | null>(null);
   const handleHover = (id: number | null) =>
     setHoveredGroupId((prev) => (prev === id ? prev : id));
 
@@ -2137,6 +2179,7 @@ function Scene({
           max={bounds.max}
           center={bounds.center}
           materials={materials}
+          clipOutRef={sectionClipRef}
         />
       )}
 
@@ -2166,6 +2209,7 @@ function Scene({
               onContextMenu={onContextMenu}
               onHover={handleHover}
               cycleRef={cycleRef}
+              clipRef={sectionClipRef}
             />
           );
         })}
