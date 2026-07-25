@@ -196,6 +196,7 @@ function PaymentPageContent() {
     scale,
     paper,
     pdfPageMode,
+    combineSheets,
     minAreaM2,
     sheetConfig,
     isLoadingSession,
@@ -274,6 +275,7 @@ function PaymentPageContent() {
         scale_denom: scale,
         paper,
         page_mode: pdfPageMode,
+        combine_sheets: combineSheets,
         min_area_m2: minAreaM2,
         sheet_config: {
           width_m: sheetConfig.widthM,
@@ -325,6 +327,7 @@ function PaymentPageContent() {
     scale,
     paper,
     pdfPageMode,
+    combineSheets,
     minAreaM2,
     sheetConfig,
     savedOverrides,

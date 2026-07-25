@@ -36,6 +36,8 @@ export default function NestingPage() {
     setPaper,
     pdfPageMode,
     setPdfPageMode,
+    combineSheets,
+    setCombineSheets,
     minAreaM2,
     sheetConfig,
     setSheetConfig,
@@ -64,7 +66,13 @@ export default function NestingPage() {
   });
 
   const savePrintSettings = useCallback(
-    (newScale: number, newConfig: SheetConfig, newPaper: string, newMode: PdfPageMode) => {
+    (
+      newScale: number,
+      newConfig: SheetConfig,
+      newPaper: string,
+      newMode: PdfPageMode,
+      newCombine: boolean,
+    ) => {
       queuePatch({
         scale_denom: newScale,
         sheet_config: {
@@ -74,6 +82,7 @@ export default function NestingPage() {
         },
         paper: newPaper,
         page_mode: newMode,
+        combine_sheets: newCombine,
       });
     },
     [queuePatch],
@@ -98,7 +107,13 @@ export default function NestingPage() {
   // El nesting lo calcula el backend; el front sólo le pide el layout con la
   // nueva escala / configuración de plancha.
   const recompute = useCallback(
-    async (newScale: number, newConfig: SheetConfig, newPaper: string, newMode: PdfPageMode) => {
+    async (
+      newScale: number,
+      newConfig: SheetConfig,
+      newPaper: string,
+      newMode: PdfPageMode,
+      newCombine: boolean,
+    ) => {
       if (!phase1Result || !fileId) return;
       setIsRecomputing(true);
       try {
@@ -120,6 +135,7 @@ export default function NestingPage() {
           scale_denom: newScale,
           paper: newPaper,
           page_mode: newMode,
+          combine_sheets: newCombine,
           user_cuts: userCutsForApi(savedUserCuts),
           flex: flexForApi(savedFlex),
           mark_lines: markLinesForApi(savedMarkLines),
@@ -127,7 +143,7 @@ export default function NestingPage() {
           columns: columnsForApi(savedColumns),
         }, token);
         setNestingData(nesting);
-        savePrintSettings(newScale, newConfig, newPaper, newMode);
+        savePrintSettings(newScale, newConfig, newPaper, newMode, newCombine);
       } catch (err: unknown) {
         console.error(err);
         alert(err instanceof Error ? err.message : "No se pudo recalcular el nesting.");
@@ -140,25 +156,31 @@ export default function NestingPage() {
 
   const handleSheetConfigChange = useCallback((newConfig: SheetConfig) => {
     setSheetConfig(newConfig);
-    void recompute(scale, newConfig, paper, pdfPageMode);
-  }, [recompute, scale, paper, pdfPageMode, setSheetConfig]);
+    void recompute(scale, newConfig, paper, pdfPageMode, combineSheets);
+  }, [recompute, scale, paper, pdfPageMode, combineSheets, setSheetConfig]);
 
   const handleScaleChange = useCallback((newScale: number) => {
     setScale(newScale);
-    void recompute(newScale, sheetConfig, paper, pdfPageMode);
-  }, [recompute, sheetConfig, paper, pdfPageMode, setScale]);
+    void recompute(newScale, sheetConfig, paper, pdfPageMode, combineSheets);
+  }, [recompute, sheetConfig, paper, pdfPageMode, combineSheets, setScale]);
 
   // En modo cartón (one_per_sheet) la plancha = papel, así que cambiar el papel
   // o el modo cambia el preview → hay que recalcular.
   const handlePaperChange = useCallback((newPaper: string) => {
     setPaper(newPaper);
-    void recompute(scale, sheetConfig, newPaper, pdfPageMode);
-  }, [recompute, scale, sheetConfig, pdfPageMode, setPaper]);
+    void recompute(scale, sheetConfig, newPaper, pdfPageMode, combineSheets);
+  }, [recompute, scale, sheetConfig, pdfPageMode, combineSheets, setPaper]);
 
   const handlePageModeChange = useCallback((newMode: PdfPageMode) => {
     setPdfPageMode(newMode);
-    void recompute(scale, sheetConfig, paper, newMode);
-  }, [recompute, scale, sheetConfig, paper, setPdfPageMode]);
+    void recompute(scale, sheetConfig, paper, newMode, combineSheets);
+  }, [recompute, scale, sheetConfig, paper, combineSheets, setPdfPageMode]);
+
+  // Planchas combinadas: paredes + pisos anidados en las mismas planchas.
+  const handleCombineSheetsChange = useCallback((next: boolean) => {
+    setCombineSheets(next);
+    void recompute(scale, sheetConfig, paper, pdfPageMode, next);
+  }, [recompute, scale, sheetConfig, paper, pdfPageMode, setCombineSheets]);
 
   if (isLoadingSession) return null;
   if (!nestingData) return null;
@@ -176,6 +198,8 @@ export default function NestingPage() {
       onPaperChange={handlePaperChange}
       pageMode={pdfPageMode}
       onPageModeChange={handlePageModeChange}
+      combineSheets={combineSheets}
+      onCombineSheetsChange={handleCombineSheetsChange}
       isRecomputing={isRecomputing}
     />
   );
