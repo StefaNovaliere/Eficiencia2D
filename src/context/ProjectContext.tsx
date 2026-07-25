@@ -38,6 +38,7 @@ interface PersistedSession {
   ribs?: Rib[];
   columns?: Column[];
   pageMode?: PdfPageMode;
+  combineSheets?: boolean;
 }
 
 const SESSION_KEY = "e2d_pending_session";
@@ -61,6 +62,9 @@ interface ProjectContextType {
   setPaper: (paper: string) => void;
   pdfPageMode: PdfPageMode;
   setPdfPageMode: (mode: PdfPageMode) => void;
+  /** Anida paredes y pisos en las mismas planchas (aprovecha mejor el material). */
+  combineSheets: boolean;
+  setCombineSheets: (combine: boolean) => void;
   minAreaM2: number;
   setMinAreaM2: (area: number) => void;
   /** Si true, los grupos de la toolbar pueden quedar abiertos a la vez. */
@@ -113,6 +117,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const [scale, setScale] = useState(100);
   const [paper, setPaper] = useState("A4");
   const [pdfPageMode, setPdfPageMode] = useState<PdfPageMode>("one_per_sheet");
+  const [combineSheets, setCombineSheets] = useState(false);
   const [minAreaM2, setMinAreaM2] = useState(1.0);
   const [pinTools, setPinTools] = useState(true);
   const [phase1Result, setPhase1Result] = useState<Phase1Result | null>(null);
@@ -151,6 +156,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       setScale(parsed.scale);
       setPaper(parsed.paper);
       setPdfPageMode(parsed.pageMode ?? "one_per_sheet");
+      setCombineSheets(parsed.combineSheets ?? false);
       setMinAreaM2(parsed.minAreaM2);
       setSheetConfig(parsed.sheetConfig);
       setSavedOverrides(parsed.overrides);
@@ -195,6 +201,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         minAreaM2,
         sheetConfig,
         pageMode: pdfPageMode,
+        combineSheets,
         overrides: savedOverrides,
         wallWallDecisions: Array.from(savedWallWallDecisions.entries()),
         merges: savedMerges,
@@ -211,7 +218,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     } catch {
       // Storage full
     }
-  }, [file, fileId, previewObj, phase1Result, projectFileName, scale, paper, pdfPageMode, minAreaM2, sheetConfig, savedOverrides, savedWallWallDecisions, savedMerges, savedSplits, savedMarks, savedUserCuts, savedNotes, savedFlex, savedMarkLines, savedRibs, savedColumns]);
+  }, [file, fileId, previewObj, phase1Result, projectFileName, scale, paper, pdfPageMode, combineSheets, minAreaM2, sheetConfig, savedOverrides, savedWallWallDecisions, savedMerges, savedSplits, savedMarks, savedUserCuts, savedNotes, savedFlex, savedMarkLines, savedRibs, savedColumns]);
 
   const applyRestoredState = useCallback((restored: RestoredProjectState) => {
     if (restored.projectFileName != null) setProjectFileName(restored.projectFileName);
@@ -230,6 +237,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     if (restored.scale != null) setScale(restored.scale);
     if (restored.paper != null) setPaper(restored.paper);
     if (restored.pdfPageMode != null) setPdfPageMode(restored.pdfPageMode);
+    if (restored.combineSheets != null) setCombineSheets(restored.combineSheets);
     if (restored.sheetConfig != null) setSheetConfig(restored.sheetConfig);
   }, []);
 
@@ -241,6 +249,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     setScale(100);
     setPaper("A4");
     setPdfPageMode("one_per_sheet");
+    setCombineSheets(false);
     setMinAreaM2(1.0);
     setPinTools(true);
     setPhase1Result(null);
@@ -272,6 +281,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         scale, setScale,
         paper, setPaper,
         pdfPageMode, setPdfPageMode,
+        combineSheets, setCombineSheets,
         minAreaM2, setMinAreaM2,
         pinTools, setPinTools,
         phase1Result, setPhase1Result,

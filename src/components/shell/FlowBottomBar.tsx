@@ -1,8 +1,12 @@
 "use client";
 
-import { ArrowLeft, ArrowRight, BookOpen, Search } from "lucide-react";
+import { useEffect } from "react";
+import { ArrowLeft, ArrowRight, BookOpen, ChevronUp, Search } from "lucide-react";
 import { useUIStore } from "@/stores/uiStore";
 import CameraNavigationSelect from "@/components/CameraNavigationSelect";
+
+/** Alto de la barra; se publica como CSS var para que el contenido lo compense. */
+const BAR_H = "3.5rem";
 
 /**
  * Barra de navegación CONSTANTE del flujo. Atrás (izquierda) y Continuar
@@ -13,11 +17,46 @@ import CameraNavigationSelect from "@/components/CameraNavigationSelect";
 export default function FlowBottomBar() {
   const nav = useUIStore((s) => s.flowNav);
   const openPalette = useUIStore((s) => s.openPalette);
+  const collapsed = useUIStore((s) => s.flowBarCollapsed);
+  const toggleFlowBar = useUIStore((s) => s.toggleFlowBar);
   const isMac =
     typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
 
+  // El contenido del flujo reserva `--flow-bar-h`: al plegar la barra ese alto
+  // se libera y las planchas/tablas ganan pantalla.
+  useEffect(() => {
+    const root = document.documentElement.style;
+    root.setProperty("--flow-bar-h", collapsed ? "0rem" : BAR_H);
+    return () => root.setProperty("--flow-bar-h", BAR_H);
+  }, [collapsed]);
+
+  if (collapsed) {
+    return (
+      <button
+        type="button"
+        onClick={toggleFlowBar}
+        aria-label="Mostrar barra de navegación"
+        title="Mostrar barra"
+        className="fixed bottom-0 left-1/2 -translate-x-1/2 z-50 flex items-center gap-1.5 rounded-t-xl border border-b-0 border-base-300/50 bg-base-100/95 px-3 py-1 text-xs text-base-content/60 shadow-lg backdrop-blur-md transition-colors hover:text-base-content"
+      >
+        <ChevronUp size={13} />
+        <span className="hidden sm:inline">Mostrar barra</span>
+      </button>
+    );
+  }
+
   return (
     <div className="fixed bottom-0 inset-x-0 z-50 h-14 border-t border-base-300/50 bg-base-100/95 backdrop-blur-md flex items-center justify-between gap-3 px-3 sm:px-4">
+      {/* Plegar la barra (libera alto en planchas e instructivo) */}
+      <button
+        type="button"
+        onClick={toggleFlowBar}
+        aria-label="Ocultar barra de navegación"
+        title="Ocultar barra"
+        className="absolute -top-6 left-1/2 -translate-x-1/2 flex items-center gap-1 rounded-t-lg border border-b-0 border-base-300/50 bg-base-100/95 px-2.5 py-1 text-[11px] text-base-content/50 shadow-sm backdrop-blur-md transition-colors hover:text-base-content"
+      >
+        <ChevronUp size={12} className="rotate-180" />
+      </button>
       {/* Izquierda: Atrás (posición fija) */}
       <div className="flex-1 flex gap-10 justify-start min-w-0">
         {nav.onBack && (

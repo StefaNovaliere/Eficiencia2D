@@ -73,6 +73,21 @@ export interface UIState {
   clearFlowNav: () => void;
   flowNext: () => void;
   flowBack: () => void;
+
+  /** Barra inferior del flujo plegada (libera alto en planchas/instructivo). */
+  flowBarCollapsed: boolean;
+  toggleFlowBar: () => void;
+}
+
+const FLOW_BAR_KEY = "e2dFlowBarCollapsed";
+
+function readFlowBarCollapsed(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return localStorage.getItem(FLOW_BAR_KEY) === "1";
+  } catch {
+    return false;
+  }
 }
 
 export const useUIStore = create<UIState>((set, get) => ({
@@ -103,4 +118,16 @@ export const useUIStore = create<UIState>((set, get) => ({
   clearFlowNav: () => set({ flowNav: EMPTY_NAV }),
   flowNext: () => get().flowNav.onNext?.(),
   flowBack: () => get().flowNav.onBack?.(),
+
+  flowBarCollapsed: readFlowBarCollapsed(),
+  toggleFlowBar: () =>
+    set((s) => {
+      const next = !s.flowBarCollapsed;
+      try {
+        localStorage.setItem(FLOW_BAR_KEY, next ? "1" : "0");
+      } catch {
+        /* ignore */
+      }
+      return { flowBarCollapsed: next };
+    }),
 }));
