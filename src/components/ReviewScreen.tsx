@@ -2475,7 +2475,7 @@ export default function ReviewScreen({
   }, [showWallWallHelp2]);
 
   return (
-    <div className="fixed top-0 left-0 right-0 bottom-14 z-50 bg-base-200/40 flex overflow-hidden">
+    <div className="fixed top-0 left-0 right-0 bottom-[var(--flow-bar-h,3.5rem)] z-50 bg-base-200/40 flex overflow-hidden">
       <PanelGroup orientation="horizontal" id="review-screen-layout">
         {!hideSidebar && (
           <>

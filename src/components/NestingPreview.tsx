@@ -24,6 +24,9 @@ export interface NestingPreviewProps {
   onPaperChange: (paper: string) => void;
   /** Paginación del PDF de planchas (sólo afecta el PDF descargado). */
   pageMode: PdfPageMode;
+  /** Anida paredes + pisos en las mismas planchas. */
+  combineSheets: boolean;
+  onCombineSheetsChange: (combine: boolean) => void;
   onPageModeChange: (mode: PdfPageMode) => void;
   /** True mientras se recalcula el nesting (cambio de escala/plancha). */
   isRecomputing?: boolean;
@@ -220,6 +223,8 @@ export default function NestingPreview({
   onPaperChange,
   pageMode,
   onPageModeChange,
+  combineSheets,
+  onCombineSheetsChange,
   isRecomputing = false,
 }: NestingPreviewProps) {
   const { theme } = useTheme();
@@ -259,8 +264,20 @@ export default function NestingPreview({
   const totalWallSheets = nesting.wallNesting.sheets.length;
   const totalFloorSheets = nesting.floorNesting.sheets.length;
   const totalSheets = totalWallSheets + totalFloorSheets;
-  const wallPanels = nesting.wallNesting.sheets.reduce((s, sh) => s + sh.panels.length, 0);
-  const floorPanels = nesting.floorNesting.sheets.reduce((s, sh) => s + sh.panels.length, 0);
+  // Contar por la categoría REAL de cada panel: con planchas combinadas todas las
+  // piezas viajan en `wallNesting`, así que sumar por lista etiquetaría pisos como paredes.
+  const panelCountByCategory = (category: "wall" | "floor") =>
+    [nesting.wallNesting, nesting.floorNesting].reduce(
+      (total, result) =>
+        total +
+        result.sheets.reduce(
+          (n, sh) => n + sh.panels.filter((p) => p.panel.category === category).length,
+          0,
+        ),
+      0,
+    );
+  const wallPanels = panelCountByCategory("wall");
+  const floorPanels = panelCountByCategory("floor");
   const unplacedCount = nesting.wallNesting.unplaced.length + nesting.floorNesting.unplaced.length;
   const displayScale = nesting.wallNesting.scaleDenom || nesting.floorNesting.scaleDenom || 1;
 
@@ -288,7 +305,7 @@ export default function NestingPreview({
   const nextScaleOption = SCALE_OPTIONS.find((s) => s >= suggestedScale) ?? suggestedScale;
 
   return (
-    <div className="fixed top-0 left-0 right-0 bottom-14 z-50 bg-base-100 flex flex-col">
+    <div className="fixed top-0 left-0 right-0 bottom-[var(--flow-bar-h,3.5rem)] z-50 bg-base-100 flex flex-col">
       <div className="flex flex-wrap items-center justify-between gap-4 p-4 border-b border-base-300 bg-base-200/50 shrink-0">
         <button className="btn btn-ghost btn-sm" onClick={onBack}>
           &larr; Volver a revisión
@@ -386,6 +403,27 @@ export default function NestingPreview({
         </span>
       </div>
 
+      {/* Combinar paredes + pisos en las mismas planchas (aprovecha material) */}
+      <div className="flex flex-wrap items-center gap-2 px-4 py-2.5 border-b border-base-300 bg-base-100 text-sm shrink-0">
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-base-content/40">
+          Material
+        </span>
+        <label className="flex cursor-pointer items-center gap-2">
+          <input
+            type="checkbox"
+            className="toggle toggle-sm toggle-primary"
+            checked={combineSheets}
+            onChange={(e) => onCombineSheetsChange(e.target.checked)}
+          />
+          <span className="font-medium text-base-content/70">Planchas combinadas</span>
+        </label>
+        <span className="text-xs text-base-content/40 ml-1">
+          {combineSheets
+            ? "Paredes y pisos se anidan juntos en las mismas planchas."
+            : "Paredes y pisos van en planchas separadas (por material)."}
+        </span>
+      </div>
+
       {unplacedCount > 0 && (
         <div className="alert alert-warning rounded-none border-x-0 shrink-0 flex-wrap gap-x-3 py-3">
           <svg xmlns="http://www.w3.org/2000/svg" className="stroke-current shrink-0 h-5 w-5" fill="none" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
@@ -416,7 +454,7 @@ export default function NestingPreview({
           sheets={nesting.wallNesting.sheets}
           config={nesting.config}
           color={canvasColors.wall}
-          label="Paredes"
+          label={combineSheets ? "Piezas (paredes + pisos)" : "Paredes"}
           sheetBg={canvasColors.sheetBg}
           sheetStroke={canvasColors.sheetStroke}
           labelText={canvasColors.labelText}

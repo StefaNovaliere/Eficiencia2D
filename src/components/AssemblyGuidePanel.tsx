@@ -132,7 +132,7 @@ function ElevationSection({
 
 function TotalsBar({ totals }: { totals: AssemblyPreviewData["totals"] }) {
   return (
-    <div className="flex items-center gap-3 px-4 py-3 bg-base-200/50 border-b border-base-300/30 text-xs text-base-content/60 shrink-0">
+    <div className="flex items-center gap-3 px-3 py-1.5 bg-base-200/50 border-b border-base-300/30 text-xs text-base-content/60 shrink-0">
       <Package className="w-3.5 h-3.5 text-primary/70 shrink-0" />
       <span className="font-semibold text-base-content/80">
         {totals.total_panels} piezas totales
@@ -163,23 +163,25 @@ function AllPanelsTable({
   onSelect: (id: string) => void;
 }) {
   return (
+    // Tabla liviana: filas densas, bordes finos y encabezado fijo para que no
+    // tape la pieza ni corte la lectura al hacer scroll.
     <div className="overflow-x-auto">
-      <table className="table table-xs w-full">
-        <thead>
-          <tr className="text-base-content/50">
+      <table className="table table-xs w-full [&_td]:py-1 [&_th]:py-1.5 [&_td]:px-2 [&_th]:px-2 [&_:where(td,th)]:border-base-300/25">
+        <thead className="sticky top-0 z-10 bg-base-100/95 backdrop-blur-sm">
+          <tr className="text-[10px] uppercase tracking-wide text-base-content/45">
             <th>ID</th>
             <th>Tipo</th>
-            <th>Ancho (cm)</th>
-            <th>Alto (cm)</th>
-            <th>Área (m²)</th>
+            <th className="text-right">Ancho <span className="normal-case opacity-60">cm</span></th>
+            <th className="text-right">Alto <span className="normal-case opacity-60">cm</span></th>
+            <th className="text-right">Área <span className="normal-case opacity-60">m²</span></th>
           </tr>
         </thead>
-        <tbody>
+        <tbody className="text-[11px]">
           {panels.map((p) => (
             <tr
               key={p.id}
               onClick={() => onSelect(p.id)}
-              className={`cursor-pointer hover:bg-base-200 transition-colors ${
+              className={`cursor-pointer transition-colors hover:bg-base-200/60 ${
                 selectedId === p.id ? "bg-primary/10 font-semibold" : ""
               }`}
             >
@@ -189,9 +191,9 @@ function AllPanelsTable({
                   {categoryLabel(p.category)}
                 </span>
               </td>
-              <td className="font-mono">{fmt(p.width_m * 100)}</td>
-              <td className="font-mono">{fmt(p.height_m * 100)}</td>
-              <td className="font-mono">{fmt(p.area_m2)}</td>
+              <td className="font-mono text-right tabular-nums">{fmt(p.width_m * 100)}</td>
+              <td className="font-mono text-right tabular-nums">{fmt(p.height_m * 100)}</td>
+              <td className="font-mono text-right tabular-nums">{fmt(p.area_m2)}</td>
             </tr>
           ))}
         </tbody>

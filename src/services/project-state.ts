@@ -29,6 +29,8 @@ export interface ProjectSavedState {
   scale_denom?: number;
   paper?: string;
   page_mode?: PdfPageMode;
+  /** Anida paredes y pisos en las mismas planchas. */
+  combine_sheets?: boolean;
 }
 
 export type ProjectStatePatch = Partial<ProjectSavedState>;
@@ -57,6 +59,7 @@ export interface RestoredProjectState {
   scale?: number;
   paper?: string;
   pdfPageMode?: PdfPageMode;
+  combineSheets?: boolean;
   sheetConfig?: SheetConfig;
   axis?: "Y" | "Z";
 }
@@ -170,6 +173,9 @@ export function parseSavedState(raw: unknown): ProjectSavedState | null {
     state.page_mode = pageMode;
   }
 
+  const combine = o.combine_sheets ?? o.combineSheets;
+  if (typeof combine === "boolean") state.combine_sheets = combine;
+
   return state;
 }
 
@@ -208,6 +214,7 @@ export function restoreProjectState(raw: unknown): RestoredProjectState | null {
   if (state.scale_denom != null) restored.scale = state.scale_denom;
   if (state.paper) restored.paper = state.paper;
   if (state.page_mode) restored.pdfPageMode = state.page_mode;
+  if (state.combine_sheets != null) restored.combineSheets = state.combine_sheets;
   if (state.sheet_config) {
     restored.sheetConfig = {
       widthM: state.sheet_config.width_m,
