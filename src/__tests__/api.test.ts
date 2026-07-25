@@ -163,7 +163,42 @@ describe("fetchNestingPreview", () => {
     expect(result.config.widthM).toBe(1);
   });
 
-  it("reintenta con paper/page_mode si el backend falla al desempaquetar", async () => {
+  it("manda paper/page_mode/combine_sheets en el PRIMER intento", async () => {
+    // Regresión: omitirlos en el primer intento hacía que cambiar el papel o el
+    // toggle de planchas combinadas nunca se reflejara en el preview.
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        wall_nesting: { sheets: [], config: {}, scale_denom: 50, unplaced: [] },
+        floor_nesting: { sheets: [], config: {}, scale_denom: 50, unplaced: [] },
+        config: { width_m: 0.28, height_m: 0.19, gap_m: 0.003 },
+      }),
+    );
+
+    await fetchNestingPreview({
+      file_id: "abc",
+      original_filename: "modelo.stl",
+      axis: "Y",
+      min_area_m2: 1,
+      merges: [],
+      splits: [],
+      overrides: {},
+      wall_wall_decisions: {},
+      marks: [],
+      sheet_config: { width_m: 1, height_m: 0.6, gap_m: 0.003 },
+      scale_denom: 50,
+      paper: "A3",
+      page_mode: "one_per_sheet",
+      combine_sheets: true,
+    });
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    const firstBody = JSON.parse(String(mockFetch.mock.calls[0][1]?.body));
+    expect(firstBody.paper).toBe("A3");
+    expect(firstBody.page_mode).toBe("one_per_sheet");
+    expect(firstBody.combine_sheets).toBe(true);
+  });
+
+  it("degrada a un intento sin paper/page_mode si el backend no los soporta", async () => {
     mockFetch
       .mockResolvedValueOnce(
         jsonResponse(
@@ -198,10 +233,10 @@ describe("fetchNestingPreview", () => {
     expect(mockFetch).toHaveBeenCalledTimes(2);
     const firstBody = JSON.parse(String(mockFetch.mock.calls[0][1]?.body));
     const retryBody = JSON.parse(String(mockFetch.mock.calls[1][1]?.body));
-    expect(firstBody).not.toHaveProperty("paper");
-    expect(firstBody).not.toHaveProperty("page_mode");
-    expect(retryBody.paper).toBe("A4");
-    expect(retryBody.page_mode).toBe("one_per_sheet");
+    expect(firstBody.paper).toBe("A4");
+    expect(firstBody.page_mode).toBe("one_per_sheet");
+    expect(retryBody).not.toHaveProperty("paper");
+    expect(retryBody).not.toHaveProperty("page_mode");
     expect(result.config.widthM).toBe(1);
   });
 });

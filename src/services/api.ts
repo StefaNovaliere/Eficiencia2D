@@ -280,6 +280,9 @@ export interface NestingPreviewPayload {
   /** Paginación del PDF. En `one_per_sheet` la plancha = papel − margen
    *  (auto-orientada); en `single_page` se usa `sheet_config` tal cual. */
   page_mode?: "one_per_sheet" | "single_page";
+  /** Anida paredes y pisos en las MISMAS planchas (default false). Con `true`,
+   *  `wall_nesting` trae todas las piezas y `floor_nesting.sheets` viene vacío. */
+  combine_sheets?: boolean;
   /** Cortes manuales del usuario (panel-local, metros). Para previsualizar las
    *  planchas con los recortes aplicados. */
   user_cuts?: Record<string, unknown>[];
@@ -300,6 +303,9 @@ export interface GenerateRequestPayload {
   paper?: string;
   /** Paginación del PDF de planchas: una plancha por página o todas en una. */
   page_mode?: "one_per_sheet" | "single_page";
+  /** Anida paredes y pisos en las MISMAS planchas (default false). Los archivos
+   *  salen como `*_Piezas_corte.*` en vez de `*_Paredes_*` + `*_Pisos_*`. */
+  combine_sheets?: boolean;
   min_area_m2?: number;
   sheet_config?: {
     width_m: number;
@@ -405,9 +411,12 @@ export async function fetchNestingPreview(
   token?: string | null,
 ): Promise<NestingPreviewData> {
   const attempts: NestingPreviewPayload[] = [
-    // Primero sin paper/page_mode — el backend remoto suele fallar al desempaquetar con esos campos.
-    { ...payload, paper: undefined, page_mode: undefined },
+    // El payload COMPLETO va primero: `paper`/`page_mode` definen la plancha
+    // efectiva (modo cartón), así que omitirlos hacía que cambiar el papel no se
+    // reflejara nunca en el preview. Los intentos degradados quedan sólo como
+    // fallback para backends viejos que fallaban al desempaquetar esos campos.
     payload,
+    { ...payload, paper: undefined, page_mode: undefined },
     { ...payload, paper: undefined, page_mode: undefined, user_cuts: undefined },
     {
       ...payload,
