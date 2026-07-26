@@ -143,6 +143,9 @@ export const COMMANDS: Command[] = [
     keywords: ["continuar", "siguiente", "avanzar", "next", "seguir"], perform: (a) => a.flowNext() },
   { id: "nav.back", title: "Volver al paso anterior", group: "Navegación",
     keywords: ["volver", "atras", "anterior", "back", "regresar"], perform: (a) => a.flowBack() },
+  { id: "help.tour", title: "Tutorial guiado del visor (tour)", group: "Navegación",
+    keywords: ["tutorial", "tour", "ayuda", "guia", "aprender", "primeros pasos", "onboarding"],
+    when: inReview, perform: (a) => a.emitIntent("tour") },
 ];
 
 /** Normaliza para búsqueda: minúsculas y sin acentos. */

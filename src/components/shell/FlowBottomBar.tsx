@@ -87,6 +87,7 @@ export default function FlowBottomBar() {
         <button
           type="button"
           onClick={openPalette}
+          data-tour="command-search"
           className="inline-flex items-center gap-2 rounded-full border border-base-300/60 bg-base-200/50 hover:border-primary/40 px-3.5 py-1.5 text-sm text-base-content/60 hover:text-base-content transition-colors"
           aria-label="Buscar herramienta o acción"
         >
@@ -114,6 +115,7 @@ export default function FlowBottomBar() {
           <button
             type="button"
             onClick={nav.onNext}
+            data-tour="flow-next"
             disabled={nav.canNext === false || nav.nextBusy}
             className="btn btn-primary btn-sm rounded-xl gap-1.5 shadow-md shadow-primary/20"
           >
