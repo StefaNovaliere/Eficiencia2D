@@ -47,6 +47,7 @@ function SheetCanvas({
   sheetBg,
   sheetStroke,
   labelText,
+  flexStroke,
 }: {
   sheets: NestingSheet[];
   config: SheetConfig;
@@ -55,6 +56,7 @@ function SheetCanvas({
   sheetBg: string;
   sheetStroke: string;
   labelText: string;
+  flexStroke: string;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -152,7 +154,7 @@ function SheetCanvas({
           // Precedencia: patrón de flexión (kerf/auxético) = corte negro;
           // aberturas grabadas = rojo; resto = color de corte del panel.
           ctx.strokeStyle = e.flex === true
-            ? "#111827"
+            ? flexStroke
             : isMark && e.hole === true
               ? "#dc2626"
               : color;
@@ -183,7 +185,7 @@ function SheetCanvas({
         }
       }
     }
-  }, [sheets, config, color, dims, sheetBg, sheetStroke, labelText]);
+  }, [sheets, config, color, dims, sheetBg, sheetStroke, labelText, flexStroke]);
 
   if (sheets.length === 0) return null;
 
@@ -443,7 +445,7 @@ export default function NestingPreview({
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-base-100 relative">
+      <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-base-100 relative e2d-canvas-clean">
         {isRecomputing && (
           <div className="absolute inset-0 z-10 flex items-center justify-center gap-3 bg-base-100/60 backdrop-blur-[1px] text-base-content/70">
             <span className="loading loading-spinner text-primary" />
@@ -458,6 +460,7 @@ export default function NestingPreview({
           sheetBg={canvasColors.sheetBg}
           sheetStroke={canvasColors.sheetStroke}
           labelText={canvasColors.labelText}
+          flexStroke={canvasColors.flexStroke}
         />
         <SheetCanvas
           sheets={nesting.floorNesting.sheets}
@@ -467,6 +470,7 @@ export default function NestingPreview({
           sheetBg={canvasColors.sheetBg}
           sheetStroke={canvasColors.sheetStroke}
           labelText={canvasColors.labelText}
+          flexStroke={canvasColors.flexStroke}
         />
       </div>
 

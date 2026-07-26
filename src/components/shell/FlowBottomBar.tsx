@@ -46,7 +46,7 @@ export default function FlowBottomBar() {
   }
 
   return (
-    <div className="fixed bottom-0 inset-x-0 z-50 h-14 border-t border-base-300/50 bg-base-100/95 backdrop-blur-md flex items-center justify-between gap-3 px-3 sm:px-4">
+    <div className="fixed bottom-0 inset-x-0 z-50 h-14 border-t border-base-300/50 bg-base-100/95 backdrop-blur-md e2d-cyber-panel flex items-center justify-between gap-3 px-3 sm:px-4">
       {/* Plegar la barra (libera alto en planchas e instructivo) */}
       <button
         type="button"
