@@ -82,7 +82,7 @@ export default function CommandPalette() {
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-start justify-center pt-[15vh] bg-black/40 backdrop-blur-sm"
+      className="fixed inset-0 z-[100] flex items-start justify-center pt-[15vh] bg-neutral/70 backdrop-blur-sm"
       onMouseDown={closePalette}
       role="dialog"
       aria-modal="true"

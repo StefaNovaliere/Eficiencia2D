@@ -45,24 +45,26 @@ export interface ViewerPalette {
  */
 export const VIEWER_PALETTES: Record<ThemeId, ViewerPalette> = {
   /**
-   * Neón — primary cian `#22d3ee` / magenta.
-   * Fondo casi negro; paredes plateado frío; piso violeta-magenta.
+   * Neón (cyberpunk) — primary cian `#22e6ff` / secondary magenta `#ff2bd6`.
+   * Fondo negro azul-violeta; paredes acero frío; pisos magenta.
+   * `wall` y `floor` se mantienen separados en TONO y LUMINOSIDAD (accesibilidad
+   * daltónica): acero claro ~L70 vs magenta oscuro ~L45.
    */
   neon: {
-    background: "#293233",
+    background: "#0a0a14",
     isDark: true,
-    wall: "#8BA8B8",
-    floor: "#1F9399",
-    discard: "#5B6B7A",
-    edge: "#E0F7FA",
-    edgeOpacity: 0.4,
-    highlight: "#22d3ee",
-    leaderPrimary: "#22d3ee",
-    leaderSecondary: "#e879f9",
-    ambientLight: 0.85,
-    keyLight: 0.72,
-    fillLight: 0.4,
-    gizmoLabel: "#fafaf9",
+    wall: "#93A9C4",
+    floor: "#B03A9E",
+    discard: "#4E5A73",
+    edge: "#7DF9FF",
+    edgeOpacity: 0.55,
+    highlight: "#22e6ff",
+    leaderPrimary: "#22e6ff",
+    leaderSecondary: "#ff2bd6",
+    ambientLight: 0.78,
+    keyLight: 0.8,
+    fillLight: 0.45,
+    gizmoLabel: "#e6f4ff",
   },
 
   /**
@@ -212,7 +214,7 @@ export const THEMES: {
   {
     id: "neon",
     label: "Neón",
-    swatch: "#22d3ee",
+    swatch: "#22e6ff",
     preview: {
       bg: VIEWER_PALETTES.neon.background,
       wall: VIEWER_PALETTES.neon.wall,
@@ -316,5 +318,12 @@ export function getNestingCanvasColors(theme: ThemeId) {
     sheetBg: hexToRgba(palette.background, palette.isDark ? 0.97 : 0.94),
     sheetStroke: palette.edge,
     labelText: palette.isDark ? "#cbd5e1" : "#334155",
+    /**
+     * Trazo del patrón de flexión (kerf/auxético). Debe CONTRASTAR con la
+     * plancha: sobre plancha oscura un casi-negro es invisible, así que se
+     * invierte por tema. No confundir con el rojo de grabado (`#dc2626`), que
+     * es semántica de taller y no cambia.
+     */
+    flexStroke: palette.isDark ? "#e8eef5" : "#111827",
   };
 }
