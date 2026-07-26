@@ -6,6 +6,7 @@ import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from "reac
 import GroupList from "./GroupList";
 import MeasureList from "./MeasureList";
 import InspectorSection from "./InspectorSection";
+import ReviewTour from "./tour/ReviewTour";
 import MeasureScaleSelect from "./MeasureScaleSelect";
 import CameraNavigationSelect from "./CameraNavigationSelect";
 import VisibilityFilters from "./VisibilityFilters";
@@ -961,6 +962,8 @@ export default function ReviewScreen({
   // / intención que dispara la palette, mapeándola a los modos existentes.
   const uiToolNonce = useUIStore((s) => s.toolNonce);
   const uiIntent = useUIStore((s) => s.intent);
+  // Tour guiado: nonce que lo relanza desde el Command Palette.
+  const [tourNonce, setTourNonce] = useState(0);
 
   useEffect(() => {
     useUIStore.getState().setSelectionCount(selectedGroupIds.size);
@@ -1604,6 +1607,9 @@ export default function ReviewScreen({
       case "column":
         setSidebarTab("seleccion");
         handleAddColumn();
+        break;
+      case "tour":
+        setTourNonce((n) => n + 1);
         break;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2480,7 +2486,7 @@ export default function ReviewScreen({
         {!hideSidebar && (
           <>
             <Panel defaultSize={350} minSize={250} maxSize={500} className="flex flex-col shrink-0 h-[42vh] md:h-full z-20 shadow-2xl shadow-base-content/5 bg-base-100">
-              <aside className="w-full h-full flex flex-col border-t md:border-t-0 md:border-r border-base-300/40">
+              <aside data-tour="inspector" className="w-full h-full flex flex-col border-t md:border-t-0 md:border-r border-base-300/40">
           <div className="px-4 pt-4 pb-3 border-b border-base-300/30 shrink-0 bg-base-100/80 text-primary font-semibold tracking-widest">
             <StepIndicator current="review" variant="compact" />
           </div>
@@ -3537,7 +3543,7 @@ export default function ReviewScreen({
           </>
         )}
         <Panel className="relative overflow-hidden flex-1">
-          <div className="w-full h-full relative overflow-hidden" ref={viewerAreaRef}>
+          <div className="w-full h-full relative overflow-hidden" data-tour="viewer-3d" ref={viewerAreaRef}>
         <ModelViewer
           faces={phase1.faces}
           groups={displayGroups}
@@ -3946,6 +3952,9 @@ export default function ReviewScreen({
           </div>
         </Panel>
       </PanelGroup>
+
+      {/* Tour guiado: invitación en primera visita + relanzable desde la palette */}
+      <ReviewTour launchNonce={tourNonce} />
 
       {/* Assembly window overlay */}
       {(assemblyWindowOpen && (onRequestAssemblyPreview || assemblyGuideData)) && (
