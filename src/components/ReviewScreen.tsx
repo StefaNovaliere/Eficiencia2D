@@ -19,6 +19,12 @@ import {
 } from "@/core/discard-by-area";
 import type { Phase1Result, ClassificationOverride } from "@/core/pipeline";
 import type { WallWallJoint } from "@/core/assembly-adjuster";
+import type { Face3D } from "@/core/types";
+import {
+  areGroupsCoplanar,
+  connectedUnitedWallIds,
+  evaluateWallMergeSelection,
+} from "@/core/wall-merge-connectivity";
 import type { LeaderMarker, GroupNoteMarker } from "./ModelViewer";
 import {
   RefreshCw,
@@ -276,18 +282,6 @@ function findMergeClusterIndex(
   );
 }
 
-function areGroupsCoplanar(a: GeometryGroup, b: GeometryGroup): boolean {
-  const na = a.representativeNormal;
-  const nb = b.representativeNormal;
-  const dot = na.x * nb.x + na.y * nb.y + na.z * nb.z;
-  if (Math.abs(Math.abs(dot) - 1) > 0.02) return false;
-  const ca = a.centroid;
-  const cb = b.centroid;
-  const planeDist =
-    (cb.x - ca.x) * na.x + (cb.y - ca.y) * na.y + (cb.z - ca.z) * na.z;
-  return Math.abs(planeDist) < 0.02;
-}
-
 /**
  * Paredes que realmente forman la fusión coplanar. Excluye paredes aledañas que
  * solo cruzan la fusión (encuentros pared-pared) y quedaron en el cluster por
@@ -324,20 +318,24 @@ function filterTrueMergeMembers(
   });
 }
 
-/** Expande ids con miembros de fusiones existentes y todas las coplanares. */
+/**
+ * Fachada fusionable: paredes coplanares con `reference` que están UNIDAS
+ * (mismo componente conexo). Las coplanares separadas por un vano no entran.
+ */
 function listCoplanarFacadeIds(
   reference: GeometryGroup,
   groups: GeometryGroup[],
   overrides: Map<number, FaceCategory>,
+  faces: Face3D[],
+  joints: Phase1Result["joints"],
 ): number[] {
   if (getEffectiveCategory(reference, overrides) !== "wall") return [];
-  return groups
-    .filter(
-      (g) =>
-        getEffectiveCategory(g, overrides) === "wall" &&
-        areGroupsCoplanar(reference, g),
-    )
-    .map((g) => g.id);
+  const coplanarWalls = groups.filter(
+    (g) =>
+      getEffectiveCategory(g, overrides) === "wall" &&
+      areGroupsCoplanar(reference, g),
+  );
+  return connectedUnitedWallIds(reference.id, coplanarWalls, faces, joints);
 }
 
 /** Mapea ids de miembros fusionados → superviviente en groups. */
@@ -694,6 +692,11 @@ export default function ReviewScreen({
   const [assemblyLoading, setAssemblyLoading] = useState(false);
   const [assemblyError, setAssemblyError] = useState<string | null>(null);
   const [assemblyWindowOpen, setAssemblyWindowOpen] = useState(false);
+  const setInstructivoOpen = useUIStore((s) => s.setInstructivoOpen);
+  useEffect(() => {
+    setInstructivoOpen(assemblyWindowOpen);
+    return () => setInstructivoOpen(false);
+  }, [assemblyWindowOpen, setInstructivoOpen]);
   const [bulkSimilarModal, setBulkSimilarModal] = useState<{
     reference: GeometryGroup;
     matches: GeometryGroup[];
@@ -1347,15 +1350,21 @@ export default function ReviewScreen({
     [selectedGroups, overrides],
   );
 
-  // El cluster a fusionar = las paredes seleccionadas (≥2). El backend valida y
-  // las agrupa por coplanaridad al recalcular; el front sólo recolecta la
-  // decisión.
-  const mergeClusters = useMemo<number[][]>(
+  // El cluster a fusionar = paredes seleccionadas coplanares Y unidas (≥2).
+  // Paredes en el mismo plano pero separadas (vano / hueco) no se pueden unir.
+  const wallMergeEval = useMemo(
     () =>
-      selectedWallGroups.length >= 2
-        ? [selectedWallGroups.map((g) => g.id)]
-        : [],
-    [selectedWallGroups],
+      evaluateWallMergeSelection(
+        selectedWallGroups,
+        phase1.faces,
+        phase1.joints,
+      ),
+    [selectedWallGroups, phase1.faces, phase1.joints],
+  );
+
+  const mergeClusters = useMemo<number[][]>(
+    () => (wallMergeEval.ok ? [wallMergeEval.cluster] : []),
+    [wallMergeEval],
   );
 
   const canMergeSelected = mergeClusters.length >= 1;
@@ -1372,8 +1381,16 @@ export default function ReviewScreen({
     if (canMergeSelected) return null;
     if (selectedWallGroups.length < 2)
       return "Solo se pueden fusionar paredes.";
-    return "No hay paredes coplanares en la selección.";
-  }, [selectedGroups.length, selectedWallGroups.length, canMergeSelected]);
+    return (
+      wallMergeEval.reason ??
+      "Solo se pueden fusionar paredes coplanares y unidas."
+    );
+  }, [
+    selectedGroups.length,
+    selectedWallGroups.length,
+    canMergeSelected,
+    wallMergeEval.reason,
+  ]);
 
   const handleMergeSelected = useCallback(() => {
     if (mergeClusters.length < 1) return;
@@ -1795,8 +1812,14 @@ export default function ReviewScreen({
       getEffectiveCategory(selectedWallOwnerGroup, overrides) !== "wall"
     )
       return [];
-    return listCoplanarFacadeIds(selectedWallOwnerGroup, phase1.groups, overrides);
-  }, [selectedWallOwnerGroup, phase1.groups, overrides]);
+    return listCoplanarFacadeIds(
+      selectedWallOwnerGroup,
+      phase1.groups,
+      overrides,
+      phase1.faces,
+      phase1.joints,
+    );
+  }, [selectedWallOwnerGroup, phase1.groups, phase1.faces, phase1.joints, overrides]);
 
   const facadeReferenceResolved = useMemo(() => {
     if (!selectedWallOwnerGroup) return -1;
@@ -3964,6 +3987,7 @@ export default function ReviewScreen({
           error={assemblyError}
           phase1={phase1}
           categoryOverrides={overrides}
+          wallWallDecisions={wallWallDecisions}
           onClose={() => setAssemblyWindowOpen(false)}
           onReload={() => void loadAssemblyPreview(true)}
         />

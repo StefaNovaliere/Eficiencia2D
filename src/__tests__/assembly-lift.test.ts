@@ -110,6 +110,7 @@ describe("liftPiece", () => {
     const g = liftFaces([quad]);
     expect(g.positions.length).toBe(18); // 2 triángulos × 3 × 3
     expect(g.hasHoles).toBe(false);
+    expect(g.inwardSlab).toBe(true);
     // Coordenadas de mundo sin transformar: z constante = 1, x∈[0,2], y∈[0,1].
     for (let i = 0; i < g.positions.length; i += 3) {
       expect(g.positions[i + 2]).toBeCloseTo(1);

@@ -7,15 +7,23 @@ import type {
   AssemblyPreviewData,
   AssemblySequencePiecePayload,
 } from "@/services/api";
+import type { GeometryGroup } from "./group-classifier";
+import {
+  applyYieldClipsToPositions,
+  type YieldClipSpec,
+} from "./wall-yield-clip";
+import {
+  faceNormalFromPositions,
+  orientOutwardNormal,
+} from "./assembly-slab";
 
 /**
- * Contexto del instructivo v2 (método obligatorio del contrato):
- *  - CUERPO + HUECOS + POSE: la malla original del grupo
- *    (`faces[group.faceIndices]`), idéntica al visor de /review. Los huecos
- *    aparecen solos (son gaps reales de la malla). NO se reconstruye desde el
- *    panel 2D de corte (causaba huecos tapados y pisos deformados).
- *  - ENCASTRES (ranuras): overlay desde `plate_joints` de `/api/nesting-preview`
- *    (ya en coords de mundo), filtrados por `cut_id == group.id`.
+ * Contexto del instructivo 3D:
+ *  - CUERPO: malla del grupo (`liftFaces`) como en /review, engrosada hacia
+ *    ADENTRO con espesor MDF (cantos exteriores fijos).
+ *  - ENCUENTROS: la pared que cede se acorta contra el slab de la que manda
+ *    (`yieldClips` desde wall_wall_decisions).
+ *  - ENCASTRES / marcas de apoyo: overlay desde `plate_joints` del nesting.
  */
 export interface AssemblyLiftContext {
   /** etiqueta de panel (A1, B2…) → id de grupo. */
@@ -28,9 +36,14 @@ export interface AssemblyLiftContext {
   plateJointsByGroupId?: Map<number, PlateJoint[]>;
   /** Normal del plano de cada grupo (para orientar las ranuras). */
   normalByGroupId?: Map<number, Vec3>;
-  /** Centroide de cada grupo — orienta la marca de apoyo hacia la CARA INTERIOR
-   *  (el lado de la pared que mira a la placa que se apoya). */
+  /** Centroide de cada grupo — orienta la marca de apoyo hacia la CARA INTERIOR. */
   centroidByGroupId?: Map<number, Vec3>;
+  /** Grupos por id (para clips de cesión). */
+  groupById?: Map<number, GeometryGroup>;
+  /** Clips: acortar paredes que ceden en encuentros pared-pared. */
+  yieldClips?: YieldClipSpec[];
+  /** Centroide del modelo — orienta el engrosado hacia afuera. */
+  buildingCentroid?: Vec3;
 }
 
 /** One assembly step from the backend JSON. */
@@ -117,9 +130,8 @@ function payloadToPiece(
 }
 
 /**
- * v2: arma la geometría de la pieza = malla original del grupo (cuerpo + huecos
- * + pose) + overlay de ranuras de encastre. Nunca tira: ante cualquier error,
- * la pieza cae al render de caja (sin `lifted`).
+ * Arma la geometría 3D de la pieza con la malla del modelo (como en /review),
+ * acorte de cesión en encuentros, y overlays de encastre/apoyo del nesting.
  */
 function applyLift(
   piece: AssemblySequencePiece,
@@ -127,30 +139,62 @@ function applyLift(
 ): AssemblySequencePiece {
   if (!lift) return piece;
   const label = piece.id.trim();
-  const faceIndices = lift.faceIndicesByLabel.get(label);
-  if (!faceIndices || faceIndices.length === 0) return piece;
+  const groupId = lift.labelToGroupId.get(label);
 
   try {
+    const faceIndices = lift.faceIndicesByLabel.get(label);
+    if (!faceIndices || faceIndices.length === 0) return piece;
     const faces = faceIndices.map((i) => lift.faces[i]).filter(Boolean);
     if (faces.length === 0) return piece;
-
     const body = liftFaces(faces);
     if ((body.positions?.length ?? 0) < 9) return piece;
 
-    // Overlay de ranuras de encastre (plate_joints con cut_id == group.id).
-    const groupId = lift.labelToGroupId.get(label);
+    let positions = body.positions;
+    const group =
+      groupId != null && lift.groupById ? lift.groupById.get(groupId) : undefined;
+    if (groupId != null && group && lift.yieldClips?.length) {
+      positions = applyYieldClipsToPositions(
+        positions,
+        groupId,
+        group,
+        lift.yieldClips,
+      );
+    }
+
+    const isWall = group?.category === "wall" || piece.category === "wall";
+    const faceN = faceNormalFromPositions(positions);
+    const groupN =
+      groupId === undefined ? undefined : lift.normalByGroupId?.get(groupId);
+    const rawN = faceN ?? groupN ?? piece.normal;
+    const facePoint =
+      (groupId !== undefined ? lift.centroidByGroupId?.get(groupId) : undefined) ??
+      piece.position;
+    const building = lift.buildingCentroid ?? facePoint;
+    const outwardNormal = isWall
+      ? orientOutwardNormal(rawN, facePoint, building)
+      : undefined;
+
     const joints = groupId === undefined ? undefined : lift.plateJointsByGroupId?.get(groupId);
     const normal = groupId === undefined ? undefined : lift.normalByGroupId?.get(groupId);
     const slots = joints && joints.length > 0 && normal ? buildSlots(joints, normal) : [];
-    // Marcas de apoyo (rojo): footprint de las juntas de apoyo pegado.
     const supportMarks =
       joints && joints.length > 0 && normal
         ? computeSupportMarks3D(joints, normal, lift.centroidByGroupId)
         : [];
 
-    return { ...piece, lifted: { ...body, openings: body.openings ?? [], slots, supportMarks } };
+    return {
+      ...piece,
+      lifted: {
+        ...body,
+        positions,
+        openings: body.openings ?? [],
+        inwardSlab: isWall,
+        outwardNormal,
+        slots,
+        supportMarks,
+      },
+    };
   } catch {
-    // Caer al render de caja.
     return piece;
   }
 }
