@@ -1408,10 +1408,10 @@ function MeasureHtmlLabels({
           <div
             className={`px-2 py-0.5 rounded-lg font-mono text-xs font-semibold shadow-md border whitespace-nowrap ${
               p.isDraft
-                ? "bg-base-100/90 border-sky-400/70 text-sky-600 dark:text-sky-300"
+                ? "bg-base-100/90 border-info/70 text-info"
                 : highlighted
-                  ? "bg-amber-400 border-amber-300 text-amber-950 ring-2 ring-amber-200 scale-110"
-                  : "bg-sky-500/95 border-sky-400 text-white"
+                  ? "bg-warning border-warning text-warning-content ring-2 ring-warning/50 scale-110"
+                  : "bg-info border-info text-info-content"
             }`}
           >
             {p.label}
@@ -1472,14 +1472,14 @@ function AngleHtmlLabels({ placements }: { placements: AngleLabelPlacement[] }) 
           {p.isInstruction ? (
             /* Pulsing instruction badge for panels first-click draft */
             <div
-              className="px-2 py-1 rounded-xl text-[11px] font-semibold shadow-lg border border-amber-400/70 bg-amber-500/20 text-amber-500 whitespace-nowrap backdrop-blur-sm"
+              className="px-2 py-1 rounded-xl text-[11px] font-semibold shadow-lg border border-warning/70 bg-warning/20 text-warning whitespace-nowrap backdrop-blur-sm"
               style={{ animation: "pulse 1.4s cubic-bezier(0.4,0,0.6,1) infinite" }}
             >
               <span className="mr-1">●</span>{p.label}
             </div>
           ) : p.arcDeg !== undefined ? (
             /* Panels committed: angle value + SVG arc indicator */
-            <div className="flex flex-col items-center gap-0.5 bg-amber-500/95 border border-amber-400 text-white rounded-xl shadow-lg px-2 pt-1.5 pb-1 select-none">
+            <div className="flex flex-col items-center gap-0.5 bg-warning border border-warning text-warning-content rounded-xl shadow-lg px-2 pt-1.5 pb-1 select-none">
               <AngleArcSvg deg={p.arcDeg} />
               <span className="font-mono text-xs font-semibold leading-none">{p.label}</span>
             </div>
@@ -1488,8 +1488,8 @@ function AngleHtmlLabels({ placements }: { placements: AngleLabelPlacement[] }) 
             <div
               className={`px-2 py-0.5 rounded-lg font-mono text-xs font-semibold shadow-md border whitespace-nowrap ${
                 p.isDraft
-                  ? "bg-base-100/90 border-amber-400/70 text-amber-600 dark:text-amber-300"
-                  : "bg-amber-500/95 border-amber-400 text-white"
+                  ? "bg-base-100/90 border-warning/70 text-warning"
+                  : "bg-warning border-warning text-warning-content"
               }`}
             >
               {p.label}

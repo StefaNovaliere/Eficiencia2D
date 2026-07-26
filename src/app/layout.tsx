@@ -1,5 +1,26 @@
 import type { Metadata } from "next";
+import { Chakra_Petch, JetBrains_Mono } from "next/font/google";
 import "@/styles/globals.css";
+
+/*
+ * Tipografía del tema cyberpunk: display técnica para títulos/eyebrows y una
+ * mono real para cifras y datos (el CSS ya pedía "JetBrains Mono", pero nunca
+ * se cargaba y caía al stack del sistema). Se exponen como CSS vars y se
+ * enganchan en `@theme` de globals.css.
+ */
+const display = Chakra_Petch({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  variable: "--font-display",
+  display: "swap",
+});
+
+const mono = JetBrains_Mono({
+  subsets: ["latin"],
+  weight: ["400", "500", "700"],
+  variable: "--font-mono-e2d",
+  display: "swap",
+});
 import { AuthProvider } from "@/context/AuthContext";
 import { ProjectProvider } from "@/context/ProjectContext";
 import { SettingsProvider, SettingsThemeSync } from "@/context/SettingsContext";
@@ -30,10 +51,11 @@ const themeInitScript = `
       document.documentElement.setAttribute("data-theme", saved);
       return;
     }
-    var dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+    // Sin preferencia guardada: el look por defecto de la app es "neon"
+    // (cyberpunk). El usuario puede elegir otro tema en Configuración.
+    document.documentElement.setAttribute("data-theme", "neon");
   } catch (e) {
-    document.documentElement.setAttribute("data-theme", "dark");
+    document.documentElement.setAttribute("data-theme", "neon");
   }
 })();
 `;
@@ -44,7 +66,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="es" suppressHydrationWarning>
+    <html lang="es" suppressHydrationWarning className={`${display.variable} ${mono.variable}`}>
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
