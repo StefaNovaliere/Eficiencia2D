@@ -148,7 +148,7 @@
 
 /* Área de trabajo LIMPIA: opaca y por encima de la textura de fondo. */
 [data-theme="neon"] .e2d-canvas-clean {
-  position: relative;
+  /* Sin `position`: los consumidores ya traen su propio `relative`. */
   z-index: 1;
   isolation: isolate;
   background-color: var(--viewer-bg, var(--color-base-100));
@@ -214,8 +214,13 @@
  * Panel/isla cyber: borde de acento + corner brackets. Se aplica a la toolbar
  * flotante, el inspector y la barra inferior del flujo.
  */
+/*
+ * OJO: sólo PRESENTACIÓN. Nada de layout acá (`position`, `inset`, `display`…):
+ * este selector tiene más especificidad que las utilidades de Tailwind y le
+ * pisaría el `fixed`/`absolute` al componente. El posicionamiento lo declara
+ * cada componente con su propia clase.
+ */
 [data-theme="neon"] .e2d-cyber-panel {
-  position: relative;
   border-color: color-mix(in oklch, var(--color-primary) 26%, transparent) !important;
   box-shadow:
     0 0 24px color-mix(in oklch, var(--color-primary) 12%, transparent),

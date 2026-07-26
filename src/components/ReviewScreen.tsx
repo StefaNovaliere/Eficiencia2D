@@ -2486,7 +2486,7 @@ export default function ReviewScreen({
         {!hideSidebar && (
           <>
             <Panel defaultSize={350} minSize={250} maxSize={500} className="flex flex-col shrink-0 h-[42vh] md:h-full z-20 shadow-2xl shadow-base-content/5 bg-base-100">
-              <aside data-tour="inspector" className="w-full h-full flex flex-col border-t md:border-t-0 md:border-r border-base-300/40 e2d-cyber-panel">
+              <aside data-tour="inspector" className="relative w-full h-full flex flex-col border-t md:border-t-0 md:border-r border-base-300/40 e2d-cyber-panel">
           <div className="px-4 pt-4 pb-3 border-b border-base-300/30 shrink-0 bg-base-100/80 text-primary font-semibold tracking-widest">
             <StepIndicator current="review" variant="compact" />
           </div>
