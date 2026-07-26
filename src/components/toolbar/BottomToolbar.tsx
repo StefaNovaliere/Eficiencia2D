@@ -768,6 +768,7 @@ export default function BottomToolbar(props: BottomToolbarProps) {
               <button
                 key={g.id}
                 type="button"
+                data-tour={`toolbar-${g.id}`}
                 onClick={() => toggle(g.id)}
                 className={`${TAB} ${isOpen ? TAB_ON : isActive ? TAB_ACTIVE : TAB_OFF}`}
               >
