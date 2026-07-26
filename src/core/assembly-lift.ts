@@ -26,6 +26,13 @@ export interface LiftedPieceGeometry {
   openings: number[];
   /** True si la pieza tiene aberturas (huecos) lifteadas. */
   hasHoles: boolean;
+  /**
+   * Engrosar hacia ADENTRO (fachada exterior fija). Usado con la malla de
+   * /review para no deformar cantos exteriores al aplicar el MDF.
+   */
+  inwardSlab?: boolean;
+  /** Normal hacia AFUERA (para `buildInwardSlab`). */
+  outwardNormal?: Vec3;
   /** Triángulos de las ranuras de encastre (overlay v2), en coords de mundo. */
   slots?: number[];
   /** Triángulos del footprint de APOYO (marca roja: dónde se pega un piso/estante). */
@@ -104,9 +111,14 @@ function pointsEqual(a: Vec2, b: Vec2): boolean {
 }
 
 /**
- * Liftea una pieza a 3D. Si `panel` viene, usa su contorno de corte real (con
- * aberturas); si no, usa el rectángulo del `placement` (pose correcta, sin
- * huecos). En ambos casos la pose sale del marco `placement`.
+ * Liftea una pieza a 3D.
+ *
+ * - Con `panel` (contorno de nesting/PDF): usa sus aristas reales (exteriores +
+ *   huecos). Si no se pueden reconstruir anillos, devuelve geometría vacía
+ *   (el caller debe caer a otro método) — NUNCA rellena con el rectángulo del
+ *   placement (eso inventaba material macizo entre columnas/aberturas).
+ * - Sin `panel` (`null`): rectángulo del placement (útil para tests / preview
+ *   sin nesting). El instructivo no usa este camino.
  */
 export function liftPiece(
   placement: Placement,
@@ -124,16 +136,26 @@ export function liftPiece(
     const { outer, holes } = edgesToRings(panel.edges);
     outerRings = outer.map((r) => r.map((p) => scaleAndMirror(p, scale, widthM, mirrored)));
     holeRings = holes.map((r) => r.map((p) => scaleAndMirror(p, scale, widthM, mirrored)));
-    // Si no se pudo reconstruir el exterior, caer al rectángulo.
-    if (outerRings.length === 0) outerRings = [rectRing(widthM, heightM, mirrored)];
-  } else {
+    // Sin exterior reconstruible: no inventar un bloque macizo del AABB.
+    if (outerRings.length === 0) {
+      return { positions: [], openings: [], hasHoles: false };
+    }
+  } else if (!panel) {
     outerRings = [rectRing(widthM, heightM, mirrored)];
     holeRings = [];
+  } else {
+    return { positions: [], openings: [], hasHoles: false };
   }
 
   const positions: number[] = [];
   for (const ring of outerRings) {
-    triangulateRingWithHoles(ring, holeRings, placement, positions);
+    // Cada contorno exterior lleva sólo los huecos que caen dentro (si no,
+    // un hueco de otra pieza “rellena” mal al triangular).
+    let holesForRing = holeRings.filter((h) => ringContainsRing(ring, h));
+    if (holesForRing.length === 0 && outerRings.length === 1) {
+      holesForRing = holeRings;
+    }
+    triangulateRingWithHoles(ring, holesForRing, placement, positions);
   }
 
   const openings: number[] = [];
@@ -142,6 +164,36 @@ export function liftPiece(
   }
 
   return { positions, openings, hasHoles: holeRings.length > 0 };
+}
+
+/** ¿El anillo `inner` está (aprox.) dentro del `outer`? Centroide + winding simple. */
+function ringContainsRing(outer: Ring, inner: Ring): boolean {
+  if (outer.length < 3 || inner.length < 3) return false;
+  let cx = 0;
+  let cy = 0;
+  for (const p of inner) {
+    cx += p.x;
+    cy += p.y;
+  }
+  cx /= inner.length;
+  cy /= inner.length;
+  return pointInRing(cx, cy, outer);
+}
+
+function pointInRing(x: number, y: number, ring: Ring): boolean {
+  // Ray casting 2D.
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i].x;
+    const yi = ring[i].y;
+    const xj = ring[j].x;
+    const yj = ring[j].y;
+    const intersect =
+      yi > y !== yj > y &&
+      x < ((xj - xi) * (y - yi)) / (yj - yi) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
 }
 
 function rectRing(w: number, h: number, mirrored: boolean): Ring {
@@ -220,7 +272,7 @@ export function liftFaces(faces: Face3D[]): LiftedPieceGeometry {
   for (const face of faces) {
     triangulateFaceWorld(face, positions);
   }
-  return { positions, openings: [], hasHoles: false };
+  return { positions, openings: [], hasHoles: false, inwardSlab: true };
 }
 
 function triangulateFaceWorld(face: Face3D, out: number[]): void {

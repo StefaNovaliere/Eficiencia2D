@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { usePathname } from "next/navigation";
 import { ArrowLeft, ArrowRight, BookOpen, ChevronUp, Search } from "lucide-react";
 import { useUIStore } from "@/stores/uiStore";
 import CameraNavigationSelect from "@/components/CameraNavigationSelect";
@@ -9,26 +10,34 @@ import CameraNavigationSelect from "@/components/CameraNavigationSelect";
 const BAR_H = "3.5rem";
 
 /**
- * Barra de navegación CONSTANTE del flujo. Atrás (izquierda) y Continuar
- * (derecha) quedan SIEMPRE en la misma posición en todos los pasos; sólo cambian
- * label/handler que registra la página (`useRegisterFlowNav`). En el centro, la
- * entrada VISIBLE al Command Palette. Posición fija abajo (h-14).
+ * Barra de navegación del flujo.
+ *
+ * - Atrás / Continuar: en todo el flujo (review, nesting, payment).
+ * - Navegación de cámara, buscador e instructivo: sólo en /review, donde el
+ *   modelo es editable y están las herramientas.
+ * - Oculta por completo con el instructivo de armado abierto.
  */
 export default function FlowBottomBar() {
+  const pathname = usePathname() ?? "";
+  const isEditablePreview = pathname.startsWith("/review");
+
   const nav = useUIStore((s) => s.flowNav);
   const openPalette = useUIStore((s) => s.openPalette);
   const collapsed = useUIStore((s) => s.flowBarCollapsed);
   const toggleFlowBar = useUIStore((s) => s.toggleFlowBar);
+  const instructivoOpen = useUIStore((s) => s.instructivoOpen);
   const isMac =
     typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
 
-  // El contenido del flujo reserva `--flow-bar-h`: al plegar la barra ese alto
-  // se libera y las planchas/tablas ganan pantalla.
+  const hidden = instructivoOpen || collapsed;
+
   useEffect(() => {
     const root = document.documentElement.style;
-    root.setProperty("--flow-bar-h", collapsed ? "0rem" : BAR_H);
+    root.setProperty("--flow-bar-h", hidden ? "0rem" : BAR_H);
     return () => root.setProperty("--flow-bar-h", BAR_H);
-  }, [collapsed]);
+  }, [hidden]);
+
+  if (instructivoOpen) return null;
 
   if (collapsed) {
     return (
@@ -47,7 +56,6 @@ export default function FlowBottomBar() {
 
   return (
     <div className="fixed bottom-0 inset-x-0 z-50 h-14 border-t border-base-300/50 bg-base-100/95 backdrop-blur-md e2d-cyber-panel flex items-center justify-between gap-3 px-3 sm:px-4">
-      {/* Plegar la barra (libera alto en planchas e instructivo) */}
       <button
         type="button"
         onClick={toggleFlowBar}
@@ -57,7 +65,7 @@ export default function FlowBottomBar() {
       >
         <ChevronUp size={12} className="rotate-180" />
       </button>
-      {/* Izquierda: Atrás (posición fija) */}
+
       <div className="flex-1 flex gap-10 justify-start min-w-0">
         {nav.onBack && (
           <button
@@ -79,28 +87,30 @@ export default function FlowBottomBar() {
             )}
           </button>
         )}
-        <CameraNavigationSelect variant="toolbar-bottom" className="hidden sm:flex" />
+        {isEditablePreview && (
+          <CameraNavigationSelect variant="toolbar-bottom" className="hidden sm:flex" />
+        )}
       </div>
 
-      {/* Centro: configuración de navegación/teclado + entrada visible al palette */}
       <div className="flex items-center gap-2 min-w-0">
-        <button
-          type="button"
-          onClick={openPalette}
-          data-tour="command-search"
-          className="inline-flex items-center gap-2 rounded-full border border-base-300/60 bg-base-200/50 hover:border-primary/40 px-3.5 py-1.5 text-sm text-base-content/60 hover:text-base-content transition-colors"
-          aria-label="Buscar herramienta o acción"
-        >
-          <Search size={14} className="text-primary/70" />
-          <span className="hidden sm:inline">Buscar herramienta o acción…</span>
-          <span className="sm:hidden">Buscar…</span>
-          <kbd className="kbd kbd-xs ml-0.5">{isMac ? "⌘" : "Ctrl"} K</kbd>
-        </button>
+        {isEditablePreview && (
+          <button
+            type="button"
+            onClick={openPalette}
+            data-tour="command-search"
+            className="inline-flex items-center gap-2 rounded-full border border-base-300/60 bg-base-200/50 hover:border-primary/40 px-3.5 py-1.5 text-sm text-base-content/60 hover:text-base-content transition-colors"
+            aria-label="Buscar herramienta o acción"
+          >
+            <Search size={14} className="text-primary/70" />
+            <span className="hidden sm:inline">Buscar herramienta o acción…</span>
+            <span className="sm:hidden">Buscar…</span>
+            <kbd className="kbd kbd-xs ml-0.5">{isMac ? "⌘" : "Ctrl"} K</kbd>
+          </button>
+        )}
       </div>
 
-      {/* Derecha: Instructivo + Continuar (posición fija) */}
       <div className="flex-1 flex justify-end items-center gap-2 min-w-0">
-        {nav.onInstructivo && (
+        {isEditablePreview && nav.onInstructivo && (
           <button
             type="button"
             onClick={nav.onInstructivo}

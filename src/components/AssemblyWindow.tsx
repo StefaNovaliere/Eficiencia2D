@@ -30,6 +30,7 @@ import { useProjectContext } from "@/context/ProjectContext";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import InteractiveAssemblyViewer from "@/components/InteractiveAssemblyViewer";
 import { resolveSlabThicknessM } from "@/core/assembly-slab";
+import { buildYieldClipSpecs, type WallWallDecisions } from "@/core/wall-yield-clip";
 
 /** Espesor del material físico de la maqueta. MDF 3 mm por defecto (futuro:
  *  selector MDF/cartón por proyecto). Se escala por la escala de impresión. */
@@ -329,6 +330,8 @@ export interface AssemblyWindowProps {
   error: string | null;
   phase1: Phase1Result;
   categoryOverrides: Map<number, FaceCategory>;
+  /** Decisiones de quién cede en encuentros pared-pared (live de revisión). */
+  wallWallDecisions?: WallWallDecisions;
   projectName?: string;
   onClose: () => void;
   onReload: () => void;
@@ -340,6 +343,7 @@ export default function AssemblyWindow({
   error,
   phase1,
   categoryOverrides,
+  wallWallDecisions,
   projectName = "Proyecto",
   onClose,
   onReload,
@@ -347,6 +351,7 @@ export default function AssemblyWindow({
   const [selectedPanelId, setSelectedPanelId] = useState<string | null>(null);
   const [view, setView] = useState<"elevations" | "table">("elevations");
   const { nestingData, scale } = useProjectContext();
+  // Espesor MDF 3 mm a escala de impresión (fiel a la maqueta física).
   const slabThicknessM = resolveSlabThicknessM(MATERIAL_THICKNESS_M, scale);
 
   // Close on Escape
@@ -394,29 +399,45 @@ export default function AssemblyWindow({
     );
   }, [displayData, phase1, categoryOverrides]);
 
-  // Contexto para liftear cada pieza a su pose 3D real (instructivo #2): pose
-  // desde `placements` (topology) + contorno de corte desde los paneles de
-  // nesting. Si falta cualquiera, buildAssemblyPieces cae al render de cajas.
+  // Cuerpo = malla del modelo + engrosado inward + clips de cesión.
   const liftContext = useMemo<AssemblyLiftContext>(() => {
-    // v2: cuerpo = malla original del grupo; ranuras = plate_joints del nesting.
     const labelToGroupId = new Map<string, number>();
     const faceIndicesByLabel = new Map<string, number[]>();
     const normalByGroupId = new Map<number, Vec3>();
     const centroidByGroupId = new Map<number, Vec3>();
+    const groupById = new Map(phase1.groups.map((g) => [g.id, g]));
+    let cx = 0;
+    let cy = 0;
+    let cz = 0;
     for (const g of phase1.groups) {
       const label = groupLabel(g, phase1.panelIdByGroup);
       labelToGroupId.set(label, g.id);
       faceIndicesByLabel.set(label, g.faceIndices);
       normalByGroupId.set(g.id, g.representativeNormal);
       centroidByGroupId.set(g.id, g.centroid);
+      cx += g.centroid.x;
+      cy += g.centroid.y;
+      cz += g.centroid.z;
     }
-    // Encastres por grupo que los recibe (cut_id).
+    const n = Math.max(phase1.groups.length, 1);
+    const buildingCentroid = { x: cx / n, y: cy / n, z: cz / n };
+
     const plateJointsByGroupId = new Map<number, PlateJoint[]>();
     for (const j of nestingData?.plateJoints ?? []) {
       const arr = plateJointsByGroupId.get(j.cutId);
       if (arr) arr.push(j);
       else plateJointsByGroupId.set(j.cutId, [j]);
     }
+
+    const decisions = wallWallDecisions ?? new Map<number, number>();
+    const yieldClips = buildYieldClipSpecs(
+      phase1.wallWallJoints ?? [],
+      phase1.joints ?? [],
+      phase1.groups,
+      decisions,
+      slabThicknessM,
+    );
+
     return {
       labelToGroupId,
       faces: phase1.faces,
@@ -424,8 +445,11 @@ export default function AssemblyWindow({
       plateJointsByGroupId,
       normalByGroupId,
       centroidByGroupId,
+      groupById,
+      yieldClips,
+      buildingCentroid,
     };
-  }, [phase1, nestingData]);
+  }, [phase1, nestingData, wallWallDecisions, slabThicknessM]);
 
   const assemblyPieces = useMemo(
     () => (displayData ? buildAssemblyPieces(displayData, assemblySteps, liftContext) : []),

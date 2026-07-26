@@ -391,10 +391,9 @@ function ReviewPageContent() {
     ],
   );
 
-  // El instructivo se construye en el FRONT desde la topología (el backend no
-  // tiene endpoint de preview; sólo genera la guía dentro del ZIP). La geometría
-  // 3D la resuelve el lift: piezas de corte (#2) con placements+nesting, o la
-  // geometría original por grupo (#1) como fallback.
+  // El instructivo usa la misma geometría que nesting/impresión: al abrirlo
+  // refrescamos `/api/nesting-preview` con las wall_wall_decisions actuales
+  // (quién cede / quién manda) y después lifteamos esos contornos a 3D.
   const handleRequestAssemblyPreview = useCallback(
     async (request: AssemblyPreviewRequest) => {
       if (!phase1Result) throw new Error("Proyecto no cargado");
@@ -402,9 +401,71 @@ function ReviewPageContent() {
       for (const o of request.overrides) {
         overridesMap.set(o.groupId, o.newCategory as FaceCategory);
       }
+
+      if (fileId) {
+        try {
+          const originalFilename = resolveOriginalFilename(
+            projectFileName,
+            phase1Result.stem,
+          );
+          const nesting = await fetchNestingPreview(
+            {
+              file_id: fileId,
+              original_filename: originalFilename,
+              axis: phase1Result.appliedAxis,
+              min_area_m2: minAreaM2,
+              merges: savedMerges,
+              splits: savedSplits.map(
+                (s): SplitOperation => ({ group_id: s.groupId, mode: s.mode }),
+              ),
+              overrides: overridesToRecord(request.overrides),
+              wall_wall_decisions: decisionsToRecord(request.wallWallDecisions),
+              marks: request.marks,
+              sheet_config: {
+                width_m: sheetConfig.widthM,
+                height_m: sheetConfig.heightM,
+                gap_m: sheetConfig.gapM,
+              },
+              scale_denom: scale,
+              paper,
+              page_mode: pdfPageMode,
+              user_cuts: userCutsForApi(request.userCuts),
+              flex: flexForApi(savedFlex),
+              mark_lines: markLinesForApi(savedMarkLines),
+              ribs: ribsForApi(savedRibs),
+              columns: columnsForApi(savedColumns),
+            },
+            token,
+          );
+          setNestingData(nesting);
+        } catch (err) {
+          console.warn(
+            "[instructivo] no se pudo refrescar nesting-preview; se usa geometría de fallback.",
+            err,
+          );
+        }
+      }
+
       return buildAssemblyGuideFromTopology(phase1Result, { overrides: overridesMap });
     },
-    [phase1Result],
+    [
+      phase1Result,
+      fileId,
+      projectFileName,
+      minAreaM2,
+      savedMerges,
+      savedSplits,
+      savedFlex,
+      savedMarkLines,
+      savedRibs,
+      savedColumns,
+      sheetConfig,
+      scale,
+      paper,
+      pdfPageMode,
+      setNestingData,
+      token,
+    ],
   );
 
   if (isLoadingSession) return null;

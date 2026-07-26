@@ -77,6 +77,10 @@ export interface UIState {
   /** Barra inferior del flujo plegada (libera alto en planchas/instructivo). */
   flowBarCollapsed: boolean;
   toggleFlowBar: () => void;
+
+  /** Instructivo de armado a pantalla completa: oculta la barra del flujo. */
+  instructivoOpen: boolean;
+  setInstructivoOpen: (open: boolean) => void;
 }
 
 const FLOW_BAR_KEY = "e2dFlowBarCollapsed";
@@ -130,4 +134,7 @@ export const useUIStore = create<UIState>((set, get) => ({
       }
       return { flowBarCollapsed: next };
     }),
+
+  instructivoOpen: false,
+  setInstructivoOpen: (open) => set({ instructivoOpen: open }),
 }));

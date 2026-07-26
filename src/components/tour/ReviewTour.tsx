@@ -1,14 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { Sparkles } from "lucide-react";
+import { Bot } from "lucide-react";
 import GuidedTour from "./GuidedTour";
 import {
   REVIEW_TOUR_STEPS,
   hasSeenReviewTour,
   markReviewTourSeen,
 } from "@/core/guided-tour";
+import { useAuth } from "@/context/AuthContext";
+import { completarFirstTime, fetchFirstTime } from "@/services/users";
 
 export interface ReviewTourProps {
   /** Incrementar para relanzar el tour (Command Palette → «Tutorial guiado»). */
@@ -16,18 +18,41 @@ export interface ReviewTourProps {
 }
 
 /**
- * Tour guiado de la pantalla de Revisión. La PRIMERA vez que el usuario entra
- * al visor le ofrece el recorrido (invitación discreta); después queda
- * disponible desde el Command Palette. La preferencia persiste por navegador.
+ * Tour guiado de la pantalla de Revisión. La PRIMERA vez (según el backend
+ * `first_time`, o localStorage si no hay sesión) se ofrece el recorrido; al
+ * terminarlo se llama a `POST /api/users/me/completar-first-time`. Después
+ * queda disponible desde el Command Palette.
  */
 export default function ReviewTour({ launchNonce = 0 }: ReviewTourProps) {
+  const { token } = useAuth();
   const [inviteOpen, setInviteOpen] = useState(false);
   const [tourOpen, setTourOpen] = useState(false);
+  /** Evita invitar antes de saber si el backend ya marcó el onboarding. */
+  const [ready, setReady] = useState(false);
 
-  // Primera visita → invitar (tras montar, para que las anclas ya existan).
   useEffect(() => {
-    if (!hasSeenReviewTour()) setInviteOpen(true);
-  }, []);
+    let cancelled = false;
+
+    async function decideInvite() {
+      if (token) {
+        try {
+          const { first_time } = await fetchFirstTime(token);
+          if (!cancelled && first_time) setInviteOpen(true);
+        } catch {
+          // Fallback local si el endpoint falla (offline, 5xx, etc.).
+          if (!cancelled && !hasSeenReviewTour()) setInviteOpen(true);
+        }
+      } else if (!hasSeenReviewTour()) {
+        if (!cancelled) setInviteOpen(true);
+      }
+      if (!cancelled) setReady(true);
+    }
+
+    void decideInvite();
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
 
   // Relanzado explícito desde la palette: directo al tour, sin invitación.
   useEffect(() => {
@@ -37,36 +62,49 @@ export default function ReviewTour({ launchNonce = 0 }: ReviewTourProps) {
     }
   }, [launchNonce]);
 
-  const acceptInvite = () => {
+  const persistCompleted = useCallback(async () => {
     markReviewTourSeen();
+    if (!token) return;
+    try {
+      await completarFirstTime(token);
+    } catch {
+      /* El tour ya terminó en UI; el backend se reintentará en otra visita. */
+    }
+  }, [token]);
+
+  const acceptInvite = () => {
     setInviteOpen(false);
     setTourOpen(true);
   };
 
   const declineInvite = () => {
-    markReviewTourSeen();
     setInviteOpen(false);
+    // Sin sesión no hay backend: no volver a molestar en este navegador.
+    // Con sesión, `first_time` sigue true hasta que complete el recorrido.
+    if (!token) markReviewTourSeen();
+  };
+
+  const handleTourClose = (completed: boolean) => {
+    setTourOpen(false);
+    if (completed) void persistCompleted();
   };
 
   if (tourOpen) {
     return (
       <GuidedTour
         steps={REVIEW_TOUR_STEPS}
-        onClose={() => {
-          markReviewTourSeen();
-          setTourOpen(false);
-        }}
+        onClose={handleTourClose}
       />
     );
   }
 
-  if (!inviteOpen || typeof document === "undefined") return null;
+  if (!ready || !inviteOpen || typeof document === "undefined") return null;
 
   return createPortal(
     <div className="fixed inset-x-0 bottom-20 z-[400] flex justify-center px-4 pointer-events-none">
       <div className="pointer-events-auto flex items-center gap-3 rounded-2xl border border-primary/25 bg-base-100/95 px-4 py-3 shadow-2xl shadow-primary/10 backdrop-blur-md animate-[fadeIn_0.2s_ease]">
         <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary/15 text-primary">
-          <Sparkles size={16} />
+          <Bot size={16} />
         </span>
         <div className="min-w-0">
           <p className="text-sm font-semibold text-base-content leading-tight">

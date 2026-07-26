@@ -116,4 +116,40 @@ export async function aceptarTerminos(token: string): Promise<{ message: string;
   return res.json();
 }
 
+/** ¿El usuario aún no completó el onboarding / tour del visor? */
+export async function fetchFirstTime(token: string): Promise<{ first_time: boolean }> {
+  const res = await apiFetch("/api/users/me/first-time", { method: "GET" }, { token });
+
+  if (!res.ok) {
+    await parseApiError(res, "No se pudo consultar el estado de primera vez");
+  }
+
+  const data = (await res.json()) as { first_time?: unknown };
+  return { first_time: Boolean(data.first_time) };
+}
+
+/** Marca el onboarding / tour como completado en el backend. */
+export async function completarFirstTime(token: string): Promise<{
+  message: string;
+  first_time: boolean;
+  ya_habia_completado: boolean;
+}> {
+  const res = await apiFetch(
+    "/api/users/me/completar-first-time",
+    { method: "POST" },
+    { token },
+  );
+
+  if (!res.ok) {
+    await parseApiError(res, "No se pudo registrar el fin del recorrido");
+  }
+
+  const data = (await res.json()) as Record<string, unknown>;
+  return {
+    message: String(data.message ?? ""),
+    first_time: Boolean(data.first_time),
+    ya_habia_completado: Boolean(data.ya_habia_completado),
+  };
+}
+
 export { PASSWORD_MIN_LENGTH, PASSWORD_MAX_LENGTH, NOMBRE_MAX_LENGTH };

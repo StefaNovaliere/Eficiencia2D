@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { buildSlab, faceNormalFromPositions, resolveSlabThicknessM } from "@/core/assembly-slab";
+import {
+  buildSlab,
+  buildInwardSlab,
+  faceNormalFromPositions,
+  orientOutwardNormal,
+  resolveSlabThicknessM,
+} from "@/core/assembly-slab";
 
 // Cuadrado unitario en el plano z=0 (normal +Z), dos triángulos.
 const SQUARE: number[] = [
@@ -74,5 +80,34 @@ describe("buildSlab", () => {
     const { walls } = buildSlab(withHole, NZ, 0.1);
     // 4 (exterior) + 3 (triángulo interior) = 7 aristas de borde.
     expect(walls.length).toBe(7 * 2 * 9);
+  });
+});
+
+describe("buildInwardSlab", () => {
+  it("deja la tapa exterior en z=0 y mueve la interior −outward·depth", () => {
+    const { caps } = buildInwardSlab(SQUARE, NZ, 0.1);
+    expect(caps.length).toBe(SQUARE.length * 2);
+    const outer = caps.slice(0, SQUARE.length);
+    const inner = caps.slice(SQUARE.length);
+    for (let i = 2; i < outer.length; i += 3) {
+      expect(outer[i]).toBeCloseTo(0, 9);
+    }
+    for (let i = 2; i < inner.length; i += 3) {
+      expect(inner[i]).toBeCloseTo(-0.1, 9);
+    }
+  });
+
+  it("cose paredes laterales sobre el borde", () => {
+    const { walls } = buildInwardSlab(SQUARE, NZ, 0.1);
+    expect(walls.length).toBe(4 * 2 * 9);
+  });
+
+  it("orientOutwardNormal apunta lejos del centro del edificio", () => {
+    const n = orientOutwardNormal(
+      { x: 0, y: 0, z: -1 },
+      { x: 0, y: 0, z: 5 },
+      { x: 0, y: 0, z: 0 },
+    );
+    expect(n.z).toBeCloseTo(1, 6);
   });
 });

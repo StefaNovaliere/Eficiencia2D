@@ -69,6 +69,35 @@ export function faceNormalFromPositions(positions: number[]): Vec3 | null {
   return normalize({ x: nx, y: ny, z: nz });
 }
 
+type EdgeAccum = {
+  ax: number; ay: number; az: number;
+  bx: number; by: number; bz: number;
+  count: number;
+};
+
+function collectBoundaryEdges(caps: number[], triCount: number): Map<string, EdgeAccum> {
+  const edgeCount = new Map<string, EdgeAccum>();
+  const addEdge = (
+    ax: number, ay: number, az: number,
+    bx: number, by: number, bz: number,
+  ) => {
+    const ka = vkey(ax, ay, az);
+    const kb = vkey(bx, by, bz);
+    const key = ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
+    const existing = edgeCount.get(key);
+    if (existing) existing.count++;
+    else edgeCount.set(key, { ax, ay, az, bx, by, bz, count: 1 });
+  };
+
+  for (let t = 0; t < triCount; t++) {
+    const i = t * 9;
+    addEdge(caps[i], caps[i + 1], caps[i + 2], caps[i + 3], caps[i + 4], caps[i + 5]);
+    addEdge(caps[i + 3], caps[i + 4], caps[i + 5], caps[i + 6], caps[i + 7], caps[i + 8]);
+    addEdge(caps[i + 6], caps[i + 7], caps[i + 8], caps[i], caps[i + 1], caps[i + 2]);
+  }
+  return edgeCount;
+}
+
 /**
  * Engrosa un triangulado plano (`caps`, formato x,y,z por vértice; 9 números por
  * triángulo) a un slab sólido de espesor `depth` sobre `normal`.
@@ -95,20 +124,7 @@ export function buildSlab(caps: number[], normal: Vec3, depth: number): SlabGeom
 
   const front: number[] = [];
   const back: number[] = [];
-  // Conteo de aristas no dirigidas → las de borde aparecen una sola vez.
-  const edgeCount = new Map<string, { ax: number; ay: number; az: number; bx: number; by: number; bz: number; count: number }>();
-
-  const addEdge = (
-    ax: number, ay: number, az: number,
-    bx: number, by: number, bz: number,
-  ) => {
-    const ka = vkey(ax, ay, az);
-    const kb = vkey(bx, by, bz);
-    const key = ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
-    const existing = edgeCount.get(key);
-    if (existing) existing.count++;
-    else edgeCount.set(key, { ax, ay, az, bx, by, bz, count: 1 });
-  };
+  const edgeCount = collectBoundaryEdges(caps, triCount);
 
   for (let t = 0; t < triCount; t++) {
     const i = t * 9;
@@ -125,10 +141,6 @@ export function buildSlab(caps: number[], normal: Vec3, depth: number): SlabGeom
     for (const k of [0, 2, 1]) {
       back.push(p[k * 3] - ox, p[k * 3 + 1] - oy, p[k * 3 + 2] - oz);
     }
-    // Aristas del triángulo original (para detectar el borde).
-    addEdge(p[0], p[1], p[2], p[3], p[4], p[5]);
-    addEdge(p[3], p[4], p[5], p[6], p[7], p[8]);
-    addEdge(p[6], p[7], p[8], p[0], p[1], p[2]);
   }
 
   const walls: number[] = [];
@@ -146,4 +158,76 @@ export function buildSlab(caps: number[], normal: Vec3, depth: number): SlabGeom
   }
 
   return { caps: [...front, ...back], walls };
+}
+
+/**
+ * Engrosa hacia ADENTRO: la tapa exterior queda en `caps` (cantos/fachada
+ * intactos) y la interior se desplaza `−outward · depth`. Así el MDF no deforma
+ * el perímetro exterior y el encuentro muestra quién cubre a quién.
+ *
+ * `outwardNormal` debe apuntar hacia AFUERA del edificio.
+ */
+export function buildInwardSlab(
+  caps: number[],
+  outwardNormal: Vec3,
+  depth: number,
+): SlabGeometry {
+  const triCount = Math.floor(caps.length / 9);
+  const n = normalize(outwardNormal);
+  if (triCount === 0 || !n || !(depth > 0)) {
+    return { caps: caps.slice(0, triCount * 9), walls: [] };
+  }
+
+  const ix = -n.x * depth;
+  const iy = -n.y * depth;
+  const iz = -n.z * depth;
+
+  const outer: number[] = caps.slice(0, triCount * 9);
+  const inner: number[] = [];
+  const edgeCount = collectBoundaryEdges(caps, triCount);
+
+  for (let t = 0; t < triCount; t++) {
+    const i = t * 9;
+    // Tapa interior: winding invertido, desplazada hacia adentro.
+    for (const k of [0, 2, 1]) {
+      const b = i + k * 3;
+      inner.push(caps[b] + ix, caps[b + 1] + iy, caps[b + 2] + iz);
+    }
+  }
+
+  const walls: number[] = [];
+  for (const e of edgeCount.values()) {
+    if (e.count !== 1) continue;
+    const aO = [e.ax, e.ay, e.az];
+    const bO = [e.bx, e.by, e.bz];
+    const aI = [e.ax + ix, e.ay + iy, e.az + iz];
+    const bI = [e.bx + ix, e.by + iy, e.bz + iz];
+    walls.push(
+      aO[0], aO[1], aO[2], bO[0], bO[1], bO[2], bI[0], bI[1], bI[2],
+      aO[0], aO[1], aO[2], bI[0], bI[1], bI[2], aI[0], aI[1], aI[2],
+    );
+  }
+
+  return { caps: [...outer, ...inner], walls };
+}
+
+/**
+ * Orienta una normal para que apunte HACIA AFUERA del edificio, usando el
+ * centroide del modelo como referencia (si `dot(n, face − building) < 0`, se
+ * invierte).
+ */
+export function orientOutwardNormal(
+  normal: Vec3,
+  facePoint: Vec3,
+  buildingCentroid: Vec3,
+): Vec3 {
+  const n = normalize(normal);
+  if (!n) return normal;
+  const away = {
+    x: facePoint.x - buildingCentroid.x,
+    y: facePoint.y - buildingCentroid.y,
+    z: facePoint.z - buildingCentroid.z,
+  };
+  const d = n.x * away.x + n.y * away.y + n.z * away.z;
+  return d >= 0 ? n : { x: -n.x, y: -n.y, z: -n.z };
 }

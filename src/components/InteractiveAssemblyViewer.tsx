@@ -15,7 +15,7 @@ import {
   computeSequenceDiag,
   prepareAssemblyPiecesForRender,
 } from "@/core/assembly-sequence";
-import { buildSlab, faceNormalFromPositions } from "@/core/assembly-slab";
+import { buildSlab, buildInwardSlab, faceNormalFromPositions } from "@/core/assembly-slab";
 
 const DROP_HEIGHT_FACTOR = 0.35;
 const PAST_COLOR = 0x94a3b8;
@@ -65,15 +65,20 @@ function buildMeshGeometry(positions: number[]): THREE.BufferGeometry | null {
 }
 
 /**
- * Engrosa el contorno plano lifteado a un slab sólido de espesor `depth`:
- * `cap` = tapas (frente+dorso), `wall` = cantos laterales. Si no se puede
- * calcular la normal, cae a la cara plana (sin canto).
+ * Engrosa el contorno lifteado a un slab sólido de espesor `depth`.
+ * Con `inward` + `outwardNormal`: fachada fija, grosor hacia adentro (MDF fiel).
+ * Si no, slab centrado ±depth/2.
  */
 function buildSlabGeometries(
   positions: number[],
   depth: number,
+  opts?: { inward?: boolean; outwardNormal?: { x: number; y: number; z: number } },
 ): { cap: THREE.BufferGeometry | null; wall: THREE.BufferGeometry | null } {
-  const normal = faceNormalFromPositions(positions);
+  if (opts?.inward && opts.outwardNormal) {
+    const { caps, walls } = buildInwardSlab(positions, opts.outwardNormal, depth);
+    return { cap: buildMeshGeometry(caps), wall: buildMeshGeometry(walls) };
+  }
+  const normal = opts?.outwardNormal ?? faceNormalFromPositions(positions);
   if (!normal) return { cap: buildMeshGeometry(positions), wall: null };
   const { caps, walls } = buildSlab(positions, normal, depth);
   return { cap: buildMeshGeometry(caps), wall: buildMeshGeometry(walls) };
@@ -220,11 +225,17 @@ function DroppingPiece({
   );
 }
 
-/** Pieza de corte ya colocada — contorno real (con aberturas) engrosado a slab 3D. */
+/** Pieza de corte ya colocada — malla lifteada engrosada a slab 3D. */
 function StaticLiftedPiece({ piece }: { piece: AssemblySequencePiece }) {
   const lifted = piece.lifted;
   const slab = useMemo(
-    () => (lifted ? buildSlabGeometries(lifted.positions, safeDim(piece.depth_m)) : null),
+    () =>
+      lifted
+        ? buildSlabGeometries(lifted.positions, safeDim(piece.depth_m), {
+            inward: lifted.inwardSlab === true,
+            outwardNormal: lifted.outwardNormal,
+          })
+        : null,
     [lifted, piece.depth_m],
   );
   const lineGeom = useMemo(
@@ -299,7 +310,13 @@ function DroppingLiftedPiece({
   const matRef = useRef<THREE.MeshStandardMaterial>(null);
   const fadeTweenRef = useRef<gsap.core.Tween | null>(null);
   const slab = useMemo(
-    () => (lifted ? buildSlabGeometries(lifted.positions, safeDim(piece.depth_m)) : null),
+    () =>
+      lifted
+        ? buildSlabGeometries(lifted.positions, safeDim(piece.depth_m), {
+            inward: lifted.inwardSlab === true,
+            outwardNormal: lifted.outwardNormal,
+          })
+        : null,
     [lifted, piece.depth_m],
   );
   const lineGeom = useMemo(
