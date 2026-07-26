@@ -580,7 +580,7 @@ export function ActiveToolBadge({
             : TOOL_LABEL[activeTool]}
         </span>
         {count > 0 && (
-          <span className="ml-0.5 px-1.5 py-0.5 rounded-full bg-black/20 tabular-nums text-[10px] font-bold">{count}</span>
+          <span className="ml-0.5 px-1.5 py-0.5 rounded-full bg-base-300/60 tabular-nums text-[10px] font-bold">{count}</span>
         )}
       </div>
 
@@ -726,7 +726,7 @@ export default function BottomToolbar(props: BottomToolbarProps) {
       className="absolute top-4 left-4 right-4 z-40 flex flex-col gap-1.5 pointer-events-none"
     >
       {/* ── Tab bar ─────────────────────────────────────────────── */}
-        <div className="pointer-events-auto relative z-50 flex items-center gap-0.5 p-1 rounded-2xl bg-base-100/90 backdrop-blur-xl border border-base-300/40 shadow-lg shadow-base-content/5">
+        <div className="pointer-events-auto relative z-50 flex items-center gap-0.5 p-1 rounded-2xl bg-base-100/90 backdrop-blur-xl e2d-cyber-panel border border-base-300/40 shadow-lg shadow-base-content/5">
 
         {/* Undo / Redo — siempre visibles */}
         <button

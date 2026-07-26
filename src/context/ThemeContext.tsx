@@ -97,20 +97,21 @@ export function getBaseThemeId(): ThemeId {
   return "dark";
 }
 
+/**
+ * Tema efectivo: el guardado por el usuario o, si no eligió ninguno, el look por
+ * defecto de la app ("neon" / cyberpunk). Los demás temas siguen disponibles en
+ * Configuración; `getBaseThemeId()` (el "off" del switch de la landing) sigue
+ * siendo Oscuro.
+ */
 export function getStoredThemeId(): ThemeId {
-  if (typeof window === "undefined") return "dark";
+  if (typeof window === "undefined") return "neon";
   try {
     const saved = localStorage.getItem("theme");
     if (saved && VALID_THEMES.has(saved)) return saved as ThemeId;
   } catch {
     /* ignore */
   }
-  try {
-    if (window.matchMedia("(prefers-color-scheme: dark)").matches) return "dark";
-  } catch {
-    /* ignore */
-  }
-  return "light";
+  return "neon";
 }
 
 interface ThemeContextValue {
@@ -174,7 +175,7 @@ export function resolveViewerPalette(
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setThemeState] = useState<ThemeId>(() =>
-    typeof window !== "undefined" ? getStoredThemeId() : "dark",
+    typeof window !== "undefined" ? getStoredThemeId() : "neon",
   );
   const [modelColors, setModelColors] = useState<ModelColorOverrides>({
     wall: null,
