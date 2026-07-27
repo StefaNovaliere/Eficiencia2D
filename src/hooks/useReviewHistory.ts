@@ -1,15 +1,29 @@
 import { useCallback, useRef, useState } from "react";
 import type { FaceCategory } from "@/core/group-classifier";
 import type { UserCut } from "@/core/user-cuts";
+import type { MarkLine } from "@/core/mark-lines";
+import type { UserMeasure } from "@/core/measure-tool";
+import type { UserAngleMeasure } from "@/core/angle-measure";
+import type { Rib, Column } from "@/core/reinforcements";
+import type { GroupNote } from "@/core/group-notes";
+import type { FlexSpec } from "@/core/flex-bending";
 
-// Sólo se versiona el estado de etiquetado/edición client-side (categorías,
-// ocultos, decisiones de unión, cortes manuales). Eje/área/merges/splits viven
-// en el backend (recompute).
+// Se versiona TODO el estado de edición client-side, así CUALQUIER herramienta
+// habilita el deshacer (antes sólo categorías/ocultos/uniones/cortes, por eso
+// la flecha se activaba "a veces"). Eje/área/merges/splits viven en el backend.
 export interface ReviewHistoryState {
   overrides: Map<number, FaceCategory>;
   hiddenGroupIds: Set<number>;
   wallWallDecisions: Map<number, number>;
   userCuts: UserCut[];
+  markLines: MarkLine[];
+  measures: UserMeasure[];
+  angleMeasures: UserAngleMeasure[];
+  ribs: Rib[];
+  columns: Column[];
+  notes: GroupNote[];
+  flex: FlexSpec[];
+  markGroupIds: Set<number>;
 }
 
 interface SerializedSnapshot {
@@ -17,6 +31,14 @@ interface SerializedSnapshot {
   hiddenGroupIds: number[];
   wallWallDecisions: [number, number][];
   userCuts: UserCut[];
+  markLines: MarkLine[];
+  measures: UserMeasure[];
+  angleMeasures: UserAngleMeasure[];
+  ribs: Rib[];
+  columns: Column[];
+  notes: GroupNote[];
+  flex: FlexSpec[];
+  markGroupIds: number[];
 }
 
 const MAX_HISTORY = 50;
@@ -27,6 +49,14 @@ function serialize(state: ReviewHistoryState): string {
     hiddenGroupIds: Array.from(state.hiddenGroupIds),
     wallWallDecisions: Array.from(state.wallWallDecisions.entries()),
     userCuts: state.userCuts,
+    markLines: state.markLines,
+    measures: state.measures,
+    angleMeasures: state.angleMeasures,
+    ribs: state.ribs,
+    columns: state.columns,
+    notes: state.notes,
+    flex: state.flex,
+    markGroupIds: Array.from(state.markGroupIds),
   };
   return JSON.stringify(payload);
 }
@@ -38,6 +68,14 @@ function deserialize(raw: string): ReviewHistoryState {
     hiddenGroupIds: new Set(payload.hiddenGroupIds),
     wallWallDecisions: new Map(payload.wallWallDecisions),
     userCuts: payload.userCuts ?? [],
+    markLines: payload.markLines ?? [],
+    measures: payload.measures ?? [],
+    angleMeasures: payload.angleMeasures ?? [],
+    ribs: payload.ribs ?? [],
+    columns: payload.columns ?? [],
+    notes: payload.notes ?? [],
+    flex: payload.flex ?? [],
+    markGroupIds: new Set(payload.markGroupIds ?? []),
   };
 }
 

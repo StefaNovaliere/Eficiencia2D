@@ -19,6 +19,15 @@ export interface MarkLine {
   groupId: number;
   /** Vértices de la polilínea en coords UV del panel (metros). */
   points: MarkLinePoint[];
+  /**
+   * Cara sobre la que se dibujó (normal unitaria en coords de escena, hacia la
+   * cámara) y su distancia con signo al plano de proyección. Igual que en
+   * `UserCut`: sin esto el preview 3D ancla la marca a una cara arbitraria del
+   * grupo y puede dibujarla del lado opuesto al que clickeó el usuario.
+   * Es metadata de PREVIEW: no viaja al backend (el contrato es UV del panel).
+   */
+  surfaceNormal?: { x: number; y: number; z: number };
+  surfaceOffset?: number;
 }
 
 export function createMarkLineId(): string {

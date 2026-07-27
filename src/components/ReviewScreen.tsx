@@ -556,6 +556,7 @@ export default function ReviewScreen({
     assemblyGuideData,
     setAssemblyGuideData,
     savedFlex,
+    setSavedFlex,
     savedMarkLines,
     setSavedMarkLines,
     savedRibs,
@@ -748,8 +749,29 @@ export default function ReviewScreen({
       hiddenGroupIds,
       wallWallDecisions,
       userCuts,
+      markLines: savedMarkLines,
+      measures,
+      angleMeasures,
+      ribs: savedRibs,
+      columns: savedColumns,
+      notes: groupNotes,
+      flex: savedFlex,
+      markGroupIds,
     }),
-    [overrides, hiddenGroupIds, wallWallDecisions, userCuts],
+    [
+      overrides,
+      hiddenGroupIds,
+      wallWallDecisions,
+      userCuts,
+      savedMarkLines,
+      measures,
+      angleMeasures,
+      savedRibs,
+      savedColumns,
+      groupNotes,
+      savedFlex,
+      markGroupIds,
+    ],
   );
 
   const { canUndo, canRedo, pushHistory, undo, redo } =
@@ -763,11 +785,21 @@ export default function ReviewScreen({
       setHiddenGroupIds(snap.hiddenGroupIds);
       setWallWallDecisions(snap.wallWallDecisions);
       setUserCuts(snap.userCuts);
+      setSavedMarkLines(snap.markLines);
+      setMeasures(snap.measures);
+      setAngleMeasures(snap.angleMeasures);
+      setSavedRibs(snap.ribs);
+      setSavedColumns(snap.columns);
+      setGroupNotes(snap.notes);
+      setSavedFlex(snap.flex);
+      setMarkGroupIds(snap.markGroupIds);
       setSelectedGroupIds(new Set());
       setSelectedJointIndex(null);
       setContextMenu(null);
+      setSelectedMeasureId(null);
+      setSelectedCutId(null);
     },
-    [],
+    [setSavedMarkLines, setSavedRibs, setSavedColumns, setSavedFlex],
   );
 
   const handleUndo = useCallback(() => {
@@ -1540,13 +1572,14 @@ export default function ReviewScreen({
   }, []);
 
   const handleToggleMark = useCallback((id: number) => {
+    pushHistory();
     setMarkGroupIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
-  }, []);
+  }, [pushHistory]);
 
   // Adaptador de intents del Command Palette → handlers existentes. (Se ubica tras
   // definirlos todos.) Todo lo que se puede hacer sobre el visor pasa por acá.
@@ -1660,11 +1693,13 @@ export default function ReviewScreen({
   );
 
   const handleCommitMeasure = useCallback((measure: UserMeasure) => {
+    pushHistory();
     setMeasures((prev) => [...prev, measure]);
-  }, []);
+  }, [pushHistory]);
 
   const handleUpsertMarkLine = useCallback(
     (line: MarkLine) => {
+      pushHistory();
       setSavedMarkLines((prev) => {
         const idx = prev.findIndex((l) => l.id === line.id);
         if (idx >= 0) {
@@ -1675,19 +1710,21 @@ export default function ReviewScreen({
         return [...prev, line];
       });
     },
-    [setSavedMarkLines],
+    [pushHistory, setSavedMarkLines],
   );
 
   const handleClearMeasures = useCallback(() => {
+    pushHistory();
     setMeasures([]);
     setMeasureDraft(null);
     setSelectedMeasureId(null);
-  }, []);
+  }, [pushHistory]);
 
   const handleRemoveMeasure = useCallback((id: string) => {
+    pushHistory();
     setMeasures((prev) => prev.filter((m) => m.id !== id));
     setSelectedMeasureId((prev) => (prev === id ? null : prev));
-  }, []);
+  }, [pushHistory]);
 
   const handleSelectMeasure = useCallback(
     (id: string) => {

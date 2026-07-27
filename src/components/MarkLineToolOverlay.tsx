@@ -96,6 +96,11 @@ export default function MarkLineToolOverlay({
     v0: number;
     points: MarkLinePoint[];
   } | null>(null);
+  /** Última cara golpeada — se adjunta a la línea al confirmarla. */
+  const lastSurfaceRef = useRef<{
+    surfaceNormal: { x: number; y: number; z: number };
+    surfaceOffset?: number;
+  } | null>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef<number | null>(null);
   const latestRef = useRef<MarkLine | null>(null);
@@ -131,6 +136,12 @@ export default function MarkLineToolOverlay({
       if (mode === "straight") {
         const hit = viewerRef.current?.raycastPanelFull(clientX, clientY);
         if (!hit) return null;
+        // Recordar la CARA clickeada: sin esto el preview 3D dibuja la marca
+        // sobre una cara arbitraria del grupo (a veces la de atrás).
+        lastSurfaceRef.current = {
+          surfaceNormal: hit.surfaceNormal,
+          surfaceOffset: hit.surfaceOffset,
+        };
         return {
           groupId: hit.groupId,
           u: hit.u,
@@ -141,6 +152,7 @@ export default function MarkLineToolOverlay({
       }
       const hit = viewerRef.current?.raycastMeasure(clientX, clientY);
       if (!hit) return null;
+      lastSurfaceRef.current = { surfaceNormal: hit.surfaceNormal };
       return {
         groupId: hit.hitGroupId,
         u: hit.u,
@@ -224,7 +236,7 @@ export default function MarkLineToolOverlay({
       if (!points || markLineLengthM(points) < MIN_MARK_LINE_M) { scheduleDraft(null); return; }
       const id = editingLineIdRef.current ?? createMarkLineId();
       editingLineIdRef.current = id;
-      onUpsertRef.current({ id, groupId: resolvedGid, points });
+      onUpsertRef.current({ id, groupId: resolvedGid, points, ...(lastSurfaceRef.current ?? {}) });
       scheduleDraft(null);
     },
     [resolveGroupId, buildPointsFromCurrentSpec, scheduleDraft],
@@ -442,7 +454,12 @@ export default function MarkLineToolOverlay({
     if (mode === "freehand") {
       const points = simplifyPolyline(draft.points, FREEHAND_SIMPLIFY_TOL_M);
       if (points.length >= 2 && markLineLengthM(points) >= MIN_MARK_LINE_M) {
-        onUpsertRef.current({ id: createMarkLineId(), groupId: draft.groupId, points });
+        onUpsertRef.current({
+          id: createMarkLineId(),
+          groupId: draft.groupId,
+          points,
+          ...(lastSurfaceRef.current ?? {}),
+        });
       }
       return;
     }
@@ -456,6 +473,7 @@ export default function MarkLineToolOverlay({
 
     const id = createMarkLineId();
     onUpsertRef.current({
+      ...(lastSurfaceRef.current ?? {}),
       id,
       groupId: draft.groupId,
       points: draft.points,
