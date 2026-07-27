@@ -2469,6 +2469,8 @@ export interface ModelViewerHandle {
     v: number;
     scenePoint: { x: number; y: number; z: number };
     projection: PanelProjection;
+    /** Normal unitaria de la cara golpeada (hacia la cámara). */
+    surfaceNormal: { x: number; y: number; z: number };
   } | null;
   /**
    * Combined plane-projection + cross-panel edge snap for the measure endpoint.
@@ -2887,6 +2889,11 @@ function SceneBridge({
           v: uv.v,
           scenePoint: { x: picked.point.x, y: picked.point.y, z: picked.point.z },
           projection,
+          surfaceNormal: {
+            x: picked.faceNormal.x,
+            y: picked.faceNormal.y,
+            z: picked.faceNormal.z,
+          },
         };
       },
 

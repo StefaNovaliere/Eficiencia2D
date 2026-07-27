@@ -158,34 +158,63 @@ export function computeMarkLines3D(
       projGroup.representativeNormal.y,
       projGroup.representativeNormal.z,
     );
-    const bias = nlen > 1e-6 ? 0.002 : 0;
-    const nx = nlen > 1e-6 ? (projGroup.representativeNormal.x / nlen) * bias : 0;
-    const ny = nlen > 1e-6 ? (projGroup.representativeNormal.y / nlen) * bias : 0;
-    const nz = nlen > 1e-6 ? (projGroup.representativeNormal.z / nlen) * bias : 0;
-    const normal =
-      nlen > 1e-6
-        ? {
-            x: projGroup.representativeNormal.x / nlen,
-            y: projGroup.representativeNormal.y / nlen,
-            z: projGroup.representativeNormal.z / nlen,
-          }
-        : projGroup.representativeNormal;
+    if (nlen <= 1e-6) continue;
 
-    const segments: MarkOpeningSegment[] = [];
+    const repNormal = {
+      x: projGroup.representativeNormal.x / nlen,
+      y: projGroup.representativeNormal.y / nlen,
+      z: projGroup.representativeNormal.z / nlen,
+    };
+    const BIAS = 0.002;
+
+    /**
+     * Cada línea se dibuja sobre la CARA que el usuario clickeó (`surfaceNormal`),
+     * no sobre una cara arbitraria del grupo: antes todas caían del mismo lado y
+     * una marca hecha en la cara interior aparecía en la exterior.
+     * Se agrupan por lado (frente/dorso) porque el visor usa `normal` para
+     * ocultar las líneas de la cara que no se ve.
+     */
+    const bySide = new Map<1 | -1, MarkOpeningSegment[]>();
+
     for (const line of groupLines) {
+      const sn = line.surfaceNormal;
+      const side: 1 | -1 =
+        sn && dot(sn, repNormal) < 0 ? -1 : 1;
+      const nx = repNormal.x * BIAS * side;
+      const ny = repNormal.y * BIAS * side;
+      const nz = repNormal.z * BIAS * side;
+
+      let bucket = bySide.get(side);
+      if (!bucket) {
+        bucket = [];
+        bySide.set(side, bucket);
+      }
+
       for (let i = 1; i < line.points.length; i++) {
         const p0 = line.points[i - 1];
         const p1 = line.points[i];
         const a = panel2DTo3D(p0.u + originU, p0.v + originV, uAxis, vAxis, anchor);
         const b = panel2DTo3D(p1.u + originU, p1.v + originV, uAxis, vAxis, anchor);
-        segments.push({
+        bucket.push({
           groupId: group.id,
           a: { x: a.x + nx, y: a.y + ny, z: a.z + nz },
           b: { x: b.x + nx, y: b.y + ny, z: b.z + nz },
         });
       }
     }
-    if (segments.length > 0) result.push({ groupId: group.id, normal, segments });
+
+    for (const [side, segments] of bySide) {
+      if (segments.length === 0) continue;
+      result.push({
+        groupId: group.id,
+        normal: {
+          x: repNormal.x * side,
+          y: repNormal.y * side,
+          z: repNormal.z * side,
+        },
+        segments,
+      });
+    }
   }
   return result;
 }
