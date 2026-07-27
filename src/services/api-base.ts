@@ -1,5 +1,8 @@
 const DEFAULT_LOCAL = "http://localhost:8081";
-const DEFAULT_REMOTE = "https://eficiencia.mykonosboutique.com.ar";
+// Fallback SÓLO si no está seteada la env `NEXT_PUBLIC_API_URL` (Vercel). En
+// producción la env manda; este valor mantiene el fallback alineado con el
+// backend actual (GCP detrás de HTTPS: api.eficiencia2d.com.ar).
+const DEFAULT_REMOTE = "https://api.eficiencia2d.com.ar";
 const HEALTH_CHECK_TIMEOUT_MS = 1500;
 
 let cachedBaseUrl: string | null = null;
