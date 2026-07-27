@@ -17,9 +17,12 @@ export interface SectionPlaneParams {
  * @param min    AABB mínimo (coords de modelo)
  * @param max    AABB máximo (coords de modelo)
  * @param center centro del modelo (el offset de la escena)
+ * @param invert dirección del corte. `false` (default) conserva el lado de
+ *               coordenada MENOR (pela desde el máximo hacia el mínimo);
+ *               `true` conserva el lado MAYOR (pela desde el otro extremo).
  *
- * Se conserva el lado con coordenada MENOR al corte (normal = −eje), de modo que
- * subir `pos` va "pelando" material desde el frente.
+ * En ambos casos vale la convención de three.js: se conserva el semiespacio con
+ * `distanceToPoint(p) >= 0`. El filtrado del raycast usa el MISMO criterio.
  */
 export function sectionPlaneParams(
   axis: SectionAxis,
@@ -27,6 +30,7 @@ export function sectionPlaneParams(
   min: { x: number; y: number; z: number },
   max: { x: number; y: number; z: number },
   center: { x: number; y: number; z: number },
+  invert = false,
 ): SectionPlaneParams {
   const t = Math.min(1, Math.max(0, pos));
   const lo = min[axis];
@@ -34,7 +38,14 @@ export function sectionPlaneParams(
   const cutModel = lo + (hi - lo) * t;
   const cutWorld = cutModel - center[axis];
   const normal = { x: 0, y: 0, z: 0 };
+
+  if (invert) {
+    // n = +eje, c = −cutWorld ⇒ distancia = p·eje − cutWorld ≥ 0 ⇒ conserva p·eje ≥ cutWorld.
+    normal[axis] = 1;
+    return { normal, constant: -cutWorld };
+  }
+
+  // n = −eje, c = cutWorld ⇒ distancia = cutWorld − p·eje ≥ 0 ⇒ conserva p·eje ≤ cutWorld.
   normal[axis] = -1;
-  // Plano n·p + c = 0 con n = −eje ⇒ se conserva coord < cutWorld.
   return { normal, constant: cutWorld };
 }
