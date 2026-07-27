@@ -856,6 +856,8 @@ export interface CameraCommand {
 export interface SectionState {
   enabled: boolean;
   axis: SectionAxis;
+  /** Dirección del corte: `true` conserva el lado opuesto (pela desde el otro extremo). */
+  invert?: boolean;
   /** Posición del corte 0..1 dentro del rango del modelo en ese eje. */
   pos: number;
 }
@@ -925,7 +927,14 @@ function SectionPlane({
   }, [section.enabled, materials]);
 
   // Actualizar el plano en cada render (cambia eje/posición).
-  const { normal, constant } = sectionPlaneParams(section.axis, section.pos, min, max, center);
+  const { normal, constant } = sectionPlaneParams(
+    section.axis,
+    section.pos,
+    min,
+    max,
+    center,
+    section.invert ?? false,
+  );
   planeRef.current.normal.set(normal.x, normal.y, normal.z);
   planeRef.current.constant = constant;
   if (clipOutRef) clipOutRef.current = section.enabled ? planeRef.current : null;
@@ -1638,6 +1647,8 @@ interface SceneProps {
   xray?: boolean;
   /** Plano de sección (corte) para ver el interior. */
   section?: SectionState | null;
+  /** Ref compartido con las herramientas: plano de sección activo (mundo). */
+  sectionClipRef?: React.MutableRefObject<THREE.Plane | null>;
   /** Modo caminar/volar (primera persona) en lugar de órbita. */
   walkMode?: boolean;
   userCuts?: UserCut[];
@@ -1677,6 +1688,7 @@ const EMPTY_MARK_LINES: MarkLine[] = [];
 const EMPTY_FLEX: FlexSpec[] = [];
 
 function Scene({
+  sectionClipRef,
   faces,
   groups,
   selectedGroupIds,
@@ -2140,9 +2152,6 @@ function Scene({
   // va a seleccionar). Click cíclico: rotar entre superpuestos.
   const [hoveredGroupId, setHoveredGroupId] = useState<number | null>(null);
   const cycleRef = useRef<ClickCycleState | null>(null);
-  // Plano de sección activo (mundo), compartido con la selección para que el
-  // raycast ignore la geometría recortada (que no se ve pero sí se raycastea).
-  const sectionClipRef = useRef<THREE.Plane | null>(null);
   const handleHover = (id: number | null) =>
     setHoveredGroupId((prev) => (prev === id ? prev : id));
 
@@ -2522,12 +2531,19 @@ function pickGroupFromRaycast(
   raycaster: THREE.Raycaster,
   hits: THREE.Intersection[],
   hiddenGroupIds: Set<number>,
+  /** Plano de sección activo: descarta lo que está del lado recortado. */
+  clip?: THREE.Plane | null,
 ): {
   groupId: number;
   point: THREE.Vector3;
   faceNormal: THREE.Vector3;
 } | null {
-  if (hits.length === 0) return null;
+  // El clipping de three.js NO afecta el raycast: sin este filtro las
+  // herramientas (medir/cortar/marcar) golpean la pared exterior oculta en vez
+  // de la interior que el usuario está viendo.
+  const visible = intersectionsVisibleUnderSection(hits, clip ?? null);
+  if (visible.length === 0) return null;
+  hits = visible;
   const rayDir = raycaster.ray.direction;
 
   function tryHit(hit: THREE.Intersection): {
@@ -2577,10 +2593,13 @@ function SceneBridge({
   handleRef,
   modelCenter,
   panelRaycastRef,
+  clipRef,
 }: {
   handleRef: React.MutableRefObject<ModelViewerHandle | null>;
   modelCenter: { x: number; y: number; z: number };
   panelRaycastRef: React.MutableRefObject<PanelRaycastContext>;
+  /** Plano de sección activo (mundo) para que las herramientas lo respeten. */
+  clipRef?: React.MutableRefObject<THREE.Plane | null>;
 }) {
   const { camera, gl, scene } = useThree();
 
@@ -2659,7 +2678,7 @@ function SceneBridge({
         const raycaster = new THREE.Raycaster();
         raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
         const hits = raycaster.intersectObjects(scene.children, true);
-        const picked = pickGroupFromRaycast(raycaster, hits, ctx.hiddenGroupIds);
+        const picked = pickGroupFromRaycast(raycaster, hits, ctx.hiddenGroupIds, clipRef?.current);
         if (!picked) return null;
 
         const resolved = resolvePanelRaycastGroup(ctx, picked.groupId);
@@ -2693,7 +2712,7 @@ function SceneBridge({
         const raycaster = new THREE.Raycaster();
         raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
         const hits = raycaster.intersectObjects(scene.children, true);
-        const picked = pickGroupFromRaycast(raycaster, hits, ctx.hiddenGroupIds);
+        const picked = pickGroupFromRaycast(raycaster, hits, ctx.hiddenGroupIds, clipRef?.current);
         if (!picked) return null;
 
         const resolved = resolvePanelRaycastGroup(ctx, picked.groupId);
@@ -2834,7 +2853,7 @@ function SceneBridge({
         const raycaster = new THREE.Raycaster();
         raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
         const hits = raycaster.intersectObjects(scene.children, true);
-        const picked = pickGroupFromRaycast(raycaster, hits, ctx.hiddenGroupIds);
+        const picked = pickGroupFromRaycast(raycaster, hits, ctx.hiddenGroupIds, clipRef?.current);
         if (!picked) return null;
 
         const group = ctx.groups.find((g) => g.id === picked.groupId);
@@ -2919,7 +2938,7 @@ function SceneBridge({
         const raycaster = new THREE.Raycaster();
         raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
         const hits = raycaster.intersectObjects(scene.children, true);
-        const picked = pickGroupFromRaycast(raycaster, hits, ctx.hiddenGroupIds);
+        const picked = pickGroupFromRaycast(raycaster, hits, ctx.hiddenGroupIds, clipRef?.current);
         if (!picked) return baseUV;
 
         const hitGroup = ctx.groups.find((g) => g.id === picked.groupId);
@@ -3075,6 +3094,11 @@ export default function ModelViewer({
   );
   useEffect(() => () => disposeViewerMaterials(materials), [materials]);
 
+  // Plano de sección activo (mundo). Lo publica SectionPlane y lo consumen la
+  // selección y TODAS las herramientas, para que el raycast ignore la geometría
+  // recortada (three.js clipea el dibujo, no el rayo).
+  const sectionClipRef = useRef<THREE.Plane | null>(null);
+
   const panelRaycastRef = useRef<PanelRaycastContext>({
     faces: [],
     groups: [],
@@ -3136,6 +3160,7 @@ export default function ModelViewer({
       <directionalLight position={[-100, 50, -100]} intensity={palette.fillLight} />
 
       <Scene
+        sectionClipRef={sectionClipRef}
         faces={faces}
         groups={groups}
         selectedGroupIds={selectedGroupIds}
@@ -3183,6 +3208,7 @@ export default function ModelViewer({
           handleRef={viewerRef}
           modelCenter={modelCenter}
           panelRaycastRef={panelRaycastRef}
+          clipRef={sectionClipRef}
         />
       )}
 

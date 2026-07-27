@@ -60,6 +60,7 @@ import {
   Ruler,
   BookOpen,
   StickyNote,
+  FlipHorizontal2,
 } from "lucide-react";
 import { useReviewHistory } from "@/hooks/useReviewHistory";
 import type { ModelViewerHandle, CameraCommand, SectionState } from "@/components/ModelViewer";
@@ -669,7 +670,7 @@ export default function ReviewScreen({
   // Rayos X: paredes translúcidas para ver piezas internas.
   const [xrayMode, setXrayMode] = useState(false);
   // Plano de sección (corte) para ver el interior.
-  const [section, setSection] = useState<SectionState>({ enabled: false, axis: "y", pos: 0.5 });
+  const [section, setSection] = useState<SectionState>({ enabled: false, axis: "y", pos: 0.5, invert: false });
   // Modo caminar/volar (primera persona).
   const [walkMode, setWalkMode] = useState(false);
   const toggleWalk = useCallback(() => {
@@ -3834,6 +3835,18 @@ export default function ReviewScreen({
                 </button>
               ))}
             </div>
+            <button
+              type="button"
+              className={`btn btn-xs btn-circle ${
+                section.invert ? "btn-primary" : "btn-ghost"
+              }`}
+              onClick={() => setSection((s) => ({ ...s, invert: !s.invert }))}
+              title="Invertir el lado que se conserva"
+              aria-label="Invertir dirección del corte"
+              aria-pressed={section.invert ?? false}
+            >
+              <FlipHorizontal2 size={13} />
+            </button>
             <input
               type="range"
               className="range range-primary range-xs w-40"

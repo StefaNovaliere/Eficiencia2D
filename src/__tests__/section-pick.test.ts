@@ -13,8 +13,12 @@ describe("filtrado de selección bajo el plano de sección", () => {
   const max = { x: 10, y: 10, z: 10 };
   const center = { x: 5, y: 5, z: 5 };
 
-  function planeFor(axis: "x" | "y" | "z", pos: number): THREE.Plane {
-    const { normal, constant } = sectionPlaneParams(axis, pos, min, max, center);
+  function planeFor(
+    axis: "x" | "y" | "z",
+    pos: number,
+    invert = false,
+  ): THREE.Plane {
+    const { normal, constant } = sectionPlaneParams(axis, pos, min, max, center, invert);
     return new THREE.Plane(
       new THREE.Vector3(normal.x, normal.y, normal.z),
       constant,
@@ -30,6 +34,16 @@ describe("filtrado de selección bajo el plano de sección", () => {
     const clipped = new THREE.Vector3(3, 0, 0);
     expect(plane.distanceToPoint(visible)).toBeGreaterThanOrEqual(0);
     expect(plane.distanceToPoint(clipped)).toBeLessThan(0);
+  });
+
+  it("con el corte INVERTIDO, el lado visible es el opuesto", () => {
+    // Mismo corte que el test anterior, pero pelando desde el otro extremo:
+    // lo que antes se veía ahora está recortado, y viceversa.
+    const plane = planeFor("x", 0.5, true);
+    const antesVisible = new THREE.Vector3(-3, 0, 0);
+    const antesRecortado = new THREE.Vector3(3, 0, 0);
+    expect(plane.distanceToPoint(antesVisible)).toBeLessThan(0);
+    expect(plane.distanceToPoint(antesRecortado)).toBeGreaterThanOrEqual(0);
   });
 
   it("funciona en otros ejes (y)", () => {
