@@ -50,7 +50,7 @@ describe("useReviewHistory — cobertura por herramienta", () => {
 
       expect(result.current.canUndo).toBe(true);
 
-      let snap: ReturnType<typeof result.current.undo>;
+      let snap: ReturnType<typeof result.current.undo> | undefined;
       act(() => {
         snap = result.current.undo();
       });

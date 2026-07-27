@@ -828,8 +828,20 @@
   .casa-explode-copy {
     position: static;
     max-width: none;
-    padding: 5rem 6vw 0;
+    padding: 4.25rem 6vw 0;
     text-align: center;
+  }
+
+  /* La copia se apila ARRIBA del escenario: si el texto crece, se mete encima
+     del dibujo. Achicamos la tipografía del beat para que el bloque entre en la
+     banda reservada por `.casa-explode-panels`. */
+  .casa-explode-title {
+    font-size: clamp(1.45rem, 6.2vw, 1.95rem);
+  }
+
+  .casa-explode-lead {
+    font-size: 0.85rem;
+    line-height: 1.45;
   }
 
   .casa-explode-section {
@@ -853,8 +865,11 @@
     justify-content: center;
   }
 
+  /* Los paneles son `position: absolute; inset: 0`, así que NO empujan al
+     contenedor: si el más alto no entra en este `min-height`, se derrama sobre
+     el escenario. Medido a 360px de ancho, el beat más largo pide ~190px. */
   .casa-explode-panels {
-    min-height: 150px;
+    min-height: 190px;
   }
 
   .casa-tube {
@@ -863,6 +878,19 @@
 
   .casa-intro {
     padding-top: 6.5rem;
+    /* Deja libre la franja del "deslizá" (bottom: 1.6rem + alto del hint). */
+    padding-bottom: 5.5rem;
+  }
+
+  /* En desktop el visual de la nube se centra sobre el escenario; en mobile la
+     copia va apilada arriba, así que centrarlo en el pin lo pone justo encima
+     del párrafo. Lo anclamos abajo y lo limitamos también por ANCHO (antes sólo
+     dependía de `vh`, y en un celular alto se pasaba del viewport). */
+  .journey-cloud {
+    width: min(88vw, 46vh, 420px);
+    top: auto;
+    bottom: 3.25rem;
+    transform: translateX(-50%);
   }
 }
 
@@ -1600,6 +1628,18 @@
   50% { transform: translateY(-4px); opacity: 1; }
 }
 
+/* Aviso "girá el celular": el ícono imita el gesto que se le pide al usuario. */
+@keyframes e2dRotateHint {
+  0%, 22% { transform: rotate(0deg); }
+  55%, 82% { transform: rotate(-90deg); }
+  100% { transform: rotate(0deg); }
+}
+
+.e2d-rotate-hint {
+  animation: e2dRotateHint 3.2s ease-in-out infinite;
+  transform-origin: center;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .landing-root * {
     animation-duration: 0.01ms !important;
@@ -1611,5 +1651,10 @@
   [data-theme="neon"] body::after {
     animation: none !important;
     display: none;
+  }
+
+  .e2d-rotate-hint {
+    animation: none;
+    transform: rotate(-90deg);
   }
 }

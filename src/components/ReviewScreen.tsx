@@ -102,6 +102,9 @@ import {
   removeNotesForCuts,
 } from "@/core/group-notes";
 import GroupNotesPanel from "@/components/GroupNotesPanel";
+import RotateDevicePrompt from "@/components/RotateDevicePrompt";
+import { useViewportKind } from "@/hooks/useViewportKind";
+import { sidebarSizing } from "@/core/mobile-layout";
 import {
   buildDisplayGroupsFromCuts,
   cutGroupOwnerId,
@@ -582,6 +585,20 @@ export default function ReviewScreen({
   const [isSolid, setIsSolid] = useState(false);
   const [hideSidebar, setHideSidebar] = useState(false);
   const [hideToolbar, setHideToolbar] = useState(false);
+
+  /**
+   * Celular: el visor necesita ancho. En pantalla chica el panel lateral se
+   * achica y arranca cerrado (el lienzo manda), y en vertical proponemos girar
+   * el teléfono en vez de degradar el layout.
+   */
+  const { compact, promptRotate } = useViewportKind();
+  const sidebar = useMemo(() => sidebarSizing(compact), [compact]);
+  /** Sólo al PASAR a compacto: no pisa el toggle manual del usuario después. */
+  const wasCompactRef = useRef(false);
+  useEffect(() => {
+    if (compact && !wasCompactRef.current) setHideSidebar(sidebar.startsHidden);
+    wasCompactRef.current = compact;
+  }, [compact, sidebar.startsHidden]);
   /** Señal para enfocar el borrador de notas (atajo N / Command Palette). */
   const [noteFocusKey, setNoteFocusKey] = useState(0);
   // Which wall-wall joint (by jointIndex) is highlighted with leader labels in
@@ -2546,7 +2563,14 @@ export default function ReviewScreen({
       <PanelGroup orientation="horizontal" id="review-screen-layout">
         {!hideSidebar && (
           <>
-            <Panel defaultSize={350} minSize={250} maxSize={500} className="flex flex-col shrink-0 h-[42vh] md:h-full z-20 shadow-2xl shadow-base-content/5 bg-base-100">
+            <Panel
+              defaultSize={sidebar.defaultSize}
+              minSize={sidebar.minSize}
+              maxSize={sidebar.maxSize}
+              className={`flex flex-col shrink-0 z-20 shadow-2xl shadow-base-content/5 bg-base-100 ${
+                compact ? "h-full" : "h-[42vh] md:h-full"
+              }`}
+            >
               <aside data-tour="inspector" className="relative w-full h-full flex flex-col border-t md:border-t-0 md:border-r border-base-300/40 e2d-cyber-panel">
           <div className="px-4 pt-4 pb-3 border-b border-base-300/30 shrink-0 bg-base-100/80 text-primary font-semibold tracking-widest">
             <StepIndicator current="review" variant="compact" />
@@ -4018,13 +4042,23 @@ export default function ReviewScreen({
           data-viewer-chrome
           onClick={() => setHideSidebar((s) => !s)}
           title={hideSidebar ? "Mostrar panel lateral" : "Ocultar panel lateral"}
-          className="absolute left-0 top-1/2 -translate-y-1/2 z-[60] pointer-events-auto flex items-center justify-center w-4 h-14 bg-base-100/90 backdrop-blur border border-l-0 border-base-300/40 rounded-r-xl shadow-md hover:w-5 hover:bg-primary hover:text-primary-content hover:border-primary transition-all duration-150"
+          className={`absolute left-0 top-1/2 -translate-y-1/2 z-[60] pointer-events-auto flex items-center justify-center h-14 bg-base-100/90 backdrop-blur border border-l-0 border-base-300/40 rounded-r-xl shadow-md hover:bg-primary hover:text-primary-content hover:border-primary transition-all duration-150 ${
+            compact ? "w-7" : "w-4 hover:w-5"
+          }`}
         >
-          {hideSidebar ? <ChevronRight size={12} /> : <ChevronLeft size={12} />}
+          {hideSidebar ? (
+            <ChevronRight size={compact ? 16 : 12} />
+          ) : (
+            <ChevronLeft size={compact ? 16 : 12} />
+          )}
         </button>
           </div>
         </Panel>
       </PanelGroup>
+
+      {/* Celular en vertical: el visor no da para trabajar así. Sugerimos girar
+          (la barra de flujo queda debajo, accesible para volver). */}
+      {promptRotate && <RotateDevicePrompt />}
 
       {/* Tour guiado: invitación en primera visita + relanzable desde la palette */}
       <ReviewTour launchNonce={tourNonce} />
