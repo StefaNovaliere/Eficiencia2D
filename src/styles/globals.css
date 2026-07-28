@@ -56,6 +56,46 @@
 }
 
 /*
+ * Tema "light" — override del built-in de DaisyUI.
+ * El default es casi blanco puro y queda lavado (poco contraste entre
+ * navbar/página/símbolos). Bajamos luminosidad de las bases y endurecemos
+ * el texto para una lectura más cómoda sin salir de un look claro.
+ */
+@plugin "daisyui/theme" {
+  name: "light";
+  color-scheme: light;
+
+  --color-base-100: oklch(96.5% 0.008 250);  /* cards / navbar — off-white frío */
+  --color-base-200: oklch(91% 0.014 250);    /* fondo de página — gris azulado */
+  --color-base-300: oklch(84% 0.02 250);     /* bordes / divisores más visibles */
+  --color-base-content: oklch(24% 0.028 260); /* texto casi negro azulado */
+
+  --color-primary: oklch(52% 0.14 230);       /* cian más profundo (legible en claro) */
+  --color-primary-content: oklch(98% 0.01 230);
+  --color-secondary: oklch(58% 0.22 340);
+  --color-secondary-content: oklch(98% 0.01 340);
+  --color-accent: oklch(55% 0.16 200);
+  --color-accent-content: oklch(98% 0.01 200);
+  --color-neutral: oklch(35% 0.03 260);
+  --color-neutral-content: oklch(96% 0.01 250);
+
+  --color-info: oklch(55% 0.12 230);
+  --color-info-content: oklch(98% 0.01 230);
+  --color-success: oklch(52% 0.14 155);
+  --color-success-content: oklch(98% 0.01 155);
+  --color-warning: oklch(72% 0.15 75);
+  --color-warning-content: oklch(28% 0.04 75);
+  --color-error: oklch(55% 0.22 25);
+  --color-error-content: oklch(98% 0.01 25);
+
+  --radius-selector: 0.75rem;
+  --radius-field: 0.75rem;
+  --radius-box: 1rem;
+  --depth: 1;
+  --noise: 0;
+}
+
+/*
  * Convenciones de diseño (mantener consistencia — usar la escala de Tailwind/DaisyUI):
  *  · Espaciado: usar pasos de la escala (2/3/4/6/8 = 8/12/16/24/32px). Evitar
  *    valores arbitrarios (no `p-[18px]`). Padding de cards: p-6 (móvil) / p-8 (md).
@@ -157,6 +197,18 @@
 [data-theme="neon"] {
   --bg-symbol-color: #9fb3c8;
   --bg-symbol-glow: drop-shadow(0 0 6px rgba(120, 180, 220, 0.35));
+}
+
+/* Light: símbolos de fondo un poco más oscuros para que no se pierdan. */
+[data-theme="light"] {
+  --bg-symbol-color: oklch(48% 0.035 250);
+}
+
+/* Light: navbar más oscura para separarla del fondo lavado. */
+[data-theme="light"] .e2d-topbar {
+  background-color: color-mix(in oklch, var(--color-base-300) 30%, var(--color-neutral) 30%);
+  border-bottom-color: color-mix(in oklch, var(--color-neutral) 28%, transparent);
+  color: var(--color-base-content);
 }
 
 /* Branding E2D: sombra suave por defecto; glow neón solo en el tema neón. */

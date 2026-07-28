@@ -23,6 +23,19 @@ interface AuthFormProps {
   passwordUpdatedNotice?: boolean;
 }
 
+/** True solo para errores de cuenta sin verificar — no para "Verificá que el backend…". */
+function isUnverifiedEmailError(message: string): boolean {
+  const lower = message.toLowerCase();
+  if (lower.includes("conectar al servidor") || lower.includes("backend")) {
+    return false;
+  }
+  return (
+    /verificar\s+tu\s+correo/.test(lower) ||
+    /correo\s+electr[oó]nico\s+antes/.test(lower) ||
+    (lower.includes("pendiente") && lower.includes("verific"))
+  );
+}
+
 export default function AuthForm({ mode, passwordUpdatedNotice }: AuthFormProps) {
   const router = useRouter();
   const { login, register } = useAuth();
@@ -129,10 +142,7 @@ export default function AuthForm({ mode, passwordUpdatedNotice }: AuthFormProps)
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Ocurrió un error inesperado";
-      const isUnverified =
-        msg.toLowerCase().includes("verific") ||
-        msg.toLowerCase().includes("pendiente");
-      setUnverifiedEmail(isUnverified);
+      setUnverifiedEmail(isUnverifiedEmailError(msg));
       setError(msg);
     } finally {
       setIsLoading(false);
@@ -366,10 +376,13 @@ export default function AuthForm({ mode, passwordUpdatedNotice }: AuthFormProps)
               )}
 
               {error && (
-                <div className="alert alert-error rounded-xl flex-col items-start gap-1">
-                  <span>{error}</span>
+                <div
+                  role="alert"
+                  className="rounded-xl bg-error text-error-content px-4 py-3 text-sm space-y-2"
+                >
+                  <p className="leading-snug">{error}</p>
                   {unverifiedEmail && (
-                    <p className="text-xs opacity-80">
+                    <p className="text-xs opacity-90 leading-snug">
                       Revisá tu casilla de correo y hacé clic en el link de verificación.{" "}
                       <Link href="/register" className="underline font-medium">
                         ¿No recibiste el correo? Registrate de nuevo.
