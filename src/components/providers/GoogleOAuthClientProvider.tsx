@@ -14,5 +14,5 @@ export default function GoogleOAuthClientProvider({ children }: { children: Reac
     return <>{children}</>;
   }
 
-  return <GoogleOAuthProvider clientId={googleClientId}>{children}</GoogleOAuthProvider>;
+  return <GoogleOAuthProvider clientId={googleClientId} locale="es">{children}</GoogleOAuthProvider>;
 }

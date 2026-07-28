@@ -92,7 +92,6 @@ export default function GoogleLoginButton({
           text={text}
           shape="rectangular"
           width={buttonWidth}
-          locale="es"
         />
       </div>
     </div>
