@@ -13,6 +13,7 @@ import {
 import { getRols, type Rol } from "@/services/rols";
 import { Mail, CheckCircle2, ArrowRight, Eye, EyeOff } from "lucide-react";
 import TermsAcceptance from "@/components/TermsAcceptance";
+import GoogleLoginButton from "@/components/GoogleLoginButton";
 
 type AuthMode = "login" | "register";
 
@@ -396,6 +397,26 @@ export default function AuthForm({ mode, passwordUpdatedNotice }: AuthFormProps)
                 )}
               </button>
             </form>
+
+            {process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID && (
+              <div className="mt-6 space-y-4">
+                <div className="flex items-center gap-3">
+                  <div className="h-px flex-1 bg-base-300" />
+                  <span className="text-xs uppercase tracking-wide text-base-content/50">
+                    o continuá con
+                  </span>
+                  <div className="h-px flex-1 bg-base-300" />
+                </div>
+                <GoogleLoginButton
+                  text={isRegister ? "signup_with" : "signin_with"}
+                  disabled={isLoading}
+                  onError={(message) => {
+                    setUnverifiedEmail(false);
+                    setError(message);
+                  }}
+                />
+              </div>
+            )}
 
             <p className="text-center text-sm text-base-content/70 mt-6 pt-2">
               {isRegister ? (

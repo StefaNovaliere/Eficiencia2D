@@ -165,6 +165,34 @@ export async function loginUser(email: string, password: string): Promise<AuthRe
   return data;
 }
 
+/**
+ * Valida el JWT (credential / id_token) de Google Sign-In en el backend
+ * y devuelve la sesión de la app (mismo shape que login/verify-email).
+ */
+export async function loginWithGoogle(credential: string): Promise<AuthResponse> {
+  const res = await apiFetch("/api/auth/google", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ credential }),
+  });
+
+  if (!res.ok) {
+    const fallback =
+      res.status === 401 || res.status === 403
+        ? "No se pudo validar la cuenta de Google"
+        : "No se pudo iniciar sesión con Google";
+    await parseApiError(res, fallback);
+  }
+
+  const data = (await res.json()) as AuthResponse;
+  data.user = normalizeAuthUser(data.user);
+  assertActiveSession(data.user);
+  return data;
+}
+
+/** Alias explícito: envía el token JWT de Google al backend. */
+export const loginConBackend = loginWithGoogle;
+
 /** Verifica el email con el token del link y devuelve el JWT. */
 export async function verifyEmailToken(token: string): Promise<AuthResponse> {
   const res = await apiFetch("/api/auth/verify-email", {

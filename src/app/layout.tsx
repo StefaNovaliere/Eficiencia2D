@@ -28,6 +28,7 @@ import { CameraNavigationProvider } from "@/context/CameraNavigationContext";
 import { UserProfileProvider } from "@/context/UserProfileContext";
 import { SubscriptionProvider } from "@/context/SubscriptionContext";
 import { ThemeProvider } from "@/context/ThemeContext";
+import GoogleOAuthClientProvider from "@/components/providers/GoogleOAuthClientProvider";
 import AppShell from "@/components/AppShell";
 
 export const metadata: Metadata = {
@@ -71,22 +72,24 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
       <body className="min-h-screen bg-base-200 text-base-content antialiased font-sans">
-        <AuthProvider>
-          <UserProfileProvider>
-            <SettingsProvider>
-              <ThemeProvider>
-                <SettingsThemeSync />
-                <CameraNavigationProvider>
-                  <SubscriptionProvider>
-                    <ProjectProvider>
-                      <AppShell>{children}</AppShell>
-                    </ProjectProvider>
-                  </SubscriptionProvider>
-                </CameraNavigationProvider>
-              </ThemeProvider>
-            </SettingsProvider>
-          </UserProfileProvider>
-        </AuthProvider>
+        <GoogleOAuthClientProvider>
+          <AuthProvider>
+            <UserProfileProvider>
+              <SettingsProvider>
+                <ThemeProvider>
+                  <SettingsThemeSync />
+                  <CameraNavigationProvider>
+                    <SubscriptionProvider>
+                      <ProjectProvider>
+                        <AppShell>{children}</AppShell>
+                      </ProjectProvider>
+                    </SubscriptionProvider>
+                  </CameraNavigationProvider>
+                </ThemeProvider>
+              </SettingsProvider>
+            </UserProfileProvider>
+          </AuthProvider>
+        </GoogleOAuthClientProvider>
       </body>
     </html>
   );

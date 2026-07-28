@@ -15,6 +15,7 @@ import {
   isAdminUser,
   loadStoredAuth,
   loginUser,
+  loginWithGoogle,
   registerUser,
   verifyEmailToken,
   saveStoredAuth,
@@ -29,6 +30,8 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isAdmin: boolean;
   login: (email: string, password: string) => Promise<void>;
+  /** Valida el JWT de Google en el backend y aplica la sesión. */
+  loginWithGoogle: (credential: string) => Promise<void>;
   /** Crea la cuenta. Devuelve la respuesta de registro (sin JWT). */
   register: (
     email: string,
@@ -107,6 +110,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [applyAuth],
   );
 
+  const loginWithGoogleCredential = useCallback(
+    async (credential: string) => {
+      const data = await loginWithGoogle(credential);
+      applyAuth(data.access_token, data.user);
+    },
+    [applyAuth],
+  );
+
   const register = useCallback(
     async (
       email: string,
@@ -137,6 +148,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isAuthenticated: Boolean(user && token && isActiveUser(user)),
         isAdmin: isAdminUser(user),
         login,
+        loginWithGoogle: loginWithGoogleCredential,
         register,
         verifyEmail,
         logout,
