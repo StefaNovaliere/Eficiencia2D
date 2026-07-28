@@ -787,8 +787,8 @@
 }
 
 .casa-intro-logo {
-  width: 7rem;
-  height: 7rem;
+  width: auto;
+  height: 4.75rem;
   margin: 0 auto 1.5rem;
 }
 
@@ -819,8 +819,7 @@
 
 @media (min-width: 768px) {
   .casa-intro-logo {
-    width: 9rem;
-    height: 9rem;
+    height: 6rem;
   }
 }
 

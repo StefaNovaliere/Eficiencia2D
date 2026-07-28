@@ -47,7 +47,7 @@ export default function ForgotPasswordScreen() {
               <img
                 src="/images/logoFaviconE2d.svg"
                 alt="Eficiencia2D"
-                className="mx-auto w-16 h-16 e2d-logo-glow"
+                className="mx-auto h-11 w-auto e2d-logo-glow"
               />
               <h1 className="text-2xl font-extrabold tracking-tight">Olvidé mi contraseña</h1>
               <p className="text-sm text-base-content/65 leading-relaxed">

@@ -843,8 +843,8 @@ function CasaExplode() {
         <img
           src="/images/logoFaviconE2d.svg"
           alt="Eficiencia2D"
-          width={144}
-          height={144}
+          width={239}
+          height={107}
           className="casa-intro-logo e2d-logo-glow"
         />
         <h1 className="casa-intro-title e2d-title-glow">

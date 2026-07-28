@@ -148,9 +148,9 @@ export default function AuthForm({ mode, passwordUpdatedNotice }: AuthFormProps)
           <img
             src="/images/logoFaviconE2d.svg"
             alt="Eficiencia2D"
-            width={96}
-            height={96}
-            className="mx-auto mb-4 w-20 h-20 md:w-24 md:h-24 e2d-logo-glow"
+            width={143}
+            height={64}
+            className="mx-auto mb-4 h-14 md:h-16 w-auto e2d-logo-glow"
           />
         </div>
 
@@ -211,9 +211,9 @@ export default function AuthForm({ mode, passwordUpdatedNotice }: AuthFormProps)
         <img
           src="/images/logoFaviconE2d.svg"
           alt="Eficiencia2D"
-          width={96}
-          height={96}
-          className="mx-auto mb-4 w-20 h-20 md:w-24 md:h-24 e2d-logo-glow"
+          width={143}
+          height={64}
+          className="mx-auto mb-4 h-14 md:h-16 w-auto e2d-logo-glow"
         />
         <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight mb-2 text-base-content">
           {isRegister ? "Crear cuenta" : "Iniciar sesión"}
