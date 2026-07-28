@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { RotateCcw } from "lucide-react";
 import { useViewerPalette } from "@/context/ThemeContext";
 import { usePersistedModelColors } from "@/hooks/usePersistedModelColors";
 import {
+  type Hsv,
   hexToHsv,
   hsvToHex,
   hsvToWheelXY,
@@ -55,55 +56,88 @@ export default function ModelColorWheel() {
     background: modelColors.background ?? palette.background,
   };
 
-  const hsv: Record<Channel, ReturnType<typeof hexToHsv>> = useMemo(
-    () => ({
-      wall: hexToHsv(colors.wall),
-      floor: hexToHsv(colors.floor),
-      background: hexToHsv(colors.background),
-    }),
-    [colors.wall, colors.floor, colors.background],
-  );
-
   const isCustom =
     modelColors.wall != null ||
     modelColors.floor != null ||
     modelColors.background != null;
 
-  const handlePos = useCallback((ch: Channel) => {
-    const { x, y } = hsvToWheelXY(hsv[ch].h, hsv[ch].s);
-    const r = WHEEL_PX / 2;
-    return { left: r + x * r, top: r + y * r };
-  }, [hsv]);
+  /**
+   * HSV "en curso" del canal que se está editando. El color se guarda como hex
+   * de 8 bits, y ese redondeo destruye matiz y saturación cuando el brillo es
+   * bajo: con `v = 0` todo h/s colapsa a `#000000`, así que la manija quedaba
+   * clavada en el centro. Guardando el HSV que originó el hex, la manija sigue
+   * al puntero aunque el hex no pueda representar la diferencia.
+   *
+   * El borrador vale sólo mientras el color guardado siga siendo el que produjo:
+   * cualquier edición externa (campo hex, restablecer, cambio de tema) lo
+   * invalida sola.
+   */
+  const draftRef = useRef<{ ch: Channel; hex: string; hsv: Hsv } | null>(null);
+
+  const hsvOf = useCallback(
+    (ch: Channel): Hsv => {
+      const draft = draftRef.current;
+      if (draft && draft.ch === ch && draft.hex === colors[ch]) return draft.hsv;
+      return hexToHsv(colors[ch]);
+    },
+    [colors.wall, colors.floor, colors.background],
+  );
+
+  /** Guarda el color y recuerda el HSV exacto que lo generó. */
+  const commit = useCallback(
+    (ch: Channel, next: Hsv) => {
+      const hex = hsvToHex(next.h, next.s, next.v);
+      draftRef.current = { ch, hex, hsv: next };
+      setModelColor(ch, hex);
+    },
+    [setModelColor],
+  );
+
+  const handlePos = useCallback(
+    (ch: Channel) => {
+      const { h, s } = hsvOf(ch);
+      const { x, y } = hsvToWheelXY(h, s);
+      const r = WHEEL_PX / 2;
+      return { left: r + x * r, top: r + y * r };
+    },
+    [hsvOf],
+  );
+
+  /** Puntero → coordenadas del disco nominal (por si el contenedor está escalado). */
+  const wheelPoint = useCallback((clientX: number, clientY: number) => {
+    const rect = wheelRef.current!.getBoundingClientRect();
+    const scale = rect.width / WHEEL_PX || 1;
+    return { px: (clientX - rect.left) / scale, py: (clientY - rect.top) / scale };
+  }, []);
 
   const applyFromPointer = useCallback(
     (ch: Channel, clientX: number, clientY: number) => {
-      const el = wheelRef.current;
-      if (!el) return;
-      const rect = el.getBoundingClientRect();
-      const r = rect.width / 2;
-      const nx = (clientX - rect.left - r) / r;
-      const ny = (clientY - rect.top - r) / r;
-      const { h, s } = wheelXYToHs(nx, ny);
-      setModelColor(ch, hsvToHex(h, s, hsv[ch].v));
+      if (!wheelRef.current) return;
+      const r = WHEEL_PX / 2;
+      const { px, py } = wheelPoint(clientX, clientY);
+      const { h, s } = wheelXYToHs((px - r) / r, (py - r) / r);
+      commit(ch, { h, s, v: hsvOf(ch).v });
     },
-    [hsv, setModelColor],
+    [wheelPoint, commit, hsvOf],
   );
 
   const onPointerDown = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
       const el = wheelRef.current;
       if (!el) return;
-      const rect = el.getBoundingClientRect();
-      const px = e.clientX - rect.left;
-      const py = e.clientY - rect.top;
+      const { px, py } = wheelPoint(e.clientX, e.clientY);
 
-      // ¿Se agarró una manija concreta? Si no, se mueve la activa.
+      // ¿Se agarró una manija concreta? Si no, se mueve la activa. Las manijas
+      // se apilan cuando los colores son grises (saturación 0 = centro), así
+      // que ante un empate tiene que ganar la activa: si no, tocar la de Pared
+      // terminaba arrastrando la de Fondo.
+      const byPriority: Channel[] = [active, ...CHANNELS.filter((c) => c !== active)];
       let target: Channel = active;
       let best = GRAB_PX;
-      for (const ch of CHANNELS) {
+      for (const ch of byPriority) {
         const pos = handlePos(ch);
         const d = Math.hypot(px - pos.left, py - pos.top);
-        if (d <= best) {
+        if (d < best) {
           best = d;
           target = ch;
         }
@@ -111,10 +145,14 @@ export default function ModelColorWheel() {
 
       draggingRef.current = target;
       setActive(target);
-      el.setPointerCapture(e.pointerId);
+      try {
+        el.setPointerCapture(e.pointerId);
+      } catch {
+        /* sin captura el arrastre sigue funcionando dentro del disco */
+      }
       applyFromPointer(target, e.clientX, e.clientY);
     },
-    [active, handlePos, applyFromPointer],
+    [active, wheelPoint, handlePos, applyFromPointer],
   );
 
   const onPointerMove = useCallback(
@@ -128,21 +166,25 @@ export default function ModelColorWheel() {
 
   const endDrag = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     draggingRef.current = null;
-    wheelRef.current?.releasePointerCapture?.(e.pointerId);
+    const el = wheelRef.current;
+    // `releasePointerCapture` tira NotFoundError si la captura ya se soltó sola.
+    if (el?.hasPointerCapture?.(e.pointerId)) el.releasePointerCapture(e.pointerId);
   }, []);
 
   const setValue = useCallback(
     (v: number) => {
-      const cur = hsv[active];
-      setModelColor(active, hsvToHex(cur.h, cur.s, v));
+      // Conserva h/s: bajar el brillo a 0 no debe borrar el matiz elegido.
+      commit(active, { ...hsvOf(active), v });
     },
-    [active, hsv, setModelColor],
+    [active, hsvOf, commit],
   );
 
   const onHexInput = useCallback(
     (raw: string) => {
       const norm = normalizeHex(raw);
-      if (norm) setModelColor(active, norm);
+      if (!norm) return;
+      draftRef.current = null;
+      setModelColor(active, norm);
     },
     [active, setModelColor],
   );
@@ -222,7 +264,7 @@ export default function ModelColorWheel() {
           type="range"
           min={0}
           max={100}
-          value={Math.round(hsv[active].v * 100)}
+          value={Math.round(hsvOf(active).v * 100)}
           onChange={(e) => setValue(Number(e.target.value) / 100)}
           className="range range-primary range-xs flex-1"
           aria-label={`Brillo de ${LABEL[active].toLowerCase()}`}
