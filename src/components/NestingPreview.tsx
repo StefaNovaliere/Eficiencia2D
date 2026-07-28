@@ -1,7 +1,17 @@
 "use client";
 
 import { useCallback, useMemo, useRef, useEffect, useState } from "react";
+import { Minus, Plus, Maximize2 } from "lucide-react";
 import type { NestingPreviewData } from "@/core/pipeline";
+import {
+  type CanvasView,
+  IDENTITY_VIEW,
+  applyView,
+  isZoomed as viewIsZoomed,
+  panBy,
+  wheelZoomFactor,
+  zoomAt,
+} from "@/core/canvas-view";
 import type { NestingResult, NestingSheet, PlacedNestingPanel } from "@/core/sheet-nester";
 import { rotateEdges } from "@/core/sheet-nester";
 import type { SheetConfig } from "@/core/types";
@@ -62,6 +72,16 @@ function SheetCanvas({
   const containerRef = useRef<HTMLDivElement>(null);
   const [dims, setDims] = useState({ w: 600, h: 300 });
 
+  const [view, setView] = useState<CanvasView>(IDENTITY_VIEW);
+  // El manejador nativo de la rueda se registra una sola vez: necesita leer la
+  // vista actual sin volver a suscribirse en cada zoom.
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  const dimsRef = useRef(dims);
+  dimsRef.current = dims;
+  const dragRef = useRef<{ x: number; y: number } | null>(null);
+  const zoomed = viewIsZoomed(view);
+
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -71,6 +91,80 @@ function SheetCanvas({
     });
     ro.observe(el);
     return () => ro.disconnect();
+  }, []);
+
+  // Vuelve al encuadre completo cuando cambia lo dibujado (otra escala, otra
+  // plancha): quedarse con el zoom viejo apuntaría a una zona que ya no existe.
+  useEffect(() => {
+    setView(IDENTITY_VIEW);
+  }, [sheets.length, config.widthM, config.heightM]);
+
+  /**
+   * Zoom con la rueda, anclado en el cursor. Va como listener nativo porque
+   * React registra `wheel` en modo pasivo y ahí `preventDefault()` no corre.
+   */
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const onWheel = (e: WheelEvent) => {
+      const rect = el.getBoundingClientRect();
+      const next = zoomAt(
+        viewRef.current,
+        wheelZoomFactor(e.deltaY, e.deltaMode),
+        e.clientX - rect.left,
+        e.clientY - rect.top,
+        { w: rect.width, h: rect.height },
+      );
+      // Si el zoom ya está en el tope no secuestramos la rueda: alejar con el
+      // dibujo entero a la vista sigue scrolleando la página, como se espera.
+      if (next === viewRef.current) return;
+      e.preventDefault();
+      viewRef.current = next;
+      setView(next);
+    };
+
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
+
+  const onPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (!viewIsZoomed(viewRef.current)) return; // sin zoom no hay nada que arrastrar
+    dragRef.current = { x: e.clientX, y: e.clientY };
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+  }, []);
+
+  const onPointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const last = dragRef.current;
+    if (!last) return;
+    const next = panBy(
+      viewRef.current,
+      e.clientX - last.x,
+      e.clientY - last.y,
+      dimsRef.current,
+    );
+    dragRef.current = { x: e.clientX, y: e.clientY };
+    viewRef.current = next;
+    setView(next);
+  }, []);
+
+  const endDrag = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    dragRef.current = null;
+    const el = e.currentTarget;
+    if (el.hasPointerCapture?.(e.pointerId)) el.releasePointerCapture(e.pointerId);
+  }, []);
+
+  /** Zoom desde los botones: anclado en el centro del recuadro. */
+  const zoomFromCenter = useCallback((factor: number) => {
+    const { w, h } = dimsRef.current;
+    const next = zoomAt(viewRef.current, factor, w / 2, h / 2, dimsRef.current);
+    viewRef.current = next;
+    setView(next);
+  }, []);
+
+  const resetView = useCallback(() => {
+    viewRef.current = IDENTITY_VIEW;
+    setView(IDENTITY_VIEW);
   }, []);
 
   useEffect(() => {
@@ -95,10 +189,15 @@ function SheetCanvas({
     const padding = 40;
     const availW = dims.w - padding * 2;
     const availH = dims.h - padding * 2;
-    const scale = Math.min(availW / totalW, availH / totalH);
-
-    const offsetX = padding + (availW - totalW * scale) / 2;
-    const offsetY = padding + (availH - totalH * scale) / 2;
+    const fitScale = Math.min(availW / totalW, availH / totalH);
+    const { scale, offsetX, offsetY } = applyView(
+      {
+        scale: fitScale,
+        offsetX: padding + (availW - totalW * fitScale) / 2,
+        offsetY: padding + (availH - totalH * fitScale) / 2,
+      },
+      view,
+    );
 
     function toX(v: number) { return offsetX + v * scale; }
     function toY(v: number) { return offsetY + v * scale; }
@@ -185,7 +284,7 @@ function SheetCanvas({
         }
       }
     }
-  }, [sheets, config, color, dims, sheetBg, sheetStroke, labelText, flexStroke]);
+  }, [sheets, config, color, dims, view, sheetBg, sheetStroke, labelText, flexStroke]);
 
   if (sheets.length === 0) return null;
 
@@ -199,13 +298,65 @@ function SheetCanvas({
           {sheets.length} plancha{sheets.length !== 1 ? "s" : ""}
         </span>
       </div>
-      <div className="w-full h-[300px] bg-base-200/50 rounded-xl overflow-hidden relative" ref={containerRef}>
+      <div
+        className={`group w-full h-[300px] bg-base-200/50 rounded-xl overflow-hidden relative ${
+          zoomed ? "cursor-grab active:cursor-grabbing" : "cursor-zoom-in"
+        }`}
+        ref={containerRef}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+        onDoubleClick={resetView}
+        // Sin zoom, arrastrar sobre el lienzo scrollea la página como siempre;
+        // con zoom el gesto pasa a mover la vista.
+        style={{ touchAction: zoomed ? "none" : "auto" }}
+      >
         <canvas
           ref={canvasRef}
           width={dims.w}
           height={dims.h}
           style={{ width: "100%", height: "100%" }}
         />
+
+        <div
+          className={`absolute bottom-2 right-2 flex items-center gap-0.5 rounded-lg border border-base-300/60 bg-base-100/90 p-0.5 shadow-md backdrop-blur-sm transition-opacity ${
+            zoomed ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus-within:opacity-100"
+          }`}
+        >
+          <button
+            type="button"
+            className="btn btn-ghost btn-xs px-1.5"
+            onClick={() => zoomFromCenter(1 / 1.4)}
+            disabled={!zoomed}
+            aria-label={`Alejar ${label.toLowerCase()}`}
+            title="Alejar"
+          >
+            <Minus size={13} />
+          </button>
+          <span className="w-10 text-center text-[11px] font-mono tabular-nums text-base-content/60">
+            {Math.round(view.zoom * 100)}%
+          </span>
+          <button
+            type="button"
+            className="btn btn-ghost btn-xs px-1.5"
+            onClick={() => zoomFromCenter(1.4)}
+            aria-label={`Acercar ${label.toLowerCase()}`}
+            title="Acercar"
+          >
+            <Plus size={13} />
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost btn-xs px-1.5"
+            onClick={resetView}
+            disabled={!zoomed}
+            aria-label={`Ver ${label.toLowerCase()} completo`}
+            title="Ver todo (doble clic)"
+          >
+            <Maximize2 size={13} />
+          </button>
+        </div>
       </div>
     </div>
   );
