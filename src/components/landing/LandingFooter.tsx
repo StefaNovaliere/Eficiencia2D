@@ -8,9 +8,9 @@ export default function LandingFooter() {
           <img
             src="/images/logoFaviconE2d.svg"
             alt=""
-            width={36}
-            height={36}
-            className="w-9 h-9 e2d-logo-glow"
+            width={54}
+            height={24}
+            className="h-6 w-auto e2d-logo-glow"
           />
           <p className="font-semibold text-sm">Eficiencia2D</p>
         </div>

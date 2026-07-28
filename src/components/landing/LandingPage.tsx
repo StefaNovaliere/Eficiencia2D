@@ -63,7 +63,7 @@ export default function LandingPage() {
         className="landing-nav absolute top-0 inset-x-0 z-50 flex items-center justify-between gap-4 px-4 md:px-8 py-4 border-b border-base-300/30 bg-base-100/70 backdrop-blur-xl"
       >
         <Link href="/" className="flex items-center gap-2.5 font-bold tracking-tight shrink-0">
-          <img src="/images/logoFaviconE2d.svg" alt="" width={28} height={28} className="w-7 h-7 e2d-logo-glow" />
+          <img src="/images/logoFaviconE2d.svg" alt="" width={54} height={24} className="h-6 w-auto e2d-logo-glow" />
           <span className="hidden sm:inline">Eficiencia2D</span>
         </Link>
         <div className="hidden md:flex items-center gap-8 text-sm text-base-content/60">

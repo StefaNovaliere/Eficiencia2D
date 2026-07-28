@@ -50,7 +50,7 @@ export default function VerifyEmailScreen() {
             <img
               src="/images/logoFaviconE2d.svg"
               alt="Eficiencia2D"
-              className="mx-auto w-14 h-14 drop-shadow-md"
+              className="mx-auto h-9 w-auto drop-shadow-md"
             />
 
             {status === "loading" && (

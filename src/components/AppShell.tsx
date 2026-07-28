@@ -21,7 +21,7 @@ function TopBar({ isAuthPage }: { isAuthPage: boolean }) {
   return (
     <header className="sticky top-0 z-40 h-14 shrink-0 flex items-center justify-between gap-3 px-4 md:px-6 border-b border-base-300/50 bg-base-100/80 backdrop-blur-md">
       <Link href="/home" className="flex items-center gap-2 font-bold tracking-tight" aria-label="Ir al inicio">
-        <img src="/images/logoFaviconE2d.svg" alt="" width={28} height={28} className="w-7 h-7 e2d-logo-glow" />
+        <img src="/images/logoFaviconE2d.svg" alt="" width={54} height={24} className="h-6 w-auto e2d-logo-glow" />
         <span className="hidden sm:inline">Eficiencia2D</span>
       </Link>
 

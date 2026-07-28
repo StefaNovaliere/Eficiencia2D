@@ -11,9 +11,9 @@ export default function AppHomePage() {
         <img
           src="/images/logoFaviconE2d.svg"
           alt="Eficiencia2D"
-          width={128}
-          height={128}
-          className="mx-auto mb-6 w-24 h-24 md:w-32 md:h-32 e2d-logo-glow"
+          width={179}
+          height={80}
+          className="mx-auto mb-6 h-16 md:h-20 w-auto e2d-logo-glow"
         />
         <h1 className="text-4xl md:text-6xl font-extrabold tracking-tight mb-4 text-base-content e2d-title-glow">
           Eficiencia2D
