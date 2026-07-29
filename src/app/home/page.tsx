@@ -19,7 +19,7 @@ export default function AppHomePage() {
           Eficiencia2D
         </h1>
         <p className="text-lg md:text-xl text-base-content/70 max-w-xl mx-auto font-medium">
-          Convierte modelos 3D en planos arquitectónicos 2D al instante
+          Convierte modelos 3D en planchas de corte al instante
         </p>
       </div>
 
