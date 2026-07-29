@@ -1,6 +1,12 @@
 import type { Face3D, Vec3 } from "./types";
 import type { PlateJoint } from "./pipeline";
-import { liftFaces, buildSlots, type LiftedPieceGeometry } from "./assembly-lift";
+import {
+  liftFaces,
+  liftFinalPiece,
+  buildSlots,
+  type LiftedPieceGeometry,
+} from "./assembly-lift";
+import type { FinalPiece } from "./final-pieces";
 import { computeSupportMarks3D } from "./support-marks";
 import type {
   AssemblyPanel,
@@ -44,6 +50,13 @@ export interface AssemblyLiftContext {
   yieldClips?: YieldClipSpec[];
   /** Centroide del modelo — orienta el engrosado hacia afuera. */
   buildingCentroid?: Vec3;
+  /**
+   * Piezas FINALES por etiqueta (`final_pieces` de `/nesting-preview`). Cuando
+   * están, son la fuente del instructivo: traen el contorno ya recortado, así
+   * que las piezas no se pisan donde el encastre ya las resolvió. Sin ellas se
+   * cae al camino viejo (caras originales del modelo, sin recortar).
+   */
+  finalPieceById?: Map<string, FinalPiece>;
 }
 
 /** One assembly step from the backend JSON. */
@@ -142,17 +155,29 @@ function applyLift(
   const groupId = lift.labelToGroupId.get(label);
 
   try {
-    const faceIndices = lift.faceIndicesByLabel.get(label);
-    if (!faceIndices || faceIndices.length === 0) return piece;
-    const faces = faceIndices.map((i) => lift.faces[i]).filter(Boolean);
-    if (faces.length === 0) return piece;
-    const body = liftFaces(faces);
-    if ((body.positions?.length ?? 0) < 9) return piece;
+    // Preferir la pieza final: ya viene recortada. El camino de caras originales
+    // dibuja el modelo sin recortar, que es lo que hacía que las piezas se
+    // superpongan donde el encastre ya las había resuelto.
+    const finalPiece = lift.finalPieceById?.get(label);
+    let body = finalPiece ? liftFinalPiece(finalPiece) : null;
+    let usedFinalPiece = body !== null && (body.positions?.length ?? 0) >= 9;
+
+    if (!usedFinalPiece) {
+      const faceIndices = lift.faceIndicesByLabel.get(label);
+      if (!faceIndices || faceIndices.length === 0) return piece;
+      const faces = faceIndices.map((i) => lift.faces[i]).filter(Boolean);
+      if (faces.length === 0) return piece;
+      body = liftFaces(faces);
+      usedFinalPiece = false;
+    }
+    if (!body || (body.positions?.length ?? 0) < 9) return piece;
 
     let positions = body.positions;
     const group =
       groupId != null && lift.groupById ? lift.groupById.get(groupId) : undefined;
-    if (groupId != null && group && lift.yieldClips?.length) {
+    // Los recortes ya vienen aplicados en la pieza final: volver a clipear acá
+    // la recortaría dos veces.
+    if (!usedFinalPiece && groupId != null && group && lift.yieldClips?.length) {
       positions = applyYieldClipsToPositions(
         positions,
         groupId,

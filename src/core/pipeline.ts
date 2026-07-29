@@ -13,6 +13,7 @@ import type { GeometryGroup } from "./group-classifier";
 import type { Joint } from "./joint-detector";
 import type { DimensionAdjustment, WallWallJoint } from "./assembly-adjuster";
 import type { NestingResult, SheetConfig } from "./sheet-nester";
+import type { AssemblyWarning, FinalPiece } from "./final-pieces";
 
 /**
  * Pose 3D de una pieza (grupo) provista por el backend en `topology.placements`.
@@ -140,4 +141,13 @@ export interface NestingPreviewData {
   config: SheetConfig;
   /** Encastres en 3D (world coords) para el overlay del instructivo. */
   plateJoints?: PlateJoint[];
+  /**
+   * Piezas tal como se van a cortar, con su pose en el edificio. Es la fuente
+   * del instructivo: `placements` es la proyección del modelo SIN recortar, así
+   * que mostraba piezas pisándose donde el encastre ya las había resuelto.
+   * Opcional: si el backend no las manda, el instructivo cae al camino viejo.
+   */
+  finalPieces?: FinalPiece[];
+  /** Choques y huecos que detectó el backend al armar la maqueta virtualmente. */
+  assemblyWarnings?: AssemblyWarning[];
 }

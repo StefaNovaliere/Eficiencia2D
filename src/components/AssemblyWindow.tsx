@@ -10,6 +10,8 @@ import {
   ChevronDown,
   ChevronRight,
   RefreshCw,
+  AlertTriangle,
+  CheckCircle2,
 } from "lucide-react";
 import {
   normalizeAssemblyPreviewData,
@@ -29,6 +31,11 @@ import { groupLabel, stepsFromAssemblySteps } from "@/core/assembly-guide-build"
 import { useProjectContext } from "@/context/ProjectContext";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import InteractiveAssemblyViewer from "@/components/InteractiveAssemblyViewer";
+import {
+  formatWarningMeasure,
+  sortWarningsBySeverity,
+  warningTypeLabel,
+} from "@/core/final-pieces";
 import { resolveSlabThicknessM } from "@/core/assembly-slab";
 import { buildYieldClipSpecs, type WallWallDecisions } from "@/core/wall-yield-clip";
 
@@ -438,6 +445,12 @@ export default function AssemblyWindow({
       slabThicknessM,
     );
 
+    // Piezas finales del backend: traen el contorno ya recortado, así que el
+    // instructivo muestra la maqueta que se arma y no la proyección del modelo.
+    const finalPieceById = new Map(
+      (nestingData?.finalPieces ?? []).map((fp) => [fp.id, fp]),
+    );
+
     return {
       labelToGroupId,
       faces: phase1.faces,
@@ -448,8 +461,15 @@ export default function AssemblyWindow({
       groupById,
       yieldClips,
       buildingCentroid,
+      finalPieceById,
     };
   }, [phase1, nestingData, wallWallDecisions, slabThicknessM]);
+
+  // Choques del chequeo de ensamble, lo más grave primero.
+  const assemblyWarnings = useMemo(
+    () => sortWarningsBySeverity(nestingData?.assemblyWarnings ?? []),
+    [nestingData],
+  );
 
   const assemblyPieces = useMemo(
     () => (displayData ? buildAssemblyPieces(displayData, assemblySteps, liftContext) : []),
@@ -592,6 +612,7 @@ export default function AssemblyWindow({
                 pieces={assemblyPieces}
                 viewerSchema={displayData.viewerSchema}
                 slabThicknessM={slabThicknessM}
+                warnings={assemblyWarnings}
               />
             </ErrorBoundary>
           )}
@@ -599,6 +620,56 @@ export default function AssemblyWindow({
 
         {/* ── Guide panel (right side / print full-width) ──────────────── */}
         <aside className="assembly-content w-full md:w-[420px] lg:w-[480px] flex flex-col bg-base-50 print:w-full print:max-w-full shrink-0 border-l border-base-300/30 print:border-none">
+
+          {/*
+            Chequeo de ensamble del backend. Con avisos, las piezas en conflicto
+            ya salen pintadas en rojo en el visor y cada choque lleva un
+            marcador; acá se listan con su magnitud. Sin avisos, el cartel verde
+            es la señal de que se puede mandar a cortar.
+          */}
+          {displayData && (
+            assemblyWarnings.length > 0 ? (
+              <div className="shrink-0 border-b border-base-300/30 bg-error/5">
+                <div className="flex items-center gap-2 px-3 pt-2.5 pb-1.5">
+                  <AlertTriangle className="w-3.5 h-3.5 text-error shrink-0" />
+                  <span className="text-xs font-semibold text-error">
+                    {assemblyWarnings.length} problema
+                    {assemblyWarnings.length !== 1 ? "s" : ""} de ensamble
+                  </span>
+                </div>
+                <ul className="px-3 pb-2.5 space-y-1">
+                  {assemblyWarnings.map((w, i) => (
+                    <li
+                      key={`${w.type}-${w.pieces.join("-")}-${i}`}
+                      className="flex items-baseline gap-2 text-[11px] leading-snug"
+                    >
+                      <span className="font-semibold text-error/90 shrink-0">
+                        {warningTypeLabel(w.type)}
+                      </span>
+                      {w.pieces.length > 0 && (
+                        <span className="font-mono text-base-content/70 shrink-0">
+                          {w.pieces.join(" · ")}
+                        </span>
+                      )}
+                      <span className="text-base-content/50 tabular-nums ml-auto shrink-0">
+                        {formatWarningMeasure(w.measureMm)}
+                        {w.toleranceMm != null && (
+                          <span className="text-base-content/35">
+                            {" "}(tol. {w.toleranceMm} mm)
+                          </span>
+                        )}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : (
+              <div className="assembly-no-print shrink-0 flex items-center gap-2 px-3 py-2 border-b border-base-300/30 bg-success/5">
+                <CheckCircle2 className="w-3.5 h-3.5 text-success shrink-0" />
+                <span className="text-xs font-medium text-success">Ensamble verificado</span>
+              </div>
+            )
+          )}
 
           {/* View switcher — screen only */}
           {displayData && (
