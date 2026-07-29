@@ -16,6 +16,7 @@ import type { NestingResult, NestingSheet, PlacedNestingPanel } from "@/core/she
 import { rotateEdges } from "@/core/sheet-nester";
 import type { SheetConfig } from "@/core/types";
 import { PRINT_SCALE_OPTIONS } from "@/core/print-scale";
+import { formatSheetSizeCm, smallestHoleMm, smallestPieceMm } from "@/core/cut-sheet-spec";
 import { getNestingCanvasColors, useTheme } from "@/context/ThemeContext";
 import type { PdfPageMode } from "@/context/ProjectContext";
 import StepIndicator from "./StepIndicator";
@@ -45,8 +46,8 @@ export interface NestingPreviewProps {
 const PAPER_OPTIONS = ["A4", "A3", "A2", "A1"];
 
 const PAGE_MODE_OPTIONS: { value: PdfPageMode; label: string }[] = [
-  { value: "one_per_sheet", label: "Una plancha por hoja" },
-  { value: "single_page", label: "Todo en una hoja" },
+  { value: "one_per_sheet", label: "Cartón · una plancha por hoja" },
+  { value: "single_page", label: "Láser · todo en una plancha" },
 ];
 
 function SheetCanvas({
@@ -457,6 +458,16 @@ export default function NestingPreview({
   }
   const nextScaleOption = SCALE_OPTIONS.find((s) => s >= suggestedScale) ?? suggestedScale;
 
+  // Lo que el taller necesita saber antes de cortar: cuánto mide el recuadro
+  // exterior y cuál es el detalle más chico del archivo. Salía todo en metros,
+  // que es la unidad del modelo, no la del taller.
+  const todasLasPlanchas = useMemo(
+    () => [...nesting.wallNesting.sheets, ...nesting.floorNesting.sheets],
+    [nesting.wallNesting.sheets, nesting.floorNesting.sheets],
+  );
+  const detalleMm = useMemo(() => smallestHoleMm(todasLasPlanchas), [todasLasPlanchas]);
+  const piezaMm = useMemo(() => smallestPieceMm(todasLasPlanchas), [todasLasPlanchas]);
+
   return (
     <div className="fixed top-0 left-0 right-0 bottom-[var(--flow-bar-h,3.5rem)] z-50 bg-base-100 flex flex-col">
       <div className="flex flex-wrap items-center justify-between gap-4 p-4 border-b border-base-300 bg-base-200/50 shrink-0">
@@ -483,7 +494,7 @@ export default function NestingPreview({
             // En cartón la plancha la define el papel (auto-orientada, con
             // margen): se muestra de sólo lectura, sin inputs editables.
             <span className="text-base-content/80 font-semibold tabular-nums">
-              {plancha.widthM.toFixed(2)} &times; {plancha.heightM.toFixed(2)} m
+              {formatSheetSizeCm(plancha.widthM, plancha.heightM)}
               <span className="text-base-content/50 font-normal ml-1">({paper}, auto)</span>
             </span>
           ) : (
@@ -551,8 +562,8 @@ export default function NestingPreview({
         </select>
         <span className="text-xs text-base-content/40 ml-1">
           {isCardboard
-            ? "El papel define el tamaño de la plancha (auto-orientada, con margen)."
-            : "Sólo afecta el PDF descargado, no la vista previa."}
+            ? "En cartón manda el papel: la plancha sale de la hoja menos 1 cm de margen por lado, auto-orientada."
+            : "En láser manda la plancha de arriba; el papel sólo cambia el PDF, no lo que se corta."}
         </span>
       </div>
 
@@ -583,7 +594,7 @@ export default function NestingPreview({
           <span className="text-sm">
             <strong>{unplacedCount} componente{unplacedCount !== 1 ? "s" : ""}</strong> no
             {unplacedCount === 1 ? " entra" : " entran"} entero{unplacedCount !== 1 ? "s" : ""} en la
-            plancha ({plancha.widthM.toFixed(2)} &times; {plancha.heightM.toFixed(2)} m).{" "}
+            plancha ({formatSheetSizeCm(plancha.widthM, plancha.heightM)}).{" "}
             {nextScaleOption > scaleDenom
               ? <>Reducí la escala a <strong>1:{nextScaleOption}</strong> para que quepan.</>
               : <>Usá una plancha más grande o reducí la escala.</>}
@@ -628,11 +639,33 @@ export default function NestingPreview({
       <div className="mt-auto border-t border-base-300 p-4 bg-base-200/30 flex flex-col sm:flex-row items-center justify-between gap-4 shrink-0">
         <div className="flex flex-wrap items-center justify-center sm:justify-start gap-x-5 gap-y-1 text-xs">
           <span className="text-base-content/55">
-            Plancha <b className="text-base-content/80 font-semibold tabular-nums">{plancha.widthM.toFixed(2)}×{plancha.heightM.toFixed(2)} m</b>
+            Recuadro exterior{" "}
+            <b className="text-base-content/90 font-semibold tabular-nums">
+              {formatSheetSizeCm(plancha.widthM, plancha.heightM)}
+            </b>
           </span>
           <span className="text-base-content/55">
             Escala <b className="text-base-content/80 font-semibold tabular-nums">1:{displayScale}</b>
           </span>
+          {piezaMm != null && (
+            <span className="text-base-content/55" title="Lado menor de la pieza más chica del trabajo">
+              Pieza más chica{" "}
+              <b className="text-base-content/80 font-semibold tabular-nums">
+                {String(piezaMm).replace(".", ",")} mm
+              </b>
+            </span>
+          )}
+          {detalleMm != null && (
+            <span
+              className="text-base-content/55"
+              title="Lado menor del hueco más chico (ventanas, puertas, calados). Consultá con el taller si su láser lo resuelve a esta escala."
+            >
+              Detalle más chico{" "}
+              <b className="text-base-content/80 font-semibold tabular-nums">
+                {String(detalleMm).replace(".", ",")} mm
+              </b>
+            </span>
+          )}
           <span className="text-base-content/55">
             <b className="text-base-content/80 font-semibold tabular-nums">{totalSheets}</b> plancha{totalSheets !== 1 ? "s" : ""}
           </span>
