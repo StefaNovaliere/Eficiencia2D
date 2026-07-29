@@ -3,7 +3,7 @@
 import { useCallback, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowRight, FileBox, RotateCcw, Trash2 } from "lucide-react";
-import { uploadModelFile, uploadDemoObj, recomputeTopology, resolveOriginalFilename, type SplitOperation } from "@/services/api";
+import { uploadModelFile, uploadDemoObj, recomputeTopology, resolveOriginalFilename, overridesToRecord, type SplitOperation } from "@/services/api";
 import DemoButton from "./DemoButton";
 import SavedProjectsPicker from "./SavedProjectsPicker";
 import { useAuth } from "@/context/AuthContext";
@@ -197,6 +197,10 @@ export default function UploadForm() {
                   splits: (restored.savedSplits ?? []).map(
                     (s): SplitOperation => ({ group_id: s.groupId, mode: s.mode }),
                   ),
+                  // Al reabrir un proyecto, el instructivo tiene que salir ya
+                  // con las recategorizaciones guardadas, no con la
+                  // clasificación automática.
+                  overrides: overridesToRecord(restored.savedOverrides ?? []),
                 },
                 token,
               );

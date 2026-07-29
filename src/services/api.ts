@@ -255,6 +255,60 @@ export interface RecomputePayload {
   min_area_m2: number;
   merges: number[][];
   splits: SplitOperation[];
+  /**
+   * Recategorizaciones del usuario (`{ groupId: categoría }`). El backend arma
+   * `placements` y `assembly_steps` — o sea el instructivo y las etiquetas de
+   * pieza — con la categoría EFECTIVA, así que sin esto lo descartado sigue
+   * apareciendo y lo rescatado nunca aparece. Opcional: si no viaja, el
+   * backend cae a la clasificación automática.
+   */
+  overrides?: Record<number, string>;
+}
+
+/** `[{ groupId, newCategory }]` → `{ groupId: categoría }` para el backend. */
+export function overridesToRecord(
+  overrides: { groupId: number; newCategory: string }[],
+): Record<number, string> {
+  const out: Record<number, string> = {};
+  for (const o of overrides) out[o.groupId] = o.newCategory;
+  return out;
+}
+
+/** Estado del proyecto del que sale un recompute. */
+export interface RecomputeBase {
+  fileId: string;
+  originalFilename: string;
+  axis: "Y" | "Z";
+  minAreaM2: number;
+  merges: number[][];
+  splits: SplitOperation[];
+  overrides: Record<number, string>;
+}
+
+/**
+ * Arma el payload de `/recompute` con el estado actual más el cambio puntual.
+ *
+ * `next` PISA al estado base campo por campo, incluido `overrides`. Eso importa
+ * para girar el eje y cambiar el área mínima: ahí los grupos se re-derivan y
+ * las recategorizaciones viejas dejan de aplicar, así que quien llama manda
+ * `overrides: {}`. No alcanza con limpiar el estado antes, porque `setState` es
+ * asincrónico y el valor viejo sigue vivo en ese render.
+ */
+export function buildRecomputePayload(
+  base: RecomputeBase,
+  next: Partial<
+    Pick<RecomputePayload, "axis" | "min_area_m2" | "merges" | "splits" | "overrides">
+  > = {},
+): RecomputePayload {
+  return {
+    file_id: base.fileId,
+    original_filename: base.originalFilename,
+    axis: next.axis ?? base.axis,
+    min_area_m2: next.min_area_m2 ?? base.minAreaM2,
+    merges: next.merges ?? base.merges,
+    splits: next.splits ?? base.splits,
+    overrides: next.overrides ?? base.overrides,
+  };
 }
 
 /** Payload para `POST /api/nesting-preview`. */

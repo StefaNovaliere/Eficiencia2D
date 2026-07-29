@@ -11,7 +11,14 @@ vi.mock("@/services/api-base", () => ({
   invalidateApiBaseUrl: vi.fn(),
 }));
 
-import { recomputeTopology, fetchNestingPreview, normalizeAssemblyGuide, toWirePipelinePayload } from "@/services/api";
+import {
+  buildRecomputePayload,
+  recomputeTopology,
+  fetchNestingPreview,
+  normalizeAssemblyGuide,
+  overridesToRecord,
+  toWirePipelinePayload,
+} from "@/services/api";
 
 const mockFetch = vi.fn();
 
@@ -38,6 +45,17 @@ function onePackedTriangle() {
     normals_b64: b64(new Float32Array([0, 0, 1])),
     idx_counts_b64: b64(new Uint32Array([3])),
     indices_b64: b64(new Uint32Array([0, 1, 2])),
+  };
+}
+
+/** Topología mínima válida: los tests de payload no miran la respuesta. */
+function minimalTopology() {
+  return {
+    applied_axis: "Z",
+    groups: [],
+    wall_wall_joints: [],
+    faces_packed: onePackedTriangle(),
+    raw_faces_packed: onePackedTriangle(),
   };
 }
 
@@ -128,6 +146,120 @@ describe("recomputeTopology", () => {
       original_filename: "modelo.stl",
       axis: "Z",
       min_area_m2: 1,
+    });
+  });
+
+  /**
+   * El backend arma `placements` y `assembly_steps` — el instructivo y las
+   * etiquetas de pieza — con la categoría EFECTIVA. Si el front no manda los
+   * overrides, cae a la clasificación automática: lo que el usuario descartó
+   * sigue apareciendo y lo que rescató no aparece nunca.
+   */
+  it("manda las recategorizaciones del usuario", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ topology: minimalTopology() }));
+
+    await recomputeTopology({
+      file_id: "abc",
+      original_filename: "modelo.stl",
+      axis: "Z",
+      min_area_m2: 1,
+      merges: [],
+      splits: [],
+      overrides: { 243: "wall", 100: "discard" },
+    });
+
+    const [, init] = mockFetch.mock.calls[0];
+    // El backend indexa por string: las claves numéricas viajan serializadas.
+    expect(JSON.parse(String(init.body)).overrides).toEqual({
+      "243": "wall",
+      "100": "discard",
+    });
+  });
+
+  it("sin recategorizaciones no manda el campo, y el backend usa la automática", async () => {
+    // Importa para girar el eje / cambiar el área mínima: ahí los grupos se
+    // re-derivan y los overrides viejos ya no aplican, así que tienen que
+    // desaparecer del payload en vez de viajar vacíos o desactualizados.
+    mockFetch.mockResolvedValueOnce(jsonResponse({ topology: minimalTopology() }));
+
+    await recomputeTopology({
+      file_id: "abc",
+      original_filename: "modelo.stl",
+      axis: "Z",
+      min_area_m2: 1,
+      merges: [],
+      splits: [],
+      overrides: {},
+    });
+
+    expect(JSON.parse(String(mockFetch.mock.calls[0][1].body))).not.toHaveProperty("overrides");
+  });
+});
+
+describe("overridesToRecord", () => {
+  it("convierte la lista del front al mapa que espera el backend", () => {
+    expect(
+      overridesToRecord([
+        { groupId: 243, newCategory: "wall" },
+        { groupId: 100, newCategory: "discard" },
+      ]),
+    ).toEqual({ 243: "wall", 100: "discard" });
+  });
+
+  it("una lista vacía da un mapa vacío", () => {
+    expect(overridesToRecord([])).toEqual({});
+  });
+
+  it("gana la última recategorización del mismo grupo", () => {
+    expect(
+      overridesToRecord([
+        { groupId: 7, newCategory: "discard" },
+        { groupId: 7, newCategory: "floor" },
+      ]),
+    ).toEqual({ 7: "floor" });
+  });
+});
+
+describe("buildRecomputePayload", () => {
+  const base = {
+    fileId: "abc",
+    originalFilename: "modelo.stl",
+    axis: "Y" as const,
+    minAreaM2: 1,
+    merges: [],
+    splits: [],
+    overrides: { 243: "wall", 100: "discard" },
+  };
+
+  it("arrastra las recategorizaciones guardadas cuando el cambio es otro", () => {
+    // Fusionar o dividir no toca la clasificación: los overrings del usuario
+    // tienen que seguir viajando o el instructivo vuelve a la automática.
+    const payload = buildRecomputePayload(base, { merges: [[1, 2]] });
+    expect(payload.overrides).toEqual({ 243: "wall", 100: "discard" });
+    expect(payload.merges).toEqual([[1, 2]]);
+  });
+
+  /**
+   * Girar el eje y cambiar el área mínima re-derivan los grupos, así que los
+   * IDs viejos dejan de significar lo mismo. La pantalla limpia el estado, pero
+   * `setState` es asincrónico y el valor viejo sigue vivo en ese render: por eso
+   * manda `overrides: {}` explícito y tiene que ganarle al estado base.
+   */
+  it("el vacío explícito le gana al estado base (girar eje / área mínima)", () => {
+    const payload = buildRecomputePayload(base, { axis: "Z", overrides: {} });
+    expect(payload.overrides).toEqual({});
+    expect(payload.axis).toBe("Z");
+  });
+
+  it("sin cambios replica el estado actual", () => {
+    expect(buildRecomputePayload(base)).toEqual({
+      file_id: "abc",
+      original_filename: "modelo.stl",
+      axis: "Y",
+      min_area_m2: 1,
+      merges: [],
+      splits: [],
+      overrides: { 243: "wall", 100: "discard" },
     });
   });
 });
