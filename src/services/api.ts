@@ -14,6 +14,7 @@ import {
   fetchWithApiFallback,
   type ApiFetchOptions,
 } from "@/services/api-base";
+import { parseAssemblyWarnings, parseFinalPieces } from "@/core/final-pieces";
 import { parseApiError } from "@/services/api-errors";
 import { parseSavedState, type ProjectSavedState } from "@/services/project-state";
 
@@ -514,7 +515,21 @@ export async function fetchNestingPreview(
     );
 
     if (res.ok) {
-      return toCamelCase(await res.json()) as NestingPreviewData;
+      const raw = await res.json();
+      const data = toCamelCase(raw) as NestingPreviewData;
+      // El camelizado no valida: las piezas y los avisos se parsean aparte para
+      // que una coordenada inválida no meta NaN en la escena 3D.
+      const finalPieces = parseFinalPieces(data.finalPieces ?? raw.final_pieces);
+      const assemblyWarnings = parseAssemblyWarnings(
+        data.assemblyWarnings ?? raw.assembly_warnings,
+      );
+      return {
+        ...data,
+        ...(finalPieces.length > 0 ? { finalPieces } : { finalPieces: undefined }),
+        ...(assemblyWarnings.length > 0
+          ? { assemblyWarnings }
+          : { assemblyWarnings: undefined }),
+      };
     }
 
     const errorData = await res.json().catch(() => null);

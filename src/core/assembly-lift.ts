@@ -17,6 +17,7 @@
 import * as THREE from "three";
 import type { Face3D, Vec2, Vec3 } from "./types";
 import type { Placement, PlateJoint } from "./pipeline";
+import type { FinalPiece } from "./final-pieces";
 import type { NestingPanel } from "./sheet-nester";
 
 export interface LiftedPieceGeometry {
@@ -212,8 +213,18 @@ function scaleAndMirror(p: Vec2, scale: number, widthM: number, mirrored: boolea
   return { x: mirrored ? widthM - u : u, y: v };
 }
 
+/**
+ * Marco ortonormal de una pieza. `Placement` lo cumple estructuralmente, y las
+ * piezas finales (`FinalPiece`) se adaptan renombrando uDir/vDir.
+ */
+interface PieceFrame {
+  origin: Vec3;
+  uAxis: Vec3;
+  vAxis: Vec3;
+}
+
 /** P = origin + u·uAxis + v·vAxis (u,v en metros reales). */
-function liftUV(u: number, v: number, placement: Placement): THREE.Vector3 {
+function liftUV(u: number, v: number, placement: PieceFrame): THREE.Vector3 {
   const { origin, uAxis, vAxis } = placement;
   return new THREE.Vector3(
     origin.x + u * uAxis.x + v * vAxis.x,
@@ -225,7 +236,7 @@ function liftUV(u: number, v: number, placement: Placement): THREE.Vector3 {
 function triangulateRingWithHoles(
   outer: Ring,
   holes: Ring[],
-  placement: Placement,
+  placement: PieceFrame,
   out: number[],
 ): void {
   const outer2D = outer.map((p) => new THREE.Vector2(p.x, p.y));
@@ -258,6 +269,77 @@ function triangulateRingWithHoles(
 
 function pushTri(out: number[], a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3): void {
   out.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
+}
+
+/** Área con signo de un anillo (para saber cuál es el contorno externo). */
+function ringArea(ring: Ring): number {
+  let a = 0;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    a += ring[j].x * ring[i].y - ring[i].x * ring[j].y;
+  }
+  return Math.abs(a) / 2;
+}
+
+/**
+ * Coloca una pieza FINAL en su pose 3D. A diferencia de `liftPiece`, acá el
+ * contorno ya viene en metros de edificio y con los recortes aplicados, así que
+ * es la fórmula del contrato y nada más:
+ *
+ *     world = origin + u·uDir + v·vDir
+ *
+ * Sin escalar (el contorno no está a escala de maqueta) y sin espejar (`uDir` ya
+ * apunta en el sentido correcto).
+ *
+ * Las aristas de encastre (`joint`) cuentan como contorno de corte: son material
+ * cortado, y dejarlas afuera abriría el anillo exterior en cada muesca y la
+ * pieza no se podría triangular. Si una ranura queda cerrada por dentro del
+ * contorno, se trata como hueco para no rellenarla.
+ */
+export function liftFinalPiece(piece: FinalPiece): LiftedPieceGeometry {
+  const frame: PieceFrame = {
+    origin: piece.origin,
+    uAxis: piece.uDir,
+    vAxis: piece.vDir,
+  };
+
+  const { outer, holes } = edgesToRings(
+    piece.edges.map((e) => ({ a: e.a, b: e.b, hole: e.hole === true })),
+  );
+  if (outer.length === 0) {
+    return { positions: [], openings: [], hasHoles: false };
+  }
+
+  // Con varios anillos de corte, el de mayor área es el contorno y los que
+  // caen adentro son ranuras cerradas (encastres interiores), no islas macizas.
+  const sorted = [...outer].sort((a, b) => ringArea(b) - ringArea(a));
+  const outerRings: Ring[] = [];
+  const holeRings: Ring[] = [...holes];
+  for (const ring of sorted) {
+    const contenedor = outerRings.find((o) => ringContainsRing(o, ring));
+    if (contenedor) holeRings.push(ring);
+    else outerRings.push(ring);
+  }
+
+  const positions: number[] = [];
+  for (const ring of outerRings) {
+    let holesForRing = holeRings.filter((h) => ringContainsRing(ring, h));
+    if (holesForRing.length === 0 && outerRings.length === 1) {
+      holesForRing = holeRings;
+    }
+    triangulateRingWithHoles(ring, holesForRing, frame, positions);
+  }
+
+  const openings: number[] = [];
+  for (const ring of holes) {
+    pushRingSegments(ring, frame, openings);
+  }
+
+  return {
+    positions,
+    openings,
+    hasHoles: holes.length > 0,
+    outwardNormal: piece.normal,
+  };
 }
 
 /**
@@ -333,7 +415,7 @@ function triangulateFaceWorld(face: Face3D, out: number[]): void {
   }
 }
 
-function pushRingSegments(ring: Ring, placement: Placement, out: number[]): void {
+function pushRingSegments(ring: Ring, placement: PieceFrame, out: number[]): void {
   for (let i = 0; i < ring.length; i++) {
     const a = liftUV(ring[i].x, ring[i].y, placement);
     const b = liftUV(ring[(i + 1) % ring.length].x, ring[(i + 1) % ring.length].y, placement);

@@ -10,6 +10,8 @@ import type {
   AssemblySequencePiece,
   AssemblySequenceStep,
 } from "@/core/assembly-sequence";
+import type { Vec3 } from "@/core/types";
+import type { AssemblyWarning } from "@/core/final-pieces";
 import {
   computeSequenceCenter,
   computeSequenceDiag,
@@ -28,8 +30,14 @@ const SLOT_COLOR = 0xfacc15; // ranuras de encastre (overlay v2, ámbar)
 // es de un solo material; MDF por defecto (cambiar a cartón = un color global
 // cuando exista un selector de material).
 const SUPPORT_MARK_COLOR = 0xdc2626; // marcas de apoyo (rojo, capa MARK)
+const CONFLICT_COLOR = 0xef4444; // piezas que choca el chequeo de ensamble
 /** Muestra/oculta las marcas de apoyo rojas en el instructivo. */
 const SupportMarksContext = createContext(false);
+/**
+ * Piezas que el backend marcó en conflicto (se atraviesan, quedan sin apoyo…).
+ * Va por contexto para no enhebrar la prop por toda la jerarquía de piezas.
+ */
+const ConflictContext = createContext<ReadonlySet<string>>(new Set<string>());
 const MDF_COLOR = 0xc9a97e; // tan cálido (MDF)
 const EDGE_BURNT = 0x7a5c3c; // canto de MDF (chamuscado, apenas más oscuro que la cara)
 
@@ -257,13 +265,22 @@ function StaticLiftedPiece({ piece }: { piece: AssemblySequencePiece }) {
     [lifted],
   );
   const showSupport = useContext(SupportMarksContext);
+  const conflicts = useContext(ConflictContext);
+  const inConflict = conflicts.has(piece.id);
 
   if (!slab?.cap) return <StaticPiece piece={piece} />;
 
   return (
     <group>
       <mesh geometry={slab.cap} frustumCulled={false} castShadow receiveShadow>
-        <meshStandardMaterial color={MDF_COLOR} roughness={0.7} metalness={0.05} side={THREE.DoubleSide} />
+        <meshStandardMaterial
+          color={inConflict ? CONFLICT_COLOR : MDF_COLOR}
+          emissive={inConflict ? CONFLICT_COLOR : 0x000000}
+          emissiveIntensity={inConflict ? 0.3 : 0}
+          roughness={0.7}
+          metalness={0.05}
+          side={THREE.DoubleSide}
+        />
       </mesh>
       {slab.wall && (
         <mesh geometry={slab.wall} frustumCulled={false} castShadow receiveShadow>
@@ -460,11 +477,13 @@ function AssemblyScene({
   currentStep,
   centerOffset,
   diag,
+  conflictPoints,
 }: {
   pieces: AssemblySequencePiece[];
   currentStep: number;
   centerOffset: THREE.Vector3;
   diag: number;
+  conflictPoints: Vec3[];
 }) {
   const dropHeight = diag * DROP_HEIGHT_FACTOR;
 
@@ -487,6 +506,20 @@ function AssemblyScene({
           dropHeight={dropHeight}
         />
       ))}
+      {conflictPoints.map((pt, i) => (
+        <mesh key={i} position={[pt.x, pt.y, pt.z]} renderOrder={3}>
+          {/* Tamaño relativo al modelo: un radio fijo desaparece en una casa
+              y tapa la pieza en una maqueta chica. */}
+          <sphereGeometry args={[Math.max(diag * 0.012, 0.02), 16, 16]} />
+          <meshStandardMaterial
+            color={CONFLICT_COLOR}
+            emissive={CONFLICT_COLOR}
+            emissiveIntensity={0.8}
+            depthTest={false}
+            transparent
+          />
+        </mesh>
+      ))}
     </group>
   );
 }
@@ -498,6 +531,12 @@ export interface InteractiveAssemblyViewerProps {
   /** Espesor del material (m mundo, ya × escala de impresión). Si viene, sustituye
    *  al `depth_m` de cada pieza para que el grosor sea visible y fiel a la maqueta. */
   slabThicknessM?: number;
+  /**
+   * Choques que detectó el backend al armar la maqueta. Las piezas involucradas
+   * se pintan en rojo y cada punto de conflicto lleva un marcador: es lo que
+   * hoy se descubre recién pegando el MDF.
+   */
+  warnings?: AssemblyWarning[];
   className?: string;
 }
 
@@ -506,6 +545,7 @@ export default function InteractiveAssemblyViewer({
   pieces,
   viewerSchema,
   slabThicknessM,
+  warnings,
   className = "",
 }: InteractiveAssemblyViewerProps) {
   const [currentStep, setCurrentStep] = useState(0);
@@ -533,6 +573,17 @@ export default function InteractiveAssemblyViewer({
   const visiblePieces = useMemo(
     () => renderPieces.filter((p) => p.stepIndex <= currentStep),
     [renderPieces, currentStep],
+  );
+
+  const conflictIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const w of warnings ?? []) for (const id of w.pieces) ids.add(id);
+    return ids;
+  }, [warnings]);
+
+  const conflictPoints = useMemo(
+    () => (warnings ?? []).map((w) => w.at).filter((at): at is Vec3 => at != null),
+    [warnings],
   );
 
   const center = useMemo(
@@ -595,12 +646,15 @@ export default function InteractiveAssemblyViewer({
         <directionalLight position={[-diag, diag * 0.5, -diag]} intensity={0.5} />
 
         <SupportMarksContext.Provider value={showSupportMarks}>
-          <AssemblyScene
-            pieces={visiblePieces.length > 0 ? visiblePieces : renderPieces}
-            currentStep={currentStep}
-            centerOffset={centerVec}
-            diag={diag}
-          />
+          <ConflictContext.Provider value={conflictIds}>
+            <AssemblyScene
+              pieces={visiblePieces.length > 0 ? visiblePieces : renderPieces}
+              currentStep={currentStep}
+              centerOffset={centerVec}
+              diag={diag}
+              conflictPoints={conflictPoints}
+            />
+          </ConflictContext.Provider>
         </SupportMarksContext.Provider>
 
         <OrbitControls
