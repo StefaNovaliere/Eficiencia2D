@@ -18,6 +18,8 @@ import {
   ribsForApi,
   columnsForApi,
   resolveOriginalFilename,
+  overridesToRecord,
+  buildRecomputePayload,
   type AssemblyPreviewRequest,
   type RecomputePayload,
   type SplitOperation,
@@ -26,14 +28,6 @@ import { buildAssemblyGuideFromTopology } from "@/core/assembly-guide-build";
 import type { FaceCategory } from "@/core/group-classifier";
 import { useProjectStateAutosave } from "@/hooks/useProjectStateAutosave";
 import { buildReviewEditingPatch } from "@/services/project-state";
-
-function overridesToRecord(
-  overrides: { groupId: number; newCategory: string }[],
-): Record<number, string> {
-  const out: Record<number, string> = {};
-  for (const o of overrides) out[o.groupId] = o.newCategory;
-  return out;
-}
 
 function decisionsToRecord(decisions: Map<number, number>): Record<number, number> {
   const out: Record<number, number> = {};
@@ -149,17 +143,26 @@ function ReviewPageContent() {
   // topología en el backend, que es la fuente de verdad. El front sólo arma el
   // payload con el estado actual + el cambio puntual.
   const runRecompute = useCallback(
-    async (next: Partial<Pick<RecomputePayload, "axis" | "min_area_m2" | "merges" | "splits">>) => {
+    async (
+      next: Partial<
+        Pick<RecomputePayload, "axis" | "min_area_m2" | "merges" | "splits" | "overrides">
+      >,
+    ) => {
       if (!fileId || !phase1Result) return;
-      const originalFilename = resolveOriginalFilename(projectFileName, phase1Result.stem);
-      const payload: RecomputePayload = {
-        file_id: fileId,
-        original_filename: originalFilename,
-        axis: next.axis ?? phase1Result.appliedAxis,
-        min_area_m2: next.min_area_m2 ?? minAreaM2,
-        merges: next.merges ?? savedMerges,
-        splits: next.splits ?? savedSplits.map((s): SplitOperation => ({ group_id: s.groupId, mode: s.mode })),
-      };
+      const payload = buildRecomputePayload(
+        {
+          fileId,
+          originalFilename: resolveOriginalFilename(projectFileName, phase1Result.stem),
+          axis: phase1Result.appliedAxis,
+          minAreaM2,
+          merges: savedMerges,
+          splits: savedSplits.map((s): SplitOperation => ({ group_id: s.groupId, mode: s.mode })),
+          // Sin esto el backend arma el instructivo con la clasificación
+          // automática y las recategorizaciones no se reflejan.
+          overrides: overridesToRecord(savedOverrides),
+        },
+        next,
+      );
       setIsRecomputing(true);
       try {
         const updated = await recomputeTopology(payload, token);
@@ -181,21 +184,24 @@ function ReviewPageContent() {
         setIsRecomputing(false);
       }
     },
-    [fileId, projectFileName, phase1Result, minAreaM2, savedMerges, savedSplits, setPhase1Result, token, saveGeometryState],
+    [fileId, projectFileName, phase1Result, minAreaM2, savedMerges, savedSplits, savedOverrides, setPhase1Result, token, saveGeometryState],
   );
 
   const handleRotateAxis = useCallback(() => {
     if (!phase1Result) return;
     const newAxis = phase1Result.appliedAxis === "Y" ? "Z" : "Y";
     setSavedOverrides([]);
-    void runRecompute({ axis: newAxis });
+    // `savedOverrides` sigue teniendo el valor viejo en este render (setState es
+    // asincrónico): hay que mandar el vacío explícito, no dejar que lo resuelva
+    // el default de runRecompute.
+    void runRecompute({ axis: newAxis, overrides: {} });
   }, [phase1Result, runRecompute, setSavedOverrides]);
 
   const handleMinAreaChange = useCallback(
     (newArea: number) => {
       setMinAreaM2(newArea);
       setSavedOverrides([]);
-      void runRecompute({ min_area_m2: newArea });
+      void runRecompute({ min_area_m2: newArea, overrides: {} });
     },
     [setMinAreaM2, runRecompute, setSavedOverrides],
   );
