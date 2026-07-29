@@ -274,6 +274,24 @@ export function overridesToRecord(
   return out;
 }
 
+/**
+ * Firma de las categorías efectivas de un proyecto.
+ *
+ * El backend numera las etiquetas de pieza (A1/A2 paredes, B1/B2 pisos)
+ * recorriendo los grupos NO descartados, así que recategorizar corre la
+ * numeración de todo lo que sigue. Comparar firmas dice cuándo las etiquetas
+ * que tiene el front quedaron viejas respecto de las que saldrán en la plancha.
+ *
+ * No depende del orden: la lista de overrides puede reordenarse sin que cambie
+ * nada real, y cada refresco de más cuesta un recompute entero.
+ */
+export function categorySignature(overrides: Record<number, string>): string {
+  return Object.entries(overrides)
+    .map(([groupId, category]) => `${groupId}:${category}`)
+    .sort()
+    .join("|");
+}
+
 /** Estado del proyecto del que sale un recompute. */
 export interface RecomputeBase {
   fileId: string;

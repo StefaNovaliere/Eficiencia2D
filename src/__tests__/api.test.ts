@@ -13,6 +13,7 @@ vi.mock("@/services/api-base", () => ({
 
 import {
   buildRecomputePayload,
+  categorySignature,
   recomputeTopology,
   fetchNestingPreview,
   normalizeAssemblyGuide,
@@ -261,6 +262,44 @@ describe("buildRecomputePayload", () => {
       splits: [],
       overrides: { 243: "wall", 100: "discard" },
     });
+  });
+});
+
+describe("categorySignature", () => {
+  /**
+   * Cada cambio de firma cuesta un recompute entero para renumerar. La lista de
+   * overrides puede llegar reordenada sin que haya cambiado nada real, así que
+   * reordenarla NO puede contar como cambio.
+   */
+  it("no depende del orden en que llegan los overrides", () => {
+    const a = overridesToRecord([
+      { groupId: 3, newCategory: "wall" },
+      { groupId: 12, newCategory: "discard" },
+    ]);
+    const b = overridesToRecord([
+      { groupId: 12, newCategory: "discard" },
+      { groupId: 3, newCategory: "wall" },
+    ]);
+    expect(categorySignature(a)).toBe(categorySignature(b));
+  });
+
+  it("descartar un componente cambia la firma", () => {
+    const antes = categorySignature({ 3: "wall" });
+    const despues = categorySignature({ 3: "wall", 12: "discard" });
+    expect(despues).not.toBe(antes);
+  });
+
+  it("mover una pieza de pared a piso cambia la firma", () => {
+    // Cambia el prefijo (A→B) y corre la numeración de las dos categorías.
+    expect(categorySignature({ 3: "wall" })).not.toBe(categorySignature({ 3: "floor" }));
+  });
+
+  it("rescatar un descartado cambia la firma", () => {
+    expect(categorySignature({ 7: "discard" })).not.toBe(categorySignature({ 7: "wall" }));
+  });
+
+  it("sin recategorizaciones la firma es vacía", () => {
+    expect(categorySignature({})).toBe("");
   });
 });
 

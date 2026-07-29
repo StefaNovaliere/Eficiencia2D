@@ -20,6 +20,7 @@ import {
   resolveOriginalFilename,
   overridesToRecord,
   buildRecomputePayload,
+  categorySignature,
   type AssemblyPreviewRequest,
   type RecomputePayload,
   type SplitOperation,
@@ -139,6 +140,13 @@ function ReviewPageContent() {
     }
   }, [isLoadingSession, phase1Result, router]);
 
+  // Categorías que reflejan las etiquetas que tenemos ahora mismo. `null` hasta
+  // la primera pasada, donde la topología recién cargada ya está al día.
+  const labeledSignature = useRef<string | null>(null);
+  // Descarta respuestas viejas: si el usuario sigue recategorizando mientras
+  // vuelve un refresco, gana el último pedido.
+  const labelRefreshSeq = useRef(0);
+
   // Toda edición geométrica (eje, área, fusión, división) re-deriva la
   // topología en el backend, que es la fuente de verdad. El front sólo arma el
   // payload con el estado actual + el cambio puntual.
@@ -166,6 +174,9 @@ function ReviewPageContent() {
       setIsRecomputing(true);
       try {
         const updated = await recomputeTopology(payload, token);
+        // La topología vuelve con las etiquetas ya numeradas para estos overrides.
+        labeledSignature.current = categorySignature(payload.overrides ?? {});
+        labelRefreshSeq.current += 1; // invalida cualquier refresco en vuelo
         setPhase1Result(updated);
         saveGeometryState({
           axis: payload.axis,
@@ -186,6 +197,65 @@ function ReviewPageContent() {
     },
     [fileId, projectFileName, phase1Result, minAreaM2, savedMerges, savedSplits, savedOverrides, setPhase1Result, token, saveGeometryState],
   );
+
+  /**
+   * Las etiquetas de pieza (A1/B2…) las numera el backend sobre los grupos NO
+   * descartados. Recategorizar no dispara ningún recompute, así que la lista de
+   * componentes y el visor se quedaban con la numeración vieja mientras la
+   * plancha de corte salía con la nueva: los mismos paneles con dos nombres.
+   *
+   * Se refrescan pidiéndoselas al backend (nunca replicando su numeración acá),
+   * con un respiro para no mandar un pedido por clic, y aplicando SÓLO las
+   * etiquetas: la geometría no cambió y reemplazar la topología entera
+   * reconstruiría la escena 3D al pedo.
+   */
+  useEffect(() => {
+    if (!fileId || !phase1Result) return;
+
+    const signature = categorySignature(overridesToRecord(savedOverrides));
+    if (labeledSignature.current === null) {
+      labeledSignature.current = signature; // la topología cargada ya está al día
+      return;
+    }
+    if (labeledSignature.current === signature) return;
+
+    const timer = setTimeout(() => {
+      const seq = ++labelRefreshSeq.current;
+      const payload = buildRecomputePayload({
+        fileId,
+        originalFilename: resolveOriginalFilename(projectFileName, phase1Result.stem),
+        axis: phase1Result.appliedAxis,
+        minAreaM2,
+        merges: savedMerges,
+        splits: savedSplits.map((s): SplitOperation => ({ group_id: s.groupId, mode: s.mode })),
+        overrides: overridesToRecord(savedOverrides),
+      });
+
+      void recomputeTopology(payload, token)
+        .then((updated) => {
+          if (seq !== labelRefreshSeq.current) return; // quedó vieja
+          labeledSignature.current = signature;
+          setPhase1Result({ ...phase1Result, panelIdByGroup: updated.panelIdByGroup });
+        })
+        .catch((err: unknown) => {
+          // Sin etiquetas nuevas se siguen viendo las anteriores: molesto, pero
+          // no rompe la revisión. Se reintenta al próximo cambio de categoría.
+          console.error("No se pudieron actualizar las etiquetas de pieza", err);
+        });
+    }, 700);
+
+    return () => clearTimeout(timer);
+  }, [
+    savedOverrides,
+    fileId,
+    phase1Result,
+    projectFileName,
+    minAreaM2,
+    savedMerges,
+    savedSplits,
+    token,
+    setPhase1Result,
+  ]);
 
   const handleRotateAxis = useCallback(() => {
     if (!phase1Result) return;
