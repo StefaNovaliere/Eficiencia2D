@@ -77,8 +77,37 @@ describe("GuidedTour", () => {
     expect(screen.getByText("Paso dos")).toBeInTheDocument();
     expect(screen.getByText("1 / 1")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByLabelText("Cerrar tour"));
+    fireEvent.click(screen.getByText("Salir del tour"));
     expect(onClose).toHaveBeenCalledWith(false);
+  });
+
+  it("no cierra al clickear el fondo ni con Escape", () => {
+    mountAnchors();
+    const onClose = vi.fn();
+    render(<GuidedTour steps={STEPS} onClose={onClose} />);
+
+    const dialog = screen.getByRole("dialog", { name: "Tour guiado" });
+    fireEvent.click(dialog.firstElementChild as HTMLElement);
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByText("Paso uno")).toBeInTheDocument();
+  });
+
+  it("deja la app usable: el overlay no captura el mouse", () => {
+    const holder = mountAnchors();
+    const target = holder.querySelector<HTMLElement>('[data-tour="t1"]')!;
+    const onTargetClick = vi.fn();
+    target.addEventListener("click", onTargetClick);
+
+    render(<GuidedTour steps={STEPS} onClose={vi.fn()} />);
+
+    const dialog = screen.getByRole("dialog", { name: "Tour guiado" });
+    expect(dialog.className).toContain("pointer-events-none");
+
+    fireEvent.click(target);
+    expect(onTargetClick).toHaveBeenCalled();
+    expect(screen.getByText("Paso uno")).toBeInTheDocument();
   });
 });
 
@@ -122,11 +151,7 @@ describe("ReviewTour (primera visita)", () => {
   it("con sesión: invita según first_time y completa en el backend al terminar", async () => {
     mockToken = "tok";
     fetchFirstTime.mockResolvedValue({ first_time: true });
-    completarFirstTime.mockResolvedValue({
-      message: "ok",
-      first_time: false,
-      ya_habia_completado: false,
-    });
+    completarFirstTime.mockResolvedValue({ first_time: false });
     mountAnchors();
 
     render(<ReviewTour />);
@@ -137,6 +162,22 @@ describe("ReviewTour (primera visita)", () => {
     expect(screen.getByText("El visor 3D")).toBeInTheDocument();
 
     fireEvent.click(screen.getByText("Terminar"));
+    await waitFor(() => {
+      expect(completarFirstTime).toHaveBeenCalledWith("tok");
+    });
+    expect(localStorage.getItem(REVIEW_TOUR_SEEN_KEY)).toBe("1");
+  });
+
+  it("con sesión: también marca first_time al salir del tour", async () => {
+    mockToken = "tok";
+    fetchFirstTime.mockResolvedValue({ first_time: true });
+    completarFirstTime.mockResolvedValue({ first_time: false });
+    mountAnchors();
+
+    render(<ReviewTour />);
+    fireEvent.click(await screen.findByText("Ver el tour"));
+    fireEvent.click(screen.getByText("Salir del tour"));
+
     await waitFor(() => {
       expect(completarFirstTime).toHaveBeenCalledWith("tok");
     });

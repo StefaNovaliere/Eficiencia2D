@@ -89,6 +89,7 @@ export default function CommandPalette() {
       aria-label="Buscador de acciones"
     >
       <div
+        data-tour="command-palette"
         className="w-full max-w-lg mx-4 rounded-2xl bg-base-100 border border-base-300/60 shadow-2xl overflow-hidden"
         onMouseDown={(e) => e.stopPropagation()}
       >

@@ -18,6 +18,12 @@ export interface TourStep {
   body: string;
   /** Lado preferido para la tarjeta (se ajusta si no entra en pantalla). */
   placement?: TourPlacement;
+  /**
+   * Otros `data-tour` que forman parte del paso cuando están en pantalla (el
+   * ribbon que abre una pestaña, el modal del buscador…). Se suman al área
+   * destacada para que la tarjeta no se les monte encima.
+   */
+  companions?: string[];
 }
 
 /** Selector CSS del ancla de un paso. */
@@ -43,6 +49,23 @@ export const REVIEW_TOUR_STEPS: TourStep[] = [
     title: "Capas",
     body: "Filtrá qué se ve: paredes, pisos o descartados. Si un componente te tapa, desde acá lo ocultás.",
     placement: "bottom",
+    companions: ["toolbar-ribbon"],
+  },
+  {
+    id: "toolbar-camara",
+    target: "toolbar-nav",
+    title: "Cámara",
+    body: "Encuadrá la selección o todo el modelo, activá el modo caminar para recorrer el interior, o rotá el eje si el modelo quedó de costado.",
+    placement: "bottom",
+    companions: ["toolbar-ribbon"],
+  },
+  {
+    id: "toolbar-visualizacion",
+    target: "toolbar-visualizacion",
+    title: "Visualización",
+    body: "Cambiá cómo se ve el modelo: vista maciza, rayos X para ver a través, plano de corte y ejes de referencia.",
+    placement: "bottom",
+    companions: ["toolbar-ribbon"],
   },
   {
     id: "toolbar-herramientas",
@@ -50,6 +73,15 @@ export const REVIEW_TOUR_STEPS: TourStep[] = [
     title: "Herramientas de edición",
     body: "Cortar aberturas, medir, marcar en rojo para grabar, transportador y más. Cada herramienta tiene su atajo de teclado.",
     placement: "bottom",
+    companions: ["toolbar-ribbon"],
+  },
+  {
+    id: "toolbar-config",
+    target: "toolbar-config",
+    title: "Configuraciones",
+    body: "Acá ajustás el descarte automático de capas chicas, los colores del modelo y si preferís dejar varias pestañas abiertas a la vez.",
+    placement: "bottom",
+    companions: ["toolbar-config-menu"],
   },
   {
     id: "inspector",
@@ -64,6 +96,7 @@ export const REVIEW_TOUR_STEPS: TourStep[] = [
     title: "Buscador de acciones",
     body: "¿No encontrás algo? Con Ctrl+K buscás cualquier herramienta o acción por nombre, sin recorrer menús.",
     placement: "top",
+    companions: ["command-palette"],
   },
   {
     id: "continue",
@@ -124,6 +157,21 @@ export interface TooltipPosition {
   left: number;
   top: number;
   placement: TourPlacement;
+}
+
+/**
+ * Caja que contiene a todos los rectángulos dados (ancla + acompañantes
+ * visibles). Ignora los degenerados: un panel cerrado mide 0×0 y no debe
+ * estirar el spotlight hasta la esquina de la pantalla.
+ */
+export function unionRects(rects: Rect[]): Rect | null {
+  const real = rects.filter((r) => r.width > 0 && r.height > 0);
+  if (real.length === 0) return null;
+  const left = Math.min(...real.map((r) => r.left));
+  const top = Math.min(...real.map((r) => r.top));
+  const right = Math.max(...real.map((r) => r.left + r.width));
+  const bottom = Math.max(...real.map((r) => r.top + r.height));
+  return { left, top, width: right - left, height: bottom - top };
 }
 
 const GAP = 14;

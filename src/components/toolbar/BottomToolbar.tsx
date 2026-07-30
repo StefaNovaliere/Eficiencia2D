@@ -817,6 +817,7 @@ export default function BottomToolbar(props: BottomToolbarProps) {
       {/* ── Ribbon row — all open groups merged, scrollable ──────── */}
       {anyOpen && (
         <div
+          data-tour="toolbar-ribbon"
           className="pointer-events-auto relative z-40 flex items-center gap-x-0.5 px-2 py-1.5 rounded-2xl bg-base-100/95 backdrop-blur-xl border border-base-300/45 shadow-lg shadow-base-content/8 overflow-x-auto"
           style={{ scrollbarWidth: "none" }}
         >

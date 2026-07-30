@@ -49,6 +49,7 @@ export default function ConfigButtom({
     <div ref={rootRef} className={`relative shrink-0 ${configOpen ? "z-[80]" : "z-10"}`}>
       <button
         type="button"
+        data-tour="toolbar-config"
         className={`inline-flex shrink-0 items-center gap-1.5 h-8 px-2.5 rounded-lg text-xs font-medium transition-colors select-none ${
           configOpen
             ? "bg-primary/15 text-primary"
@@ -69,6 +70,7 @@ export default function ConfigButtom({
 
       {configOpen && (
         <div
+          data-tour="toolbar-config-menu"
           role="menu"
           className="absolute right-0 top-full mt-1.5 z-[80] w-72 rounded-2xl border border-base-300/60 bg-base-100 p-2 shadow-2xl"
         >

@@ -2,16 +2,41 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ArrowLeft, ArrowRight, X } from "lucide-react";
+import { ArrowLeft, ArrowRight } from "lucide-react";
 import {
   computeTooltipPosition,
   resolveTourSteps,
   tourTargetSelector,
+  unionRects,
+  type Rect,
   type TourStep,
 } from "@/core/guided-tour";
 
 const CARD_W = 300;
 const CARD_H = 170;
+const SPOT_PAD = 6;
+
+function toRect(r: DOMRect): Rect {
+  return { left: r.left, top: r.top, width: r.width, height: r.height };
+}
+
+function sameRect(a: Rect | null, b: Rect | null): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return (
+    a.left === b.left && a.top === b.top && a.width === b.width && a.height === b.height
+  );
+}
+
+/** Caja inflada por el margen del spotlight, en coordenadas de viewport. */
+function padded(r: Rect) {
+  return {
+    left: r.left - SPOT_PAD,
+    top: r.top - SPOT_PAD,
+    width: r.width + SPOT_PAD * 2,
+    height: r.height + SPOT_PAD * 2,
+  };
+}
 
 export interface GuidedTourProps {
   steps: TourStep[];
@@ -24,6 +49,11 @@ export interface GuidedTourProps {
  * spotlight sobre el ancla del paso (`data-tour`) y muestra una tarjeta con la
  * explicación y navegación Anterior/Siguiente. Portal al <body> para quedar por
  * encima de cualquier stacking context (sidebar, barra inferior, modales).
+ *
+ * El oscurecido es sólo visual (`pointer-events-none`): la app sigue siendo
+ * usable durante el tour para poder probar lo que cada paso explica (orbitar el
+ * visor, abrir capas, seleccionar componentes…). El tour no se cierra por
+ * interactuar: sólo con «Salir del tour» o «Terminar».
  */
 export default function GuidedTour({ steps, onClose }: GuidedTourProps) {
   // Anclas ausentes (p.ej. sidebar plegado) se saltan al iniciar.
@@ -32,18 +62,36 @@ export default function GuidedTour({ steps, onClose }: GuidedTourProps) {
     [steps],
   );
   const [index, setIndex] = useState(0);
-  const [rect, setRect] = useState<DOMRect | null>(null);
+  /**
+   * `anchor` es lo que lleva el aro (el elemento exacto del paso); `box` suma
+   * los acompañantes abiertos y define qué queda iluminado y dónde NO puede ir
+   * la tarjeta. Separarlos evita que un panel abierto disuelva el resaltado.
+   */
+  const [spot, setSpot] = useState<{ anchor: Rect | null; box: Rect | null }>({
+    anchor: null,
+    box: null,
+  });
   const rafRef = useRef(0);
 
   const step = activeSteps[index] ?? null;
   const total = activeSteps.length;
 
-  // Seguir al ancla en vivo (scroll, resize, layout async del canvas).
+  // Seguir a los elementos en vivo (scroll, resize, layout async del canvas).
   useEffect(() => {
     if (!step) return;
+    const companions = step.companions ?? [];
     const measure = () => {
-      const el = document.querySelector(tourTargetSelector(step.target));
-      setRect(el ? el.getBoundingClientRect() : null);
+      const anchorEl = document.querySelector(tourTargetSelector(step.target));
+      const anchor = anchorEl ? toRect(anchorEl.getBoundingClientRect()) : null;
+      const rects = anchor ? [anchor] : [];
+      for (const c of companions) {
+        const el = document.querySelector(tourTargetSelector(c));
+        if (el) rects.push(toRect(el.getBoundingClientRect()));
+      }
+      const box = unionRects(rects);
+      setSpot((prev) =>
+        sameRect(prev.anchor, anchor) && sameRect(prev.box, box) ? prev : { anchor, box },
+      );
       rafRef.current = requestAnimationFrame(measure);
     };
     measure();
@@ -67,26 +115,24 @@ export default function GuidedTour({ steps, onClose }: GuidedTourProps) {
 
   const prev = useCallback(() => setIndex((i) => Math.max(0, i - 1)), []);
 
-  // Teclado: ←/→ navegan, Esc cierra.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") finish(false);
-      else if (e.key === "ArrowRight" || e.key === "Enter") next();
-      else if (e.key === "ArrowLeft") prev();
-      e.stopPropagation();
-    };
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
-  }, [finish, next, prev]);
+  // Teclado: ←/→ navegan sólo con el foco dentro de la tarjeta, para no pisar
+  // los atajos del visor mientras el usuario prueba lo que el paso explica.
+  const onCardKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "ArrowRight") next();
+    else if (e.key === "ArrowLeft") prev();
+    else return;
+    e.preventDefault();
+    e.stopPropagation();
+  };
 
   if (!step || total === 0) return null;
   if (typeof document === "undefined") return null;
 
   const vw = window.innerWidth;
   const vh = window.innerHeight;
-  const pos = rect
+  const pos = spot.box
     ? computeTooltipPosition(
-        { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+        spot.box,
         { width: CARD_W, height: CARD_H },
         { width: vw, height: vh },
         step.placement,
@@ -96,50 +142,55 @@ export default function GuidedTour({ steps, onClose }: GuidedTourProps) {
   const isLast = index === total - 1;
 
   return createPortal(
-    <div className="fixed inset-0 z-[400]" role="dialog" aria-label="Tour guiado">
-      {/* Fondo clickeable (cerrar) — el spotlight recorta el ancla con box-shadow */}
-      <div className="absolute inset-0" onClick={() => finish(false)} />
-      {rect && (
+    <div
+      className="fixed inset-0 z-[400] pointer-events-none"
+      role="dialog"
+      aria-label="Tour guiado"
+    >
+      {spot.box ? (
         <div
-          className="absolute rounded-xl ring-2 ring-primary/80 transition-all duration-200 ease-out pointer-events-none"
-          style={{
-            left: rect.left - 6,
-            top: rect.top - 6,
-            width: rect.width + 12,
-            height: rect.height + 12,
-            boxShadow: "0 0 0 9999px rgba(0,0,0,0.55)",
-          }}
+          className="absolute rounded-xl transition-all duration-200 ease-out"
+          style={{ ...padded(spot.box), boxShadow: "0 0 0 9999px rgba(0,0,0,0.45)" }}
         />
-      )}
-      {!rect && (
-        <div className="absolute inset-0 bg-black/55 pointer-events-none" />
+      ) : (
+        <div className="absolute inset-0 bg-black/45" />
       )}
 
-      {/* Tarjeta del paso */}
+      {/* El aro marca sólo el elemento del paso, aunque el panel que abrió
+          quede iluminado alrededor. */}
+      {spot.anchor && (
+        <div
+          className="absolute rounded-xl ring-2 ring-primary shadow-[0_0_0_4px_rgba(0,0,0,0.25)] transition-all duration-200 ease-out"
+          style={padded(spot.anchor)}
+        />
+      )}
+
+      {/* Tarjeta del paso — única capa que captura el mouse. */}
       <div
-        className="absolute rounded-2xl border border-base-300/60 bg-base-100 shadow-2xl p-4 flex flex-col gap-2 animate-[fadeIn_0.15s_ease]"
+        className="absolute pointer-events-auto rounded-2xl border border-base-300/60 bg-base-100 shadow-2xl p-4 flex flex-col gap-2 animate-[fadeIn_0.15s_ease]"
         style={{ left: pos.left, top: pos.top, width: CARD_W }}
-        onClick={(e) => e.stopPropagation()}
+        onKeyDown={onCardKeyDown}
       >
         <div className="flex items-start justify-between gap-2">
           <h3 className="text-sm font-bold text-base-content leading-tight">
             {step.title}
           </h3>
-          <button
-            type="button"
-            onClick={() => finish(false)}
-            aria-label="Cerrar tour"
-            className="btn btn-ghost btn-xs btn-circle -mt-1 -mr-1 text-base-content/50"
-          >
-            <X size={13} />
-          </button>
         </div>
         <p className="text-xs leading-relaxed text-base-content/70">{step.body}</p>
-        <div className="flex items-center justify-between pt-1">
-          <span className="font-mono text-[10px] text-base-content/40 tabular-nums">
-            {index + 1} / {total}
-          </span>
-          <div className="flex items-center gap-1.5">
+        <div className="flex items-center justify-between pt-1 gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="font-mono text-[10px] text-base-content/40 tabular-nums shrink-0">
+              {index + 1} / {total}
+            </span>
+            <button
+              type="button"
+              onClick={() => finish(false)}
+              className="btn btn-ghost btn-xs rounded-lg text-base-content/50 px-1.5"
+            >
+              Salir del tour
+            </button>
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
             {index > 0 && (
               <button
                 type="button"

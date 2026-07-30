@@ -20,8 +20,8 @@ export interface ReviewTourProps {
 /**
  * Tour guiado de la pantalla de Revisión. La PRIMERA vez (según el backend
  * `first_time`, o localStorage si no hay sesión) se ofrece el recorrido; al
- * terminarlo se llama a `POST /api/users/me/completar-first-time`. Después
- * queda disponible desde el Command Palette.
+ * salir o terminarlo se llama a `PATCH /api/users/me/first-time` con
+ * `first_time: false`. Después queda disponible desde el Command Palette.
  */
 export default function ReviewTour({ launchNonce = 0 }: ReviewTourProps) {
   const { token } = useAuth();
@@ -80,13 +80,14 @@ export default function ReviewTour({ launchNonce = 0 }: ReviewTourProps) {
   const declineInvite = () => {
     setInviteOpen(false);
     // Sin sesión no hay backend: no volver a molestar en este navegador.
-    // Con sesión, `first_time` sigue true hasta que complete el recorrido.
+    // Con sesión, `first_time` sigue true hasta que abra y cierre el tour.
     if (!token) markReviewTourSeen();
   };
 
-  const handleTourClose = (completed: boolean) => {
+  const handleTourClose = (_completed: boolean) => {
     setTourOpen(false);
-    if (completed) void persistCompleted();
+    // Salir o terminar: ambos marcan first_time = false.
+    void persistCompleted();
   };
 
   if (tourOpen) {
@@ -111,7 +112,7 @@ export default function ReviewTour({ launchNonce = 0 }: ReviewTourProps) {
             ¿Primera vez en el visor?
           </p>
           <p className="text-xs text-base-content/55 mt-0.5">
-            Te mostramos lo esencial en 30 segundos, con clicks guiados.
+            Te mostramos lo esencial de la barra y el visor, con clicks guiados.
           </p>
         </div>
         <div className="flex items-center gap-1.5 pl-1 shrink-0">

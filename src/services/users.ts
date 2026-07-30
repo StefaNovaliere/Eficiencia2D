@@ -128,15 +128,15 @@ export async function fetchFirstTime(token: string): Promise<{ first_time: boole
   return { first_time: Boolean(data.first_time) };
 }
 
-/** Marca el onboarding / tour como completado en el backend. */
-export async function completarFirstTime(token: string): Promise<{
-  message: string;
-  first_time: boolean;
-  ya_habia_completado: boolean;
-}> {
+/** Marca el onboarding / tour como visto (`first_time = false`). */
+export async function completarFirstTime(token: string): Promise<{ first_time: boolean }> {
   const res = await apiFetch(
-    "/api/users/me/completar-first-time",
-    { method: "POST" },
+    "/api/users/me/first-time",
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ first_time: false }),
+    },
     { token },
   );
 
@@ -144,12 +144,14 @@ export async function completarFirstTime(token: string): Promise<{
     await parseApiError(res, "No se pudo registrar el fin del recorrido");
   }
 
-  const data = (await res.json()) as Record<string, unknown>;
-  return {
-    message: String(data.message ?? ""),
-    first_time: Boolean(data.first_time),
-    ya_habia_completado: Boolean(data.ya_habia_completado),
-  };
+  // Algunos backends responden 204 sin cuerpo.
+  if (res.status === 204) return { first_time: false };
+
+  const text = await res.text();
+  if (!text) return { first_time: false };
+
+  const data = JSON.parse(text) as { first_time?: unknown };
+  return { first_time: data.first_time === undefined ? false : Boolean(data.first_time) };
 }
 
 export { PASSWORD_MIN_LENGTH, PASSWORD_MAX_LENGTH, NOMBRE_MAX_LENGTH };

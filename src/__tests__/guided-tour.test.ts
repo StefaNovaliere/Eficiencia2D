@@ -7,6 +7,7 @@ import {
   REVIEW_TOUR_SEEN_KEY,
   REVIEW_TOUR_STEPS,
   tourTargetSelector,
+  unionRects,
   type TourStep,
 } from "@/core/guided-tour";
 
@@ -69,6 +70,36 @@ describe("resolveTourSteps", () => {
   it("los pasos del tour de Revisión usan selectores válidos", () => {
     for (const s of REVIEW_TOUR_STEPS) {
       expect(() => document.querySelector(tourTargetSelector(s.target))).not.toThrow();
+      for (const c of s.companions ?? []) {
+        expect(() => document.querySelector(tourTargetSelector(c))).not.toThrow();
+      }
     }
+  });
+});
+
+describe("unionRects", () => {
+  const button = { left: 100, top: 20, width: 120, height: 40 };
+  const ribbon = { left: 40, top: 70, width: 900, height: 44 };
+
+  it("envuelve al ancla y al panel abierto", () => {
+    expect(unionRects([button, ribbon])).toEqual({
+      left: 40,
+      top: 20,
+      width: 900,
+      height: 94,
+    });
+  });
+
+  it("ignora rectángulos vacíos (panel cerrado)", () => {
+    const empty = { left: 0, top: 0, width: 0, height: 0 };
+    expect(unionRects([button, empty])).toEqual(button);
+    expect(unionRects([empty])).toBeNull();
+    expect(unionRects([])).toBeNull();
+  });
+
+  it("la tarjeta se ubica fuera del conjunto, no encima del panel", () => {
+    const box = unionRects([button, ribbon])!;
+    const pos = computeTooltipPosition(box, CARD, VIEWPORT, "bottom");
+    expect(pos.top).toBeGreaterThanOrEqual(box.top + box.height);
   });
 });
