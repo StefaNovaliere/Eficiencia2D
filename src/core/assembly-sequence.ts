@@ -3,10 +3,12 @@ import type { PlateJoint } from "./pipeline";
 import {
   liftFaces,
   liftFinalPiece,
+  liftPiece,
   buildSlots,
   type LiftedPieceGeometry,
 } from "./assembly-lift";
-import type { FinalPiece } from "./final-pieces";
+import type { FinalPiece, NestingPlacement } from "./final-pieces";
+import type { NestingPanel } from "./sheet-nester";
 import { computeSupportMarks3D } from "./support-marks";
 import type {
   AssemblyPanel,
@@ -57,6 +59,14 @@ export interface AssemblyLiftContext {
    * cae al camino viejo (caras originales del modelo, sin recortar).
    */
   finalPieceById?: Map<string, FinalPiece>;
+  /**
+   * Marcos YA RECORTADOS por el ensamble (`placements` de `/nesting-preview`),
+   * por id de grupo. Combinados con el contorno de la plancha dan la pieza real.
+   * Es la ruta que se usa cuando el backend no manda `final_pieces`.
+   */
+  nestingPlacementByGroupId?: Map<number, NestingPlacement>;
+  /** Contorno de corte por etiqueta, tomado de las planchas del nesting. */
+  nestingPanelByLabel?: Map<string, NestingPanel>;
 }
 
 /** One assembly step from the backend JSON. */
@@ -161,6 +171,21 @@ function applyLift(
     const finalPiece = lift.finalPieceById?.get(label);
     let body = finalPiece ? liftFinalPiece(finalPiece) : null;
     let usedFinalPiece = body !== null && (body.positions?.length ?? 0) >= 9;
+
+    // Segunda opción: marco recortado del nesting + contorno de la plancha.
+    // Llega al mismo resultado que la pieza final por otro camino, y también
+    // trae los recortes del ensamble aplicados.
+    if (!usedFinalPiece && groupId != null) {
+      const nestingPlacement = lift.nestingPlacementByGroupId?.get(groupId);
+      const nestingPanel = lift.nestingPanelByLabel?.get(label);
+      if (nestingPlacement && nestingPanel) {
+        const recortada = liftPiece(nestingPlacement, nestingPanel);
+        if ((recortada.positions?.length ?? 0) >= 9) {
+          body = recortada;
+          usedFinalPiece = true; // ya viene recortada: no volver a clipear
+        }
+      }
+    }
 
     if (!usedFinalPiece) {
       const faceIndices = lift.faceIndicesByLabel.get(label);

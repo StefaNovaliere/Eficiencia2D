@@ -14,7 +14,11 @@ import {
   fetchWithApiFallback,
   type ApiFetchOptions,
 } from "@/services/api-base";
-import { parseAssemblyWarnings, parseFinalPieces } from "@/core/final-pieces";
+import {
+  parseAssemblyWarnings,
+  parseFinalPieces,
+  parseNestingPlacements,
+} from "@/core/final-pieces";
 import { parseApiError } from "@/services/api-errors";
 import { parseSavedState, type ProjectSavedState } from "@/services/project-state";
 
@@ -523,12 +527,16 @@ export async function fetchNestingPreview(
       const assemblyWarnings = parseAssemblyWarnings(
         data.assemblyWarnings ?? raw.assembly_warnings,
       );
+      const nestingPlacements = parseNestingPlacements(raw.placements);
       return {
         ...data,
         ...(finalPieces.length > 0 ? { finalPieces } : { finalPieces: undefined }),
         ...(assemblyWarnings.length > 0
           ? { assemblyWarnings }
           : { assemblyWarnings: undefined }),
+        ...(nestingPlacements.size > 0
+          ? { nestingPlacements }
+          : { nestingPlacements: undefined }),
       };
     }
 

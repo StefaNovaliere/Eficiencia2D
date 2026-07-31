@@ -35,6 +35,13 @@ export function groupLabel(
 
 export interface BuildAssemblyOptions {
   overrides?: Map<number, FaceCategory>;
+  /**
+   * Área de MATERIAL por id de grupo (`area_m2` del nesting). `group.totalArea`
+   * suma las caras de la malla: en un sólido cuenta las dos pieles, y una losa
+   * con cielorraso 21 cm más abajo sumaba las dos superficies. Eso hacía que dos
+   * losas parecidas se mostraran con casi 10 m² de diferencia.
+   */
+  areaByGroupId?: Map<number, number>;
 }
 
 /** Bounding del grupo en el plano de la pieza (ancho horizontal × alto vertical). */
@@ -77,7 +84,7 @@ export function buildAssemblyGuideFromTopology(
   phase1: Phase1Result,
   opts: BuildAssemblyOptions = {},
 ): AssemblyPreviewData {
-  const { overrides } = opts;
+  const { overrides, areaByGroupId } = opts;
   const placements = phase1.placements;
 
   const panels: AssemblyPanel[] = [];
@@ -100,7 +107,7 @@ export function buildAssemblyGuideFromTopology(
       source_group_id: group.id,
       width_m: size.width,
       height_m: size.height,
-      area_m2: group.totalArea,
+      area_m2: areaByGroupId?.get(group.id) ?? group.totalArea,
       centroid: group.centroid,
       normal: group.representativeNormal,
       label,
@@ -161,6 +168,8 @@ export function stepsFromAssemblySteps(
   phase1: Phase1Result,
   overrides: Map<number, FaceCategory> | undefined,
   validLabels: Set<string>,
+  /** Área de material del nesting; sin ella se ordena por el área de la malla. */
+  areaByGroupId?: Map<number, number>,
 ): AssemblySequenceStep[] | null {
   const entries = phase1.assemblySteps;
   if (!entries || entries.length === 0) return null;
@@ -188,7 +197,13 @@ export function stepsFromAssemblySteps(
     const label = groupLabel(group, phase1.panelIdByGroup);
     if (!validLabels.has(label) || placed.has(label)) continue;
     placed.add(label);
-    eligible.push({ groupId: group.id, level: e.level, category, label, area: group.totalArea });
+    eligible.push({
+      groupId: group.id,
+      level: e.level,
+      category,
+      label,
+      area: areaByGroupId?.get(group.id) ?? group.totalArea,
+    });
   }
 
   // Dentro del flujo abajo→arriba (por nivel, pisos primero), armar del

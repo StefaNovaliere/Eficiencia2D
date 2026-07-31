@@ -36,6 +36,7 @@ import {
   sortWarningsBySeverity,
   warningTypeLabel,
 } from "@/core/final-pieces";
+import type { NestingPanel } from "@/core/sheet-nester";
 import { resolveSlabThicknessM } from "@/core/assembly-slab";
 import { buildYieldClipSpecs, type WallWallDecisions } from "@/core/wall-yield-clip";
 
@@ -451,6 +452,17 @@ export default function AssemblyWindow({
       (nestingData?.finalPieces ?? []).map((fp) => [fp.id, fp]),
     );
 
+    // Ruta alternativa al mismo resultado: marcos recortados + el contorno de
+    // corte de cada pieza en la plancha.
+    const nestingPanelByLabel = new Map<string, NestingPanel>();
+    for (const result of [nestingData?.wallNesting, nestingData?.floorNesting]) {
+      for (const sheet of result?.sheets ?? []) {
+        for (const placed of sheet.panels) {
+          nestingPanelByLabel.set(placed.panel.id, placed.panel);
+        }
+      }
+    }
+
     return {
       labelToGroupId,
       faces: phase1.faces,
@@ -462,6 +474,8 @@ export default function AssemblyWindow({
       yieldClips,
       buildingCentroid,
       finalPieceById,
+      nestingPlacementByGroupId: nestingData?.nestingPlacements,
+      nestingPanelByLabel,
     };
   }, [phase1, nestingData, wallWallDecisions, slabThicknessM]);
 
