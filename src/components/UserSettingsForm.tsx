@@ -230,7 +230,7 @@ export default function UserSettingsForm() {
         <button
           type="button"
           onClick={handleLogout}
-          className="btn btn-outline btn-neutral w-full   gap-2"
+          className="btn btn-outline btn-secondary w-full rounded-xl border-base-300 gap-2"
         >
           <LogOut size={16} />
           Salir de la sesión

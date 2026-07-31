@@ -153,9 +153,9 @@ export function SubscriptionProvider({ children }: { children: ReactNode }) {
 
   const cancelar = useCallback(async () => {
     if (!token) throw new Error("Tenés que iniciar sesión");
-    const sub = await cancelarSuscripcion(token);
+    const sub = await cancelarSuscripcion(token, suscripcion);
     setSuscripcion(sub);
-  }, [token]);
+  }, [token, suscripcion]);
 
   return (
     <SubscriptionContext.Provider

@@ -1,0 +1,48 @@
+---
+description: Preferir siempre componentes DaisyUI en lugar de APIs nativas del browser
+alwaysApply: true
+---
+
+# DaisyUI primero
+
+Este proyecto usa **DaisyUI** (sobre Tailwind). Si DaisyUI ya tiene un componente para lo que estás armando, **usalo**. No inventes un equivalente nativo del browser ni un custom ad-hoc.
+
+## Prohibido (salvo que no exista equivalente DaisyUI)
+
+- `window.confirm` / `window.alert` / `window.prompt` → usar `dialog.modal` + `modal-box` + `modal-action` + `modal-backdrop`
+- Toasts/alerts crudos del browser → `alert`, `toast`, o banners del diseño existente
+- Checkboxes/radios/toggles/selects/inputs/botones sin clases Daisy (`btn`, `input`, `toggle`, `select`, `checkbox`, `radio`, …)
+- Menús custom cuando alcanza `dropdown` / `menu`
+- Badges, tooltips, loading spinners caseros si existen `badge`, `tooltip`, `loading`
+
+## Modal de confirmación (patrón del repo)
+
+```tsx
+{open && (
+  <dialog className="modal modal-open z-[300]" open>
+    <div className="modal-box max-w-md rounded-2xl">
+      <h3 className="font-semibold text-base">Título</h3>
+      <p className="text-sm text-base-content/70 mt-2">Mensaje…</p>
+      <div className="modal-action">
+        <button type="button" className="btn btn-ghost rounded-xl" onClick={onCancel}>
+          Cancelar
+        </button>
+        <button type="button" className="btn btn-error rounded-xl" onClick={onConfirm}>
+          Confirmar
+        </button>
+      </div>
+    </div>
+    <form method="dialog" className="modal-backdrop">
+      <button type="button" onClick={onCancel}>cerrar</button>
+    </form>
+  </dialog>
+)}
+```
+
+Referencias: `TermsModal.tsx`, modales en `ReviewScreen.tsx`.
+
+## Checklist antes de mergear UI
+
+1. ¿DaisyUI tiene un componente para esto? → usarlo.
+2. ¿Hay un patrón igual en el repo? → copiarlo.
+3. ¿Estás por llamar `alert`/`confirm`/`prompt`? → modal DaisyUI.

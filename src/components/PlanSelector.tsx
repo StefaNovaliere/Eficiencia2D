@@ -2,7 +2,14 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Check, CreditCard, Loader2, Sparkles, Ticket, X } from "lucide-react";
+import {
+  Check,
+  CreditCard,
+  Loader2,
+  Sparkles,
+  Ticket,
+  X,
+} from "lucide-react";
 import { useSubscription } from "@/context/SubscriptionContext";
 import { useAuth } from "@/context/AuthContext";
 import type { Plan } from "@/services/planes";
@@ -38,6 +45,19 @@ function formatFecha(iso: string | null): string {
   }
 }
 
+function estadoLabel(estado: string | undefined): string {
+  switch (estado) {
+    case "activa":
+      return "Activa";
+    case "pendiente":
+      return "Pendiente de pago";
+    case "cancelada":
+      return "Cancelada";
+    default:
+      return "Sin suscripción";
+  }
+}
+
 export default function PlanSelector({ hideHeader = false }: { hideHeader?: boolean }) {
   const {
     planes,
@@ -55,6 +75,7 @@ export default function PlanSelector({ hideHeader = false }: { hideHeader?: bool
   const [busyId, setBusyId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [cancelModalOpen, setCancelModalOpen] = useState(false);
   const [cuponInput, setCuponInput] = useState("");
   const [appliedCupon, setAppliedCupon] = useState<ValidarCuponResult | null>(null);
   /** Precio con descuento por plan (solo tipo descuento). */
@@ -179,13 +200,22 @@ export default function PlanSelector({ hideHeader = false }: { hideHeader?: bool
     }
   }
 
-  async function handleCancel() {
+  async function confirmCancelPlan() {
+    const fin = suscripcion?.periodo_fin
+      ? formatFecha(suscripcion.periodo_fin)
+      : null;
+
+    setCancelModalOpen(false);
     setBusyId("__cancel__");
     setNotice(null);
     setActionError(null);
     try {
       await cancelar();
-      setNotice("Tu plan fue cancelado.");
+      setNotice(
+        fin
+          ? `Lamentamos que te vayas. Tu plan sigue activo hasta el ${fin}; después no se renovará. Cuando quieras, acá te esperamos.`
+          : "Lamentamos que te vayas. Conservás el acceso hasta el fin del período ya pagado. Cuando quieras volver, acá te esperamos.",
+      );
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "No se pudo cancelar el plan");
     } finally {
@@ -247,7 +277,9 @@ export default function PlanSelector({ hideHeader = false }: { hideHeader?: bool
   const hasPaidActive =
     currentPlan != null &&
     currentPlan.precio_mensual > 0 &&
-    suscripcion?.estado === "activa";
+    (suscripcion?.estado === "activa" || suscripcion?.estado === "pendiente");
+
+  const canCancel = hasPaidActive && !suscripcion?.cancela_al_fin;
 
   const cuponPlanTarget =
     appliedCupon?.tipo === "plan" && appliedCupon.cupon.plan_id != null
@@ -265,15 +297,55 @@ export default function PlanSelector({ hideHeader = false }: { hideHeader?: bool
             <h2 className="text-sm font-semibold text-base-content">Plan</h2>
             <p className="text-xs text-base-content/55 mt-1">
               {isAuthenticated && currentPlan
-                ? `Plan actual: ${currentPlan.nombre}${
-                    suscripcion?.cancela_al_fin && suscripcion?.periodo_fin
-                      ? ` · finaliza el ${formatFecha(suscripcion.periodo_fin)}`
-                      : suscripcion?.periodo_fin
-                        ? ` · renueva el ${formatFecha(suscripcion.periodo_fin)}`
-                        : ""
-                  }`
+                ? `Plan actual: ${currentPlan.nombre}`
                 : "Elegí el plan que mejor se adapte a tu trabajo."}
             </p>
+          </div>
+        </div>
+      )}
+
+      {isAuthenticated && !isLoading && (
+        <div className="rounded-xl border border-primary/25 bg-primary/5 p-4 space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-[11px] font-semibold uppercase tracking-widest text-primary/80">
+                Tu plan actual
+              </p>
+              <p className="text-lg font-bold text-base-content mt-0.5">
+                {currentPlan?.nombre ?? "Gratis"}
+              </p>
+              <p className="text-xs text-base-content/60 mt-1">
+                {estadoLabel(suscripcion?.estado)}
+                {currentPlan && currentPlan.precio_mensual > 0
+                  ? ` · ${formatPrecio(currentPlan)}`
+                  : ""}
+              </p>
+              {suscripcion?.cancela_al_fin && suscripcion.periodo_fin ? (
+                <p className="text-xs text-warning mt-1.5">
+                  Te vamos a extrañar. Conservás el acceso hasta el{" "}
+                  {formatFecha(suscripcion.periodo_fin)}; después no se renueva.
+                </p>
+              ) : suscripcion?.periodo_fin && hasPaidActive ? (
+                <p className="text-xs text-base-content/55 mt-1.5">
+                  Próxima renovación: {formatFecha(suscripcion.periodo_fin)}
+                </p>
+              ) : null}
+            </div>
+
+            {canCancel && (
+              <button
+                type="button"
+                className="btn btn-outline btn-sm rounded-xl border-error/40 text-error hover:bg-error/10 hover:border-error shrink-0"
+                disabled={busyId === "__cancel__"}
+                onClick={() => setCancelModalOpen(true)}
+              >
+                {busyId === "__cancel__" ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  "Dar de baja el plan"
+                )}
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -346,12 +418,10 @@ export default function PlanSelector({ hideHeader = false }: { hideHeader?: bool
               <div className="rounded-lg bg-success/10 border border-success/20 px-3 py-2 space-y-1.5">
                 <p className="text-xs font-medium text-success">{appliedCupon.message}</p>
                 <p className="text-xs text-base-content/60">
-                
                   {appliedCupon.tipo === "plan" && cuponPlanTarget
                     ? ` · Suscribite al plan ${cuponPlanTarget.nombre}`
                     : ""}
                 </p>
-                
               </div>
             )}
 
@@ -391,7 +461,7 @@ export default function PlanSelector({ hideHeader = false }: { hideHeader?: bool
                       Incluido en tu cupón
                     </span>
                   )}
-                  
+
                   <div className="flex items-baseline justify-between gap-2">
                     <h3 className="text-sm font-bold text-base-content">{plan.nombre}</h3>
                   </div>
@@ -436,21 +506,6 @@ export default function PlanSelector({ hideHeader = false }: { hideHeader?: bool
               );
             })}
           </div>
-
-          {hasPaidActive && !suscripcion?.cancela_al_fin && (
-            <button
-              type="button"
-              className="btn btn-ghost btn-xs text-base-content/50"
-              disabled={busyId === "__cancel__"}
-              onClick={handleCancel}
-            >
-              {busyId === "__cancel__" ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                "Cancelar plan"
-              )}
-            </button>
-          )}
         </>
       )}
 
@@ -477,6 +532,51 @@ export default function PlanSelector({ hideHeader = false }: { hideHeader?: bool
         <div className="alert alert-success rounded-xl text-sm">
           <span>{notice}</span>
         </div>
+      )}
+
+      {cancelModalOpen && (
+        <dialog
+          className="modal modal-open z-[300]"
+          open
+          aria-labelledby="cancel-plan-modal-title"
+        >
+          <div className="modal-box max-w-md rounded-2xl">
+            <h3 id="cancel-plan-modal-title" className="font-semibold text-base">
+              Lamentamos que te vayas
+            </h3>
+            <p className="text-sm text-base-content/70 mt-2 leading-relaxed">
+              Gracias por haber confiado en Eficiencia2D
+              {currentPlan?.nombre ? ` con el plan ${currentPlan.nombre}` : ""}.
+              Si algo no te cerró, nos duele: siempre podés volver cuando lo necesites.
+            </p>
+            <p className="text-sm text-base-content/55 mt-3 leading-relaxed">
+              {suscripcion?.periodo_fin
+                ? `Si confirmás la baja, conservás el acceso hasta el ${formatFecha(suscripcion.periodo_fin)}. Después no se renovará.`
+                : "Si confirmás la baja, conservás el acceso hasta el fin del período ya pagado."}
+            </p>
+            <div className="modal-action">
+              <button
+                type="button"
+                className="btn btn-ghost rounded-xl"
+                onClick={() => setCancelModalOpen(false)}
+              >
+                Prefiero quedarme
+              </button>
+              <button
+                type="button"
+                className="btn btn-error rounded-xl"
+                onClick={() => void confirmCancelPlan()}
+              >
+                Igual dar de baja
+              </button>
+            </div>
+          </div>
+          <form method="dialog" className="modal-backdrop">
+            <button type="button" onClick={() => setCancelModalOpen(false)}>
+              cerrar
+            </button>
+          </form>
+        </dialog>
       )}
     </section>
   );

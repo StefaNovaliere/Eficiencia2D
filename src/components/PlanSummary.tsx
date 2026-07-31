@@ -9,7 +9,16 @@ import { useSubscription } from "@/context/SubscriptionContext";
  * acceso a la página dedicada `/planes` (el grid completo vive ahí).
  */
 export default function PlanSummary() {
-  const { currentPlan, isLoading } = useSubscription();
+  const { currentPlan, suscripcion, isLoading } = useSubscription();
+
+  const fin =
+    suscripcion?.cancela_al_fin && suscripcion.periodo_fin
+      ? new Date(suscripcion.periodo_fin).toLocaleDateString("es-AR", {
+          day: "numeric",
+          month: "long",
+          year: "numeric",
+        })
+      : null;
 
   return (
     <section className="space-y-3 pt-2 border-t border-base-300/40">
@@ -26,7 +35,10 @@ export default function PlanSummary() {
                 Cargando…
               </span>
             ) : (
-              `Plan actual: ${currentPlan?.nombre ?? "Gratis"}`
+              <>
+                Plan actual: {currentPlan?.nombre ?? "Gratis"}
+                {fin ? ` · baja el ${fin}` : ""}
+              </>
             )}
           </p>
         </div>
@@ -35,7 +47,7 @@ export default function PlanSummary() {
           className="btn btn-outline btn-sm rounded-xl border-base-300 gap-2 shrink-0"
         >
           <CreditCard size={16} />
-          Ver planes
+          Ver / dar de baja
         </Link>
       </div>
     </section>

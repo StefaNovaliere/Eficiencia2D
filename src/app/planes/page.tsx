@@ -7,11 +7,13 @@ import { ArrowLeft, CreditCard } from "lucide-react";
 import BackgroundSymbols from "@/components/BackgroundSymbols";
 import PlanSelector from "@/components/PlanSelector";
 import { useSubscription } from "@/context/SubscriptionContext";
+import { useAuth } from "@/context/AuthContext";
 
 function PlanesContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const { refresh } = useSubscription();
+  const { isAuthenticated } = useAuth();
+  const { refresh, currentPlan } = useSubscription();
   const [banner, setBanner] = useState<"ok" | "pending" | null>(null);
 
   useEffect(() => {
@@ -58,9 +60,15 @@ function PlanesContent() {
                 <p className="text-[11px] font-semibold uppercase tracking-widest text-primary/80 mb-0.5">
                   Planes
                 </p>
-                <h1 className="text-2xl font-bold tracking-tight">Elegí tu plan</h1>
+                <h1 className="text-2xl font-bold tracking-tight">
+                  {isAuthenticated ? "Tu plan y opciones" : "Elegí tu plan"}
+                </h1>
                 <p className="text-sm text-base-content/55 mt-1">
-                  Empezá gratis y pasá a un plan pago cuando lo necesites. Sin apuro.
+                  {isAuthenticated
+                    ? currentPlan
+                      ? `Estás en ${currentPlan.nombre}. Podés cambiar de plan o darlo de baja acá.`
+                      : "Mirá tu plan actual, cambiá de opción o dá de baja cuando quieras."
+                    : "Empezá gratis y pasá a un plan pago cuando lo necesites. Sin apuro."}
                 </p>
               </div>
             </div>

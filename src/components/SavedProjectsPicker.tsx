@@ -143,6 +143,7 @@ export default function SavedProjectsPicker({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<UserProject | null>(null);
   const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [renameSavingId, setRenameSavingId] = useState<string | null>(null);
@@ -247,11 +248,7 @@ export default function SavedProjectsPicker({
     async (project: UserProject) => {
       if (!token || isBusy) return;
 
-      const confirmed = window.confirm(
-        `¿Eliminar "${project.nombre}"? Esta acción no se puede deshacer.`,
-      );
-      if (!confirmed) return;
-
+      setPendingDelete(null);
       setDeletingProjectId(project.id);
       setError(null);
 
@@ -459,7 +456,7 @@ export default function SavedProjectsPicker({
                         disabled={isBusy}
                         isBusy={isDeleting || isRenameSaving}
                         onRename={() => startRename(project)}
-                        onDelete={() => void handleDeleteProject(project)}
+                        onDelete={() => setPendingDelete(project)}
                       />
                     </div>
                   )}
@@ -475,6 +472,44 @@ export default function SavedProjectsPicker({
           </p>
         )}
       </div>
+
+      {pendingDelete && (
+        <dialog
+          className="modal modal-open z-[300]"
+          open
+          aria-labelledby="delete-project-modal-title"
+        >
+          <div className="modal-box max-w-md rounded-2xl">
+            <h3 id="delete-project-modal-title" className="font-semibold text-base">
+              ¿Eliminar “{pendingDelete.nombre}”?
+            </h3>
+            <p className="text-sm text-base-content/70 mt-2 leading-relaxed">
+              Esta acción no se puede deshacer. El proyecto se borra de la nube.
+            </p>
+            <div className="modal-action">
+              <button
+                type="button"
+                className="btn btn-ghost rounded-xl"
+                onClick={() => setPendingDelete(null)}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="btn btn-error rounded-xl"
+                onClick={() => void handleDeleteProject(pendingDelete)}
+              >
+                Eliminar
+              </button>
+            </div>
+          </div>
+          <form method="dialog" className="modal-backdrop">
+            <button type="button" onClick={() => setPendingDelete(null)}>
+              cerrar
+            </button>
+          </form>
+        </dialog>
+      )}
     </div>
   );
 }

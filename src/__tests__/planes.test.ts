@@ -4,6 +4,7 @@ import {
   normalizePlanesList,
   normalizeSuscripcion,
   seleccionarPlan,
+  cancelarSuscripcion,
   MOCK_PLANES,
   type Plan,
 } from "@/services/planes";
@@ -16,10 +17,12 @@ vi.mock("@/services/api", () => ({
 const apiFetchMock = vi.mocked(apiFetch);
 
 function fakeResponse(status: number, body: unknown): Response {
+  const text = body == null ? "" : JSON.stringify(body);
   return {
     ok: status >= 200 && status < 300,
     status,
     json: async () => body,
+    text: async () => text,
   } as unknown as Response;
 }
 
@@ -118,6 +121,40 @@ describe("seleccionarPlan", () => {
     await expect(seleccionarPlan("tok", PRO)).rejects.toThrow(
       "MercadoPago no está configurado.",
     );
+  });
+});
+
+describe("cancelarSuscripcion", () => {
+  beforeEach(() => {
+    apiFetchMock.mockReset();
+    localStorage.clear();
+  });
+
+  it("DELETE 200 con cancela_al_fin → marca baja al fin del período", async () => {
+    apiFetchMock.mockResolvedValue(
+      fakeResponse(200, {
+        plan_id: "pro",
+        estado: "activa",
+        periodo_fin: "2026-08-01T00:00:00Z",
+        cancela_al_fin: true,
+      }),
+    );
+    const sub = await cancelarSuscripcion("tok");
+    expect(sub.cancela_al_fin).toBe(true);
+    expect(sub.plan_id).toBe("pro");
+    expect(sub.estado).toBe("activa");
+  });
+
+  it("404 degrada a local usando la suscripción actual", async () => {
+    apiFetchMock.mockResolvedValue(fakeResponse(404, { detail: "not found" }));
+    const sub = await cancelarSuscripcion("tok", {
+      plan_id: "2",
+      estado: "activa",
+      periodo_fin: "2026-09-01",
+    });
+    expect(sub.cancela_al_fin).toBe(true);
+    expect(sub.plan_id).toBe("2");
+    expect(sub.estado).toBe("activa");
   });
 });
 

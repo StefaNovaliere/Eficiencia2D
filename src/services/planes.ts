@@ -225,6 +225,15 @@ export function getLocalSuscripcion(): Suscripcion {
   }
 }
 
+export function setLocalSuscripcion(sub: Suscripcion): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(LOCAL_KEY, JSON.stringify(sub));
+  } catch {
+    /* quota / private mode */
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Lectura resiliente.
 // ---------------------------------------------------------------------------
@@ -325,17 +334,67 @@ export async function seleccionarPlan(
   return { kind: "activa", suscripcion: normalizeSuscripcion(data) };
 }
 
-/** Cancela la suscripción (al fin del período). Tira con el `detail` ante error. */
-export async function cancelarSuscripcion(token: string): Promise<Suscripcion> {
-  const res = await apiFetch(
-    "/api/users/me/suscripcion",
-    { method: "DELETE" },
-    { token },
-  );
+/** Cancela la suscripción (al fin del período). */
+export async function cancelarSuscripcion(
+  token: string,
+  current?: Suscripcion | null,
+): Promise<Suscripcion> {
+  let res: Response | null = null;
+  try {
+    res = await apiFetch(
+      "/api/users/me/suscripcion",
+      { method: "DELETE" },
+      { token },
+    );
+  } catch {
+    res = null;
+  }
 
-  if (!res.ok) {
+  if (res?.ok) {
+    if (res.status === 204) {
+      const base = current ?? getLocalSuscripcion();
+      const next: Suscripcion = {
+        ...base,
+        cancela_al_fin: true,
+        estado:
+          base.estado === "activa" || base.estado === "pendiente"
+            ? base.estado
+            : "cancelada",
+      };
+      setLocalSuscripcion(next);
+      return next;
+    }
+
+    const text = await res.text();
+    const sub = text
+      ? normalizeSuscripcion(JSON.parse(text) as unknown)
+      : {
+          ...(current ?? getLocalSuscripcion()),
+          cancela_al_fin: true,
+        };
+    if (!sub.cancela_al_fin) sub.cancela_al_fin = true;
+    setLocalSuscripcion(sub);
+    return sub;
+  }
+
+  // Errores reales del backend (no 404): propagar el detail.
+  if (res && res.status !== 404) {
     await parseApiError(res, "No se pudo cancelar el plan");
   }
 
-  return normalizeSuscripcion(await res.json());
+  // 404 / red: degradar a local (mismo patrón que GET).
+  const base = current ?? getLocalSuscripcion();
+  if (!base.plan_id && base.estado === "ninguna") {
+    throw new Error("No tenés un plan activo para cancelar");
+  }
+  const next: Suscripcion = {
+    ...base,
+    cancela_al_fin: true,
+    estado:
+      base.estado === "activa" || base.estado === "pendiente"
+        ? base.estado
+        : "cancelada",
+  };
+  setLocalSuscripcion(next);
+  return next;
 }
