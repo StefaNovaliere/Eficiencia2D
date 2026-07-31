@@ -168,32 +168,46 @@ function applyLift(
     // Preferir la pieza final: ya viene recortada. El camino de caras originales
     // dibuja el modelo sin recortar, que es lo que hacía que las piezas se
     // superpongan donde el encastre ya las había resuelto.
-    const finalPiece = lift.finalPieceById?.get(label);
-    let body = finalPiece ? liftFinalPiece(finalPiece) : null;
-    let usedFinalPiece = body !== null && (body.positions?.length ?? 0) >= 9;
+    let body: LiftedPieceGeometry | null = null;
+    // `yaRecortada` marca que el cuerpo ya trae los recortes del ensamble, así
+    // que no hay que volver a pasarlo por los clips de cesión.
+    let yaRecortada = false;
 
-    // Segunda opción: marco recortado del nesting + contorno de la plancha.
-    // Llega al mismo resultado que la pieza final por otro camino, y también
-    // trae los recortes del ensamble aplicados.
-    if (!usedFinalPiece && groupId != null) {
-      const nestingPlacement = lift.nestingPlacementByGroupId?.get(groupId);
-      const nestingPanel = lift.nestingPanelByLabel?.get(label);
-      if (nestingPlacement && nestingPanel) {
-        const recortada = liftPiece(nestingPlacement, nestingPanel);
-        if ((recortada.positions?.length ?? 0) >= 9) {
-          body = recortada;
-          usedFinalPiece = true; // ya viene recortada: no volver a clipear
-        }
+    // Primera opción: marco recortado del nesting + contorno de la plancha.
+    const nestingPlacement =
+      groupId != null ? lift.nestingPlacementByGroupId?.get(groupId) : undefined;
+    const nestingPanel = lift.nestingPanelByLabel?.get(label);
+    if (nestingPlacement && nestingPanel) {
+      // NUNCA espejar acá. El espejado del contorno de corte (para que el
+      // quemado del láser quede del lado interior) ya viene horneado en el
+      // marco: el backend corrió el origen al otro extremo e invirtió u_axis,
+      // y la fórmula del contrato es `origin + u·u_axis + v·v_axis`, sin
+      // término de espejo. Compensarlo otra vez daría vuelta cada pieza
+      // asimétrica sobre su propio eje.
+      const recortada = liftPiece({ ...nestingPlacement, mirrored: false }, nestingPanel);
+      if ((recortada.positions?.length ?? 0) >= 9) {
+        body = recortada;
+        yaRecortada = true;
       }
     }
 
-    if (!usedFinalPiece) {
+    // Segunda opción: la pieza final, que trae el contorno ya resuelto.
+    if (!yaRecortada) {
+      const finalPiece = lift.finalPieceById?.get(label);
+      const liftada = finalPiece ? liftFinalPiece(finalPiece) : null;
+      if (liftada && (liftada.positions?.length ?? 0) >= 9) {
+        body = liftada;
+        yaRecortada = true;
+      }
+    }
+
+    // Última opción: las caras crudas del modelo, sin recortar.
+    if (!yaRecortada) {
       const faceIndices = lift.faceIndicesByLabel.get(label);
       if (!faceIndices || faceIndices.length === 0) return piece;
       const faces = faceIndices.map((i) => lift.faces[i]).filter(Boolean);
       if (faces.length === 0) return piece;
       body = liftFaces(faces);
-      usedFinalPiece = false;
     }
     if (!body || (body.positions?.length ?? 0) < 9) return piece;
 
@@ -202,7 +216,7 @@ function applyLift(
       groupId != null && lift.groupById ? lift.groupById.get(groupId) : undefined;
     // Los recortes ya vienen aplicados en la pieza final: volver a clipear acá
     // la recortaría dos veces.
-    if (!usedFinalPiece && groupId != null && group && lift.yieldClips?.length) {
+    if (!yaRecortada && groupId != null && group && lift.yieldClips?.length) {
       positions = applyYieldClipsToPositions(
         positions,
         groupId,

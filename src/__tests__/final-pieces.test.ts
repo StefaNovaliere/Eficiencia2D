@@ -477,7 +477,7 @@ describe("de dónde saca el instructivo cada pieza", () => {
     return { min: Math.min(...xs), max: Math.max(...xs) };
   }
 
-  it("usa el marco recortado del nesting cuando no hay piezas finales", () => {
+  it("usa el marco recortado del nesting", () => {
     const r = anchoDibujado({
       ...baseLift,
       nestingPlacementByGroupId: new Map([[1, nestingPlacement]]),
@@ -499,5 +499,86 @@ describe("de dónde saca el instructivo cada pieza", () => {
       nestingPanelByLabel: new Map(), // falta el contorno de la plancha
     });
     expect(r.max).toBeCloseTo(9, 6); // cayó a las caras crudas
+  });
+});
+
+/**
+ * El contorno de corte se espeja antes de cortarse, para que el quemado del
+ * láser quede del lado interior de la maqueta. Ese espejado ya viene horneado en
+ * el marco del nesting (origen corrido al otro extremo y u_axis invertido), y la
+ * fórmula del contrato no tiene término de espejo. Compensarlo otra vez da vuelta
+ * cada pieza asimétrica sobre su propio eje: es lo que hacía que el instructivo
+ * siguiera mostrando piezas superpuestas.
+ */
+describe("el marco del nesting nunca se espeja", () => {
+  const data = {
+    panels: [
+      {
+        id: "A1", category: "wall", source_group_id: 1,
+        width_m: 2, height_m: 1, area_m2: 2,
+        centroid: { x: 0, y: 0, z: 0 }, normal: { x: 0, y: 0, z: 1 }, label: "A1",
+      },
+    ],
+    elevations: {},
+    totals: { wall_count: 1, floor_count: 0, total_panels: 1 },
+  };
+  const steps = [{ title: "Paso 1", description: "", panel_ids: ["A1"] }];
+
+  /** Contorno ASIMÉTRICO: un espejado de más se nota. */
+  const panelAsimetrico = {
+    id: "A1",
+    category: "wall" as const,
+    widthM: 1,
+    heightM: 1,
+    edges: [
+      { a: { x: 0, y: 0 }, b: { x: 1, y: 0 } },
+      { a: { x: 1, y: 0 }, b: { x: 1, y: 0.2 } }, // muesca sólo de un lado
+      { a: { x: 1, y: 0.2 }, b: { x: 0, y: 1 } },
+      { a: { x: 0, y: 1 }, b: { x: 0, y: 0 } },
+    ],
+  };
+
+  const marco = {
+    panelId: "A1",
+    origin: { x: 0, y: 0, z: 0 },
+    uAxis: { x: 1, y: 0, z: 0 },
+    vAxis: { x: 0, y: 1, z: 0 },
+    normal: { x: 0, y: 0, z: 1 },
+    widthM: 1,
+    heightM: 1,
+    areaM2: 1,
+  };
+
+  function vertices(mirrored: boolean) {
+    const [pieza] = buildAssemblyPieces(data as never, steps, {
+      labelToGroupId: new Map([["A1", 1]]),
+      faces: [],
+      faceIndicesByLabel: new Map(),
+      nestingPlacementByGroupId: new Map([[1, { ...marco, mirrored }]]),
+      nestingPanelByLabel: new Map([["A1", panelAsimetrico]]),
+    } as never);
+    return pieza.lifted!.positions;
+  }
+
+  it("da el mismo resultado con mirrored true o false", () => {
+    // El contrato dice que llega en `false`, pero su propio ejemplo JSON lo
+    // muestra en `true`: el dibujo no puede depender de cuál de los dos venga.
+    expect(vertices(true)).toEqual(vertices(false));
+  });
+
+  it("dibuja el contorno tal cual, sin dar vuelta la asimetría", () => {
+    const pos = vertices(false);
+    const xs = pos.filter((_, i) => i % 3 === 0);
+    const ys = pos.filter((_, i) => i % 3 === 1);
+    expect(Math.min(...xs)).toBeCloseTo(0, 4);
+    expect(Math.max(...xs)).toBeCloseTo(1, 4);
+
+    // La muesca (y ≈ 0.2) está del lado x=1, no del x=0. Si se espejara,
+    // el vértice de y baja caería en x=0.
+    let xDeLaMuesca = NaN;
+    for (let i = 0; i < ys.length; i++) {
+      if (Math.abs(ys[i] - 0.2) < 1e-4) xDeLaMuesca = xs[i];
+    }
+    expect(xDeLaMuesca).toBeCloseTo(1, 4);
   });
 });

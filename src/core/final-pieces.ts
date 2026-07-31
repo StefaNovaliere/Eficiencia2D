@@ -66,6 +66,13 @@ export interface NestingPlacement {
   normal: Vec3;
   widthM: number;
   heightM: number;
+  /**
+   * Se lee y se conserva, pero el instructivo NO lo aplica: el espejado del
+   * contorno de corte ya viene horneado en el marco (origen corrido al otro
+   * extremo y `u_axis` invertido), y la fórmula del contrato no tiene término de
+   * espejo. El contrato dice que llega en `false`, pero su ejemplo JSON muestra
+   * `true`, así que no se depende del valor.
+   */
   mirrored: boolean;
   /**
    * Área de MATERIAL: contorno menos aberturas. `group.totalArea` suma las caras
