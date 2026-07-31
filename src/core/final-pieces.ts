@@ -47,6 +47,68 @@ export interface FinalPiece {
   edges: FinalPieceEdge[];
 }
 
+/**
+ * Marco de una pieza YA RECORTADA por el ensamble, tal como lo devuelve
+ * `/nesting-preview`. Misma forma que `topology.placements` (que sigue siendo el
+ * modelo crudo, correcto para el visor donde se clasifica), más el id de panel y
+ * el área de material.
+ *
+ * `width_m`/`height_m` vienen recortados: sobre el modelo de prueba, 20 de 28
+ * piezas miden menos acá que en la topología cruda. Dibujar la topología es lo
+ * que hacía que los muros se pisaran y las losas parecieran apoyadas encima.
+ */
+export interface NestingPlacement {
+  /** Mismo id que en la plancha de corte. */
+  panelId: string;
+  origin: Vec3;
+  uAxis: Vec3;
+  vAxis: Vec3;
+  normal: Vec3;
+  widthM: number;
+  heightM: number;
+  mirrored: boolean;
+  /**
+   * Área de MATERIAL: contorno menos aberturas. `group.totalArea` suma las caras
+   * de la malla, así que en un sólido cuenta las dos pieles y una losa con
+   * cielorraso aparecía con casi 10 m² de más.
+   */
+  areaM2: number;
+}
+
+/**
+ * Parsea el mapa `placements` de `/nesting-preview` (clave = group_id como
+ * string). Descarta entradas sin marco usable, igual que las piezas finales.
+ */
+export function parseNestingPlacements(raw: unknown): Map<number, NestingPlacement> {
+  const out = new Map<number, NestingPlacement>();
+  const root = rec(raw);
+  if (!root) return out;
+
+  for (const [key, value] of Object.entries(root)) {
+    const groupId = finite(key);
+    const o = rec(value);
+    if (groupId === null || !o) continue;
+
+    const origin = parseVec3(o.origin);
+    const uAxis = parseVec3(pick(o, "uAxis", "u_axis"));
+    const vAxis = parseVec3(pick(o, "vAxis", "v_axis"));
+    if (!origin || !uAxis || !vAxis) continue;
+
+    out.set(groupId, {
+      panelId: String(pick(o, "panelId", "panel_id") ?? "").trim(),
+      origin,
+      uAxis,
+      vAxis,
+      normal: parseVec3(o.normal) ?? { x: 0, y: 1, z: 0 },
+      widthM: finite(pick(o, "widthM", "width_m")) ?? 0,
+      heightM: finite(pick(o, "heightM", "height_m")) ?? 0,
+      mirrored: o.mirrored === true,
+      areaM2: finite(pick(o, "areaM2", "area_m2")) ?? 0,
+    });
+  }
+  return out;
+}
+
 /** Tipos de aviso que emite el chequeo de ensamble del backend. */
 export type AssemblyWarningType = "gap" | "overlap" | "unsupported" | "interpenetra";
 

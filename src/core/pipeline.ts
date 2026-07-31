@@ -13,7 +13,11 @@ import type { GeometryGroup } from "./group-classifier";
 import type { Joint } from "./joint-detector";
 import type { DimensionAdjustment, WallWallJoint } from "./assembly-adjuster";
 import type { NestingResult, SheetConfig } from "./sheet-nester";
-import type { AssemblyWarning, FinalPiece } from "./final-pieces";
+import type {
+  AssemblyWarning,
+  FinalPiece,
+  NestingPlacement,
+} from "./final-pieces";
 
 /**
  * Pose 3D de una pieza (grupo) provista por el backend en `topology.placements`.
@@ -150,4 +154,12 @@ export interface NestingPreviewData {
   finalPieces?: FinalPiece[];
   /** Choques y huecos que detectó el backend al armar la maqueta virtualmente. */
   assemblyWarnings?: AssemblyWarning[];
+  /**
+   * Marcos YA RECORTADOS por el ensamble, por id de grupo. Misma forma que
+   * `topology.placements`, que NO se toca: ése sigue siendo el modelo crudo, que
+   * es lo correcto para el visor donde se clasifica y descarta.
+   * Dependen de la escala (el recorte tiene un término físico de MDF), así que
+   * llegan con cada respuesta del nesting y se actualizan solos.
+   */
+  nestingPlacements?: Map<number, NestingPlacement>;
 }

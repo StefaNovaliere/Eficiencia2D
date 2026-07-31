@@ -550,6 +550,19 @@ function ReviewPageContent() {
             token,
           );
           setNestingData(nesting);
+          // El área de material del nesting (contorno menos aberturas) en vez
+          // de la suma de caras de la malla, que cuenta las dos pieles de un
+          // sólido y hacía ver piezas parecidas con m² muy distintos.
+          const areaByGroupId = new Map<number, number>();
+          for (const [groupId, pl] of nesting.nestingPlacements ?? []) {
+            if (pl.areaM2 > 0) areaByGroupId.set(groupId, pl.areaM2);
+          }
+          if (areaByGroupId.size > 0) {
+            return buildAssemblyGuideFromTopology(phase1Result, {
+              overrides: overridesMap,
+              areaByGroupId,
+            });
+          }
         } catch (err) {
           console.warn(
             "[instructivo] no se pudo refrescar nesting-preview; se usa geometría de fallback.",

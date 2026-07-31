@@ -3,6 +3,7 @@ import {
   formatWarningMeasure,
   parseAssemblyWarnings,
   parseFinalPieces,
+  parseNestingPlacements,
   sortWarningsBySeverity,
   warningTypeLabel,
 } from "@/core/final-pieces";
@@ -347,5 +348,156 @@ describe("formatWarningMeasure", () => {
   it("un valor sin medir no inventa un número", () => {
     expect(formatWarningMeasure(0)).toBe("—");
     expect(formatWarningMeasure(NaN)).toBe("—");
+  });
+});
+
+describe("parseNestingPlacements", () => {
+  /** Marco tal cual lo manda el contrato (clave = group_id como string). */
+  const crudoMapa = {
+    "250": {
+      panel_id: "A1",
+      origin: { x: 3.35, y: 2.69, z: 3.75 },
+      u_axis: { x: -1, y: 0, z: 0 },
+      v_axis: { x: 0, y: 1, z: 0 },
+      normal: { x: 0, y: 0.8, z: 0.6 },
+      width_m: 7.35,
+      height_m: 4.7728,
+      mirrored: true,
+      area_m2: 33.96,
+    },
+  };
+
+  it("lee el formato del contrato, con la clave numérica", () => {
+    const m = parseNestingPlacements(crudoMapa);
+    const pl = m.get(250)!;
+    expect(pl.panelId).toBe("A1");
+    expect(pl.uAxis).toEqual({ x: -1, y: 0, z: 0 });
+    expect(pl.widthM).toBeCloseTo(7.35);
+    expect(pl.mirrored).toBe(true);
+    expect(pl.areaM2).toBeCloseTo(33.96);
+  });
+
+  it("acepta también la respuesta ya camelizada", () => {
+    const m = parseNestingPlacements({
+      "250": {
+        panelId: "A1",
+        origin: { x: 0, y: 0, z: 0 },
+        uAxis: { x: 1, y: 0, z: 0 },
+        vAxis: { x: 0, y: 1, z: 0 },
+        widthM: 2,
+        areaM2: 4,
+      },
+    });
+    expect(m.get(250)!.widthM).toBe(2);
+    expect(m.get(250)!.areaM2).toBe(4);
+  });
+
+  it("descarta entradas sin marco usable", () => {
+    expect(parseNestingPlacements({ "1": { panel_id: "A1" } }).size).toBe(0);
+    expect(parseNestingPlacements({ abc: crudoMapa["250"] }).size).toBe(0);
+    expect(parseNestingPlacements(null).size).toBe(0);
+    expect(parseNestingPlacements([]).size).toBe(0);
+  });
+
+  /**
+   * Es el punto del contrato: estos marcos vienen recortados, y son los que hay
+   * que dibujar en el instructivo en vez de la topología cruda.
+   */
+  it("conserva las medidas recortadas tal como llegan", () => {
+    // A1 del modelo de prueba: 735 cm recortado contra 790 cm en la topología.
+    const pl = parseNestingPlacements(crudoMapa).get(250)!;
+    expect(pl.widthM).toBeLessThan(7.9);
+    expect(pl.widthM).toBeCloseTo(7.35, 4);
+  });
+});
+
+/**
+ * Hay tres fuentes posibles para el cuerpo de una pieza, de mejor a peor:
+ * la pieza final, el marco recortado del nesting, y las caras crudas del
+ * modelo. Las dos primeras traen los recortes del ensamble; la tercera es el
+ * modelo sin recortar, que es lo que hacía que los muros se pisaran.
+ */
+describe("de dónde saca el instructivo cada pieza", () => {
+  const QUAD = {
+    vertices: [
+      { x: 0, y: 0, z: 0 },
+      { x: 9, y: 0, z: 0 },
+      { x: 9, y: 9, z: 0 },
+      { x: 0, y: 9, z: 0 },
+    ],
+    normal: { x: 0, y: 0, z: 1 },
+    area: 81,
+  };
+  const data = {
+    panels: [
+      {
+        id: "A1", category: "wall", source_group_id: 1,
+        width_m: 2, height_m: 1, area_m2: 2,
+        centroid: { x: 0, y: 0, z: 0 }, normal: { x: 0, y: 0, z: 1 }, label: "A1",
+      },
+    ],
+    elevations: {},
+    totals: { wall_count: 1, floor_count: 0, total_panels: 1 },
+  };
+  const steps = [{ title: "Paso 1", description: "", panel_ids: ["A1"] }];
+  const baseLift = {
+    labelToGroupId: new Map([["A1", 1]]),
+    faces: [QUAD],
+    faceIndicesByLabel: new Map([["A1", [0]]]),
+  };
+
+  /** Contorno de corte en la plancha (a escala 1:100 → metros de plancha). */
+  const nestingPanel = {
+    id: "A1",
+    category: "wall" as const,
+    widthM: 0.02,
+    heightM: 0.01,
+    edges: [
+      { a: { x: 0, y: 0 }, b: { x: 0.02, y: 0 } },
+      { a: { x: 0.02, y: 0 }, b: { x: 0.02, y: 0.01 } },
+      { a: { x: 0.02, y: 0.01 }, b: { x: 0, y: 0.01 } },
+      { a: { x: 0, y: 0.01 }, b: { x: 0, y: 0 } },
+    ],
+  };
+  const nestingPlacement = {
+    panelId: "A1",
+    origin: { x: 50, y: 0, z: 0 },
+    uAxis: { x: 1, y: 0, z: 0 },
+    vAxis: { x: 0, y: 1, z: 0 },
+    normal: { x: 0, y: 0, z: 1 },
+    widthM: 2,
+    heightM: 1,
+    mirrored: false,
+    areaM2: 2,
+  };
+
+  function anchoDibujado(lift: unknown) {
+    const [pieza] = buildAssemblyPieces(data as never, steps, lift as never);
+    const xs = pieza.lifted!.positions.filter((_, i) => i % 3 === 0);
+    return { min: Math.min(...xs), max: Math.max(...xs) };
+  }
+
+  it("usa el marco recortado del nesting cuando no hay piezas finales", () => {
+    const r = anchoDibujado({
+      ...baseLift,
+      nestingPlacementByGroupId: new Map([[1, nestingPlacement]]),
+      nestingPanelByLabel: new Map([["A1", nestingPanel]]),
+    });
+    // El marco recortado ubica la pieza en x=50..52; la cara cruda, en 0..9.
+    expect(r.min).toBeCloseTo(50, 4);
+    expect(r.max).toBeCloseTo(52, 4);
+  });
+
+  it("sin ninguna de las dos, cae a las caras del modelo", () => {
+    expect(anchoDibujado(baseLift).max).toBeCloseTo(9, 6);
+  });
+
+  it("si el marco recortado no sirve, no deja la pieza sin dibujar", () => {
+    const r = anchoDibujado({
+      ...baseLift,
+      nestingPlacementByGroupId: new Map([[1, nestingPlacement]]),
+      nestingPanelByLabel: new Map(), // falta el contorno de la plancha
+    });
+    expect(r.max).toBeCloseTo(9, 6); // cayó a las caras crudas
   });
 });
