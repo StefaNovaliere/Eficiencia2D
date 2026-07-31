@@ -23,7 +23,7 @@ export default function AppHomePage() {
         </p>
       </div>
 
-      <div className="w-full max-w-3xl z-10">
+      <div className="w-full max-w-4xl z-10">
         <div className="mb-6 px-2 max-w-md mx-auto">
           <StepIndicator current="upload" />
         </div>

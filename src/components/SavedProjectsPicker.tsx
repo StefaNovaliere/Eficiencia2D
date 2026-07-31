@@ -1,13 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   FolderOpen,
   Loader2,
   MoreVertical,
   Pencil,
+  Search,
   Trash2,
+  X,
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import {
@@ -121,6 +123,14 @@ function ProjectActionsMenu({
   );
 }
 
+function normalizeSearch(value: string): string {
+  return value
+    .trim()
+    .toLocaleLowerCase("es")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
 export default function SavedProjectsPicker({
   onOpenProject,
   onProjectDeleted,
@@ -129,6 +139,7 @@ export default function SavedProjectsPicker({
 }: SavedProjectsPickerProps) {
   const { token, isAuthenticated, isLoadingAuth } = useAuth();
   const [projects, setProjects] = useState<UserProject[]>([]);
+  const [query, setQuery] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
@@ -142,6 +153,12 @@ export default function SavedProjectsPicker({
     Boolean(openingProjectId) ||
     Boolean(deletingProjectId) ||
     Boolean(renameSavingId);
+
+  const filteredProjects = useMemo(() => {
+    const needle = normalizeSearch(query);
+    if (!needle) return projects;
+    return projects.filter((p) => normalizeSearch(p.nombre).includes(needle));
+  }, [projects, query]);
 
   const loadProjects = useCallback(async () => {
     if (!token) {
@@ -313,104 +330,144 @@ export default function SavedProjectsPicker({
           <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-primary/10 text-primary shrink-0">
             <FolderOpen size={18} />
           </div>
-          <div>
-            <h2 className="text-sm font-semibold text-base-content">Mis proyectos guardados</h2>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-baseline justify-between gap-2">
+              <h2 className="text-sm font-semibold text-base-content">Mis proyectos guardados</h2>
+              <span className="text-[11px] tabular-nums text-base-content/40 shrink-0">
+                {query.trim()
+                  ? `${filteredProjects.length} / ${projects.length}`
+                  : `${projects.length}`}
+              </span>
+            </div>
             <p className="text-xs text-base-content/55 mt-0.5">
               Elegí uno para continuar sin volver a subir el archivo.
             </p>
           </div>
         </div>
 
-        <ul className="space-y-2 max-h-64 overflow-y-auto overflow-x-visible pr-1">
-          {projects.map((project) => {
-            const isOpening = openingProjectId === project.id;
-            const isDeleting = deletingProjectId === project.id;
-            const isRenaming = renamingProjectId === project.id;
-            const isRenameSaving = renameSavingId === project.id;
-            const groups = project.metadata_impresion?.summary?.total_groups;
+        <label className="relative block">
+          <span className="sr-only">Buscar proyecto</span>
+          <Search
+            size={15}
+            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-base-content/40"
+          />
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Buscar por nombre…"
+            className="input input-bordered input-sm w-full rounded-xl pl-9 pr-9 text-sm"
+            autoComplete="off"
+            spellCheck={false}
+          />
+          {query && (
+            <button
+              type="button"
+              onClick={() => setQuery("")}
+              className="absolute right-2 top-1/2 -translate-y-1/2 btn btn-ghost btn-xs btn-circle text-base-content/45"
+              aria-label="Limpiar búsqueda"
+            >
+              <X size={13} />
+            </button>
+          )}
+        </label>
 
-            return (
-              <li key={project.id} className="flex items-stretch gap-2">
-                {isRenaming ? (
-                  <form
-                    className="flex-1 min-w-0 flex items-center gap-2 rounded-xl border border-primary/35 bg-primary/5 px-3 py-2"
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      void handleRenameSubmit(project);
-                    }}
-                  >
-                    <input
-                      ref={renameInputRef}
-                      type="text"
-                      value={renameValue}
-                      maxLength={200}
-                      disabled={isRenameSaving}
-                      onChange={(e) => setRenameValue(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Escape") {
-                          e.preventDefault();
-                          cancelRename();
-                        }
+        {filteredProjects.length === 0 ? (
+          <p className="text-sm text-base-content/55 py-6 text-center">
+            Ningún proyecto coincide con “{query.trim()}”.
+          </p>
+        ) : (
+          <ul className="space-y-2 max-h-[min(32rem,55vh)] overflow-y-auto overflow-x-visible pr-1">
+            {filteredProjects.map((project) => {
+              const isOpening = openingProjectId === project.id;
+              const isDeleting = deletingProjectId === project.id;
+              const isRenaming = renamingProjectId === project.id;
+              const isRenameSaving = renameSavingId === project.id;
+              const groups = project.metadata_impresion?.summary?.total_groups;
+
+              return (
+                <li key={project.id} className="flex items-stretch gap-2">
+                  {isRenaming ? (
+                    <form
+                      className="flex-1 min-w-0 flex items-center gap-2 rounded-xl border border-primary/35 bg-primary/5 px-3 py-2"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        void handleRenameSubmit(project);
                       }}
-                      className="input input-sm input-bordered flex-1 min-w-0 rounded-lg text-sm"
-                      aria-label="Nuevo nombre del proyecto"
-                    />
-                    <button
-                      type="submit"
-                      disabled={isRenameSaving || !renameValue.trim()}
-                      className="btn btn-primary btn-sm rounded-lg shrink-0"
                     >
-                      {isRenameSaving ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        "Guardar"
-                      )}
-                    </button>
-                    <button
-                      type="button"
-                      disabled={isRenameSaving}
-                      onClick={cancelRename}
-                      className="btn btn-ghost btn-sm rounded-lg shrink-0"
-                    >
-                      Cancelar
-                    </button>
-                  </form>
-                ) : (
-                  <div className="flex-1 min-w-0 flex items-stretch rounded-xl border border-base-300/60 bg-base-100/50 transition-colors hover:border-primary/30 hover:bg-primary/5 has-[:disabled]:opacity-60">
-                    <button
-                      type="button"
-                      disabled={isBusy}
-                      onClick={() => void onOpenProject(project)}
-                      className="flex-1 btn btn-ghost min-w-0 h-auto min-h-0 flex items-center gap-3 rounded-xl rounded-r-none border-0 bg-transparent px-3 py-3 text-left shadow-none hover:bg-transparent disabled:opacity-100"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <p className="font-medium text-sm truncate">{project.nombre}</p>
-                        <p className="text-xs text-base-content/50 mt-0.5">
-                          {formatProjectDate(project.fecha_creacion)}
-                          {project.formato ? ` · ${project.formato.toUpperCase()}` : ""}
-                          {project.tamano_bytes > 0
-                            ? ` · ${formatProjectSize(project.tamano_bytes)}`
-                            : ""}
-                          {groups != null ? ` · ${groups} grupos` : ""}
-                        </p>
-                      </div>
-                      {isOpening && (
-                        <Loader2 className="h-4 w-4 animate-spin text-primary shrink-0" />
-                      )}
-                    </button>
-                    <ProjectActionsMenu
-                      projectName={project.nombre}
-                      disabled={isBusy}
-                      isBusy={isDeleting || isRenameSaving}
-                      onRename={() => startRename(project)}
-                      onDelete={() => void handleDeleteProject(project)}
-                    />
-                  </div>
-                )}
-              </li>
-            );
-          })}
-        </ul>
+                      <input
+                        ref={renameInputRef}
+                        type="text"
+                        value={renameValue}
+                        maxLength={200}
+                        disabled={isRenameSaving}
+                        onChange={(e) => setRenameValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Escape") {
+                            e.preventDefault();
+                            cancelRename();
+                          }
+                        }}
+                        className="input input-sm input-bordered flex-1 min-w-0 rounded-lg text-sm"
+                        aria-label="Nuevo nombre del proyecto"
+                      />
+                      <button
+                        type="submit"
+                        disabled={isRenameSaving || !renameValue.trim()}
+                        className="btn btn-primary btn-sm rounded-lg shrink-0"
+                      >
+                        {isRenameSaving ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          "Guardar"
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isRenameSaving}
+                        onClick={cancelRename}
+                        className="btn btn-ghost btn-sm rounded-lg shrink-0"
+                      >
+                        Cancelar
+                      </button>
+                    </form>
+                  ) : (
+                    <div className="flex-1 min-w-0 flex items-stretch rounded-xl border border-base-300/60 bg-base-100/50 transition-colors hover:border-primary/30 hover:bg-primary/5 has-[:disabled]:opacity-60">
+                      <button
+                        type="button"
+                        disabled={isBusy}
+                        onClick={() => void onOpenProject(project)}
+                        className="flex-1 btn btn-ghost min-w-0 h-auto min-h-0 flex items-center gap-3 rounded-xl rounded-r-none border-0 bg-transparent px-3 py-3 text-left shadow-none hover:bg-transparent disabled:opacity-100"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="font-medium text-sm truncate">{project.nombre}</p>
+                          <p className="text-xs text-base-content/50 mt-0.5">
+                            {formatProjectDate(project.fecha_creacion)}
+                            {project.formato ? ` · ${project.formato.toUpperCase()}` : ""}
+                            {project.tamano_bytes > 0
+                              ? ` · ${formatProjectSize(project.tamano_bytes)}`
+                              : ""}
+                            {groups != null ? ` · ${groups} grupos` : ""}
+                          </p>
+                        </div>
+                        {isOpening && (
+                          <Loader2 className="h-4 w-4 animate-spin text-primary shrink-0" />
+                        )}
+                      </button>
+                      <ProjectActionsMenu
+                        projectName={project.nombre}
+                        disabled={isBusy}
+                        isBusy={isDeleting || isRenameSaving}
+                        onRename={() => startRename(project)}
+                        onDelete={() => void handleDeleteProject(project)}
+                      />
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
 
         {error && (
           <p className="text-sm text-error" role="alert">
