@@ -172,24 +172,22 @@ export default function GuidedTour({ steps, onClose }: GuidedTourProps) {
         onKeyDown={onCardKeyDown}
       >
         <div className="flex items-start justify-between gap-2">
-          <h3 className="text-sm font-bold text-base-content leading-tight">
+          <h3 className="text-sm font-bold text-base-content leading-tight pr-2">
             {step.title}
           </h3>
+          <span className="font-mono text-[10px] text-base-content/40 tabular-nums shrink-0 pt-0.5">
+            {index + 1} / {total}
+          </span>
         </div>
         <p className="text-xs leading-relaxed text-base-content/70">{step.body}</p>
         <div className="flex items-center justify-between pt-1 gap-2">
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="font-mono text-[10px] text-base-content/40 tabular-nums shrink-0">
-              {index + 1} / {total}
-            </span>
-            <button
-              type="button"
-              onClick={() => finish(false)}
-              className="btn btn-ghost btn-xs rounded-lg text-base-content/50 px-1.5"
-            >
-              Salir del tour
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => finish(false)}
+            className="btn btn-ghost btn-xs rounded-lg text-base-content/50 px-1.5"
+          >
+            Salir del tour
+          </button>
           <div className="flex items-center gap-1.5 shrink-0">
             {index > 0 && (
               <button

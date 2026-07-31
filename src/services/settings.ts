@@ -27,6 +27,8 @@ export interface PreferenciasInterfaz {
   navegacion_camara?: string;
   /** Overrides de color del visor 3D (#RRGGBB por canal; null = default del tema). */
   colores_modelo?: ColoresModelo | null;
+  /** Si true, varias pestañas de la toolbar pueden quedar abiertas a la vez. */
+  fijar_herramientas?: boolean;
   [key: string]: unknown;
 }
 

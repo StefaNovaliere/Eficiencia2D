@@ -29,6 +29,7 @@ import { buildAssemblyGuideFromTopology } from "@/core/assembly-guide-build";
 import type { FaceCategory } from "@/core/group-classifier";
 import { useProjectStateAutosave } from "@/hooks/useProjectStateAutosave";
 import { buildReviewEditingPatch } from "@/services/project-state";
+import { useSettings } from "@/context/SettingsContext";
 
 function decisionsToRecord(decisions: Map<number, number>): Record<number, number> {
   const out: Record<number, number> = {};
@@ -40,6 +41,7 @@ function ReviewPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { token } = useAuth();
+  const { settings, updateSettings, isLoadingSettings } = useSettings();
   const openAssemblyInstructivo = searchParams.get("assembly") === "1";
   const {
     phase1Result,
@@ -83,12 +85,28 @@ function ReviewPageContent() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isRecomputing, setIsRecomputing] = useState(false);
   const [isSavingOnExit, setIsSavingOnExit] = useState(false);
+  /** Evita pisar un cambio local con la hidratación tardía de settings. */
+  const pinToolsHydratedRef = useRef(false);
 
   const { queuePatch, flushPatch, hasPendingChanges } = useProjectStateAutosave({
     token,
     projectId: fileId,
     enabled: Boolean(token && fileId),
   });
+
+  // Preferencia de cuenta: fijar_herramientas vive en /api/settings/me.
+  useEffect(() => {
+    if (isLoadingSettings || pinToolsHydratedRef.current) return;
+    if (!token) {
+      pinToolsHydratedRef.current = true;
+      return;
+    }
+    if (!settings) return;
+
+    const raw = settings.preferencias_interfaz?.fijar_herramientas;
+    if (typeof raw === "boolean") setPinTools(raw);
+    pinToolsHydratedRef.current = true;
+  }, [token, settings, isLoadingSettings, setPinTools]);
 
   const saveGeometryState = useCallback(
     (patch: Partial<Pick<RecomputePayload, "axis" | "min_area_m2" | "merges" | "splits">>) => {
@@ -279,9 +297,24 @@ function ReviewPageContent() {
   const handlePinToolsChange = useCallback(
     (pin: boolean) => {
       setPinTools(pin);
+      pinToolsHydratedRef.current = true;
+
+      // Preferencia de usuario (configuración de cuenta).
+      if (token) {
+        void updateSettings({
+          preferencias_interfaz: {
+            ...(settings?.preferencias_interfaz ?? {}),
+            fijar_herramientas: pin,
+          },
+        }).catch(() => {
+          /* El toggle ya reflejó el cambio local. */
+        });
+      }
+
+      // También al estado del proyecto, por si el backend lo usa en estado.json.
       if (token && fileId) queuePatch({ pin_tools: pin });
     },
-    [setPinTools, token, fileId, queuePatch],
+    [setPinTools, token, fileId, queuePatch, updateSettings, settings?.preferencias_interfaz],
   );
 
   const handleAddMerge = useCallback(

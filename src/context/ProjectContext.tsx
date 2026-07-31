@@ -119,7 +119,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const [pdfPageMode, setPdfPageMode] = useState<PdfPageMode>("one_per_sheet");
   const [combineSheets, setCombineSheets] = useState(false);
   const [minAreaM2, setMinAreaM2] = useState(1.0);
-  const [pinTools, setPinTools] = useState(true);
+  const [pinTools, setPinTools] = useState(false);
   const [phase1Result, setPhase1Result] = useState<Phase1Result | null>(null);
   const [nestingData, setNestingData] = useState<NestingPreviewData | null>(null);
   const [savedOverrides, setSavedOverrides] = useState<ClassificationOverride[]>([]);
@@ -223,7 +223,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const applyRestoredState = useCallback((restored: RestoredProjectState) => {
     if (restored.projectFileName != null) setProjectFileName(restored.projectFileName);
     if (restored.minAreaM2 != null) setMinAreaM2(restored.minAreaM2);
-    if (restored.pinTools != null) setPinTools(restored.pinTools);
+    // pinTools es preferencia de cuenta (settings), no del proyecto.
     if (restored.savedMerges != null) setSavedMerges(restored.savedMerges);
     if (restored.savedSplits != null) setSavedSplits(restored.savedSplits);
     if (restored.savedOverrides != null) setSavedOverrides(restored.savedOverrides);
@@ -251,7 +251,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     setPdfPageMode("one_per_sheet");
     setCombineSheets(false);
     setMinAreaM2(1.0);
-    setPinTools(true);
+    setPinTools(false);
     setPhase1Result(null);
     setNestingData(null);
     setSavedOverrides([]);
