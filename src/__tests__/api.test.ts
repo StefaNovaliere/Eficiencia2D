@@ -14,6 +14,7 @@ vi.mock("@/services/api-base", () => ({
 import {
   buildRecomputePayload,
   categorySignature,
+  topologySignature,
   recomputeTopology,
   fetchNestingPreview,
   normalizeAssemblyGuide,
@@ -230,6 +231,8 @@ describe("buildRecomputePayload", () => {
     merges: [],
     splits: [],
     overrides: { 243: "wall", 100: "discard" },
+    scaleDenom: 50,
+    wallWallDecisions: {},
   };
 
   it("arrastra las recategorizaciones guardadas cuando el cambio es otro", () => {
@@ -261,7 +264,28 @@ describe("buildRecomputePayload", () => {
       merges: [],
       splits: [],
       overrides: { 243: "wall", 100: "discard" },
+      scale_denom: 50,
+      wall_wall_decisions: {},
     });
+  });
+
+  /**
+   * La escala es lo que hace fiel a la topología: los recortes de encaje valen
+   * 3 mm de MDF, que son 6 cm de edificio a 1:20 y 60 cm a 1:200. Sin ella el
+   * backend devuelve la proyección cruda y el instructivo no sirve para decidir
+   * si algo encaja.
+   */
+  it("manda la escala y las decisiones de junta", () => {
+    const payload = buildRecomputePayload(
+      { ...base, scaleDenom: 100, wallWallDecisions: { 12: 250 } },
+      { axis: "Z" },
+    );
+    expect(payload.scale_denom).toBe(100);
+    expect(payload.wall_wall_decisions).toEqual({ 12: 250 });
+  });
+
+  it("un cambio puntual de escala pisa a la del estado", () => {
+    expect(buildRecomputePayload(base, { scale_denom: 20 }).scale_denom).toBe(20);
   });
 });
 
@@ -529,5 +553,44 @@ describe("normalizeAssemblyGuide", () => {
         meta: { piece_count: 1, step_count: 1, viewer_schema: "oriented_box_v1" },
       }),
     ).not.toThrow();
+  });
+});
+
+describe("topologySignature", () => {
+  const base = {
+    overrides: { 3: "wall" },
+    scaleDenom: 50,
+    wallWallDecisions: { 12: 250 },
+  };
+
+  /**
+   * Es lo que decide cuándo hay que volver a pedir la topología. La escala entra
+   * porque los recortes de encaje valen 3 mm de MDF: 6 cm de edificio a 1:20 y
+   * 60 cm a 1:200. Si no dispara, el instructivo queda dibujando las medidas de
+   * la escala anterior.
+   */
+  it("cambia con la escala", () => {
+    expect(topologySignature({ ...base, scaleDenom: 100 })).not.toBe(
+      topologySignature(base),
+    );
+  });
+
+  it("cambia al elegir otro que ceda en una junta", () => {
+    expect(
+      topologySignature({ ...base, wallWallDecisions: { 12: 251 } }),
+    ).not.toBe(topologySignature(base));
+  });
+
+  it("cambia al recategorizar", () => {
+    expect(topologySignature({ ...base, overrides: { 3: "floor" } })).not.toBe(
+      topologySignature(base),
+    );
+  });
+
+  it("no depende del orden de las decisiones", () => {
+    // Cada refresco de más cuesta un recompute entero.
+    expect(
+      topologySignature({ ...base, wallWallDecisions: { 12: 250, 4: 7 } }),
+    ).toBe(topologySignature({ ...base, wallWallDecisions: { 4: 7, 12: 250 } }));
   });
 });

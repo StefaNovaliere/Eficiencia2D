@@ -12,6 +12,7 @@ import {
   RefreshCw,
   AlertTriangle,
   CheckCircle2,
+  HelpCircle,
 } from "lucide-react";
 import {
   normalizeAssemblyPreviewData,
@@ -37,6 +38,7 @@ import {
   warningTypeLabel,
 } from "@/core/final-pieces";
 import type { NestingPanel } from "@/core/sheet-nester";
+import type { NestingPlacement } from "@/core/final-pieces";
 import { resolveSlabThicknessM } from "@/core/assembly-slab";
 import { buildYieldClipSpecs, type WallWallDecisions } from "@/core/wall-yield-clip";
 
@@ -360,7 +362,12 @@ export default function AssemblyWindow({
   const [view, setView] = useState<"elevations" | "table">("elevations");
   const { nestingData, scale } = useProjectContext();
   // Espesor MDF 3 mm a escala de impresión (fiel a la maqueta física).
-  const slabThicknessM = resolveSlabThicknessM(MATERIAL_THICKNESS_M, scale);
+  // El backend manda el espesor en metros de edificio junto con la topología
+  // fiel; sólo si no viene se deriva de la escala en el front.
+  const slabThicknessM =
+    phase1.plateThicknessM && phase1.plateThicknessM > 0
+      ? phase1.plateThicknessM
+      : resolveSlabThicknessM(MATERIAL_THICKNESS_M, scale);
 
   // Close on Escape
   useEffect(() => {
@@ -452,6 +459,28 @@ export default function AssemblyWindow({
       (nestingData?.finalPieces ?? []).map((fp) => [fp.id, fp]),
     );
 
+    // La topología también trae marcos recortados cuando se pidió con la
+    // escala puesta. Es la misma información que la del nesting, sin tener que
+    // pedir el nesting entero sólo para poder dibujar bien.
+    const placementsDeTopologia = new Map<number, NestingPlacement>();
+    if (phase1.placementsFieles) {
+      for (const [gid, pl] of Object.entries(phase1.placements ?? {})) {
+        const groupId = Number(gid);
+        if (!Number.isFinite(groupId)) continue;
+        placementsDeTopologia.set(groupId, {
+          panelId: pl.panelId ?? "",
+          origin: pl.origin,
+          uAxis: pl.uAxis,
+          vAxis: pl.vAxis,
+          normal: pl.normal,
+          widthM: pl.widthM,
+          heightM: pl.heightM,
+          mirrored: pl.mirrored,
+          areaM2: 0,
+        });
+      }
+    }
+
     // Ruta alternativa al mismo resultado: marcos recortados + el contorno de
     // corte de cada pieza en la plancha.
     const nestingPanelByLabel = new Map<string, NestingPanel>();
@@ -474,7 +503,11 @@ export default function AssemblyWindow({
       yieldClips,
       buildingCentroid,
       finalPieceById,
-      nestingPlacementByGroupId: nestingData?.nestingPlacements,
+      // Los del nesting primero: llegan con `area_m2` y son los que el backend
+      // viene verificando contra el DXF.
+      nestingPlacementByGroupId:
+        nestingData?.nestingPlacements ??
+        (placementsDeTopologia.size > 0 ? placementsDeTopologia : undefined),
       nestingPanelByLabel,
     };
   }, [phase1, nestingData, wallWallDecisions, slabThicknessM]);
@@ -665,7 +698,16 @@ export default function AssemblyWindow({
                           {w.pieces.join(" · ")}
                         </span>
                       )}
-                      <span className="text-base-content/50 tabular-nums ml-auto shrink-0">
+                      {w.cause && (
+                        <span className="text-base-content/45 shrink-0">({w.cause})</span>
+                      )}
+                      <span
+                        className="text-base-content/50 tabular-nums ml-auto shrink-0"
+                        title={
+                          w.message ||
+                          "La medida es una cota inferior de la penetración: puede ser mayor."
+                        }
+                      >
                         {formatWarningMeasure(w.measureMm)}
                         {w.toleranceMm != null && (
                           <span className="text-base-content/35">
@@ -677,12 +719,51 @@ export default function AssemblyWindow({
                   ))}
                 </ul>
               </div>
-            ) : (
+            ) : phase1.placementsFieles ? (
               <div className="assembly-no-print shrink-0 flex items-center gap-2 px-3 py-2 border-b border-base-300/30 bg-success/5">
                 <CheckCircle2 className="w-3.5 h-3.5 text-success shrink-0" />
                 <span className="text-xs font-medium text-success">Ensamble verificado</span>
               </div>
+            ) : (
+              /*
+                Sin la geometría recortada no hay con qué verificar el encaje.
+                Dibujar el modelo está bien; dejar que el usuario concluya que
+                encaja, no: un cartel verde acá diría algo que no se comprobó.
+              */
+              <div className="assembly-no-print shrink-0 flex items-start gap-2 px-3 py-2 border-b border-base-300/30 bg-warning/5">
+                <HelpCircle className="w-3.5 h-3.5 text-warning shrink-0 mt-0.5" />
+                <span className="text-xs text-warning/90 leading-snug">
+                  <b className="font-medium">Encaje sin verificar.</b>{" "}
+                  <span className="text-base-content/60">
+                    Se está mostrando el modelo, no las piezas ya recortadas.
+                  </span>
+                </span>
+              </div>
             )
+          )}
+
+          {/*
+            Avisos de la topología: entre ellos, decisiones de junta que se
+            descartaron al reconstruir la lista (las decisiones viajan por índice
+            posicional, y editar el modelo puede correrlas). Antes eso recortaba
+            un muro ajeno en silencio.
+          */}
+          {phase1.warnings.length > 0 && (
+            <div className="shrink-0 border-b border-base-300/30 bg-warning/5 px-3 py-2">
+              <div className="flex items-center gap-2 pb-1">
+                <AlertTriangle className="w-3.5 h-3.5 text-warning shrink-0" />
+                <span className="text-xs font-semibold text-warning">
+                  {phase1.warnings.length === 1 ? "Aviso del modelo" : "Avisos del modelo"}
+                </span>
+              </div>
+              <ul className="space-y-1">
+                {phase1.warnings.map((w, i) => (
+                  <li key={i} className="text-[11px] leading-snug text-base-content/65">
+                    {w}
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
 
           {/* View switcher — screen only */}

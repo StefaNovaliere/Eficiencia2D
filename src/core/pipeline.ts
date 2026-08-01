@@ -37,6 +37,8 @@ export interface Placement {
   heightM: number;
   /** Si true, el contorno de corte viene espejado horizontalmente. */
   mirrored: boolean;
+  /** Etiqueta de la pieza (A1, B2…), cuando el backend la incluye. */
+  panelId?: string;
 }
 
 /**
@@ -79,6 +81,23 @@ export interface Phase1Result {
    * Opcional: si el backend no la manda, el instructivo cae al render de cajas.
    */
   placements?: Record<number, Placement>;
+  /**
+   * `true` → `placements` son las piezas YA RECORTADAS, y coinciden pieza por
+   * pieza con lo que sale en el DXF. `false` (o ausente) → es la proyección
+   * cruda del modelo: sirve para mirar, NO para decidir si algo encaja.
+   *
+   * Depende de que `/recompute` reciba `scale_denom`: los recortes de encaje
+   * valen 3 mm de MDF siempre, y eso son 6 cm de edificio a 1:20 y 60 cm a
+   * 1:200. `/upload` no tiene escala, así que ahí siempre viene en `false`.
+   */
+  placementsFieles?: boolean;
+  /**
+   * Espesor de la placa en metros de EDIFICIO (ya multiplicado por la escala).
+   * Sólo llega cuando `placementsFieles` es true. Dibujar las piezas sin espesor
+   * esconde justamente los choques que el espesor provoca: dos placas de 3 mm
+   * que se cruzan ocupan el mismo material aunque sus planos medios no se toquen.
+   */
+  plateThicknessM?: number;
   /**
    * Orden de armado del instructivo (piso base → paredes → siguiente nivel).
    * Opcional: si no viene, el front sintetiza un orden por orientación.
