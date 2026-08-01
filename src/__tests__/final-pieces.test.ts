@@ -582,3 +582,27 @@ describe("el marco del nesting nunca se espeja", () => {
     expect(xDeLaMuesca).toBeCloseTo(1, 4);
   });
 });
+
+describe("avisos de interferencia entre piezas", () => {
+  it("lee el tipo nuevo con su causa y su explicación", () => {
+    const [w] = parseAssemblyWarnings([
+      {
+        pieces: ["A11", "A2"],
+        type: "interference",
+        measure_mm: 0.42,
+        cause: "escala",
+        message: "A 1:100 las piezas se pisan 0.42 mm.",
+      },
+    ]);
+    expect(w.type).toBe("interference");
+    expect(w.cause).toBe("escala");
+    expect(w.message).toContain("0.42");
+    expect(warningTypeLabel("interference")).toBe("Se atraviesan");
+  });
+
+  it("los avisos sin causa ni mensaje siguen andando", () => {
+    const [w] = parseAssemblyWarnings([{ type: "gap", measure_mm: 5 }]);
+    expect(w.cause).toBeUndefined();
+    expect(w.message).toBeUndefined();
+  });
+});

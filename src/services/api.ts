@@ -268,6 +268,15 @@ export interface RecomputePayload {
    * backend cae a la clasificación automática.
    */
   overrides?: Record<number, string>;
+  /**
+   * Escala a la que se va a cortar. Sin esto el backend devuelve la proyección
+   * cruda del modelo: los recortes de encaje valen 3 mm de MDF siempre, y esos
+   * 3 mm son 6 cm de edificio a 1:20 y 60 cm a 1:200. Un instructivo fiel no
+   * puede ser independiente de la escala.
+   */
+  scale_denom?: number;
+  /** Quién cede en cada junta pared-pared; sin esto los recortes elegidos no se ven. */
+  wall_wall_decisions?: Record<number, number>;
 }
 
 /** `[{ groupId, newCategory }]` → `{ groupId: categoría }` para el backend. */
@@ -297,6 +306,24 @@ export function categorySignature(overrides: Record<number, string>): string {
     .join("|");
 }
 
+/**
+ * Firma de todo lo que hace fiel a la topología: las categorías efectivas, la
+ * escala y quién cede en cada junta. La escala entra porque los recortes de
+ * encaje valen 3 mm de MDF y eso son 6 cm de edificio a 1:20 y 60 cm a 1:200,
+ * así que cambiarla cambia las medidas de las piezas.
+ */
+export function topologySignature(input: {
+  overrides: Record<number, string>;
+  scaleDenom: number;
+  wallWallDecisions: Record<number, number>;
+}): string {
+  const juntas = Object.entries(input.wallWallDecisions)
+    .map(([joint, groupId]) => `${joint}>${groupId}`)
+    .sort()
+    .join(",");
+  return `${categorySignature(input.overrides)}#${input.scaleDenom}#${juntas}`;
+}
+
 /** Estado del proyecto del que sale un recompute. */
 export interface RecomputeBase {
   fileId: string;
@@ -306,6 +333,8 @@ export interface RecomputeBase {
   merges: number[][];
   splits: SplitOperation[];
   overrides: Record<number, string>;
+  scaleDenom: number;
+  wallWallDecisions: Record<number, number>;
 }
 
 /**
@@ -320,7 +349,16 @@ export interface RecomputeBase {
 export function buildRecomputePayload(
   base: RecomputeBase,
   next: Partial<
-    Pick<RecomputePayload, "axis" | "min_area_m2" | "merges" | "splits" | "overrides">
+    Pick<
+      RecomputePayload,
+      | "axis"
+      | "min_area_m2"
+      | "merges"
+      | "splits"
+      | "overrides"
+      | "scale_denom"
+      | "wall_wall_decisions"
+    >
   > = {},
 ): RecomputePayload {
   return {
@@ -331,6 +369,8 @@ export function buildRecomputePayload(
     merges: next.merges ?? base.merges,
     splits: next.splits ?? base.splits,
     overrides: next.overrides ?? base.overrides,
+    scale_denom: next.scale_denom ?? base.scaleDenom,
+    wall_wall_decisions: next.wall_wall_decisions ?? base.wallWallDecisions,
   };
 }
 

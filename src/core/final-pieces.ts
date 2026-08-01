@@ -117,7 +117,12 @@ export function parseNestingPlacements(raw: unknown): Map<number, NestingPlaceme
 }
 
 /** Tipos de aviso que emite el chequeo de ensamble del backend. */
-export type AssemblyWarningType = "gap" | "overlap" | "unsupported" | "interpenetra";
+export type AssemblyWarningType =
+  | "gap"
+  | "overlap"
+  | "unsupported"
+  | "interpenetra"
+  | "interference";
 
 export interface AssemblyWarning {
   /** Piezas involucradas (mismos ids que `FinalPiece.id`). */
@@ -129,6 +134,10 @@ export interface AssemblyWarning {
   at?: Vec3;
   /** Umbral que usó el backend (se muestra al usuario). */
   toleranceMm?: number;
+  /** Por qué pasa (p. ej. "escala"), cuando el backend lo sabe. */
+  cause?: string;
+  /** Explicación en prosa del backend; se muestra tal cual. */
+  message?: string;
 }
 
 function rec(v: unknown): Record<string, unknown> | null {
@@ -257,6 +266,8 @@ export function parseAssemblyWarnings(raw: unknown): AssemblyWarning[] {
 
     const at = parseVec3(o.at);
     const tolerance = finite(pick(o, "toleranceMm", "tolerance_mm"));
+    const cause = String(pick(o, "cause") ?? "").trim();
+    const message = String(pick(o, "message") ?? "").trim();
 
     out.push({
       pieces,
@@ -264,6 +275,8 @@ export function parseAssemblyWarnings(raw: unknown): AssemblyWarning[] {
       measureMm: finite(pick(o, "measureMm", "measure_mm")) ?? 0,
       ...(at ? { at } : {}),
       ...(tolerance !== null ? { toleranceMm: tolerance } : {}),
+      ...(cause ? { cause } : {}),
+      ...(message ? { message } : {}),
     });
   }
   return out;
@@ -279,6 +292,7 @@ export function warningTypeLabel(type: string): string {
     case "unsupported":
       return "Sin apoyo";
     case "interpenetra":
+    case "interference":
       return "Se atraviesan";
     default:
       return type;
@@ -292,6 +306,8 @@ export function warningTypeLabel(type: string): string {
  */
 export function formatWarningMeasure(mm: number): string {
   if (!Number.isFinite(mm) || mm <= 0) return "—";
+  // Las interferencias vienen como cota inferior de la penetración: mostrar
+  // "0,3 mm" a secas invitaría a leerlo como "es apenas 0,3", y puede ser más.
   if (mm >= 1000) return `${(mm / 1000).toFixed(2).replace(".", ",")} m`;
   if (mm >= 10) return `${(mm / 10).toFixed(1).replace(".", ",")} cm`;
   return `${mm.toFixed(1).replace(".", ",")} mm`;

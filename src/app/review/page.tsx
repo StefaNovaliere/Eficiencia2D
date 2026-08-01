@@ -20,7 +20,7 @@ import {
   resolveOriginalFilename,
   overridesToRecord,
   buildRecomputePayload,
-  categorySignature,
+  topologySignature,
   type AssemblyPreviewRequest,
   type RecomputePayload,
   type SplitOperation,
@@ -168,6 +168,11 @@ function ReviewPageContent() {
           // Sin esto el backend arma el instructivo con la clasificación
           // automática y las recategorizaciones no se reflejan.
           overrides: overridesToRecord(savedOverrides),
+          // La escala hace fiel a la topología: los recortes de encaje valen
+          // 3 mm de MDF, que son 6 cm de edificio a 1:20 y 60 cm a 1:200. Sin
+          // mandarla, el backend devuelve la proyección cruda.
+          scaleDenom: scale,
+          wallWallDecisions: decisionsToRecord(savedWallWallDecisions),
         },
         next,
       );
@@ -175,7 +180,11 @@ function ReviewPageContent() {
       try {
         const updated = await recomputeTopology(payload, token);
         // La topología vuelve con las etiquetas ya numeradas para estos overrides.
-        labeledSignature.current = categorySignature(payload.overrides ?? {});
+        labeledSignature.current = topologySignature({
+          overrides: payload.overrides ?? {},
+          scaleDenom: payload.scale_denom ?? scale,
+          wallWallDecisions: payload.wall_wall_decisions ?? {},
+        });
         labelRefreshSeq.current += 1; // invalida cualquier refresco en vuelo
         setPhase1Result(updated);
         saveGeometryState({
@@ -195,7 +204,7 @@ function ReviewPageContent() {
         setIsRecomputing(false);
       }
     },
-    [fileId, projectFileName, phase1Result, minAreaM2, savedMerges, savedSplits, savedOverrides, setPhase1Result, token, saveGeometryState],
+    [fileId, projectFileName, phase1Result, minAreaM2, savedMerges, savedSplits, savedOverrides, scale, savedWallWallDecisions, setPhase1Result, token, saveGeometryState],
   );
 
   /**
@@ -212,7 +221,11 @@ function ReviewPageContent() {
   useEffect(() => {
     if (!fileId || !phase1Result) return;
 
-    const signature = categorySignature(overridesToRecord(savedOverrides));
+    const signature = topologySignature({
+      overrides: overridesToRecord(savedOverrides),
+      scaleDenom: scale,
+      wallWallDecisions: decisionsToRecord(savedWallWallDecisions),
+    });
     if (labeledSignature.current === null) {
       labeledSignature.current = signature; // la topología cargada ya está al día
       return;
@@ -229,18 +242,30 @@ function ReviewPageContent() {
         merges: savedMerges,
         splits: savedSplits.map((s): SplitOperation => ({ group_id: s.groupId, mode: s.mode })),
         overrides: overridesToRecord(savedOverrides),
+        scaleDenom: scale,
+        wallWallDecisions: decisionsToRecord(savedWallWallDecisions),
       });
 
       void recomputeTopology(payload, token)
         .then((updated) => {
           if (seq !== labelRefreshSeq.current) return; // quedó vieja
           labeledSignature.current = signature;
-          setPhase1Result({ ...phase1Result, panelIdByGroup: updated.panelIdByGroup });
+          // Se aplican sólo los campos que dependen de la escala y las
+          // categorías. Reemplazar la topología entera reconstruiría la escena
+          // 3D (las caras son las mismas) sin ninguna necesidad.
+          setPhase1Result({
+            ...phase1Result,
+            panelIdByGroup: updated.panelIdByGroup,
+            placements: updated.placements,
+            placementsFieles: updated.placementsFieles,
+            plateThicknessM: updated.plateThicknessM,
+            warnings: updated.warnings,
+          });
         })
         .catch((err: unknown) => {
-          // Sin etiquetas nuevas se siguen viendo las anteriores: molesto, pero
-          // no rompe la revisión. Se reintenta al próximo cambio de categoría.
-          console.error("No se pudieron actualizar las etiquetas de pieza", err);
+          // Se siguen viendo los datos anteriores: molesto, pero no rompe la
+          // revisión. Se reintenta al próximo cambio.
+          console.error("No se pudo refrescar la topología", err);
         });
     }, 700);
 
@@ -253,6 +278,8 @@ function ReviewPageContent() {
     minAreaM2,
     savedMerges,
     savedSplits,
+    scale,
+    savedWallWallDecisions,
     token,
     setPhase1Result,
   ]);
