@@ -3,6 +3,7 @@ import type { PlateJoint } from "./pipeline";
 import {
   liftFaces,
   liftFinalPiece,
+  liftOutline,
   liftPiece,
   buildSlots,
   type LiftedPieceGeometry,
@@ -177,7 +178,17 @@ function applyLift(
     const nestingPlacement =
       groupId != null ? lift.nestingPlacementByGroupId?.get(groupId) : undefined;
     const nestingPanel = lift.nestingPanelByLabel?.get(label);
-    if (nestingPlacement && nestingPanel) {
+    // El contrato consolidado manda el contorno de corte dentro del propio
+    // placement: es la fuente más directa, no hay que cruzarla con nada.
+    if (nestingPlacement?.outline && nestingPlacement.outline.length > 0) {
+      const conContorno = liftOutline(nestingPlacement, nestingPlacement.outline);
+      if ((conContorno.positions?.length ?? 0) >= 9) {
+        body = conContorno;
+        yaRecortada = true;
+      }
+    }
+
+    if (!yaRecortada && nestingPlacement && nestingPanel) {
       // NUNCA espejar acá. El espejado del contorno de corte (para que el
       // quemado del láser quede del lado interior) ya viene horneado en el
       // marco: el backend corrió el origen al otro extremo e invirtió u_axis,
@@ -248,6 +259,11 @@ function applyLift(
 
     return {
       ...piece,
+      // Espesor propio de la pieza cuando el backend lo manda; si no, el visor
+      // aplica el global.
+      ...(nestingPlacement?.thicknessM && nestingPlacement.thicknessM > 0
+        ? { depth_m: nestingPlacement.thicknessM }
+        : {}),
       lifted: {
         ...body,
         positions,

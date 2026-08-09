@@ -296,14 +296,28 @@ function ringArea(ring: Ring): number {
  * contorno, se trata como hueco para no rellenarla.
  */
 export function liftFinalPiece(piece: FinalPiece): LiftedPieceGeometry {
-  const frame: PieceFrame = {
-    origin: piece.origin,
-    uAxis: piece.uDir,
-    vAxis: piece.vDir,
-  };
+  return liftOutline(
+    { origin: piece.origin, uAxis: piece.uDir, vAxis: piece.vDir, normal: piece.normal },
+    piece.edges,
+  );
+}
 
+/**
+ * Coloca un contorno de corte en su pose 3D. Es el camino del contrato
+ * consolidado: `placements` trae el `outline` de cada pieza junto con su marco,
+ * así que no hace falta cruzarlo con nada.
+ *
+ * Dibujar el rectángulo `width_m × height_m` en vez del contorno es lo que hacía
+ * ver material donde no hay: el bounding box de un faldón triangular tiene el
+ * doble de superficie que el faldón, y tapa los huecos por donde entra la pieza
+ * vecina.
+ */
+export function liftOutline(
+  frame: { origin: Vec3; uAxis: Vec3; vAxis: Vec3; normal?: Vec3 },
+  outline: Array<{ a: Vec2; b: Vec2; hole?: boolean; joint?: boolean }>,
+): LiftedPieceGeometry {
   const { outer, holes } = edgesToRings(
-    piece.edges.map((e) => ({ a: e.a, b: e.b, hole: e.hole === true })),
+    outline.map((e) => ({ a: e.a, b: e.b, hole: e.hole === true })),
   );
   if (outer.length === 0) {
     return { positions: [], openings: [], hasHoles: false };
@@ -338,7 +352,7 @@ export function liftFinalPiece(piece: FinalPiece): LiftedPieceGeometry {
     positions,
     openings,
     hasHoles: holes.length > 0,
-    outwardNormal: piece.normal,
+    outwardNormal: frame.normal,
   };
 }
 
