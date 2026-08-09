@@ -20,6 +20,7 @@ import {
   resolveOriginalFilename,
   overridesToRecord,
   buildRecomputePayload,
+  needsTopologyRefresh,
   topologySignature,
   type AssemblyPreviewRequest,
   type RecomputePayload,
@@ -226,11 +227,16 @@ function ReviewPageContent() {
       scaleDenom: scale,
       wallWallDecisions: decisionsToRecord(savedWallWallDecisions),
     });
-    if (labeledSignature.current === null) {
-      labeledSignature.current = signature; // la topología cargada ya está al día
+    if (
+      !needsTopologyRefresh({
+        placementsFieles: phase1Result.placementsFieles,
+        currentSignature: signature,
+        lastRequestedSignature: labeledSignature.current,
+      })
+    ) {
+      labeledSignature.current = signature;
       return;
     }
-    if (labeledSignature.current === signature) return;
 
     const timer = setTimeout(() => {
       const seq = ++labelRefreshSeq.current;

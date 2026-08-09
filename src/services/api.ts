@@ -324,6 +324,30 @@ export function topologySignature(input: {
   return `${categorySignature(input.overrides)}#${input.scaleDenom}#${juntas}`;
 }
 
+/**
+ * ¿Hay que volver a pedir la topología?
+ *
+ * La de `/upload` no lleva escala, así que sus `placements` son los del modelo
+ * crudo: las medidas del instructivo no son las de las piezas que se cortan.
+ * Dar por buena la topología inicial sólo porque nadie tocó nada dejaba el
+ * instructivo en crudo para siempre.
+ *
+ * `lastRequestedSignature` es la última firma para la que YA se pidió: si
+ * coincide no se reintenta, aunque el backend no haya devuelto
+ * `placements_fieles` (un backend viejo si no dejaría el front pidiendo en
+ * bucle).
+ */
+export function needsTopologyRefresh(input: {
+  placementsFieles: boolean | undefined;
+  currentSignature: string;
+  lastRequestedSignature: string | null;
+}): boolean {
+  if (input.lastRequestedSignature === null) {
+    return input.placementsFieles !== true;
+  }
+  return input.lastRequestedSignature !== input.currentSignature;
+}
+
 /** Estado del proyecto del que sale un recompute. */
 export interface RecomputeBase {
   fileId: string;
