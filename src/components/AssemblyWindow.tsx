@@ -35,6 +35,7 @@ import InteractiveAssemblyViewer from "@/components/InteractiveAssemblyViewer";
 import {
   formatWarningMeasure,
   sortWarningsBySeverity,
+  warningAdvice,
   warningTypeLabel,
 } from "@/core/final-pieces";
 import type { NestingPanel } from "@/core/sheet-nester";
@@ -698,8 +699,21 @@ export default function AssemblyWindow({
                           {w.pieces.join(" · ")}
                         </span>
                       )}
-                      {w.cause && (
-                        <span className="text-base-content/45 shrink-0">({w.cause})</span>
+                      {/*
+                        Qué puede hacer el usuario. Un choque por escala lo
+                        resuelve él bajando la escala; uno por una junta que no
+                        resolvimos, no: pedirle algo ahí sería cargarle un
+                        problema nuestro.
+                      */}
+                      {warningAdvice(w.cause).action && (
+                        <span className="text-warning/80 shrink-0">
+                          {warningAdvice(w.cause).action}
+                        </span>
+                      )}
+                      {warningAdvice(w.cause).owner === "nosotros" && (
+                        <span className="text-base-content/40 shrink-0">
+                          lo estamos viendo
+                        </span>
                       )}
                       <span
                         className="text-base-content/50 tabular-nums ml-auto shrink-0"

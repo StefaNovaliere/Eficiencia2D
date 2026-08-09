@@ -80,6 +80,22 @@ export interface NestingPlacement {
    * cielorraso aparecía con casi 10 m² de más.
    */
   areaM2: number;
+  /** `"wall"` | `"floor"`, cuando el backend la incluye. */
+  category?: string;
+  /**
+   * Espesor de la placa en metros de EDIFICIO (ya escalado). Extruir la mitad
+   * hacia cada lado del plano: sin espesor se esconden justamente los choques
+   * que el espesor provoca.
+   */
+  thicknessM?: number;
+  /**
+   * Contorno de CORTE en el marco local (u, v). Es lo que hay que dibujar: el
+   * rectángulo `widthM × heightM` es para el nesting, y usarlo muestra material
+   * donde no hay (el bounding box de un faldón triangular tiene el doble de
+   * superficie) y tapa los huecos por donde entra la pieza vecina. Las piezas
+   * reales van de 4 a 174 aristas.
+   */
+  outline?: FinalPieceEdge[];
 }
 
 /**
@@ -101,6 +117,9 @@ export function parseNestingPlacements(raw: unknown): Map<number, NestingPlaceme
     const vAxis = parseVec3(pick(o, "vAxis", "v_axis"));
     if (!origin || !uAxis || !vAxis) continue;
 
+    const espesor = finite(pick(o, "thicknessM", "thickness_m"));
+    const outline = parseEdges(o.outline);
+
     out.set(groupId, {
       panelId: String(pick(o, "panelId", "panel_id") ?? "").trim(),
       origin,
@@ -111,6 +130,9 @@ export function parseNestingPlacements(raw: unknown): Map<number, NestingPlaceme
       heightM: finite(pick(o, "heightM", "height_m")) ?? 0,
       mirrored: o.mirrored === true,
       areaM2: finite(pick(o, "areaM2", "area_m2")) ?? 0,
+      ...(o.category !== undefined ? { category: String(o.category) } : {}),
+      ...(espesor !== null ? { thicknessM: espesor } : {}),
+      ...(outline.length > 0 ? { outline } : {}),
     });
   }
   return out;
@@ -280,6 +302,34 @@ export function parseAssemblyWarnings(raw: unknown): AssemblyWarning[] {
     });
   }
   return out;
+}
+
+/**
+ * Qué puede hacer el usuario con un aviso, según de quién sea el problema.
+ * Sin esto la lista dice que algo choca pero no si le toca a él arreglarlo.
+ */
+export interface WarningAdvice {
+  /** Qué hacer, en imperativo. `null` cuando no hay nada de su lado. */
+  action: string | null;
+  /** De quién es el problema, para no cargarle uno nuestro. */
+  owner: "usuario" | "nosotros" | "desconocido";
+}
+
+export function warningAdvice(cause: string | undefined): WarningAdvice {
+  switch (cause) {
+    case "modelo":
+      // El archivo 3D tiene una inconsistencia: no la podemos arreglar nosotros.
+      return { action: "Revisá el modelo", owner: "usuario" };
+    case "escala":
+      // A esta escala la placa es más gruesa que el detalle que tiene que pasar.
+      return { action: "Probá una escala menor", owner: "usuario" };
+    case "sin_recorte":
+    case "no_detectada":
+      // La junta la teníamos que resolver nosotros: no pedirle nada al usuario.
+      return { action: null, owner: "nosotros" };
+    default:
+      return { action: null, owner: "desconocido" };
+  }
 }
 
 /** Texto para el usuario. Un tipo desconocido se muestra crudo, no se oculta. */

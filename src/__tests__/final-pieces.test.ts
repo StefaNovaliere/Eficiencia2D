@@ -5,9 +5,10 @@ import {
   parseFinalPieces,
   parseNestingPlacements,
   sortWarningsBySeverity,
+  warningAdvice,
   warningTypeLabel,
 } from "@/core/final-pieces";
-import { liftFinalPiece } from "@/core/assembly-lift";
+import { liftFinalPiece, liftOutline } from "@/core/assembly-lift";
 import { buildAssemblyPieces } from "@/core/assembly-sequence";
 
 /** Pieza como la manda el backend (snake_case, tal cual el contrato). */
@@ -604,5 +605,122 @@ describe("avisos de interferencia entre piezas", () => {
     const [w] = parseAssemblyWarnings([{ type: "gap", measure_mm: 5 }]);
     expect(w.cause).toBeUndefined();
     expect(w.message).toBeUndefined();
+  });
+});
+
+describe("qué se le dice al usuario según la causa", () => {
+  /**
+   * La causa dice DE QUIÉN es el problema, y eso decide qué mostrar. Pedirle al
+   * usuario que revise su modelo cuando la junta no la resolvimos nosotros le
+   * carga un problema ajeno; callarse cuando sí puede hacer algo lo deja sin
+   * salida.
+   */
+  it("los problemas del usuario vienen con qué hacer", () => {
+    expect(warningAdvice("modelo")).toEqual({
+      action: "Revisá el modelo",
+      owner: "usuario",
+    });
+    expect(warningAdvice("escala")).toEqual({
+      action: "Probá una escala menor",
+      owner: "usuario",
+    });
+  });
+
+  it("los problemas nuestros no le piden nada al usuario", () => {
+    for (const causa of ["sin_recorte", "no_detectada"]) {
+      const consejo = warningAdvice(causa);
+      expect(consejo.owner).toBe("nosotros");
+      expect(consejo.action).toBeNull();
+    }
+  });
+
+  it("una causa desconocida no inventa un consejo", () => {
+    expect(warningAdvice("otra").action).toBeNull();
+    expect(warningAdvice(undefined).action).toBeNull();
+  });
+});
+
+describe("el contorno de corte dentro del placement", () => {
+  /** Pieza A4 del contrato: rectángulo de 7.18 × 2.367 con su marco. */
+  const a4 = {
+    "255": {
+      panel_id: "A4",
+      category: "wall",
+      origin: { x: 3.59, y: 0.15, z: 3.49 },
+      u_axis: { x: -1, y: 0, z: 0 },
+      v_axis: { x: 0, y: 1, z: 0 },
+      normal: { x: 0, y: 0, z: 1 },
+      mirrored: false,
+      width_m: 7.18,
+      height_m: 2.367,
+      area_m2: 16.998,
+      thickness_m: 0.3,
+      outline: [
+        { a: { x: 7.18, y: 2.367 }, b: { x: 0, y: 2.367 }, hole: false },
+        { a: { x: 0, y: 2.367 }, b: { x: 0, y: 0 }, hole: false },
+        { a: { x: 0, y: 0 }, b: { x: 7.18, y: 0 }, hole: false },
+        { a: { x: 7.18, y: 0 }, b: { x: 7.18, y: 2.367 }, hole: false },
+      ],
+    },
+  };
+
+  it("lee contorno, categoría y espesor", () => {
+    const pl = parseNestingPlacements(a4).get(255)!;
+    expect(pl.category).toBe("wall");
+    expect(pl.thicknessM).toBeCloseTo(0.3);
+    expect(pl.outline).toHaveLength(4);
+  });
+
+  /**
+   * El bounding box de un faldón triangular tiene el doble de superficie que el
+   * faldón: dibujarlo muestra material donde no hay y tapa los huecos por donde
+   * entra la pieza vecina.
+   */
+  it("dibuja el contorno, no el rectángulo que lo contiene", () => {
+    const faldon = [
+      { a: { x: 0, y: 0 }, b: { x: 4, y: 0 } },
+      { a: { x: 4, y: 0 }, b: { x: 0, y: 3 } }, // hipotenusa
+      { a: { x: 0, y: 3 }, b: { x: 0, y: 0 } },
+    ];
+    const g = liftOutline(
+      {
+        origin: { x: 0, y: 0, z: 0 },
+        uAxis: { x: 1, y: 0, z: 0 },
+        vAxis: { x: 0, y: 1, z: 0 },
+      },
+      faldon,
+    );
+    // Un triángulo son 3 vértices: si dibujara el rectángulo serían 2 triángulos.
+    expect(g.positions).toHaveLength(9);
+
+    // Y la esquina superior derecha del bounding box NO tiene material.
+    const puntos: Array<[number, number]> = [];
+    for (let i = 0; i + 2 < g.positions.length; i += 3) {
+      puntos.push([g.positions[i], g.positions[i + 1]]);
+    }
+    expect(puntos.some(([x, y]) => x > 3.9 && y > 2.9)).toBe(false);
+  });
+
+  it("los anillos con hole salen como huecos del polígono", () => {
+    const conVentana = [
+      { a: { x: 0, y: 0 }, b: { x: 4, y: 0 } },
+      { a: { x: 4, y: 0 }, b: { x: 4, y: 3 } },
+      { a: { x: 4, y: 3 }, b: { x: 0, y: 3 } },
+      { a: { x: 0, y: 3 }, b: { x: 0, y: 0 } },
+      { a: { x: 1, y: 1 }, b: { x: 2, y: 1 }, hole: true },
+      { a: { x: 2, y: 1 }, b: { x: 2, y: 2 }, hole: true },
+      { a: { x: 2, y: 2 }, b: { x: 1, y: 2 }, hole: true },
+      { a: { x: 1, y: 2 }, b: { x: 1, y: 1 }, hole: true },
+    ];
+    const g = liftOutline(
+      {
+        origin: { x: 0, y: 0, z: 0 },
+        uAxis: { x: 1, y: 0, z: 0 },
+        vAxis: { x: 0, y: 1, z: 0 },
+      },
+      conVentana,
+    );
+    expect(g.hasHoles).toBe(true);
+    expect(g.openings.length).toBeGreaterThan(0);
   });
 });
