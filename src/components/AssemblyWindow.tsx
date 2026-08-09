@@ -348,6 +348,29 @@ export interface AssemblyWindowProps {
   onReload: () => void;
 }
 
+/** Cuántas piezas de un mapa traen su contorno de corte. */
+function conContorno(fuente: Map<number, NestingPlacement> | undefined): number {
+  if (!fuente) return 0;
+  let n = 0;
+  for (const p of fuente.values()) if (p.outline && p.outline.length > 0) n++;
+  return n;
+}
+
+/**
+ * De dónde salen las piezas del instructivo. Gana la fuente que traiga más
+ * contornos: sin contorno la pieza se dibuja como su rectángulo, o sea paredes
+ * macizas sin puertas ni ventanas, que es peor que cualquier otra diferencia
+ * entre las dos fuentes. A igualdad, el nesting, que además trae `area_m2`.
+ */
+function mejorFuenteDePiezas(
+  delNesting: Map<number, NestingPlacement> | undefined,
+  deTopologia: Map<number, NestingPlacement>,
+): Map<number, NestingPlacement> | undefined {
+  if (conContorno(deTopologia) > conContorno(delNesting)) return deTopologia;
+  if (delNesting && delNesting.size > 0) return delNesting;
+  return deTopologia.size > 0 ? deTopologia : undefined;
+}
+
 export default function AssemblyWindow({
   data,
   loading,
@@ -477,7 +500,12 @@ export default function AssemblyWindow({
           widthM: pl.widthM,
           heightM: pl.heightM,
           mirrored: pl.mirrored,
-          areaM2: 0,
+          areaM2: pl.areaM2 ?? 0,
+          // Sin el contorno la pieza sale como su rectángulo: paredes macizas,
+          // sin puertas ni ventanas.
+          ...(pl.outline && pl.outline.length > 0 ? { outline: pl.outline } : {}),
+          ...(pl.category ? { category: pl.category } : {}),
+          ...(pl.thicknessM ? { thicknessM: pl.thicknessM } : {}),
         });
       }
     }
@@ -504,11 +532,10 @@ export default function AssemblyWindow({
       yieldClips,
       buildingCentroid,
       finalPieceById,
-      // Los del nesting primero: llegan con `area_m2` y son los que el backend
-      // viene verificando contra el DXF.
-      nestingPlacementByGroupId:
-        nestingData?.nestingPlacements ??
-        (placementsDeTopologia.size > 0 ? placementsDeTopologia : undefined),
+      nestingPlacementByGroupId: mejorFuenteDePiezas(
+        nestingData?.nestingPlacements,
+        placementsDeTopologia,
+      ),
       nestingPanelByLabel,
     };
   }, [phase1, nestingData, wallWallDecisions, slabThicknessM]);

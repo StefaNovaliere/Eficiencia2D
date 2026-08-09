@@ -8,7 +8,7 @@
 // recolectar las decisiones del usuario. No hay cálculo geométrico acá.
 // ============================================================================
 
-import type { Face3D, Vec3 } from "./types";
+import type { Face3D, Vec2, Vec3 } from "./types";
 import type { GeometryGroup } from "./group-classifier";
 import type { Joint } from "./joint-detector";
 import type { DimensionAdjustment, WallWallJoint } from "./assembly-adjuster";
@@ -39,6 +39,18 @@ export interface Placement {
   mirrored: boolean;
   /** Etiqueta de la pieza (A1, B2…), cuando el backend la incluye. */
   panelId?: string;
+  /** `"wall"` | `"floor"`. */
+  category?: string;
+  /** Área de material (contorno menos aberturas), en m². */
+  areaM2?: number;
+  /** Espesor de la placa en metros de edificio, ya escalado. */
+  thicknessM?: number;
+  /**
+   * Contorno de CORTE en el marco local (u, v), con `hole: true` en los anillos
+   * interiores. Llega junto con `placementsFieles`. Es lo que hay que dibujar:
+   * sin esto la pieza sale como su rectángulo, sin puertas ni ventanas.
+   */
+  outline?: Array<{ a: Vec2; b: Vec2; hole?: boolean; joint?: boolean }>;
 }
 
 /**

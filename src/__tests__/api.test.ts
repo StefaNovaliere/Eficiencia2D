@@ -13,6 +13,7 @@ vi.mock("@/services/api-base", () => ({
 
 import {
   buildRecomputePayload,
+  needsTopologyRefresh,
   categorySignature,
   topologySignature,
   recomputeTopology,
@@ -592,5 +593,64 @@ describe("topologySignature", () => {
     expect(
       topologySignature({ ...base, wallWallDecisions: { 12: 250, 4: 7 } }),
     ).toBe(topologySignature({ ...base, wallWallDecisions: { 4: 7, 12: 250 } }));
+  });
+});
+
+/**
+ * La topología de `/upload` no lleva escala, así que sus `placements` son los
+ * del modelo crudo. Darla por buena porque nadie tocó nada dejaba el
+ * instructivo dibujando las medidas sin recortar para siempre: A1 salía
+ * 790 × 477 cm cuando lo que se corta mide 775 × 451.
+ */
+describe("needsTopologyRefresh", () => {
+  it("la primera topología hay que pedirla de nuevo si no vino fiel", () => {
+    expect(
+      needsTopologyRefresh({
+        placementsFieles: undefined,
+        currentSignature: "a",
+        lastRequestedSignature: null,
+      }),
+    ).toBe(true);
+    expect(
+      needsTopologyRefresh({
+        placementsFieles: false,
+        currentSignature: "a",
+        lastRequestedSignature: null,
+      }),
+    ).toBe(true);
+  });
+
+  it("si ya vino fiel, no se vuelve a pedir", () => {
+    expect(
+      needsTopologyRefresh({
+        placementsFieles: true,
+        currentSignature: "a",
+        lastRequestedSignature: null,
+      }),
+    ).toBe(false);
+  });
+
+  it("se vuelve a pedir cuando cambia algo que la afecta", () => {
+    expect(
+      needsTopologyRefresh({
+        placementsFieles: true,
+        currentSignature: "b",
+        lastRequestedSignature: "a",
+      }),
+    ).toBe(true);
+  });
+
+  /**
+   * Un backend viejo nunca devuelve `placements_fieles`. Sin este corte, el
+   * front pediría la topología en bucle.
+   */
+  it("no reintenta indefinidamente contra un backend que no manda el flag", () => {
+    expect(
+      needsTopologyRefresh({
+        placementsFieles: false,
+        currentSignature: "a",
+        lastRequestedSignature: "a",
+      }),
+    ).toBe(false);
   });
 });

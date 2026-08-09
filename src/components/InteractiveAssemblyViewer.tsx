@@ -141,6 +141,10 @@ function pieceSize(piece: AssemblySequencePiece): [number, number, number] {
 
 /** Pieza ya colocada — caja orientada con color sólido. */
 function StaticPiece({ piece }: { piece: AssemblySequencePiece }) {
+  // El rojo de conflicto tiene que salir también acá: una pieza que se dibuja
+  // como caja (sin contorno) es justamente la que más necesita el aviso.
+  const conflicts = useContext(ConflictContext);
+  const inConflict = conflicts.has(piece.id);
   return (
     <mesh
       position={piecePosition(piece)}
@@ -151,7 +155,9 @@ function StaticPiece({ piece }: { piece: AssemblySequencePiece }) {
     >
       <boxGeometry args={pieceSize(piece)} />
       <meshStandardMaterial
-        color={pieceBaseColor(piece)}
+        color={inConflict ? CONFLICT_COLOR : pieceBaseColor(piece)}
+        emissive={inConflict ? CONFLICT_COLOR : 0x000000}
+        emissiveIntensity={inConflict ? 0.3 : 0}
         roughness={0.5}
         metalness={0.1}
       />
