@@ -572,8 +572,13 @@ export default function InteractiveAssemblyViewer({
     // Grosor sensible a la escala: el material físico (p.ej. MDF 3 mm) a escala
     // 1:N mide `3mm × N` en el mundo real del visor. El `depth_m` por defecto
     // (12 mm) es invisible sobre piezas de varios metros.
+    // El espesor que manda el backend por pieza (`thickness_m` del placement)
+    // manda sobre el global: pisarlo dejaba todas las placas del mismo grosor
+    // aunque el backend las diferenciara.
     if (!slabThicknessM || slabThicknessM <= 0) return prepared;
-    return prepared.map((p) => ({ ...p, depth_m: slabThicknessM }));
+    return prepared.map((p) =>
+      p.depthFromBackend ? p : { ...p, depth_m: slabThicknessM },
+    );
   }, [pieces, viewerSchema, slabThicknessM]);
 
   const visiblePieces = useMemo(

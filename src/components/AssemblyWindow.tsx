@@ -42,6 +42,7 @@ import type { NestingPanel } from "@/core/sheet-nester";
 import type { NestingPlacement } from "@/core/final-pieces";
 import { resolveSlabThicknessM } from "@/core/assembly-slab";
 import { buildYieldClipSpecs, type WallWallDecisions } from "@/core/wall-yield-clip";
+import { buildAssemblyDump, logAssemblyDump } from "@/core/assembly-dump";
 
 /** Espesor del material físico de la maqueta. MDF 3 mm por defecto (futuro:
  *  selector MDF/cartón por proyecto). Se escala por la escala de impresión. */
@@ -550,6 +551,28 @@ export default function AssemblyWindow({
     () => (displayData ? buildAssemblyPieces(displayData, assemblySteps, liftContext) : []),
     [displayData, assemblySteps, liftContext],
   );
+
+  /**
+   * Volcado de diagnóstico: `?dumpPieza=A4` una pieza, `?dumpPieza=*` todas.
+   * Imprime de qué fuente salió cada una, el marco crudo del backend, los
+   * números finales y las tres comprobaciones (coplanaridad, área, esquina).
+   * Sólo lee: no cambia nada de lo que se dibuja.
+   */
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const selector = new URLSearchParams(window.location.search).get("dumpPieza");
+    if (!selector || assemblyPieces.length === 0) return;
+    logAssemblyDump(
+      buildAssemblyDump(
+        assemblyPieces,
+        {
+          labelToGroupId: liftContext.labelToGroupId,
+          placementByGroupId: liftContext.nestingPlacementByGroupId,
+        },
+        selector,
+      ),
+    );
+  }, [assemblyPieces, liftContext]);
 
   const handleSelectPanel = useCallback((id: string | null) => {
     setSelectedPanelId(id);
