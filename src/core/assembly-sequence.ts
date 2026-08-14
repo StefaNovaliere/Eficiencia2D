@@ -357,14 +357,20 @@ function buildAssemblyPiecesRaw(
     );
   }
 
-  // Sin sequencePieces: usar paneles del backend.
+  // Sin sequencePieces: usar paneles del backend. Es el camino VIVO — la guía
+  // que arma el front deja `sequencePieces` en undefined.
   const panelById = new Map((data.panels ?? []).map((p) => [p.id, p]));
   const pieces: AssemblySequencePiece[] = [];
+  // Una etiqueta repetida entre pasos dibujaba la misma pieza dos veces, en dos
+  // pasos distintos: dos placas superpuestas que además hacen z-fighting. El
+  // camino de `sequencePieces` ya se protegía; éste no.
+  const used = new Set<string>();
 
   for (let stepIndex = 0; stepIndex < steps.length; stepIndex++) {
     for (const panelId of steps[stepIndex].panel_ids) {
       const panel = panelById.get(panelId);
-      if (!panel) continue;
+      if (!panel || used.has(panel.id)) continue;
+      used.add(panel.id);
       pieces.push(panelToPiece(panel, stepIndex));
     }
   }

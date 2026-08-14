@@ -553,6 +553,20 @@ export default function AssemblyWindow({
   );
 
   /**
+   * Piezas que NO salieron de un contorno recortado: se dibujaron con la malla
+   * cruda del modelo, o como caja. Importa decirlo porque el síntoma engaña —
+   * un muro macizo del modelo tiene DOS pieles, así que la malla cruda lo dibuja
+   * como dos placas paralelas y parece que el instructivo inventara paredes.
+   */
+  const piezasSinRecortar = useMemo(
+    () =>
+      assemblyPieces.filter(
+        (p) => p.liftSource === "faces" || p.liftSource === "box",
+      ).length,
+    [assemblyPieces],
+  );
+
+  /**
    * Volcado de diagnóstico: `?dumpPieza=A4` una pieza, `?dumpPieza=*` todas.
    * Imprime de qué fuente salió cada una, el marco crudo del backend, los
    * números finales y las tres comprobaciones (coplanaridad, área, esquina).
@@ -804,6 +818,28 @@ export default function AssemblyWindow({
                 </span>
               </div>
             )
+          )}
+
+          {/*
+            De dónde salió la geometría. Va aparte del bloque de arriba porque
+            con choques presentes ese bloque tapa el cartel de "sin verificar", y
+            esto es justamente lo que explica las piezas que se ven de más.
+          */}
+          {piezasSinRecortar > 0 && (
+            <div className="assembly-no-print shrink-0 flex items-start gap-2 px-3 py-2 border-b border-base-300/30 bg-warning/5">
+              <AlertTriangle className="w-3.5 h-3.5 text-warning shrink-0 mt-0.5" />
+              <span className="text-xs text-warning/90 leading-snug">
+                <b className="font-medium">
+                  {piezasSinRecortar} de {assemblyPieces.length} piezas sin contorno de
+                  corte.
+                </b>{" "}
+                <span className="text-base-content/60">
+                  Se dibujan con la malla del modelo: un muro macizo aparece como sus dos
+                  caras, así que vas a ver placas de más y medidas mayores que las que se
+                  cortan.
+                </span>
+              </span>
+            </div>
           )}
 
           {/*

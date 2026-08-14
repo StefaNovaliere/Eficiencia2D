@@ -111,6 +111,41 @@ describe("prepareAssemblyPiecesForRender", () => {
     expect(prepared[0].width_m).toBeCloseTo(2);
   });
 
+  /**
+   * Camino VIVO del instructivo: la guía que arma el front deja
+   * `sequencePieces` en undefined, así que las piezas salen de `panels`. Ese
+   * camino no deduplicaba, y una etiqueta repetida entre pasos dibujaba la misma
+   * placa dos veces — dos piezas superpuestas que hacen z-fighting y se ven como
+   * una pared de más.
+   */
+  it("no dibuja la misma pieza dos veces si la etiqueta se repite entre pasos", () => {
+    const data: AssemblyPreviewData = {
+      panels: [
+        {
+          id: "A1",
+          category: "wall",
+          source_group_id: 1,
+          width_m: 4,
+          height_m: 3,
+          area_m2: 12,
+          centroid: { x: 0, y: 0, z: 0 },
+          normal: { x: 0, y: 0, z: 1 },
+          label: "A1",
+        },
+      ],
+      elevations: {},
+      totals: { wall_count: 1, floor_count: 0, total_panels: 1 },
+    };
+    const steps = [
+      { title: "Sur", description: "", panel_ids: ["A1"] },
+      { title: "Norte", description: "", panel_ids: ["A1"] },
+    ];
+
+    const pieces = buildAssemblyPieces(data, steps);
+    expect(pieces).toHaveLength(1);
+    expect(pieces[0].stepIndex).toBe(0);
+  });
+
   it("replaces invalid dims with safe minimums", () => {
     const raw = [
       {
