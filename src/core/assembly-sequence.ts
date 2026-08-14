@@ -78,6 +78,20 @@ export interface AssemblySequenceStep {
   camera_focus?: Vec3;
 }
 
+/**
+ * De cuál de las fuentes salió la geometría de una pieza. El instructivo tiene
+ * una cadena de respaldos y cada eslabón explica un síntoma distinto, así que
+ * sin este dato no se puede diagnosticar una pieza mal dibujada:
+ *
+ *  - `outline`     contorno de corte del placement — la buena.
+ *  - `panel`       marco recortado + aristas del panel de plancha.
+ *  - `finalPiece`  `final_pieces` de `/nesting-preview`.
+ *  - `faces`       malla CRUDA del modelo, sin recortar: mismas medidas que la
+ *                  proyección, no las que se cortan.
+ *  - `box`         ni siquiera eso: caja alineada a los ejes, rotación cero.
+ */
+export type LiftSource = "outline" | "panel" | "finalPiece" | "faces" | "box";
+
 /** A single piece placed during the interactive assembly sequence. */
 export interface AssemblySequencePiece {
   id: string;
@@ -97,6 +111,10 @@ export interface AssemblySequencePiece {
   lifted?: LiftedPieceGeometry;
   /** La pieza graba sus aberturas (rojo) en vez de cortarlas. */
   isMark?: boolean;
+  /** Cuál eslabón de la cadena de respaldos dibujó esta pieza. */
+  liftSource?: LiftSource;
+  /** `depth_m` vino del backend (`thickness_m` del placement), no del default. */
+  depthFromBackend?: boolean;
 }
 
 /** Prefer backend `pasos` / `steps`; fall back to elevations. */
@@ -161,7 +179,13 @@ function applyLift(
   piece: AssemblySequencePiece,
   lift: AssemblyLiftContext | undefined,
 ): AssemblySequencePiece {
-  if (!lift) return piece;
+  // Sin geometría lifteada el visor dibuja una caja: se marca como tal para que
+  // el volcado de diagnóstico distinga "no hay datos" de "salió mal".
+  const caja = (p: AssemblySequencePiece): AssemblySequencePiece => ({
+    ...p,
+    liftSource: "box",
+  });
+  if (!lift) return caja(piece);
   const label = piece.id.trim();
   const groupId = lift.labelToGroupId.get(label);
 
@@ -173,6 +197,7 @@ function applyLift(
     // `yaRecortada` marca que el cuerpo ya trae los recortes del ensamble, así
     // que no hay que volver a pasarlo por los clips de cesión.
     let yaRecortada = false;
+    let fuente: LiftSource = "box";
 
     // Primera opción: marco recortado del nesting + contorno de la plancha.
     const nestingPlacement =
@@ -185,6 +210,7 @@ function applyLift(
       if ((conContorno.positions?.length ?? 0) >= 9) {
         body = conContorno;
         yaRecortada = true;
+        fuente = "outline";
       }
     }
 
@@ -199,6 +225,7 @@ function applyLift(
       if ((recortada.positions?.length ?? 0) >= 9) {
         body = recortada;
         yaRecortada = true;
+        fuente = "panel";
       }
     }
 
@@ -209,18 +236,20 @@ function applyLift(
       if (liftada && (liftada.positions?.length ?? 0) >= 9) {
         body = liftada;
         yaRecortada = true;
+        fuente = "finalPiece";
       }
     }
 
     // Última opción: las caras crudas del modelo, sin recortar.
     if (!yaRecortada) {
       const faceIndices = lift.faceIndicesByLabel.get(label);
-      if (!faceIndices || faceIndices.length === 0) return piece;
+      if (!faceIndices || faceIndices.length === 0) return caja(piece);
       const faces = faceIndices.map((i) => lift.faces[i]).filter(Boolean);
-      if (faces.length === 0) return piece;
+      if (faces.length === 0) return caja(piece);
       body = liftFaces(faces);
+      fuente = "faces";
     }
-    if (!body || (body.positions?.length ?? 0) < 9) return piece;
+    if (!body || (body.positions?.length ?? 0) < 9) return caja(piece);
 
     let positions = body.positions;
     const group =
@@ -259,10 +288,12 @@ function applyLift(
 
     return {
       ...piece,
+      liftSource: fuente,
       // Espesor propio de la pieza cuando el backend lo manda; si no, el visor
-      // aplica el global.
+      // aplica el global. `depthFromBackend` es lo que impide que el global lo
+      // pise: sin esa marca el espesor por pieza no llegaba nunca a la pantalla.
       ...(nestingPlacement?.thicknessM && nestingPlacement.thicknessM > 0
-        ? { depth_m: nestingPlacement.thicknessM }
+        ? { depth_m: nestingPlacement.thicknessM, depthFromBackend: true }
         : {}),
       lifted: {
         ...body,
@@ -275,7 +306,7 @@ function applyLift(
       },
     };
   } catch {
-    return piece;
+    return caja(piece);
   }
 }
 

@@ -136,11 +136,17 @@ Sí, con este orden (`src/components/AssemblyWindow.tsx:390-394`):
    (`MATERIAL_THICKNESS_M` en `AssemblyWindow.tsx:48`, `resolveSlabThicknessM` en
    `src/core/assembly-slab.ts:33`).
 
-**Ojo con esto**: ese valor único **pisa el `depth_m` de todas las piezas** en el visor
-(`src/components/InteractiveAssemblyViewer.tsx:575-576`), incluido el `thickness_m` por
-pieza que el placement pueda traer y que `applyLift` sí lee
-(`src/core/assembly-sequence.ts:264-266`). O sea: **hoy el espesor por pieza no llega a la
-pantalla**. Si el backend manda espesores distintos por pieza, decilo y lo cambiamos.
+**El valor global está bien** — verificado a pedido del backend. `resolveSlabThicknessM` es
+`0.003 × scale_denom` (`src/core/assembly-slab.ts:33`), o sea **0,30 m de edificio a
+1:100**, no 3 mm planos. La preocupación de "las placas se ven cien veces más finas y
+ningún choque se ve" no aplica: el término de escala ya está.
+
+**Lo que sí estaba mal, y ya está arreglado**: ese valor global **pisaba el `depth_m` de
+todas las piezas** en el visor, incluido el `thickness_m` por pieza que `applyLift` sí lee.
+O sea que el espesor por pieza no llegaba nunca a la pantalla. Ahora el por-pieza manda y
+el global queda de respaldo (marca `depthFromBackend`,
+`InteractiveAssemblyViewer.tsx:575-582`). Hoy no cambia nada visible porque todas las
+piezas tienen el mismo espesor, pero deja de ser una trampa para cuando dejen de tenerlo.
 
 ---
 
@@ -287,11 +293,32 @@ Lo que sí puedo dar es **dónde vive cada número que pedís**:
 | **C.2** lista de vértices en mundo | `piece.lifted.positions` — 9 floats por triángulo |
 | **C.3** identificador | `piece.id` = etiqueta de panel (`A4`); el `group_id` sale de `lift.labelToGroupId.get(label)` (`assembly-sequence.ts:166`) |
 
-**Ofrecimiento**: puedo agregar en un commit aparte un dump de diagnóstico detrás de un
-flag (`?dumpPieza=A4` o una var de entorno) que imprima por consola, para la pieza que
-pidas: el placement crudo tal como llegó, cuál de las 5 fuentes ganó, la cantidad de
-aristas del `outline`, los triángulos resultantes, y las tres comprobaciones del bloque D
-calculadas. Con eso el bloque C se contesta en una corrida. Decime y lo hago.
+### El volcado — ya está implementado
+
+`src/core/assembly-dump.ts`. Se activa por query param, abriendo el instructivo:
+
+- `?dumpPieza=A4` → una pieza
+- `?dumpPieza=*` → todas
+
+Imprime por consola, agrupado por pieza:
+
+- **el reparto por fuente de TODA la corrida** (`{ outline: 24, faces: 3, box: 1, … }`),
+  calculado siempre sobre todas las piezas aunque filtres una sola — es el dato que
+  pediste. Si alguna cayó a `faces` o a `box`, sale además un `console.warn` explícito:
+  esas no son las medidas que se cortan;
+- **C.1** el placement crudo tal como llegó del backend;
+- **C.2** cantidad de triángulos, espesor aplicado **y de dónde salió** (`del backend` vs
+  `global del front`), y los primeros vértices en coordenadas de mundo;
+- cantidad de aristas del `outline` (0 = no vino);
+- **D.1** coplanaridad: los cuatro `dot(esquina, normal)` y el spread en mm;
+- **D.2** área triangulada vs `area_m2`, con el ratio (≈2 = se está dibujando el
+  rectángulo);
+- **D.3** por cada esquina, la distancia al plano medio de las vecinas **que la
+  contienen**. El filtro importa: sin él, el plano infinito de cualquier pared lejana pasa
+  cerca de cualquier punto y el número no dice nada. Debería dar media placa.
+
+Es sólo lectura: no toca la geometría ni cambia lo que se ve. La matemática está cubierta
+en `src/__tests__/assembly-dump.test.ts`.
 
 ---
 
