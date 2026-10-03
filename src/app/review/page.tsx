@@ -8,6 +8,7 @@ import ReviewScreen from "@/components/ReviewScreen";
 import type { ClassificationOverride } from "@/core/pipeline";
 import type { UserCut } from "@/core/user-cuts";
 import type { GroupNote } from "@/core/group-notes";
+import { conEtiquetasDeCorte } from "@/core/assembly-cutset";
 import {
   recomputeTopology,
   fetchNestingPreview,
@@ -583,28 +584,30 @@ function ReviewPageContent() {
             token,
           );
           setNestingData(nesting);
-          // El área de material del nesting (contorno menos aberturas) en vez
-          // de la suma de caras de la malla, que cuenta las dos pieles de un
-          // sólido y hacía ver piezas parecidas con m² muy distintos.
-          const areaByGroupId = new Map<number, number>();
-          for (const [groupId, pl] of nesting.nestingPlacements ?? []) {
-            if (pl.areaM2 > 0) areaByGroupId.set(groupId, pl.areaM2);
+          // La guía sale del SET DE CORTE: las mismas piezas que el DXF, con
+          // los nombres de la plancha. La topología numera distinto (cuenta
+          // grupos que el corte descarta), y cruzar por etiqueta le asignaba a
+          // cada pieza el contorno y el nombre de otra.
+          const setDeCorte = nesting.nestingPlacements;
+          if (setDeCorte && setDeCorte.size > 0) {
+            return buildAssemblyGuideFromTopology(
+              conEtiquetasDeCorte(phase1Result, setDeCorte),
+              { overrides: overridesMap, setDeCorte },
+            );
           }
-          if (areaByGroupId.size > 0) {
-            return buildAssemblyGuideFromTopology(phase1Result, {
-              overrides: overridesMap,
-              areaByGroupId,
-            });
-          }
+          throw new Error(
+            "El backend no devolvió las piezas recortadas (placements del nesting).",
+          );
         } catch (err) {
-          console.warn(
-            "[instructivo] no se pudo refrescar nesting-preview; se usa geometría de fallback.",
-            err,
+          console.warn("[instructivo] no se pudo obtener el set de corte.", err);
+          throw new Error(
+            "No se pudo obtener el set de corte del backend. Sin las piezas recortadas el instructivo no puede mostrar la maqueta real.",
           );
         }
       }
 
-      return buildAssemblyGuideFromTopology(phase1Result, { overrides: overridesMap });
+      // Sin modelo en el backend no hay set de corte que mostrar.
+      throw new Error("Proyecto sin modelo en el backend: no hay set de corte.");
     },
     [
       phase1Result,

@@ -299,7 +299,13 @@ function applyLift(
         ...body,
         positions,
         openings: body.openings ?? [],
-        inwardSlab: isWall,
+        // La placa va CENTRADA en el plano medio de la pieza: es el invariante
+        // con el que el backend calcula cada recorte y cada ranura (el borde de
+        // A queda a media placa del plano medio de B). Engrosarla hacia adentro
+        // el espesor entero la corría media placa — 15 cm de edificio a 1:100 —
+        // y abría o encimaba cada encuentro. Sólo la malla cruda del modelo,
+        // que ya trae la cara exterior, se engrosa hacia adentro.
+        inwardSlab: isWall && !yaRecortada,
         outwardNormal,
         slots,
         supportMarks,
@@ -507,3 +513,44 @@ export function computeSequenceDiag(pieces: AssemblySequencePiece[]): number {
     1,
   );
 }
+
+/**
+ * Caja que contiene la maqueta ENTERA, medida sobre la geometría real (los
+ * triángulos lifteados) y no sobre los centroides.
+ *
+ * El visor la usa para centrar la escena y ubicar la cámara. Antes se medía
+ * sólo con las piezas visibles en el paso actual y sólo con sus centroides: en
+ * el paso 1 (un piso de 17 m) daba 3 m, la cámara arrancaba adentro del piso,
+ * y como el centro cambiaba con cada paso toda la maqueta se corría al apretar
+ * "Siguiente".
+ */
+export function computeSequenceBounds(pieces: AssemblySequencePiece[]): {
+  center: Vec3;
+  diag: number;
+} {
+  let minX = Infinity, minY = Infinity, minZ = Infinity;
+  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  const add = (x: number, y: number, z: number) => {
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return;
+    if (x < minX) minX = x;
+    if (y < minY) minY = y;
+    if (z < minZ) minZ = z;
+    if (x > maxX) maxX = x;
+    if (y > maxY) maxY = y;
+    if (z > maxZ) maxZ = z;
+  };
+  for (const p of pieces) {
+    const pos = p.lifted?.positions;
+    if (pos && pos.length >= 9) {
+      for (let i = 0; i + 2 < pos.length; i += 3) add(pos[i], pos[i + 1], pos[i + 2]);
+    } else {
+      add(p.position.x, p.position.y, p.position.z);
+    }
+  }
+  if (!Number.isFinite(minX)) return { center: { x: 0, y: 0, z: 0 }, diag: 4 };
+  return {
+    center: { x: (minX + maxX) / 2, y: (minY + maxY) / 2, z: (minZ + maxZ) / 2 },
+    diag: Math.max(Math.hypot(maxX - minX, maxY - minY, maxZ - minZ), 1),
+  };
+}
+

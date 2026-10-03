@@ -43,6 +43,7 @@ import type { NestingPlacement } from "@/core/final-pieces";
 import { resolveSlabThicknessM } from "@/core/assembly-slab";
 import { buildYieldClipSpecs, type WallWallDecisions } from "@/core/wall-yield-clip";
 import { buildAssemblyDump, logAssemblyDump } from "@/core/assembly-dump";
+import { conEtiquetasDeCorte } from "@/core/assembly-cutset";
 
 /** Espesor del material físico de la maqueta. MDF 3 mm por defecto (futuro:
  *  selector MDF/cartón por proyecto). Se escala por la escala de impresión. */
@@ -349,29 +350,6 @@ export interface AssemblyWindowProps {
   onReload: () => void;
 }
 
-/** Cuántas piezas de un mapa traen su contorno de corte. */
-function conContorno(fuente: Map<number, NestingPlacement> | undefined): number {
-  if (!fuente) return 0;
-  let n = 0;
-  for (const p of fuente.values()) if (p.outline && p.outline.length > 0) n++;
-  return n;
-}
-
-/**
- * De dónde salen las piezas del instructivo. Gana la fuente que traiga más
- * contornos: sin contorno la pieza se dibuja como su rectángulo, o sea paredes
- * macizas sin puertas ni ventanas, que es peor que cualquier otra diferencia
- * entre las dos fuentes. A igualdad, el nesting, que además trae `area_m2`.
- */
-function mejorFuenteDePiezas(
-  delNesting: Map<number, NestingPlacement> | undefined,
-  deTopologia: Map<number, NestingPlacement>,
-): Map<number, NestingPlacement> | undefined {
-  if (conContorno(deTopologia) > conContorno(delNesting)) return deTopologia;
-  if (delNesting && delNesting.size > 0) return delNesting;
-  return deTopologia.size > 0 ? deTopologia : undefined;
-}
-
 export default function AssemblyWindow({
   data,
   loading,
@@ -393,6 +371,21 @@ export default function AssemblyWindow({
     phase1.plateThicknessM && phase1.plateThicknessM > 0
       ? phase1.plateThicknessM
       : resolveSlabThicknessM(MATERIAL_THICKNESS_M, scale);
+
+  /**
+   * El set de corte (`placements` de `/nesting-preview`) es la ÚNICA fuente del
+   * instructivo: las mismas piezas que el DXF, con sus nombres y su contorno.
+   * Antes se elegía en runtime entre éste y `topology.placements` según cuál
+   * trajera más contornos, y el visor dibujaba cosas distintas según el
+   * proyecto y según si el nesting había respondido.
+   */
+  const setDeCorte = nestingData?.nestingPlacements;
+  const hayCorte = (setDeCorte?.size ?? 0) > 0;
+  /** Topología con los nombres de la plancha: todos los cruces por etiqueta quedan alineados con el DXF. */
+  const phase1Corte = useMemo(
+    () => (setDeCorte && setDeCorte.size > 0 ? conEtiquetasDeCorte(phase1, setDeCorte) : phase1),
+    [phase1, setDeCorte],
+  );
 
   // Close on Escape
   useEffect(() => {
@@ -434,10 +427,10 @@ export default function AssemblyWindow({
     if (!displayData) return [];
     const validLabels = new Set(displayData.panels.map((p) => p.id));
     return (
-      stepsFromAssemblySteps(phase1, categoryOverrides, validLabels) ??
+      stepsFromAssemblySteps(phase1Corte, categoryOverrides, validLabels) ??
       resolveAssemblySteps(displayData)
     );
-  }, [displayData, phase1, categoryOverrides]);
+  }, [displayData, phase1Corte, categoryOverrides]);
 
   // Cuerpo = malla del modelo + engrosado inward + clips de cesión.
   const liftContext = useMemo<AssemblyLiftContext>(() => {
@@ -449,10 +442,12 @@ export default function AssemblyWindow({
     let cx = 0;
     let cy = 0;
     let cz = 0;
-    for (const g of phase1.groups) {
-      const label = groupLabel(g, phase1.panelIdByGroup);
+    for (const g of phase1Corte.groups) {
+      const label = groupLabel(g, phase1Corte.panelIdByGroup);
       labelToGroupId.set(label, g.id);
-      faceIndicesByLabel.set(label, g.faceIndices);
+      // Con set de corte NO hay respaldo a la malla del modelo: una pieza sin
+      // contorno de corte no se dibuja inventada, se cuenta como faltante.
+      if (!hayCorte) faceIndicesByLabel.set(label, g.faceIndices);
       normalByGroupId.set(g.id, g.representativeNormal);
       centroidByGroupId.set(g.id, g.centroid);
       cx += g.centroid.x;
@@ -484,33 +479,6 @@ export default function AssemblyWindow({
       (nestingData?.finalPieces ?? []).map((fp) => [fp.id, fp]),
     );
 
-    // La topología también trae marcos recortados cuando se pidió con la
-    // escala puesta. Es la misma información que la del nesting, sin tener que
-    // pedir el nesting entero sólo para poder dibujar bien.
-    const placementsDeTopologia = new Map<number, NestingPlacement>();
-    if (phase1.placementsFieles) {
-      for (const [gid, pl] of Object.entries(phase1.placements ?? {})) {
-        const groupId = Number(gid);
-        if (!Number.isFinite(groupId)) continue;
-        placementsDeTopologia.set(groupId, {
-          panelId: pl.panelId ?? "",
-          origin: pl.origin,
-          uAxis: pl.uAxis,
-          vAxis: pl.vAxis,
-          normal: pl.normal,
-          widthM: pl.widthM,
-          heightM: pl.heightM,
-          mirrored: pl.mirrored,
-          areaM2: pl.areaM2 ?? 0,
-          // Sin el contorno la pieza sale como su rectángulo: paredes macizas,
-          // sin puertas ni ventanas.
-          ...(pl.outline && pl.outline.length > 0 ? { outline: pl.outline } : {}),
-          ...(pl.category ? { category: pl.category } : {}),
-          ...(pl.thicknessM ? { thicknessM: pl.thicknessM } : {}),
-        });
-      }
-    }
-
     // Ruta alternativa al mismo resultado: marcos recortados + el contorno de
     // corte de cada pieza en la plancha.
     const nestingPanelByLabel = new Map<string, NestingPanel>();
@@ -533,13 +501,10 @@ export default function AssemblyWindow({
       yieldClips,
       buildingCentroid,
       finalPieceById,
-      nestingPlacementByGroupId: mejorFuenteDePiezas(
-        nestingData?.nestingPlacements,
-        placementsDeTopologia,
-      ),
+      nestingPlacementByGroupId: hayCorte ? setDeCorte : undefined,
       nestingPanelByLabel,
     };
-  }, [phase1, nestingData, wallWallDecisions, slabThicknessM]);
+  }, [phase1, phase1Corte, hayCorte, setDeCorte, nestingData, wallWallDecisions, slabThicknessM]);
 
   // Choques del chequeo de ensamble, lo más grave primero.
   const assemblyWarnings = useMemo(
@@ -565,6 +530,17 @@ export default function AssemblyWindow({
       ).length,
     [assemblyPieces],
   );
+
+  /**
+   * Lo que se dibuja. Con set de corte, sólo piezas con su contorno de corte:
+   * una pieza sin contorno no se reemplaza por una caja ni por la malla del
+   * modelo, porque eso es justamente dibujar algo que no se va a cortar.
+   */
+  const piezasDibujables = useMemo(
+    () => (hayCorte ? assemblyPieces.filter((p) => p.lifted) : assemblyPieces),
+    [assemblyPieces, hayCorte],
+  );
+
 
   /**
    * Volcado de diagnóstico: `?dumpPieza=A4` una pieza, `?dumpPieza=*` todas.
@@ -721,7 +697,7 @@ export default function AssemblyWindow({
               <InteractiveAssemblyViewer
                 className="absolute inset-0"
                 steps={assemblySteps}
-                pieces={assemblyPieces}
+                pieces={piezasDibujables}
                 viewerSchema={displayData.viewerSchema}
                 slabThicknessM={slabThicknessM}
                 warnings={assemblyWarnings}
@@ -797,7 +773,7 @@ export default function AssemblyWindow({
                   ))}
                 </ul>
               </div>
-            ) : phase1.placementsFieles ? (
+            ) : hayCorte ? (
               <div className="assembly-no-print shrink-0 flex items-center gap-2 px-3 py-2 border-b border-base-300/30 bg-success/5">
                 <CheckCircle2 className="w-3.5 h-3.5 text-success shrink-0" />
                 <span className="text-xs font-medium text-success">Ensamble verificado</span>
@@ -834,9 +810,9 @@ export default function AssemblyWindow({
                   corte.
                 </b>{" "}
                 <span className="text-base-content/60">
-                  Se dibujan con la malla del modelo: un muro macizo aparece como sus dos
-                  caras, así que vas a ver placas de más y medidas mayores que las que se
-                  cortan.
+                  {hayCorte
+                    ? "No se dibujan: el backend no mandó su contorno, y mostrarlas con la malla del modelo sería dibujar algo que no se corta."
+                    : "Se dibujan con la malla del modelo: un muro macizo aparece como sus dos caras, así que vas a ver placas de más y medidas mayores que las que se cortan."}
                 </span>
               </span>
             </div>

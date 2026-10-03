@@ -13,8 +13,7 @@ import type {
 import type { Vec3 } from "@/core/types";
 import type { AssemblyWarning } from "@/core/final-pieces";
 import {
-  computeSequenceCenter,
-  computeSequenceDiag,
+  computeSequenceBounds,
   prepareAssemblyPiecesForRender,
 } from "@/core/assembly-sequence";
 import { buildSlab, buildInwardSlab, faceNormalFromPositions } from "@/core/assembly-slab";
@@ -597,19 +596,19 @@ export default function InteractiveAssemblyViewer({
     [warnings],
   );
 
-  const center = useMemo(
-    () => computeSequenceCenter(visiblePieces.length > 0 ? visiblePieces : renderPieces),
-    [visiblePieces, renderPieces],
-  );
+  // Centro y tamaño de la maqueta ENTERA, fijos para todos los pasos: si
+  // dependieran de lo visible, la escena se correría en cada "Siguiente".
+  const bounds = useMemo(() => computeSequenceBounds(renderPieces), [renderPieces]);
+  const center = bounds.center;
   const centerVec = useMemo(
     () => new THREE.Vector3(center.x, center.y, center.z),
     [center.x, center.y, center.z],
   );
-  const diag = useMemo(
-    () => Math.max(computeSequenceDiag(visiblePieces.length > 0 ? visiblePieces : renderPieces), 3),
-    [visiblePieces, renderPieces],
-  );
+  const diag = Math.max(bounds.diag, 3);
   const camDist = diag * 1.35;
+  // Media extensión de la cámara de sombra: la luz mira al origen, así que tiene
+  // que cubrir el modelo aunque no esté centrado ahí.
+  const sombra = diag + Math.hypot(center.x, center.y, center.z);
 
   const step = steps[currentStep];
   const focus = step?.camera_focus;
@@ -653,7 +652,27 @@ export default function InteractiveAssemblyViewer({
       >
         <color attach="background" args={["#1a1d24"]} />
         <ambientLight intensity={0.85} />
-        <directionalLight position={[diag * 2, diag * 3, diag]} intensity={1.4} castShadow />
+        {/*
+          La cámara de sombra por defecto es un cubo de 10 m con un mapa de 512
+          px y sin bias: sobre una maqueta de 17 m cada placa se hacía sombra a
+          sí misma y los pisos salían rayados (shadow acne), que parecía una
+          placa duplicada. Se dimensiona al modelo y se compensa con bias.
+        */}
+        <directionalLight
+          position={[diag * 2, diag * 3, diag]}
+          intensity={1.4}
+          castShadow
+          shadow-mapSize-width={2048}
+          shadow-mapSize-height={2048}
+          shadow-bias={-0.0005}
+          shadow-normalBias={diag * 0.002}
+          shadow-camera-left={-sombra}
+          shadow-camera-right={sombra}
+          shadow-camera-top={sombra}
+          shadow-camera-bottom={-sombra}
+          shadow-camera-near={0.1}
+          shadow-camera-far={diag * 10}
+        />
         <directionalLight position={[-diag, diag * 0.5, -diag]} intensity={0.5} />
 
         <SupportMarksContext.Provider value={showSupportMarks}>

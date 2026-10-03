@@ -12,6 +12,7 @@
 import type { Phase1Result } from "./pipeline";
 import type { GeometryGroup, FaceCategory } from "./group-classifier";
 import type { Face3D, Vec3 } from "./types";
+import type { NestingPlacement } from "./final-pieces";
 import { getEffectiveCategory } from "./discard-by-area";
 import type {
   AssemblyPanel,
@@ -42,6 +43,12 @@ export interface BuildAssemblyOptions {
    * losas parecidas se mostraran con casi 10 m² de diferencia.
    */
   areaByGroupId?: Map<number, number>;
+  /**
+   * Set de corte de `/nesting-preview`. Cuando está, la guía lista EXACTAMENTE
+   * esas piezas, con las medidas y el área de la plancha: un grupo que la
+   * topología no descarta pero que no se corta no tiene nada que armar.
+   */
+  setDeCorte?: Map<number, NestingPlacement>;
 }
 
 /** Bounding del grupo en el plano de la pieza (ancho horizontal × alto vertical). */
@@ -84,7 +91,7 @@ export function buildAssemblyGuideFromTopology(
   phase1: Phase1Result,
   opts: BuildAssemblyOptions = {},
 ): AssemblyPreviewData {
-  const { overrides, areaByGroupId } = opts;
+  const { overrides, areaByGroupId, setDeCorte } = opts;
   const placements = phase1.placements;
 
   const panels: AssemblyPanel[] = [];
@@ -94,9 +101,11 @@ export function buildAssemblyGuideFromTopology(
   for (const group of phase1.groups) {
     const category = getEffectiveCategory(group, overrides);
     if (category === "discard") continue;
+    const corte = setDeCorte?.get(group.id);
+    if (setDeCorte && !corte) continue;
 
     const label = groupLabel(group, phase1.panelIdByGroup);
-    const placement = placements?.[group.id];
+    const placement = corte ?? placements?.[group.id];
     const size = placement
       ? { width: placement.widthM, height: placement.heightM }
       : groupSize(group, phase1.faces);
@@ -107,7 +116,10 @@ export function buildAssemblyGuideFromTopology(
       source_group_id: group.id,
       width_m: size.width,
       height_m: size.height,
-      area_m2: areaByGroupId?.get(group.id) ?? group.totalArea,
+      area_m2:
+        (corte && corte.areaM2 > 0 ? corte.areaM2 : undefined) ??
+        areaByGroupId?.get(group.id) ??
+        group.totalArea,
       centroid: group.centroid,
       normal: group.representativeNormal,
       label,
