@@ -734,6 +734,13 @@ export default function ReviewScreen({
 
   // Box selection
   const [boxSelectMode, setBoxSelectMode] = useState(false);
+  /** Mensaje breve cuando un atajo no puede actuar (p. ej. F sin paredes fusionables). */
+  const [avisoAtajo, setAvisoAtajo] = useState<string | null>(null);
+  useEffect(() => {
+    if (!avisoAtajo) return;
+    const t = setTimeout(() => setAvisoAtajo(null), 3500);
+    return () => clearTimeout(t);
+  }, [avisoAtajo]);
   const [dragRect, setDragRect] = useState<{
     x: number;
     y: number;
@@ -2499,9 +2506,18 @@ export default function ReviewScreen({
         return;
       }
 
-      if ((e.key === "f" || e.key === "F") && canMergeSelected) {
+      if (e.key === "f" || e.key === "F") {
         e.preventDefault();
-        handleMergeSelected();
+        if (canMergeSelected) {
+          handleMergeSelected();
+        } else {
+          // Antes F no hacía nada y no decía nada, y parecía un atajo roto.
+          setAvisoAtajo(
+            selectedGroupIds.size < 2
+              ? "Fusionar (F): seleccioná dos o más paredes con Ctrl+clic."
+              : `Fusionar (F): ${mergeBlockedReason ?? "estas piezas no se pueden fusionar."}`,
+          );
+        }
         return;
       }
 
@@ -2536,6 +2552,7 @@ export default function ReviewScreen({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [
     canMergeSelected,
+    mergeBlockedReason,
     handleMergeSelected,
     canSplitMerged,
     handleDivideMerged,
@@ -4062,6 +4079,17 @@ export default function ReviewScreen({
 
       {/* Tour guiado: invitación en primera visita + relanzable desde la palette */}
       <ReviewTour launchNonce={tourNonce} />
+
+      {avisoAtajo && (
+        <div
+          role="status"
+          className="fixed inset-x-0 bottom-24 z-[350] flex justify-center px-4 pointer-events-none"
+        >
+          <div className="rounded-xl border border-warning/30 bg-base-100/95 px-4 py-2 text-sm text-base-content/85 shadow-2xl backdrop-blur-md">
+            {avisoAtajo}
+          </div>
+        </div>
+      )}
 
       {/* Assembly window overlay */}
       {(assemblyWindowOpen && (onRequestAssemblyPreview || assemblyGuideData)) && (
