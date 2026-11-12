@@ -18,10 +18,14 @@ import {
   topologySignature,
   recomputeTopology,
   fetchNestingPreview,
+  generateProjectFiles,
+  EnsambleNoArmaError,
   normalizeAssemblyGuide,
   overridesToRecord,
   toWirePipelinePayload,
 } from "@/services/api";
+
+import verificacionReal from "./fixtures/verificacion-demo.json";
 
 const mockFetch = vi.fn();
 
@@ -325,6 +329,102 @@ describe("categorySignature", () => {
 
   it("sin recategorizaciones la firma es vacía", () => {
     expect(categorySignature({})).toBe("");
+  });
+});
+
+describe("verificación en /nesting-preview y /generate", () => {
+  const pedidoNesting = {
+    file_id: "abc",
+    axis: "Y" as const,
+    min_area_m2: 1,
+    merges: [],
+    splits: [],
+    overrides: {},
+    wall_wall_decisions: {},
+    marks: [],
+    sheet_config: { width_m: 1, height_m: 0.6, gap_m: 0.003 },
+    scale_denom: 100,
+  };
+  const nestingVacio = {
+    wall_nesting: { sheets: [], config: {}, scale_denom: 100, unplaced: [] },
+    floor_nesting: { sheets: [], config: {}, scale_denom: 100, unplaced: [] },
+    config: { width_m: 1, height_m: 0.6, gap_m: 0.003 },
+  };
+
+  it("lee verificacion, absorbed_groups y warnings", async () => {
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({
+        ...nestingVacio,
+        verificacion: verificacionReal,
+        absorbed_groups: { "181": 213 },
+        warnings: ["7 superficies se cortan como una sola pieza"],
+      }),
+    );
+    const r = await fetchNestingPreview(pedidoNesting);
+    expect(r.verificacion?.veredicto).toBe("no_arma");
+    // `aplicar` no se cameliza: vuelve al backend tal cual.
+    const fusionar = r.verificacion!.problemas.flatMap((p) => p.acciones).find((a) => a.tipo === "fusionar");
+    expect(fusionar?.aplicar).toEqual({ merges: [[179, 211]] });
+    expect(r.absorbedGroups).toEqual(new Map([[181, 213]]));
+    expect(r.warnings).toEqual(["7 superficies se cortan como una sola pieza"]);
+  });
+
+  /**
+   * Backend que no conoce la verificación: la clave no viene y la UI sigue con
+   * los avisos de siempre. No es lo mismo que `null`.
+   */
+  it("sin la clave, verificacion queda undefined (backend viejo)", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse(nestingVacio));
+    const r = await fetchNestingPreview(pedidoNesting);
+    expect(r.verificacion).toBeUndefined();
+  });
+
+  it("verificacion: null es 'no se pudo verificar'", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ ...nestingVacio, verificacion: null }));
+    const r = await fetchNestingPreview(pedidoNesting);
+    expect(r.verificacion).toBeNull();
+  });
+
+  it("manda las decisiones por par y las omite si están vacías", async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse(nestingVacio));
+    await fetchNestingPreview({
+      ...pedidoNesting,
+      wall_wall_decisions_by_pair: [{ group_a: 1, group_b: 2, yield_group_id: 2 }],
+    });
+    expect(JSON.parse(mockFetch.mock.calls[0][1].body).wall_wall_decisions_by_pair).toEqual([
+      { group_a: 1, group_b: 2, yield_group_id: 2 },
+    ]);
+
+    mockFetch.mockResolvedValueOnce(jsonResponse(nestingVacio));
+    await fetchNestingPreview({ ...pedidoNesting, wall_wall_decisions_by_pair: [] });
+    expect(JSON.parse(mockFetch.mock.calls[1][1].body)).not.toHaveProperty(
+      "wall_wall_decisions_by_pair",
+    );
+  });
+
+  /**
+   * El 409 no es un error genérico: trae el reporte para mostrar QUÉ no arma y
+   * ofrecer "Generar igual". Tratarlo como cualquier error lo perdía.
+   */
+  it("un 409 de /generate se vuelve EnsambleNoArmaError con el reporte", async () => {
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse(
+        {
+          code: "ensamble_no_arma",
+          message: "La maqueta tiene uniones que no arman.",
+          verificacion: verificacionReal,
+        },
+        409,
+      ),
+    );
+    const err = await generateProjectFiles({
+      file_id: "abc",
+      original_filename: "demo.obj",
+      bloquear_si_no_arma: true,
+    }).catch((e) => e);
+    expect(err).toBeInstanceOf(EnsambleNoArmaError);
+    expect(err.verificacion.veredicto).toBe("no_arma");
+    expect(JSON.parse(mockFetch.mock.calls[0][1].body).bloquear_si_no_arma).toBe(true);
   });
 });
 

@@ -1,5 +1,6 @@
 "use client";
 
+import { decisionesPorPar } from "@/core/decisiones-por-par";
 import { Suspense, useEffect, useCallback, useState, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useProjectContext } from "@/context/ProjectContext";
@@ -193,6 +194,10 @@ function ReviewPageContent() {
           // mandarla, el backend devuelve la proyección cruda.
           scaleDenom: scale,
           wallWallDecisions: decisionsToRecord(savedWallWallDecisions),
+          wallWallDecisionsByPair: decisionesPorPar(
+            savedWallWallDecisions,
+            phase1Result.wallWallJoints ?? [],
+          ),
         },
         next,
       );
@@ -269,6 +274,10 @@ function ReviewPageContent() {
         overrides: overridesToRecord(savedOverrides),
         scaleDenom: scale,
         wallWallDecisions: decisionsToRecord(savedWallWallDecisions),
+        wallWallDecisionsByPair: decisionesPorPar(
+          savedWallWallDecisions,
+          phase1Result.wallWallJoints ?? [],
+        ),
       });
 
       void recomputeTopology(payload, token)
@@ -360,6 +369,21 @@ function ReviewPageContent() {
     [savedMerges, setSavedMerges, runRecompute],
   );
 
+  /**
+   * Fusiones que pide una acción de la verificación. A diferencia de
+   * `handleAddMerge`, espera al recálculo: el nesting que se pide después tiene
+   * que ver la topología ya fusionada.
+   */
+  const handleAddMerges = useCallback(
+    async (clusters: number[][]) => {
+      if (clusters.length === 0) return;
+      const next = [...savedMerges, ...clusters];
+      setSavedMerges(next);
+      await runRecompute({ merges: next });
+    },
+    [savedMerges, setSavedMerges, runRecompute],
+  );
+
   const handleRemoveMerge = useCallback(
     (index: number) => {
       const next = savedMerges.filter((_, i) => i !== index);
@@ -414,6 +438,10 @@ function ReviewPageContent() {
           splits: savedSplits.map((s): SplitOperation => ({ group_id: s.groupId, mode: s.mode })),
           overrides: overridesToRecord(overrides),
           wall_wall_decisions: decisionsToRecord(wallWallDecisions),
+          wall_wall_decisions_by_pair: decisionesPorPar(
+            wallWallDecisions,
+            phase1Result.wallWallJoints ?? [],
+          ),
           marks,
           sheet_config: {
             width_m: sheetConfig.widthM,
@@ -566,6 +594,10 @@ function ReviewPageContent() {
               ),
               overrides: overridesToRecord(request.overrides),
               wall_wall_decisions: decisionsToRecord(request.wallWallDecisions),
+              wall_wall_decisions_by_pair: decisionesPorPar(
+                request.wallWallDecisions,
+                phase1Result.wallWallJoints ?? [],
+              ),
               marks: request.marks,
               sheet_config: {
                 width_m: sheetConfig.widthM,
@@ -640,6 +672,7 @@ function ReviewPageContent() {
       onCancel={handleReviewCancel}
       onRotateAxis={handleRotateAxis}
       onAddMerge={handleAddMerge}
+      onAddMerges={handleAddMerges}
       onRemoveMerge={handleRemoveMerge}
       onReplaceMerges={handleReplaceMerges}
       onAddSplit={handleAddSplit}

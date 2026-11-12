@@ -1,5 +1,6 @@
 "use client";
 
+import { decisionesPorPar } from "@/core/decisiones-por-par";
 import { Suspense, useState, useCallback, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { BookOpen } from "lucide-react";
@@ -7,6 +8,9 @@ import { useProjectContext } from "@/context/ProjectContext";
 import { useAuth } from "@/context/AuthContext";
 import { useSubscription } from "@/context/SubscriptionContext";
 import PaymentScreen from "@/components/PaymentScreen";
+import VerificacionPanel from "@/components/VerificacionPanel";
+import ProbetaCard from "@/components/ProbetaCard";
+import type { Verificacion } from "@/core/verificacion";
 import {
   base64ToBlob,
   generateProjectFiles,
@@ -16,6 +20,7 @@ import {
   ribsForApi,
   columnsForApi,
   type SplitOperation,
+  EnsambleNoArmaError,
 } from "@/services/api";
 import { extractAssemblyGuideFromZip } from "@/core/assembly-guide";
 import {
@@ -202,6 +207,7 @@ function PaymentPageContent() {
     isLoadingSession,
     resetProject,
     setAssemblyGuideData,
+    nestingData,
   } = useProjectContext();
 
   const [planCheckout, setPlanCheckout] = useState<PlanCheckoutPayload | null>(null);
@@ -210,6 +216,15 @@ function PaymentPageContent() {
   const [error, setError] = useState("");
   const [guidePdfMissing, setGuidePdfMissing] = useState(false);
   const [download, setDownload] = useState<{ url: string; name: string } | null>(null);
+  /**
+   * Verificación del backend (CONTRATO_verificacion.md §5). `bloqueo`: el 409 de
+   * `/generate` con el reporte. `aceptoNoArma`: el usuario ya vio que no arma y
+   * eligió seguir — entonces se genera con `forzar`.
+   */
+  const [bloqueo, setBloqueo] = useState<{ message: string; verificacion: Verificacion | null } | null>(null);
+  const [aceptoNoArma, setAceptoNoArma] = useState(false);
+  /** La última verificación del nesting: con el mismo estado que se va a generar. */
+  const verificacionPrevia = nestingData?.verificacion;
 
   useEffect(() => {
     if (!fromPlan) return;
@@ -255,11 +270,13 @@ function PaymentPageContent() {
     router.push("/review?assembly=1");
   }, [router]);
 
-  const proceedToGeneration = useCallback(async () => {
+  const proceedToGeneration = useCallback(async (forzarArg?: boolean) => {
     if (!phase1Result || !fileId) return;
+    const forzar = forzarArg ?? aceptoNoArma;
 
     setIsGenerating(true);
     setError("");
+    setBloqueo(null);
     setGuidePdfMissing(false);
 
     const stem =
@@ -284,6 +301,10 @@ function PaymentPageContent() {
         },
         overrides: overridesToRecord(savedOverrides),
         wall_wall_decisions: decisionsToRecord(savedWallWallDecisions),
+        wall_wall_decisions_by_pair: decisionesPorPar(
+          savedWallWallDecisions,
+          phase1Result.wallWallJoints ?? [],
+        ),
         merges: savedMerges,
         splits: savedSplits.map((s): SplitOperation => ({ group_id: s.groupId, mode: s.mode })),
         marks: savedMarks,
@@ -292,6 +313,10 @@ function PaymentPageContent() {
         mark_lines: markLinesForApi(savedMarkLines),
         ribs: ribsForApi(savedRibs),
         columns: columnsForApi(savedColumns),
+        // Siempre se pide el bloqueo: si no arma, el backend no genera y
+        // devuelve el reporte. `forzar` es la salida "Generar igual".
+        bloquear_si_no_arma: true,
+        forzar,
       }, token);
 
       if (!backendRes.zip_base64) {
@@ -311,6 +336,11 @@ function PaymentPageContent() {
         backendRes.zip_filename ?? `${stem}_planos.zip`,
       );
     } catch (backendErr: unknown) {
+      if (backendErr instanceof EnsambleNoArmaError) {
+        setBloqueo({ message: backendErr.message, verificacion: backendErr.verificacion });
+        setIsGenerating(false);
+        return;
+      }
       console.error(backendErr);
       setError(
         backendErr instanceof Error
@@ -343,6 +373,7 @@ function PaymentPageContent() {
     triggerDownload,
     setAssemblyGuideData,
     token,
+    aceptoNoArma,
   ]);
 
   const handlePaymentApproved = useCallback(async (paymentId: string) => {
@@ -366,6 +397,7 @@ function PaymentPageContent() {
   const handlePaymentError = useCallback((msg: string) => setError(msg), []);
   const handlePaymentCancel = useCallback(() => router.push("/review"), [router]);
   const handleBypassSuccess = useCallback(() => proceedToGeneration(), [proceedToGeneration]);
+  const handleRevisarEnsamble = useCallback(() => router.push("/review?assembly=1"), [router]);
   const handleAcceptTerms = useCallback(async () => {
     if (!token) throw new Error("Tenés que iniciar sesión para continuar.");
     await aceptarTerminos(token);
@@ -426,6 +458,34 @@ function PaymentPageContent() {
     );
   }
 
+  if (bloqueo) {
+    return (
+      <div className="flex flex-col min-h-screen items-center justify-center p-4">
+        <div className="card bg-base-100 shadow-2xl border border-base-200 w-full max-w-lg">
+          <div className="card-body gap-3">
+            <h2 className="text-xl font-bold">La maqueta no arma</h2>
+            <p className="text-sm text-base-content/70">{bloqueo.message}</p>
+            <div className="rounded-xl border border-base-300/50 overflow-hidden">
+              <VerificacionPanel verificacion={bloqueo.verificacion} soloNoArma />
+            </div>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <button type="button" className="btn btn-primary flex-1" onClick={handleRevisarEnsamble}>
+                Revisar
+              </button>
+              <button
+                type="button"
+                className="btn btn-outline flex-1"
+                onClick={() => void proceedToGeneration(true)}
+              >
+                Generar igual
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (isGenerating) {
     return (
       <div className="flex flex-col min-h-screen items-center justify-center p-4">
@@ -433,6 +493,39 @@ function PaymentPageContent() {
           <div className="card-body items-center justify-center py-20 gap-4">
             <span className="loading loading-spinner loading-lg text-primary" />
             <p className="font-medium text-base-content/80">Generando planos en el servidor...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // No arma y el usuario todavía no eligió seguir: se le muestra ANTES de pagar.
+  // Si el 409 llegara recién después del pago, se quedaría sin archivos.
+  if (verificacionPrevia?.veredicto === "no_arma" && !aceptoNoArma) {
+    return (
+      <div className="flex flex-col min-h-screen items-center justify-center p-4">
+        <div className="card bg-base-100 shadow-2xl border border-base-200 w-full max-w-lg">
+          <div className="card-body gap-3">
+            <h2 className="text-xl font-bold">Antes de generar: la maqueta no arma</h2>
+            <p className="text-sm text-base-content/70">
+              Hay uniones donde las piezas se pisan o no se tocan. Podés revisarlas en el
+              instructivo o generar igual.
+            </p>
+            <div className="rounded-xl border border-base-300/50 overflow-hidden">
+              <VerificacionPanel verificacion={verificacionPrevia} soloNoArma />
+            </div>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <button type="button" className="btn btn-primary flex-1" onClick={handleRevisarEnsamble}>
+                Revisar
+              </button>
+              <button
+                type="button"
+                className="btn btn-outline flex-1"
+                onClick={() => setAceptoNoArma(true)}
+              >
+                Continuar igual
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -452,6 +545,22 @@ function PaymentPageContent() {
         onCancel={handlePaymentCancel}
         onBypassSuccess={handleBypassSuccess}
         onAcceptTerms={handleAcceptTerms}
+        antes={
+          verificacionPrevia !== undefined ? (
+            <div className="rounded-xl border border-base-300/50 overflow-hidden">
+              {/* Con "revisar" no se bloquea: se genera, avisando cuántas uniones quedaron para mirar. */}
+              <VerificacionPanel verificacion={verificacionPrevia} soloNoArma />
+              {verificacionPrevia && verificacionPrevia.resumen.unionesRevisar > 0 && (
+                <p className="px-3 py-2 text-xs text-base-content/60">
+                  {verificacionPrevia.resumen.unionesRevisar === 1
+                    ? "1 unión quedó para revisar: arma, pero conviene mirarla en el instructivo."
+                    : `${verificacionPrevia.resumen.unionesRevisar} uniones quedaron para revisar: arman, pero conviene mirarlas en el instructivo.`}
+                </p>
+              )}
+            </div>
+          ) : undefined
+        }
+        despues={<ProbetaCard token={token} />}
       />
     </div>
   );

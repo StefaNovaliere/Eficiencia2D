@@ -19,6 +19,7 @@ import {
   parseFinalPieces,
   parseNestingPlacements,
 } from "@/core/final-pieces";
+import { parseVerificacion, type DecisionPorPar, type Verificacion } from "@/core/verificacion";
 import { parseApiError } from "@/services/api-errors";
 import { parseSavedState, type ProjectSavedState } from "@/services/project-state";
 
@@ -212,7 +213,7 @@ function compactOptionalPipelineFields(
 ): Record<string, unknown> {
   const out = { ...wire };
 
-  for (const key of ["user_cuts", "marks", "merges", "splits"] as const) {
+  for (const key of ["user_cuts", "marks", "merges", "splits", "wall_wall_decisions_by_pair"] as const) {
     const val = out[key];
     if (Array.isArray(val) && val.length === 0) {
       delete out[key];
@@ -276,7 +277,12 @@ export interface RecomputePayload {
    */
   scale_denom?: number;
   /** Quién cede en cada junta pared-pared; sin esto los recortes elegidos no se ven. */
-  wall_wall_decisions?: Record<number, number>;
+  wall_wall_decisions?: Record<number, number>;  /**
+   * Quién cede, identificado por los dos grupos de la junta. Sobrevive a las
+   * fusiones, divisiones y cambios de escala que corren el índice; si llegan
+   * las dos formas para la misma unión, el backend usa ésta.
+   */
+  wall_wall_decisions_by_pair?: DecisionPorPar[];
 }
 
 /** `[{ groupId, newCategory }]` → `{ groupId: categoría }` para el backend. */
@@ -359,6 +365,8 @@ export interface RecomputeBase {
   overrides: Record<number, string>;
   scaleDenom: number;
   wallWallDecisions: Record<number, number>;
+  /** Las mismas decisiones expresadas por par de grupos (ver `decisionesPorPar`). */
+  wallWallDecisionsByPair?: DecisionPorPar[];
 }
 
 /**
@@ -395,6 +403,11 @@ export function buildRecomputePayload(
     overrides: next.overrides ?? base.overrides,
     scale_denom: next.scale_denom ?? base.scaleDenom,
     wall_wall_decisions: next.wall_wall_decisions ?? base.wallWallDecisions,
+    // Si quien llama cambia las decisiones por índice, las por par de la base
+    // ya no las describen: no se mandan para no pisar las nuevas.
+    ...(next.wall_wall_decisions === undefined && base.wallWallDecisionsByPair
+      ? { wall_wall_decisions_by_pair: base.wallWallDecisionsByPair }
+      : {}),
   };
 }
 
@@ -408,6 +421,12 @@ export interface NestingPreviewPayload {
   splits: SplitOperation[];
   overrides: Record<number, string>;
   wall_wall_decisions: Record<number, number>;
+  /**
+   * Quién cede, identificado por los dos grupos de la junta. Sobrevive a las
+   * fusiones, divisiones y cambios de escala que corren el índice; si llegan
+   * las dos formas para la misma unión, el backend usa ésta.
+   */
+  wall_wall_decisions_by_pair?: DecisionPorPar[];
   marks: number[];
   sheet_config: {
     width_m: number;
@@ -455,12 +474,25 @@ export interface GenerateRequestPayload {
   };
   overrides?: Record<number, string>;
   wall_wall_decisions?: Record<number, number>;
+  /**
+   * Quién cede, identificado por los dos grupos de la junta. Sobrevive a las
+   * fusiones, divisiones y cambios de escala que corren el índice; si llegan
+   * las dos formas para la misma unión, el backend usa ésta.
+   */
+  wall_wall_decisions_by_pair?: DecisionPorPar[];
   merges?: number[][];
   /** Group splits recorded in Review (replayed by the backend). */
   splits?: SplitOperation[];
   /** GeometryGroup ids whose openings (inner-ring holes) must be engraved
    *  (red, MARK_VECTOR / ACI 1) instead of cut. */
   marks?: number[];
+  /**
+   * Si el veredicto es `no_arma`, el backend NO genera y responde 409 con el
+   * reporte (`EnsambleNoArmaError`). Ver CONTRATO_verificacion.md §5.
+   */
+  bloquear_si_no_arma?: boolean;
+  /** Generar igual aunque no arme: la segunda salida del 409. */
+  forzar?: boolean;
   /** Recortes manuales del usuario (panel-local, metros). Campo reservado: la
    *  herramienta de corte se re-implementará contra el backend. */
   user_cuts?: Record<string, unknown>[];
@@ -592,6 +624,20 @@ export async function fetchNestingPreview(
         data.assemblyWarnings ?? raw.assembly_warnings,
       );
       const nestingPlacements = parseNestingPlacements(raw.placements);
+      const verificacion = parseVerificacion(raw.verificacion);
+      const absorbedGroups = new Map<number, number>();
+      for (const [k, v] of Object.entries(
+        (raw.absorbed_groups ?? {}) as Record<string, unknown>,
+      )) {
+        const absorbido = Number(k);
+        const dueño = Number(v);
+        if (Number.isFinite(absorbido) && Number.isFinite(dueño)) {
+          absorbedGroups.set(absorbido, dueño);
+        }
+      }
+      const warnings = Array.isArray(raw.warnings)
+        ? raw.warnings.filter((w: unknown): w is string => typeof w === "string")
+        : undefined;
       return {
         ...data,
         ...(finalPieces.length > 0 ? { finalPieces } : { finalPieces: undefined }),
@@ -601,6 +647,11 @@ export async function fetchNestingPreview(
         ...(nestingPlacements.size > 0
           ? { nestingPlacements }
           : { nestingPlacements: undefined }),
+        // Parseado aparte: el camelizado genérico tocaría también las claves de
+        // `aplicar`, que hay que devolverle al backend tal cual llegaron.
+        verificacion,
+        absorbedGroups: absorbedGroups.size > 0 ? absorbedGroups : undefined,
+        warnings,
       };
     }
 
@@ -1270,6 +1321,20 @@ export async function uploadDemoObj(
   return uploadModelFile(file, token);
 }
 
+/**
+ * `/generate` se negó a generar porque la maqueta no arma (HTTP 409,
+ * `code: "ensamble_no_arma"`). Trae el reporte para mostrar QUÉ no arma; para
+ * generar igual se reenvía el mismo pedido con `forzar: true`.
+ */
+export class EnsambleNoArmaError extends Error {
+  readonly verificacion: Verificacion | null;
+  constructor(message: string, verificacion: Verificacion | null) {
+    super(message);
+    this.name = "EnsambleNoArmaError";
+    this.verificacion = verificacion;
+  }
+}
+
 export async function generateProjectFiles(
   payload: GenerateRequestPayload,
   token?: string | null,
@@ -1284,9 +1349,69 @@ export async function generateProjectFiles(
     token ? { token } : undefined,
   );
 
+  if (res.status === 409) {
+    const body = await res.json().catch(() => null);
+    if (body?.code === "ensamble_no_arma") {
+      throw new EnsambleNoArmaError(
+        typeof body.message === "string"
+          ? body.message
+          : "La maqueta tiene uniones que no arman.",
+        parseVerificacion(body.verificacion) ?? null,
+      );
+    }
+  }
+
   if (!res.ok) {
     await parseApiError(res, `Error al generar: ${res.statusText}`);
   }
 
   return res.json();
+}
+
+/** Respuesta de `POST /api/probeta`: la plancha de calibración. */
+export interface ProbetaResponse {
+  generatedFiles: string[];
+  zipBase64: string;
+  zipFilename: string;
+  instrucciones: {
+    espesorNominalMm: number;
+    anchosMm: number[];
+    pasos: string[];
+    lectura: string;
+  };
+}
+
+/**
+ * Plancha de calibración: tres piezas para medir la placa y el láser antes de
+ * cortar la maqueta. No necesita modelo. Ver CONTRATO_verificacion.md §6.
+ */
+export async function fetchProbeta(
+  payload: { sheet_config?: { width_m: number; height_m: number; gap_m: number }; paper?: string } = {},
+  token?: string | null,
+): Promise<ProbetaResponse> {
+  const res = await apiFetch(
+    "/api/probeta",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+    token ? { token } : undefined,
+  );
+  if (!res.ok) {
+    await parseApiError(res, `Error al pedir la probeta: ${res.statusText}`);
+  }
+  const raw = await res.json();
+  const ins = raw.instrucciones ?? {};
+  return {
+    generatedFiles: Array.isArray(raw.generated_files) ? raw.generated_files : [],
+    zipBase64: String(raw.zip_base64 ?? ""),
+    zipFilename: String(raw.zip_filename ?? "probeta_calibracion.zip"),
+    instrucciones: {
+      espesorNominalMm: Number(ins.espesor_nominal_mm) || 0,
+      anchosMm: Array.isArray(ins.anchos_mm) ? ins.anchos_mm.map(Number) : [],
+      pasos: Array.isArray(ins.pasos) ? ins.pasos.map(String) : [],
+      lectura: typeof ins.lectura === "string" ? ins.lectura : "",
+    },
+  };
 }

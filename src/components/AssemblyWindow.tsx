@@ -13,6 +13,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   HelpCircle,
+  Palette,
 } from "lucide-react";
 import {
   normalizeAssemblyPreviewData,
@@ -44,6 +45,8 @@ import { resolveSlabThicknessM } from "@/core/assembly-slab";
 import { buildYieldClipSpecs, type WallWallDecisions } from "@/core/wall-yield-clip";
 import { buildAssemblyDump, logAssemblyDump } from "@/core/assembly-dump";
 import { conEtiquetasDeCorte } from "@/core/assembly-cutset";
+import type { AplicarAccion } from "@/core/verificacion";
+import VerificacionPanel from "@/components/VerificacionPanel";
 
 /** Espesor del material físico de la maqueta. MDF 3 mm por defecto (futuro:
  *  selector MDF/cartón por proyecto). Se escala por la escala de impresión. */
@@ -348,6 +351,14 @@ export interface AssemblyWindowProps {
   projectName?: string;
   onClose: () => void;
   onReload: () => void;
+  /**
+   * Aplica una acción de un problema de la verificación: fusiona `aplicar` con
+   * el estado de la revisión y vuelve a pedir el nesting. El reporte siguiente
+   * es la verdad; acá no se lleva la cuenta.
+   */
+  onAplicarAccion?: (aplicar: AplicarAccion) => Promise<void>;
+  /** `escala_mas_fina`: cambiar la escala de impresión y volver a verificar. */
+  onCambiarEscala?: (denominador: number) => void;
 }
 
 export default function AssemblyWindow({
@@ -360,6 +371,8 @@ export default function AssemblyWindow({
   projectName = "Proyecto",
   onClose,
   onReload,
+  onAplicarAccion,
+  onCambiarEscala,
 }: AssemblyWindowProps) {
   const [selectedPanelId, setSelectedPanelId] = useState<string | null>(null);
   const [view, setView] = useState<"elevations" | "table">("elevations");
@@ -507,6 +520,44 @@ export default function AssemblyWindow({
   }, [phase1, phase1Corte, hayCorte, setDeCorte, nestingData, wallWallDecisions, slabThicknessM]);
 
   // Choques del chequeo de ensamble, lo más grave primero.
+  /**
+   * Veredicto del backend sobre las piezas que se cortan. `undefined`: backend
+   * que no lo conoce, se sigue con `assemblyWarnings`. Si viene (aunque sea
+   * null), la lista vieja deja de mostrarse: salía de un chequeo sobre el
+   * MODELO y contradecía a éste.
+   */
+  const verificacion = nestingData?.verificacion;
+  /**
+   * Avisos de la subida más los de la generación a esta escala (fusiones
+   * automáticas, piezas más finas que la placa). Antes sólo se veían los de la
+   * subida, que no dependen de la escala.
+   */
+  const avisos = useMemo(
+    () => [...new Set([...phase1.warnings, ...(nestingData?.warnings ?? [])])],
+    [phase1.warnings, nestingData?.warnings],
+  );
+  const [problemaActivoId, setProblemaActivoId] = useState<number | null>(null);
+  const [colorPorEstado, setColorPorEstado] = useState(true);
+  const [aplicando, setAplicando] = useState(false);
+  // Un reporte nuevo renumera los problemas: la selección vieja no aplica.
+  useEffect(() => setProblemaActivoId(null), [verificacion]);
+  const problemaActivo = useMemo(
+    () => verificacion?.problemas.find((p) => p.id === problemaActivoId) ?? null,
+    [verificacion, problemaActivoId],
+  );
+  const aplicarAccion = useCallback(
+    async (aplicar: AplicarAccion) => {
+      if (!onAplicarAccion) return;
+      setAplicando(true);
+      try {
+        await onAplicarAccion(aplicar);
+      } finally {
+        setAplicando(false);
+      }
+    },
+    [onAplicarAccion],
+  );
+
   const assemblyWarnings = useMemo(
     () => sortWarningsBySeverity(nestingData?.assemblyWarnings ?? []),
     [nestingData],
@@ -701,6 +752,9 @@ export default function AssemblyWindow({
                 viewerSchema={displayData.viewerSchema}
                 slabThicknessM={slabThicknessM}
                 warnings={assemblyWarnings}
+                verificacion={verificacion}
+                problemaActivo={problemaActivo}
+                colorPorEstado={colorPorEstado}
               />
             </ErrorBoundary>
           )}
@@ -715,7 +769,20 @@ export default function AssemblyWindow({
             marcador; acá se listan con su magnitud. Sin avisos, el cartel verde
             es la señal de que se puede mandar a cortar.
           */}
-          {displayData && (
+          {displayData && verificacion !== undefined && (
+            <div className="assembly-no-print shrink-0">
+              <VerificacionPanel
+                verificacion={verificacion}
+                problemaActivoId={problemaActivoId}
+                onSeleccionar={setProblemaActivoId}
+                onAplicar={onAplicarAccion ? (a) => a.aplicar && void aplicarAccion(a.aplicar) : undefined}
+                onCambiarEscala={onCambiarEscala}
+                aplicando={aplicando}
+              />
+            </div>
+          )}
+
+          {displayData && verificacion === undefined && (
             assemblyWarnings.length > 0 ? (
               <div className="shrink-0 border-b border-base-300/30 bg-error/5">
                 <div className="flex items-center gap-2 px-3 pt-2.5 pb-1.5">
@@ -824,16 +891,16 @@ export default function AssemblyWindow({
             posicional, y editar el modelo puede correrlas). Antes eso recortaba
             un muro ajeno en silencio.
           */}
-          {phase1.warnings.length > 0 && (
+          {avisos.length > 0 && (
             <div className="shrink-0 border-b border-base-300/30 bg-warning/5 px-3 py-2">
               <div className="flex items-center gap-2 pb-1">
                 <AlertTriangle className="w-3.5 h-3.5 text-warning shrink-0" />
                 <span className="text-xs font-semibold text-warning">
-                  {phase1.warnings.length === 1 ? "Aviso del modelo" : "Avisos del modelo"}
+                  {avisos.length === 1 ? "Aviso del modelo" : "Avisos del modelo"}
                 </span>
               </div>
               <ul className="space-y-1">
-                {phase1.warnings.map((w, i) => (
+                {avisos.map((w, i) => (
                   <li key={i} className="text-[11px] leading-snug text-base-content/65">
                     {w}
                   </li>
@@ -861,6 +928,17 @@ export default function AssemblyWindow({
                 <Square className="w-3 h-3" />
                 Tabla completa
               </button>
+              {verificacion && (
+                <button
+                  type="button"
+                  className="btn btn-xs btn-ghost gap-1 ml-auto"
+                  onClick={() => setColorPorEstado((v) => !v)}
+                  title="Pintar las piezas por el estado de la verificación o ver el MDF"
+                >
+                  <Palette className="w-3 h-3" />
+                  {colorPorEstado ? "Color: estado" : "Color: MDF"}
+                </button>
+              )}
               {selectedPanelId && (
                 <button
                   type="button"

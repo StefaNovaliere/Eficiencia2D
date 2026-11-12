@@ -1,5 +1,7 @@
 "use client";
 
+import type { AplicarAccion } from "@/core/verificacion";
+import { aplicarDecisionesPorPar, remapearDecisiones } from "@/core/decisiones-por-par";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from "react-resizable-panels";
@@ -168,6 +170,8 @@ export interface ReviewScreenProps {
   onRotateAxis: () => void;
   /** Agrega una fusión y dispara recompute. */
   onAddMerge: (cluster: number[]) => void;
+  /** Fusiones de una acción de la verificación; resuelve cuando terminó el recálculo. */
+  onAddMerges?: (clusters: number[][]) => Promise<void>;
   /** Quita la fusión en el índice dado y dispara recompute. */
   onRemoveMerge: (index: number) => void;
   /** Reemplaza la lista completa de fusiones (p. ej. desfusionar un miembro). */
@@ -535,6 +539,7 @@ export default function ReviewScreen({
   onCancel,
   onRotateAxis,
   onAddMerge,
+  onAddMerges,
   onRemoveMerge,
   onReplaceMerges,
   onAddSplit,
@@ -1360,13 +1365,21 @@ export default function ReviewScreen({
       return;
     }
     if (effectiveRef.current === phase1) return;
+    const juntasViejas = effectiveRef.current.wallWallJoints ?? [];
     effectiveRef.current = phase1;
-    const m = new Map<number, number>();
-    for (const ww of phase1.wallWallJoints) {
-      if (ww.suggestedYieldGroupId != null)
-        m.set(ww.jointIndex, ww.suggestedYieldGroupId);
-    }
-    setWallWallDecisions(m);
+    // Antes acá se tiraban TODAS las decisiones y se volvía a las sugerencias.
+    // `phase1` cambia con cada fusión, división, cambio de escala y hasta con el
+    // refresco de etiquetas, así que elegir quién cede no sobrevivía a casi
+    // nada. Ahora cada decisión sigue a su par de grupos; sólo las juntas que no
+    // tenían decisión toman la sugerencia.
+    setWallWallDecisions((prev) => {
+      const m = remapearDecisiones(prev, juntasViejas, phase1.wallWallJoints ?? []);
+      for (const ww of phase1.wallWallJoints ?? []) {
+        if (!m.has(ww.jointIndex) && ww.suggestedYieldGroupId != null)
+          m.set(ww.jointIndex, ww.suggestedYieldGroupId);
+      }
+      return m;
+    });
   }, [phase1]);
 
   // Clear the highlighted joint when the encounters panel closes.
@@ -2208,6 +2221,68 @@ export default function ReviewScreen({
     assemblyAutoOpenRef.current = true;
     setAssemblyWindowOpen(true);
   }, [openAssemblyInstructivo]);
+
+  /**
+   * Acciones de la verificación (CONTRATO_verificacion.md §3). `aplicar` trae las
+   * mismas claves que ya viajan al backend: se fusiona con el estado de la
+   * revisión y se vuelve a pedir el nesting. El reporte siguiente es la verdad,
+   * así que acá no se lleva la cuenta de qué problema se resolvió.
+   *
+   * La recarga va por un contador y no directo: tiene que correr después del
+   * render que ya tiene los descartes y las decisiones nuevas, porque el pedido
+   * se arma con el estado de ese render.
+   */
+  const [recargaVerificacion, setRecargaVerificacion] = useState(0);
+  const handleAplicarAccion = useCallback(
+    async (aplicar: AplicarAccion) => {
+      pushHistory();
+      if (aplicar.overrides) {
+        const nuevos = aplicar.overrides;
+        setOverrides((prev) => {
+          const next = new Map(prev);
+          for (const [gid, cat] of Object.entries(nuevos)) {
+            const id = Number(gid);
+            if (Number.isFinite(id)) next.set(id, cat as FaceCategory);
+          }
+          return next;
+        });
+      }
+      const porPar = aplicar.wall_wall_decisions_by_pair ?? [];
+      if (porPar.length > 0) {
+        const { decisiones, sinJunta } = aplicarDecisionesPorPar(
+          wallWallDecisions,
+          phase1.wallWallJoints ?? [],
+          porPar,
+        );
+        if (sinJunta.length > 0) {
+          console.warn("[verificación] decisiones sin junta en la topología actual:", sinJunta);
+        }
+        setWallWallDecisions(decisiones);
+      }
+      if (aplicar.merges && aplicar.merges.length > 0) {
+        if (onAddMerges) await onAddMerges(aplicar.merges);
+        else for (const m of aplicar.merges) onAddMerge(m);
+      }
+      setRecargaVerificacion((n) => n + 1);
+    },
+    [pushHistory, wallWallDecisions, phase1.wallWallJoints, onAddMerges, onAddMerge],
+  );
+
+  const handleCambiarEscalaVerificacion = useCallback(
+    (denominador: number) => {
+      onPrintScaleChange(denominador);
+      setRecargaVerificacion((n) => n + 1);
+    },
+    [onPrintScaleChange],
+  );
+
+  useEffect(() => {
+    if (recargaVerificacion === 0 || !assemblyWindowOpen) return;
+    void loadAssemblyPreview(true);
+    // Sólo cuando una acción lo pide: `loadAssemblyPreview` cambia con cada
+    // edición de la revisión y recargaría sin que nadie lo pidiera.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recargaVerificacion]);
 
   // Recargar siempre al abrir la ventana — refleja overrides, cortes y fusiones actuales.
   useEffect(() => {
@@ -4102,6 +4177,8 @@ export default function ReviewScreen({
           wallWallDecisions={wallWallDecisions}
           onClose={() => setAssemblyWindowOpen(false)}
           onReload={() => void loadAssemblyPreview(true)}
+          onAplicarAccion={handleAplicarAccion}
+          onCambiarEscala={handleCambiarEscalaVerificacion}
         />
       )}
 

@@ -1,5 +1,6 @@
 "use client";
 
+import { decisionesPorPar } from "@/core/decisiones-por-par";
 import { useEffect, useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useProjectContext, type PdfPageMode } from "@/context/ProjectContext";
@@ -126,6 +127,10 @@ export default function NestingPage() {
           splits: savedSplits.map((s): SplitOperation => ({ group_id: s.groupId, mode: s.mode })),
           overrides: overridesToRecord(savedOverrides),
           wall_wall_decisions: decisionsToRecord(savedWallWallDecisions),
+          wall_wall_decisions_by_pair: decisionesPorPar(
+            savedWallWallDecisions,
+            phase1Result.wallWallJoints ?? [],
+          ),
           marks: savedMarks,
           sheet_config: {
             width_m: newConfig.widthM,
