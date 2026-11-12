@@ -1,8 +1,8 @@
 "use client";
 
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Canvas } from "@react-three/fiber";
-import { Grid, OrbitControls } from "@react-three/drei";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import { Grid, Line, OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
 import gsap from "gsap";
 import { ChevronLeft, ChevronRight } from "lucide-react";
@@ -12,6 +12,12 @@ import type {
 } from "@/core/assembly-sequence";
 import type { Vec3 } from "@/core/types";
 import type { AssemblyWarning } from "@/core/final-pieces";
+import {
+  segmentosDeProblema,
+  type EstadoVerificacion,
+  type ProblemaVerificacion,
+  type Verificacion,
+} from "@/core/verificacion";
 import {
   computeSequenceBounds,
   prepareAssemblyPiecesForRender,
@@ -32,11 +38,39 @@ const SUPPORT_MARK_COLOR = 0xdc2626; // marcas de apoyo (rojo, capa MARK)
 const CONFLICT_COLOR = 0xef4444; // piezas que choca el chequeo de ensamble
 /** Muestra/oculta las marcas de apoyo rojas en el instructivo. */
 const SupportMarksContext = createContext(false);
+/** Colores por estado de la verificación (ver CONTRATO_verificacion.md). */
+const ESTADO_COLOR: Record<EstadoVerificacion, number> = {
+  ok: 0x22c55e,
+  revisar: 0xeab308,
+  no_arma: 0xef4444,
+};
+
 /**
- * Piezas que el backend marcó en conflicto (se atraviesan, quedan sin apoyo…).
- * Va por contexto para no enhebrar la prop por toda la jerarquía de piezas.
+ * Cómo se pinta cada pieza: por el estado que le da la verificación, o en rojo
+ * si el chequeo viejo la marcó en conflicto. Y cuáles se atenúan porque hay un
+ * problema seleccionado que no las incluye. Va por contexto para no enhebrar la
+ * prop por toda la jerarquía de piezas.
  */
-const ConflictContext = createContext<ReadonlySet<string>>(new Set<string>());
+interface Pintado {
+  color: (id: string) => number | null;
+  atenuada: (id: string) => boolean;
+}
+const PINTADO_NEUTRO: Pintado = { color: () => null, atenuada: () => false };
+const ConflictContext = createContext<Pintado>(PINTADO_NEUTRO);
+
+/** Props de material para una pieza según su pintado. */
+function materialDePintado(pintado: Pintado, id: string, base: number) {
+  const c = pintado.color(id);
+  const dim = pintado.atenuada(id);
+  return {
+    color: c ?? base,
+    emissive: c ?? 0x000000,
+    emissiveIntensity: c != null ? 0.25 : 0,
+    transparent: dim,
+    opacity: dim ? 0.12 : 1,
+    depthWrite: !dim,
+  };
+}
 const MDF_COLOR = 0xc9a97e; // tan cálido (MDF)
 const EDGE_BURNT = 0x7a5c3c; // canto de MDF (chamuscado, apenas más oscuro que la cara)
 
@@ -142,8 +176,7 @@ function pieceSize(piece: AssemblySequencePiece): [number, number, number] {
 function StaticPiece({ piece }: { piece: AssemblySequencePiece }) {
   // El rojo de conflicto tiene que salir también acá: una pieza que se dibuja
   // como caja (sin contorno) es justamente la que más necesita el aviso.
-  const conflicts = useContext(ConflictContext);
-  const inConflict = conflicts.has(piece.id);
+  const pintado = useContext(ConflictContext);
   return (
     <mesh
       position={piecePosition(piece)}
@@ -154,9 +187,7 @@ function StaticPiece({ piece }: { piece: AssemblySequencePiece }) {
     >
       <boxGeometry args={pieceSize(piece)} />
       <meshStandardMaterial
-        color={inConflict ? CONFLICT_COLOR : pieceBaseColor(piece)}
-        emissive={inConflict ? CONFLICT_COLOR : 0x000000}
-        emissiveIntensity={inConflict ? 0.3 : 0}
+        {...materialDePintado(pintado, piece.id, pieceBaseColor(piece))}
         roughness={0.5}
         metalness={0.1}
       />
@@ -270,26 +301,32 @@ function StaticLiftedPiece({ piece }: { piece: AssemblySequencePiece }) {
     [lifted],
   );
   const showSupport = useContext(SupportMarksContext);
-  const conflicts = useContext(ConflictContext);
-  const inConflict = conflicts.has(piece.id);
+  const pintado = useContext(ConflictContext);
+  const atenuada = pintado.atenuada(piece.id);
 
   if (!slab?.cap) return <StaticPiece piece={piece} />;
 
   return (
     <group>
-      <mesh geometry={slab.cap} frustumCulled={false} castShadow receiveShadow>
+      <mesh geometry={slab.cap} frustumCulled={false} castShadow={!atenuada} receiveShadow>
         <meshStandardMaterial
-          color={inConflict ? CONFLICT_COLOR : MDF_COLOR}
-          emissive={inConflict ? CONFLICT_COLOR : 0x000000}
-          emissiveIntensity={inConflict ? 0.3 : 0}
+          {...materialDePintado(pintado, piece.id, MDF_COLOR)}
           roughness={0.7}
           metalness={0.05}
           side={THREE.DoubleSide}
         />
       </mesh>
       {slab.wall && (
-        <mesh geometry={slab.wall} frustumCulled={false} castShadow receiveShadow>
-          <meshStandardMaterial color={EDGE_BURNT} roughness={0.85} metalness={0.05} side={THREE.DoubleSide} />
+        <mesh geometry={slab.wall} frustumCulled={false} castShadow={!atenuada} receiveShadow>
+          <meshStandardMaterial
+            color={EDGE_BURNT}
+            roughness={0.85}
+            metalness={0.05}
+            side={THREE.DoubleSide}
+            transparent={atenuada}
+            opacity={atenuada ? 0.12 : 1}
+            depthWrite={!atenuada}
+          />
         </mesh>
       )}
       {slotGeom && (
@@ -483,12 +520,15 @@ function AssemblyScene({
   centerOffset,
   diag,
   conflictPoints,
+  segmentos = [],
 }: {
   pieces: AssemblySequencePiece[];
   currentStep: number;
   centerOffset: THREE.Vector3;
   diag: number;
   conflictPoints: Vec3[];
+  /** Tramos de las uniones del problema seleccionado, coloreados por estado. */
+  segmentos?: Array<{ a: Vec3; b: Vec3; estado: EstadoVerificacion }>;
 }) {
   const dropHeight = diag * DROP_HEIGHT_FACTOR;
 
@@ -525,8 +565,53 @@ function AssemblyScene({
           />
         </mesh>
       ))}
+      {segmentos.map((sg, i) => (
+        <Line
+          key={`sg-${i}`}
+          points={[
+            [sg.a.x, sg.a.y, sg.a.z],
+            [sg.b.x, sg.b.y, sg.b.z],
+          ]}
+          color={ESTADO_COLOR[sg.estado]}
+          lineWidth={6}
+          depthTest={false}
+          renderOrder={4}
+        />
+      ))}
     </group>
   );
+}
+
+/**
+ * Lleva la cámara al punto de un problema: centra la órbita ahí y se acerca a
+ * una distancia proporcional al modelo, sin cambiar el ángulo de vista.
+ */
+function CamaraAlPunto({ punto, distancia }: { punto: THREE.Vector3 | null; distancia: number }) {
+  const camera = useThree((s) => s.camera);
+  const controls = useThree((s) => s.controls) as unknown as
+    | { target: THREE.Vector3; update: () => void }
+    | null;
+  const destino = useRef<{ target: THREE.Vector3; pos: THREE.Vector3 } | null>(null);
+
+  useEffect(() => {
+    if (!punto || !controls) return;
+    const dir = new THREE.Vector3().subVectors(camera.position, controls.target);
+    if (dir.lengthSq() < 1e-9) dir.set(1, 1, 1);
+    dir.normalize().multiplyScalar(distancia);
+    destino.current = { target: punto.clone(), pos: punto.clone().add(dir) };
+  }, [punto, distancia, camera, controls]);
+
+  useFrame(() => {
+    const d = destino.current;
+    if (!d || !controls) return;
+    controls.target.lerp(d.target, 0.15);
+    camera.position.lerp(d.pos, 0.15);
+    controls.update();
+    if (controls.target.distanceTo(d.target) < 1e-3 && camera.position.distanceTo(d.pos) < 1e-3) {
+      destino.current = null;
+    }
+  });
+  return null;
 }
 
 export interface InteractiveAssemblyViewerProps {
@@ -542,6 +627,15 @@ export interface InteractiveAssemblyViewerProps {
    * hoy se descubre recién pegando el MDF.
    */
   warnings?: AssemblyWarning[];
+  /**
+   * Veredicto del backend sobre las piezas que se cortan. Si viene (objeto o
+   * null), reemplaza a `warnings`: las piezas se pintan por su estado.
+   */
+  verificacion?: Verificacion | null;
+  /** Problema seleccionado en la lista: se aíslan sus piezas y se va a su punto. */
+  problemaActivo?: ProblemaVerificacion | null;
+  /** Pintar por estado (verde/amarillo/rojo) o dejar el color del MDF. */
+  colorPorEstado?: boolean;
   className?: string;
 }
 
@@ -551,6 +645,9 @@ export default function InteractiveAssemblyViewer({
   viewerSchema,
   slabThicknessM,
   warnings,
+  verificacion,
+  problemaActivo = null,
+  colorPorEstado = true,
   className = "",
 }: InteractiveAssemblyViewerProps) {
   const [currentStep, setCurrentStep] = useState(0);
@@ -580,20 +677,50 @@ export default function InteractiveAssemblyViewer({
     );
   }, [pieces, viewerSchema, slabThicknessM]);
 
+  // Con un problema seleccionado se ve la maqueta entera: sus piezas pueden ser
+  // de pasos que todavía no se revelaron.
+  const pasoMostrado = problemaActivo ? Math.max(steps.length - 1, 0) : currentStep;
   const visiblePieces = useMemo(
-    () => renderPieces.filter((p) => p.stepIndex <= currentStep),
-    [renderPieces, currentStep],
+    () => renderPieces.filter((p) => p.stepIndex <= pasoMostrado),
+    [renderPieces, pasoMostrado],
   );
 
-  const conflictIds = useMemo(() => {
+  /**
+   * Con verificación (objeto o null) el chequeo viejo deja de mostrarse: el
+   * contrato pide no mezclar las dos fuentes. `null` no pinta nada — no se
+   * pudo verificar, y pintar verde diría algo que no se comprobó.
+   */
+  const usaVerificacion = verificacion !== undefined;
+  const pintado = useMemo((): Pintado => {
+    const enProblema = problemaActivo ? new Set(problemaActivo.piezas) : null;
+    const atenuada = (id: string) => enProblema !== null && !enProblema.has(id);
+    if (usaVerificacion) {
+      return {
+        color: (id) => {
+          if (!verificacion) return null;
+          // Atenuada = fuera del problema: neutra, para que el color sea sólo
+          // el de las piezas que importan.
+          if (atenuada(id)) return null;
+          if (!colorPorEstado && !enProblema?.has(id)) return null;
+          const e = verificacion.piezas.get(id)?.estado;
+          return e ? ESTADO_COLOR[e] : null;
+        },
+        atenuada,
+      };
+    }
     const ids = new Set<string>();
     for (const w of warnings ?? []) for (const id of w.pieces) ids.add(id);
-    return ids;
-  }, [warnings]);
+    return { color: (id) => (ids.has(id) ? CONFLICT_COLOR : null), atenuada };
+  }, [usaVerificacion, verificacion, colorPorEstado, problemaActivo, warnings]);
 
-  const conflictPoints = useMemo(
-    () => (warnings ?? []).map((w) => w.at).filter((at): at is Vec3 => at != null),
-    [warnings],
+  const conflictPoints = useMemo(() => {
+    if (usaVerificacion) return problemaActivo?.punto ? [problemaActivo.punto] : [];
+    return (warnings ?? []).map((w) => w.at).filter((at): at is Vec3 => at != null);
+  }, [usaVerificacion, problemaActivo, warnings]);
+
+  const segmentos = useMemo(
+    () => (verificacion && problemaActivo ? segmentosDeProblema(verificacion, problemaActivo) : []),
+    [verificacion, problemaActivo],
   );
 
   // Centro y tamaño de la maqueta ENTERA, fijos para todos los pasos: si
@@ -605,6 +732,13 @@ export default function InteractiveAssemblyViewer({
     [center.x, center.y, center.z],
   );
   const diag = Math.max(bounds.diag, 3);
+  // La escena está corrida por `-center`: el punto del problema (en mundo) se
+  // lleva al mismo marco antes de apuntarle la cámara.
+  const puntoFoco = useMemo(() => {
+    const pt = problemaActivo?.punto;
+    return pt ? new THREE.Vector3(pt.x - center.x, pt.y - center.y, pt.z - center.z) : null;
+  }, [problemaActivo, center.x, center.y, center.z]);
+
   const camDist = diag * 1.35;
   // Media extensión de la cámara de sombra: la luz mira al origen, así que tiene
   // que cubrir el modelo aunque no esté centrado ahí.
@@ -676,13 +810,14 @@ export default function InteractiveAssemblyViewer({
         <directionalLight position={[-diag, diag * 0.5, -diag]} intensity={0.5} />
 
         <SupportMarksContext.Provider value={showSupportMarks}>
-          <ConflictContext.Provider value={conflictIds}>
+          <ConflictContext.Provider value={pintado}>
             <AssemblyScene
               pieces={visiblePieces.length > 0 ? visiblePieces : renderPieces}
-              currentStep={currentStep}
+              currentStep={pasoMostrado}
               centerOffset={centerVec}
               diag={diag}
               conflictPoints={conflictPoints}
+              segmentos={segmentos}
             />
           </ConflictContext.Provider>
         </SupportMarksContext.Provider>
@@ -695,6 +830,7 @@ export default function InteractiveAssemblyViewer({
           maxPolarAngle={Math.PI * 0.48}
           minPolarAngle={0.05}
         />
+        <CamaraAlPunto punto={puntoFoco} distancia={diag * 0.6} />
       </Canvas>
 
       <div className="absolute top-2.5 right-2.5 sm:top-3 sm:right-3 z-10">
@@ -715,6 +851,20 @@ export default function InteractiveAssemblyViewer({
 
       <div className="absolute top-0 inset-x-0 z-10 pointer-events-none p-2.5 sm:p-3">
         <div className="max-w-xs mx-auto rounded-xl bg-base-100/90 backdrop-blur-md border border-base-300/40 shadow-lg px-3.5 py-2 pointer-events-auto">
+          {problemaActivo ? (
+            <>
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-primary/70 mb-0.5">
+                Problema · maqueta completa
+              </p>
+              <h2 className="text-sm font-bold text-base-content leading-tight">
+                {problemaActivo.titulo}
+              </h2>
+              <p className="text-xs text-base-content/60 mt-0.5 leading-snug">
+                Piezas: {problemaActivo.piezas.join(", ")}
+              </p>
+            </>
+          ) : (
+          <>
           <div className="flex items-baseline justify-between gap-2 mb-0.5">
             <p className="text-[10px] font-semibold uppercase tracking-widest text-primary/70">
               Paso {currentStep + 1} de {steps.length}
@@ -734,6 +884,8 @@ export default function InteractiveAssemblyViewer({
           <p className="text-xs text-base-content/60 mt-0.5 leading-snug line-clamp-2">
             {step.description}
           </p>
+          </>
+          )}
         </div>
       </div>
 

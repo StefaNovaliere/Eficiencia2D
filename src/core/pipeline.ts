@@ -18,6 +18,7 @@ import type {
   FinalPiece,
   NestingPlacement,
 } from "./final-pieces";
+import type { Verificacion } from "./verificacion";
 
 /**
  * Pose 3D de una pieza (grupo) provista por el backend en `topology.placements`.
@@ -193,4 +194,17 @@ export interface NestingPreviewData {
    * llegan con cada respuesta del nesting y se actualizan solos.
    */
   nestingPlacements?: Map<number, NestingPlacement>;
+  /**
+   * Veredicto sobre las piezas tal como van a la plancha. `undefined`: backend
+   * que no la conoce (se sigue usando `assemblyWarnings`). `null`: no se pudo
+   * verificar — gris, nunca verde. Ver CONTRATO_verificacion.md.
+   */
+  verificacion?: Verificacion | null;
+  /**
+   * `{ id absorbido: id del grupo que lo incluye }`. Un grupo absorbido no tiene
+   * pieza propia a esta escala: ya está dentro del placement del otro.
+   */
+  absorbedGroups?: Map<number, number>;
+  /** Avisos de la generación a esta escala (fusiones automáticas, piezas finas…). */
+  warnings?: string[];
 }

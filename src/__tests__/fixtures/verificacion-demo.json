@@ -1,0 +1,310 @@
+{
+ "version": 1,
+ "escala": 100.0,
+ "espesor_placa_mm": 3.0,
+ "tolerancias_mm": {
+  "ok": 0.2,
+  "revisar": 0.75
+ },
+ "veredicto": "no_arma",
+ "resumen": {
+  "piezas": 32,
+  "piezas_ok": 9,
+  "piezas_revisar": 13,
+  "piezas_no_arma": 10,
+  "uniones": 80,
+  "uniones_ok": 49,
+  "uniones_revisar": 24,
+  "uniones_no_arma": 7,
+  "problemas": 23
+ },
+ "piezas": {
+  "A6": {
+   "grupo": 235,
+   "categoria": "wall",
+   "estado": "revisar",
+   "uniones": 7,
+   "problemas": 3
+  },
+  "A11": {
+   "grupo": 179,
+   "categoria": "wall",
+   "estado": "no_arma",
+   "uniones": 7,
+   "problemas": 4
+  },
+  "A12": {
+   "grupo": 15,
+   "categoria": "wall",
+   "estado": "no_arma",
+   "uniones": 6,
+   "problemas": 3
+  },
+  "A14": {
+   "grupo": 232,
+   "categoria": "wall",
+   "estado": "revisar",
+   "uniones": 4,
+   "problemas": 3
+  },
+  "A21": {
+   "grupo": 18,
+   "categoria": "wall",
+   "estado": "no_arma",
+   "uniones": 4,
+   "problemas": 2
+  },
+  "A22": {
+   "grupo": 211,
+   "categoria": "wall",
+   "estado": "no_arma",
+   "uniones": 1,
+   "problemas": 1
+  }
+ },
+ "problemas": [
+  {
+   "tipo": "choque",
+   "estado": "no_arma",
+   "titulo": "A12 y A21 se pisan (2.3 mm)",
+   "detalle": "Las dos piezas ocupan el mismo lugar: una de las dos tiene que acortarse o llevar una ranura, y hoy no pasa ninguna de las dos cosas. En el edificio son 23 cm.",
+   "cantidad": 1,
+   "peor_mm": 2.33,
+   "peor_cm_edificio": 23.3,
+   "piezas": [
+    "A12",
+    "A21"
+   ],
+   "pieza_comun": null,
+   "punto": {
+    "x": -2.3513,
+    "y": 5.3615,
+    "z": 1.8051
+   },
+   "uniones": [
+    56
+   ],
+   "acciones": [
+    {
+     "tipo": "descartar",
+     "etiqueta": "No cortar A21",
+     "aplicar": {
+      "overrides": {
+       "18": "discard"
+      }
+     }
+    },
+    {
+     "tipo": "escala_mas_fina",
+     "etiqueta": "Probar una escala más fina (la placa ocupa menos edificio)",
+     "aplicar": null
+    },
+    {
+     "tipo": "revisar_modelo",
+     "etiqueta": "Corregir el modelo 3D en esta zona",
+     "aplicar": null
+    }
+   ],
+   "id": 1
+  },
+  {
+   "tipo": "superpuestas",
+   "estado": "no_arma",
+   "titulo": "A11 y A22 están montadas una sobre otra (1.4 mm)",
+   "detalle": "Son dos piezas paralelas que en el modelo están más cerca que el espesor de la placa: físicamente no hay lugar para las dos. En el edificio son 14 cm.",
+   "cantidad": 1,
+   "peor_mm": 1.45,
+   "peor_cm_edificio": 14.5,
+   "piezas": [
+    "A11",
+    "A22"
+   ],
+   "pieza_comun": null,
+   "punto": {
+    "x": 1.1304,
+    "y": 2.0932,
+    "z": 3.1038
+   },
+   "uniones": [
+    50
+   ],
+   "acciones": [
+    {
+     "tipo": "fusionar",
+     "etiqueta": "Cortarlas como una sola pieza (A11 + A22)",
+     "aplicar": {
+      "merges": [
+       [
+        179,
+        211
+       ]
+      ]
+     }
+    },
+    {
+     "tipo": "descartar",
+     "etiqueta": "No cortar A22",
+     "aplicar": {
+      "overrides": {
+       "211": "discard"
+      }
+     }
+    },
+    {
+     "tipo": "escala_mas_fina",
+     "etiqueta": "Probar una escala más fina (la placa ocupa menos edificio)",
+     "aplicar": null
+    },
+    {
+     "tipo": "revisar_modelo",
+     "etiqueta": "Corregir el modelo 3D en esta zona",
+     "aplicar": null
+    }
+   ],
+   "id": 2
+  },
+  {
+   "tipo": "sin_cubrir",
+   "estado": "revisar",
+   "titulo": "A6 y A14 se tocan de canto (3.0 mm)",
+   "detalle": "Las piezas se tocan sólo por el canto: ninguna de las dos tapa el espesor de la otra, así que queda el canto a la vista o medio apoyo en el aire. En el edificio son 30 cm.",
+   "cantidad": 1,
+   "peor_mm": 3.0,
+   "peor_cm_edificio": 30.0,
+   "piezas": [
+    "A6",
+    "A14"
+   ],
+   "pieza_comun": null,
+   "punto": {
+    "x": 5.0607,
+    "y": 4.4565,
+    "z": -1.3519
+   },
+   "uniones": [
+    25
+   ],
+   "acciones": [
+    {
+     "tipo": "invertir_cede",
+     "etiqueta": "Que la que se acorte sea A6",
+     "aplicar": {
+      "wall_wall_decisions_by_pair": [
+       {
+        "group_a": 235,
+        "group_b": 232,
+        "yield_group_id": 235
+       }
+      ]
+     }
+    },
+    {
+     "tipo": "escala_mas_fina",
+     "etiqueta": "Probar una escala más fina (la placa ocupa menos edificio)",
+     "aplicar": null
+    },
+    {
+     "tipo": "revisar_modelo",
+     "etiqueta": "Corregir el modelo 3D en esta zona",
+     "aplicar": null
+    }
+   ],
+   "id": 10
+  }
+ ],
+ "uniones": [
+  {
+   "id": 25,
+   "pieza_a": "A6",
+   "pieza_b": "A14",
+   "grupo_a": 235,
+   "grupo_b": 232,
+   "tipo": "sin_cubrir",
+   "estado": "revisar",
+   "medida_mm": 3.0,
+   "medida_cm_edificio": 30.0,
+   "largo_m": 0.717,
+   "prevista": true,
+   "pieza_que_ajusta": "A6",
+   "punto": {
+    "x": 5.0607,
+    "y": 4.4565,
+    "z": -1.3519
+   },
+   "segmento": [
+    {
+     "x": 5.0607,
+     "y": 4.8148,
+     "z": -1.3519
+    },
+    {
+     "x": 5.0607,
+     "y": 4.0982,
+     "z": -1.3519
+    }
+   ]
+  },
+  {
+   "id": 50,
+   "pieza_a": "A11",
+   "pieza_b": "A22",
+   "grupo_a": 179,
+   "grupo_b": 211,
+   "tipo": "superpuestas",
+   "estado": "no_arma",
+   "medida_mm": 1.45,
+   "medida_cm_edificio": 14.5,
+   "largo_m": 1.525,
+   "prevista": false,
+   "pieza_que_ajusta": "A22",
+   "punto": {
+    "x": 1.1304,
+    "y": 2.0932,
+    "z": 3.1038
+   },
+   "segmento": [
+    {
+     "x": 1.1304,
+     "y": 2.0932,
+     "z": 3.1038
+    },
+    {
+     "x": 1.1304,
+     "y": 2.0932,
+     "z": 3.1038
+    }
+   ]
+  },
+  {
+   "id": 56,
+   "pieza_a": "A12",
+   "pieza_b": "A21",
+   "grupo_a": 15,
+   "grupo_b": 18,
+   "tipo": "choque",
+   "estado": "no_arma",
+   "medida_mm": 2.33,
+   "medida_cm_edificio": 23.3,
+   "largo_m": 0.494,
+   "prevista": true,
+   "pieza_que_ajusta": null,
+   "punto": {
+    "x": -2.3513,
+    "y": 5.3615,
+    "z": 1.8051
+   },
+   "segmento": [
+    {
+     "x": -2.3513,
+     "y": 5.1148,
+     "z": 1.8051
+    },
+    {
+     "x": -2.3513,
+     "y": 5.6083,
+     "z": 1.8051
+    }
+   ]
+  }
+ ]
+}

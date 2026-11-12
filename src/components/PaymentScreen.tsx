@@ -1,5 +1,7 @@
 "use client";
 
+import type React from "react";
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import StepIndicator from "./StepIndicator";
 import TermsAcceptance from "@/components/TermsAcceptance";
@@ -29,6 +31,13 @@ export interface PaymentScreenProps {
    * Si falla, no se habilita el cobro.
    */
   onAcceptTerms?: () => Promise<void>;
+  /**
+   * Contenido de la etapa de generación que tiene que verse junto al pago (el
+   * veredicto de la verificación, la probeta). Va adentro de la tarjeta porque
+   * esta pantalla es una capa fija: todo lo que se ponga afuera queda tapado.
+   */
+  antes?: React.ReactNode;
+  despues?: React.ReactNode;
 }
 
 type Stage = "loading" | "ready" | "waiting" | "verifying" | "error";
@@ -54,6 +63,8 @@ export default function PaymentScreen({
   preferenceTitle = "Eficiencia2D - Planos de Corte Láser",
   preferenceItemId = "planos",
   onAcceptTerms,
+  antes,
+  despues,
 }: PaymentScreenProps) {
   const isSubscriptionCheckout = Boolean(checkoutUrl);
   const [termsAccepted, setTermsAccepted] = useState(false);
@@ -248,8 +259,9 @@ export default function PaymentScreen({
   }, []);
 
   return (
-    <div className="fixed inset-0 z-[100] bg-base-200/80 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="card bg-base-100 shadow-2xl border border-base-200 w-full max-w-md p-8">
+    <div className="fixed inset-0 z-[100] bg-base-200/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+      <div className="card bg-base-100 shadow-2xl border border-base-200 w-full max-w-md p-8 my-auto">
+        {antes && <div className="mb-5">{antes}</div>}
         {showStepIndicator && (
           <div className="mb-6">
             <StepIndicator current="payment" variant="compact" />
@@ -370,6 +382,7 @@ export default function PaymentScreen({
             </div>
           )}
         </div>
+        {despues && <div className="mt-5">{despues}</div>}
       </div>
     </div>
   );
