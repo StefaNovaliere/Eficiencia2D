@@ -3,6 +3,7 @@ import {
   claveNudo,
   claveProblema,
   focoDe,
+  mismoNudo,
   parseVerificacion,
   problemasSinNudo,
   segmentosDeProblema,
@@ -22,7 +23,7 @@ describe("verificación v2", () => {
     expect(v.terminaciones[0].estado).toBe("ok");
     expect(v.decisionesAutomaticas.length).toBe(10);
     expect(v.resumen.resueltasSolas).toBe(10);
-    expect(v.resumen.nudosPorQuien).toEqual({ decidir: 3, escala: 0, modelo: 3 });
+    expect(v.resumen.nudosPorQuien).toEqual({ decidir: 2, escala: 0, modelo: 4 });
   });
 
   it("lee el detalle 2D tal como viene", () => {
@@ -37,7 +38,7 @@ describe("verificación v2", () => {
 
   it("titular de la v2", () => {
     expect(titularVerificacion(v)).toBe(
-      "15 de 29 piezas verificadas · 6 lugares para mirar · 10 uniones resueltas automáticamente · 10 avisos de terminación",
+      "15 de 29 piezas verificadas · 6 lugares para mirar (2 para decidir) · 10 uniones resueltas automáticamente · 10 avisos de terminación",
     );
   });
 
@@ -71,5 +72,37 @@ describe("verificación v2", () => {
     const pf = v.problemas.find((p) => p.tipo === "pieza_fina")!;
     const a = pf.acciones.find((x) => x.tipo === "cambiar_escala")!;
     expect(a.aplicar).toEqual({ scale_denom: 75 });
+  });
+  describe("identidad de un nudo por sus grupos (§2.2)", () => {
+    it("lee los grupos de cada nudo", () => {
+      expect(v.nudos.map((n) => n.grupos)).toEqual([
+        [180, 182],
+        [180, 245],
+      ]);
+    });
+
+    it("encuentra el mismo nudo aunque haya cambiado de id y de orden de grupos", () => {
+      const renumerado = {
+        ...v,
+        nudos: v.nudos.map((n, i) => ({ ...n, id: 10 + i, grupos: [...n.grupos].reverse() })),
+      };
+      expect(mismoNudo(renumerado, [180, 182])?.id).toBe(10);
+      expect(mismoNudo(renumerado, [245, 180])?.id).toBe(11);
+    });
+
+    it("un nudo que ya no está no se confunde con otro", () => {
+      expect(mismoNudo(v, [180])).toBeNull();
+      expect(mismoNudo(v, [180, 182, 245])).toBeNull();
+      expect(mismoNudo(v, [])).toBeNull();
+    });
+
+    it("un backend sin grupos no deja seleccionar por grupos", () => {
+      const sinGrupos = parseVerificacion({
+        ...real,
+        nudos: (real as { nudos: object[] }).nudos.map((n) => ({ ...n, grupos: undefined })),
+      })!;
+      expect(sinGrupos.nudos.every((n) => n.grupos.length === 0)).toBe(true);
+      expect(mismoNudo(sinGrupos, [])).toBeNull();
+    });
   });
 });

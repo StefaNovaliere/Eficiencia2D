@@ -30,9 +30,13 @@ nombre viejo, hay que renombrarlo.
 - Es un objeto (§2) o `null`. `null` significa **"no se pudo verificar"**: estado gris,
   nunca verde.
 - Depende de la escala y de cada fusión, descarte o decisión: hay que volver a pedirlo.
-- **Tarda más que antes** en modelos grandes, porque ahora el backend prueba decisiones
-  por su cuenta. En un modelo de 300 piezas: unos 20 s (antes 7). Mostrar un estado de
-  "verificando" y no bloquear el resto de la pantalla.
+- **Tiempos**, medidos en un modelo de 300 piezas:
+  - El **primer** pedido de un modelo a una escala: unos 17 s. El backend prueba
+    decisiones por su cuenta.
+  - Cada pedido **siguiente** (después de que el usuario toca un botón): unos 7 s. El
+    backend recuerda lo que ya resolvió para ese modelo y esa escala.
+  - Cambiar de escala, o reiniciar el servidor, vuelve a ser un primer pedido.
+- Mientras espera, **no dejar los botones grises sin explicación** (ver §3.1).
 
 `assembly_warnings` e `interferencias` siguen viniendo por compatibilidad y **no hay que
 mostrarlos**.
@@ -82,8 +86,8 @@ terminaciones no lo cambian.
 
 Titular sugerido, con los campos de `resumen`:
 
-> **206 de 295 piezas verificadas** · 50 lugares para mirar · 27 uniones resueltas
-> automáticamente · 68 avisos de terminación
+> **206 de 295 piezas verificadas** · 50 lugares para mirar (9 para decidir) · 27 uniones
+> resueltas automáticamente · 68 avisos de terminación
 
 ### 2.1 `piezas`
 
@@ -115,6 +119,7 @@ primero los que no arman y, dentro de eso, primero los que se resuelven con una 
   "peor_mm": 0.8,
   "peor_cm_edificio": 8.0,
   "piezas": ["A9", "A12"],
+  "grupos": [180, 245],
   "punto": { "x": 5.1393, "y": 0.6452, "z": 2.946 },
   "uniones": [38],
   "terminaciones": [],
@@ -133,6 +138,7 @@ primero los que no arman y, dentro de eso, primero los que se resuelven con una 
 | `titulo`, `quien_texto` | Texto listo para mostrar. |
 | `quien` | `decidir`, `escala` o `modelo`. Ver tabla de abajo. Sirve para separar la lista en tres bloques. |
 | `piezas` | Las piezas con problema en este lugar. Al abrir el nudo: mostrar **sólo éstas** en el 3D, en su posición, y ocultar el resto. |
+| `grupos` | Ids de grupo de esas piezas. **Las etiquetas (`A43`) se renumeran** cuando una pieza se fusiona o se descarta; los ids no. Para reconocer el mismo nudo antes y después de una acción, comparar `grupos`, no `piezas`. |
 | `punto` | Centro del nudo, en el espacio de `faces_packed` (Y arriba). Llevar la cámara acá. |
 | `uniones` | Índices en `verificacion.uniones` de lo que falla acá. |
 | `terminaciones` | Índices de uniones de canto en el mismo lugar. Son contexto, no problema. |
@@ -298,6 +304,32 @@ Tipos de acción:
 | `cambiar_escala` | `scale_denom` o `null` | Con valor: botón "Probar a 1:N". Con `null`: llevar al selector de escala. (En v1 se llamaba `escala_mas_fina`; ya no se emite.) |
 | `revisar_modelo` | `null` | Informativa: mostrar la medida en cm y las piezas. No modifica nada. |
 
+Las acciones que llegan son las que **sirven**:
+
+- `fusionar` sólo se ofrece si la fusión se va a aplicar. (Antes se ofrecía para tramos
+  separados por una losa, el backend la rechazaba y el problema volvía igual.)
+- `invertir_cede` sólo se ofrece en uniones que el backend **no** evaluó. Si no aparece,
+  invertir ya se probó y no mejora, o es una unión que el backend ya dejó invertida.
+- Una acción puede igual no mejorar el conjunto, o empeorarlo: el backend no la prueba
+  antes de ofrecerla. Por eso hace falta el antes y después de abajo.
+
+### 3.1 Mientras se recalcula
+
+Aplicar una acción dispara un pedido que tarda varios segundos (§1). En ese lapso:
+
+1. Marcar **el botón tocado** con un indicador de progreso ("Recalculando…").
+2. Deshabilitar los demás botones de acción, pero con el mismo indicador visible en la
+   cabecera de la lista: que se entienda que el sistema está trabajando y no trabado.
+3. Si el pedido **falla o vence**, volver a habilitar todo y mostrar el error. No dejar
+   los botones grises.
+4. Cuando llega la respuesta, **reemplazar** `verificacion` entera. El nudo puede haber
+   desaparecido, cambiado de estado o seguir igual.
+5. Si el nudo sigue igual (mismos `grupos`, mismo `estado`), decirlo: "No cambió nada con
+   esa acción". Es mejor que dejar a la persona mirando una pantalla idéntica.
+
+Recordar que después de fusionar o descartar **las etiquetas se renumeran**: la pieza que
+era `A84` puede pasar a ser `A83`. No guardar la selección por etiqueta.
+
 ### Antes y después
 
 Cambiar quién cede sólo mueve un extremo de dos piezas, así que su efecto es local. Fusionar,
@@ -412,6 +444,9 @@ constantes del backend.
   cortadas.
 - El resolvedor sólo prueba invertir quién cede. No prueba fusionar ni descartar: eso
   cambia qué piezas existen y es decisión de la persona.
+- La memoria entre pedidos vive en el proceso del servidor. Con más de un proceso, o tras
+  un reinicio, un pedido puede caer sin memoria y tardar como el primero. El resultado
+  puede variar levemente entre un pedido con memoria y uno sin ella.
 - `quien: "modelo"` quiere decir "no encontramos un arreglo automático". A veces la causa
   es el modelo y a veces un límite del procesamiento; el backend no los distingue todavía.
 - `quien: "escala"` y `escala_sugerida` salen de una cuenta, no de haber probado esa

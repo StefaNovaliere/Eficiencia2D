@@ -2336,14 +2336,6 @@ export default function ReviewScreen({
     setRecargaVerificacion((n) => n + 1);
   }, [merges, nestingData, onReplaceMerges, onPrintScaleChange, setNestingData]);
 
-  const handleCambiarEscalaVerificacion = useCallback(
-    (denominador: number) => {
-      onPrintScaleChange(denominador);
-      setRecargaVerificacion((n) => n + 1);
-    },
-    [onPrintScaleChange],
-  );
-
   useEffect(() => {
     if (recargaVerificacion === 0 || !assemblyWindowOpen) return;
     void loadAssemblyPreview(true);
@@ -4254,7 +4246,6 @@ export default function ReviewScreen({
           onReload={() => void loadAssemblyPreview(true)}
           onAplicarAccion={handleAplicarAccion}
           onDeshacerAccion={handleDeshacerAccion}
-          onCambiarEscala={handleCambiarEscalaVerificacion}
         />
       )}
 

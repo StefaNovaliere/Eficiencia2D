@@ -124,6 +124,12 @@ export interface NudoVerificacion {
   peorCmEdificio: number;
   /** Las piezas con problema acá: al abrir el nudo se muestran SÓLO éstas. */
   piezas: string[];
+  /**
+   * Ids de grupo de esas piezas. Las etiquetas se renumeran al fusionar o
+   * descartar; los ids no: para reconocer el mismo nudo antes y después de una
+   * acción se comparan éstos.
+   */
+  grupos: number[];
   punto: Vec3 | null;
   uniones: number[];
   /** Uniones de canto en el mismo lugar: contexto, no problema. */
@@ -407,6 +413,7 @@ export function parseVerificacion(raw: unknown): Verificacion | null | undefined
     peorMm: num(n.peor_mm),
     peorCmEdificio: num(n.peor_cm_edificio),
     piezas: Array.isArray(n.piezas) ? n.piezas.map((x) => str(x)) : [],
+    grupos: numeros(n.grupos),
     punto: vec(n.punto),
     uniones: numeros(n.uniones),
     terminaciones: numeros(n.terminaciones),
@@ -491,7 +498,13 @@ export function titularVerificacion(v: Verificacion): string {
   if (v.version >= 2) {
     const { nudos, resueltasSolas, terminaciones } = v.resumen;
     const partes = [base];
-    if (nudos > 0) partes.push(nudos === 1 ? "1 lugar para mirar" : `${nudos} lugares para mirar`);
+    if (nudos > 0) {
+      const decidir = v.resumen.nudosPorQuien.decidir;
+      partes.push(
+        (nudos === 1 ? "1 lugar para mirar" : `${nudos} lugares para mirar`) +
+          (decidir > 0 ? ` (${decidir} para decidir)` : ""),
+      );
+    }
     if (resueltasSolas > 0)
       partes.push(
         resueltasSolas === 1
@@ -572,3 +585,19 @@ export function problemasSinNudo(v: Verificacion): ProblemaVerificacion[] {
   const citados = new Set(v.nudos.flatMap((n) => n.problemas));
   return v.problemas.filter((p) => !citados.has(p.id));
 }
+
+/** Clave de un conjunto de grupos, sin importar el orden. */
+function claveGrupos(grupos: number[]): string {
+  return [...grupos].sort((a, b) => a - b).join(",");
+}
+
+/**
+ * El mismo nudo en otro reporte, reconocido por sus GRUPOS (§2.2): las
+ * etiquetas y los ids de nudo se renumeran entre reportes.
+ */
+export function mismoNudo(v: Verificacion, grupos: number[]): NudoVerificacion | null {
+  if (grupos.length === 0) return null;
+  const k = claveGrupos(grupos);
+  return v.nudos.find((n) => claveGrupos(n.grupos) === k) ?? null;
+}
+

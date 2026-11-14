@@ -634,8 +634,11 @@ function ReviewPageContent() {
           );
         } catch (err) {
           console.warn("[instructivo] no se pudo obtener el set de corte.", err);
+          // El motivo real (timeout, 500 con su detalle) va al final: sin él
+          // no hay forma de saber si conviene reintentar o avisar al backend.
+          const motivo = err instanceof Error && err.message ? ` Motivo: ${err.message}` : "";
           throw new Error(
-            "No se pudo obtener el set de corte del backend. Sin las piezas recortadas el instructivo no puede mostrar la maqueta real.",
+            `No se pudo obtener el set de corte del backend. Sin las piezas recortadas el instructivo no puede mostrar la maqueta real.${motivo}`,
           );
         }
       }
