@@ -80,3 +80,50 @@ export function aplicarDecisionesPorPar(
   }
   return { decisiones: out, sinJunta };
 }
+
+/**
+ * Decisiones guardadas → sólo las del usuario.
+ *
+ * Hasta acá el front guardaba en el mismo mapa las sugerencias del backend y
+ * las elecciones del usuario, y las mandaba todas como decisiones. Los
+ * proyectos guardados así traen una decisión por junta. Una entrada igual a la
+ * sugerencia no se distingue de la sugerencia sembrada, así que se descarta:
+ * la sugerencia vuelve a ser el valor por defecto y el backend recupera la
+ * libertad de resolver esa unión. El costo es que una elección explícita igual
+ * a la sugerencia deja de estar fija — el caso raro, contra el resolvedor
+ * apagado en todos los proyectos guardados.
+ */
+export function soloDecisionesDelUsuario(
+  guardadas: Decisiones | undefined,
+  juntas: WallWallJoint[],
+): Decisiones {
+  const sugerida = new Map(juntas.map((j) => [j.jointIndex, j.suggestedYieldGroupId]));
+  const out: Decisiones = new Map();
+  for (const [indice, cede] of guardadas ?? []) {
+    if (sugerida.get(indice) !== cede) out.set(indice, cede);
+  }
+  return out;
+}
+
+/** Índice de `decisiones_automaticas` por par de grupos. */
+export function automaticasPorPar(lista: DecisionPorPar[]): Map<string, number> {
+  return new Map(lista.map((d) => [clavePar(d.group_a, d.group_b), d.yield_group_id]));
+}
+
+/**
+ * Lo que se corta en una junta (CONTRATO_verificacion §4.1): la decisión del
+ * usuario si la hay; si no, la que tomó el backend; si no, la sugerida.
+ * `automatica` marca cuando lo que se corta lo decidió el backend contra la
+ * sugerencia, para que se entienda por qué no coinciden.
+ */
+export function cedeEfectivo(
+  junta: Pick<WallWallJoint, "jointIndex" | "groupA" | "groupB" | "suggestedYieldGroupId">,
+  decisiones: Decisiones,
+  automaticas: Map<string, number>,
+): { cede: number | undefined; automatica: boolean } {
+  const delUsuario = decisiones.get(junta.jointIndex);
+  if (delUsuario != null) return { cede: delUsuario, automatica: false };
+  const auto = automaticas.get(clavePar(junta.groupA, junta.groupB));
+  if (auto != null) return { cede: auto, automatica: auto !== junta.suggestedYieldGroupId };
+  return { cede: junta.suggestedYieldGroupId, automatica: false };
+}

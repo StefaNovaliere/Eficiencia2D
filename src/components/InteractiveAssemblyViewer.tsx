@@ -15,7 +15,7 @@ import type { AssemblyWarning } from "@/core/final-pieces";
 import {
   segmentosDeProblema,
   type EstadoVerificacion,
-  type ProblemaVerificacion,
+  type FocoVerificacion,
   type Verificacion,
 } from "@/core/verificacion";
 import {
@@ -632,8 +632,11 @@ export interface InteractiveAssemblyViewerProps {
    * null), reemplaza a `warnings`: las piezas se pintan por su estado.
    */
   verificacion?: Verificacion | null;
-  /** Problema seleccionado en la lista: se aíslan sus piezas y se va a su punto. */
-  problemaActivo?: ProblemaVerificacion | null;
+  /**
+   * Lo seleccionado en la lista: se va a su punto y se aíslan sus piezas. Un
+   * nudo (v2) muestra sólo sus piezas; un problema atenúa el resto.
+   */
+  problemaActivo?: FocoVerificacion | null;
   /** Pintar por estado (verde/amarillo/rojo) o dejar el color del MDF. */
   colorPorEstado?: boolean;
   className?: string;
@@ -680,10 +683,15 @@ export default function InteractiveAssemblyViewer({
   // Con un problema seleccionado se ve la maqueta entera: sus piezas pueden ser
   // de pasos que todavía no se revelaron.
   const pasoMostrado = problemaActivo ? Math.max(steps.length - 1, 0) : currentStep;
-  const visiblePieces = useMemo(
-    () => renderPieces.filter((p) => p.stepIndex <= pasoMostrado),
-    [renderPieces, pasoMostrado],
-  );
+  const visiblePieces = useMemo(() => {
+    const hastaElPaso = renderPieces.filter((p) => p.stepIndex <= pasoMostrado);
+    // Un nudo se mira con SÓLO sus piezas, en su lugar: el resto tapa.
+    if (problemaActivo?.soloEstas) {
+      const ids = new Set(problemaActivo.piezas);
+      return hastaElPaso.filter((p) => ids.has(p.id));
+    }
+    return hastaElPaso;
+  }, [renderPieces, pasoMostrado, problemaActivo]);
 
   /**
    * Con verificación (objeto o null) el chequeo viejo deja de mostrarse: el
@@ -854,7 +862,7 @@ export default function InteractiveAssemblyViewer({
           {problemaActivo ? (
             <>
               <p className="text-[10px] font-semibold uppercase tracking-widest text-primary/70 mb-0.5">
-                Problema · maqueta completa
+                {problemaActivo.soloEstas ? "Lugar · sólo sus piezas" : "Problema · maqueta completa"}
               </p>
               <h2 className="text-sm font-bold text-base-content leading-tight">
                 {problemaActivo.titulo}
