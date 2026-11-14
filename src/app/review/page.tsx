@@ -396,7 +396,9 @@ function ReviewPageContent() {
   const handleReplaceMerges = useCallback(
     (next: number[][]) => {
       setSavedMerges(next);
-      void runRecompute({ merges: next });
+      // Devuelve el recálculo para quien necesite esperarlo (Deshacer de una
+      // acción de la verificación); los demás lo ignoran.
+      return runRecompute({ merges: next });
     },
     [setSavedMerges, runRecompute],
   );

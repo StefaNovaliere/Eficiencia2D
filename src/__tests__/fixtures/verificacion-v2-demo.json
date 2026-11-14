@@ -1,0 +1,878 @@
+{
+ "version": 2,
+ "escala": 100.0,
+ "espesor_placa_mm": 3.0,
+ "tolerancias_mm": {
+  "ok": 0.2,
+  "revisar": 0.75
+ },
+ "veredicto": "no_arma",
+ "resumen": {
+  "piezas": 29,
+  "piezas_ok": 15,
+  "piezas_revisar": 7,
+  "piezas_no_arma": 7,
+  "uniones": 69,
+  "uniones_ok": 63,
+  "uniones_revisar": 2,
+  "uniones_no_arma": 4,
+  "problemas": 10,
+  "nudos": 6,
+  "nudos_por_quien": {
+   "decidir": 3,
+   "escala": 0,
+   "modelo": 3
+  },
+  "terminaciones": 10,
+  "resueltas_solas": 10
+ },
+ "decisiones_automaticas": [
+  {
+   "group_a": 174,
+   "group_b": 232,
+   "yield_group_id": 174
+  },
+  {
+   "group_a": 174,
+   "group_b": 244,
+   "yield_group_id": 174
+  },
+  {
+   "group_a": 174,
+   "group_b": 245,
+   "yield_group_id": 174
+  },
+  {
+   "group_a": 174,
+   "group_b": 246,
+   "yield_group_id": 174
+  },
+  {
+   "group_a": 177,
+   "group_b": 244,
+   "yield_group_id": 177
+  },
+  {
+   "group_a": 177,
+   "group_b": 245,
+   "yield_group_id": 177
+  },
+  {
+   "group_a": 177,
+   "group_b": 246,
+   "yield_group_id": 177
+  },
+  {
+   "group_a": 179,
+   "group_b": 244,
+   "yield_group_id": 179
+  },
+  {
+   "group_a": 179,
+   "group_b": 246,
+   "yield_group_id": 179
+  },
+  {
+   "group_a": 213,
+   "group_b": 233,
+   "yield_group_id": 233
+  }
+ ],
+ "piezas": {
+  "A9": {
+   "grupo": 180,
+   "categoria": "wall",
+   "estado": "no_arma",
+   "uniones": 5,
+   "problemas": 2,
+   "terminaciones": 0
+  },
+  "A11": {
+   "grupo": 179,
+   "categoria": "wall",
+   "estado": "no_arma",
+   "uniones": 6,
+   "problemas": 1,
+   "terminaciones": 3
+  },
+  "A12": {
+   "grupo": 245,
+   "categoria": "wall",
+   "estado": "no_arma",
+   "uniones": 4,
+   "problemas": 1,
+   "terminaciones": 1
+  },
+  "A14": {
+   "grupo": 182,
+   "categoria": "wall",
+   "estado": "no_arma",
+   "uniones": 2,
+   "problemas": 1,
+   "terminaciones": 0
+  },
+  "A21": {
+   "grupo": 34,
+   "categoria": "wall",
+   "estado": "revisar",
+   "uniones": 2,
+   "problemas": 1,
+   "terminaciones": 0
+  },
+  "A23": {
+   "grupo": 244,
+   "categoria": "wall",
+   "estado": "revisar",
+   "uniones": 3,
+   "problemas": 1,
+   "terminaciones": 1
+  },
+  "B5": {
+   "grupo": 95,
+   "categoria": "floor",
+   "estado": "ok",
+   "uniones": 13,
+   "problemas": 0,
+   "terminaciones": 2
+  }
+ },
+ "nudos": [
+  {
+   "estado": "no_arma",
+   "quien": "decidir",
+   "quien_texto": "Elegí vos: hay más de una forma de resolverlo.",
+   "titulo": "A9 · A14: están montadas una sobre otra (2.9 mm)",
+   "tipos": [
+    "superpuestas"
+   ],
+   "peor_mm": 2.94,
+   "peor_cm_edificio": 29.4,
+   "piezas": [
+    "A9",
+    "A14"
+   ],
+   "punto": {
+    "x": 8.4895,
+    "y": 1.9585,
+    "z": 2.946
+   },
+   "uniones": [
+    39
+   ],
+   "terminaciones": [],
+   "problemas": [
+    0
+   ],
+   "acciones": [
+    {
+     "tipo": "fusionar",
+     "etiqueta": "Cortarlas como una sola pieza (A9 + A14)",
+     "aplicar": {
+      "merges": [
+       [
+        180,
+        182
+       ]
+      ]
+     }
+    },
+    {
+     "tipo": "descartar",
+     "etiqueta": "No cortar A14",
+     "aplicar": {
+      "overrides": {
+       "182": "discard"
+      }
+     }
+    },
+    {
+     "tipo": "cambiar_escala",
+     "etiqueta": "Probar otra escala",
+     "aplicar": null
+    },
+    {
+     "tipo": "revisar_modelo",
+     "etiqueta": "Corregir el modelo 3D en esta zona",
+     "aplicar": null
+    }
+   ],
+   "detalle": {
+    "vista": "planta",
+    "ventana_m": 1.5,
+    "espesor_m": 0.3,
+    "ejes": {
+     "a": {
+      "x": 1.0,
+      "y": 0.0,
+      "z": 0.0
+     },
+     "b": {
+      "x": -0.0,
+      "y": -0.0,
+      "z": 1.0
+     }
+    },
+    "placas": [
+     {
+      "pieza": "A9",
+      "grupo": 180,
+      "estado": "no_arma",
+      "poligono": [
+       [
+        -0.0541,
+        -0.15
+       ],
+       [
+        -0.0541,
+        0.15
+       ],
+       [
+        1.5,
+        0.15
+       ],
+       [
+        1.5,
+        -0.15
+       ]
+      ],
+      "centro": [
+       0.7229,
+       0.0
+      ]
+     },
+     {
+      "pieza": "A14",
+      "grupo": 182,
+      "estado": "no_arma",
+      "poligono": [
+       [
+        -1.5,
+        -0.1559
+       ],
+       [
+        -1.5,
+        0.1441
+       ],
+       [
+        0.0541,
+        0.1441
+       ],
+       [
+        0.0541,
+        -0.1559
+       ]
+      ],
+      "centro": [
+       -0.7229,
+       -0.0059
+      ]
+     }
+    ],
+    "solapes": [
+     {
+      "piezas": [
+       "A9",
+       "A14"
+      ],
+      "poligono": [
+       [
+        -0.0541,
+        0.1441
+       ],
+       [
+        0.0541,
+        0.1441
+       ],
+       [
+        0.0541,
+        -0.15
+       ],
+       [
+        -0.0541,
+        -0.15
+       ]
+      ]
+     }
+    ],
+    "cotas": [
+     {
+      "union": 39,
+      "tipo": "superpuestas",
+      "piezas": [
+       "A9",
+       "A14"
+      ],
+      "mm": 2.94,
+      "cm_edificio": 29.4,
+      "texto": "2.9 mm",
+      "desde": [
+       -0.0541,
+       -0.003
+      ],
+      "hasta": [
+       0.0541,
+       -0.003
+      ]
+     }
+    ]
+   },
+   "id": 0
+  },
+  {
+   "estado": "no_arma",
+   "quien": "modelo",
+   "quien_texto": "No encontramos una forma automática de cerrarlo. Suele venir del modelo 3D: conviene revisarlo en esta zona.",
+   "titulo": "A9 · A12: se pisan (0.8 mm)",
+   "tipos": [
+    "choque"
+   ],
+   "peor_mm": 0.8,
+   "peor_cm_edificio": 8.0,
+   "piezas": [
+    "A9",
+    "A12"
+   ],
+   "punto": {
+    "x": 5.1393,
+    "y": 0.6452,
+    "z": 2.946
+   },
+   "uniones": [
+    38
+   ],
+   "terminaciones": [],
+   "problemas": [
+    3
+   ],
+   "acciones": [
+    {
+     "tipo": "descartar",
+     "etiqueta": "No cortar A12",
+     "aplicar": {
+      "overrides": {
+       "245": "discard"
+      }
+     }
+    },
+    {
+     "tipo": "cambiar_escala",
+     "etiqueta": "Probar otra escala",
+     "aplicar": null
+    },
+    {
+     "tipo": "revisar_modelo",
+     "etiqueta": "Corregir el modelo 3D en esta zona",
+     "aplicar": null
+    }
+   ],
+   "detalle": {
+    "vista": "planta",
+    "ventana_m": 1.5,
+    "espesor_m": 0.3,
+    "ejes": {
+     "a": {
+      "x": 1.0,
+      "y": 0.0,
+      "z": 0.0
+     },
+     "b": {
+      "x": -0.0,
+      "y": -0.0,
+      "z": 1.0
+     }
+    },
+    "placas": [
+     {
+      "pieza": "A9",
+      "grupo": 180,
+      "estado": "no_arma",
+      "poligono": [
+       [
+        -0.0021,
+        -0.15
+       ],
+       [
+        -0.0021,
+        0.15
+       ],
+       [
+        1.5,
+        0.15
+       ],
+       [
+        1.5,
+        -0.15
+       ]
+      ],
+      "centro": [
+       0.7489,
+       0.0
+      ]
+     },
+     {
+      "pieza": "A11",
+      "grupo": 179,
+      "estado": "contexto",
+      "poligono": [
+       [
+        -1.5,
+        -0.0699
+       ],
+       [
+        -1.5,
+        0.2301
+       ],
+       [
+        -0.15,
+        0.2301
+       ],
+       [
+        -0.15,
+        -0.0699
+       ]
+      ],
+      "centro": [
+       -0.825,
+       0.0801
+      ]
+     },
+     {
+      "pieza": "A12",
+      "grupo": 245,
+      "estado": "no_arma",
+      "poligono": [
+       [
+        -0.15,
+        -0.0699
+       ],
+       [
+        0.15,
+        -0.0699
+       ],
+       [
+        0.15,
+        -1.5
+       ],
+       [
+        -0.15,
+        -1.5
+       ]
+      ],
+      "centro": [
+       0.0,
+       -0.785
+      ]
+     }
+    ],
+    "solapes": [
+     {
+      "piezas": [
+       "A9",
+       "A12"
+      ],
+      "poligono": [
+       [
+        -0.0021,
+        -0.0699
+       ],
+       [
+        0.15,
+        -0.0699
+       ],
+       [
+        0.15,
+        -0.15
+       ],
+       [
+        -0.0021,
+        -0.15
+       ]
+      ]
+     }
+    ],
+    "cotas": [
+     {
+      "union": 38,
+      "tipo": "choque",
+      "piezas": [
+       "A9",
+       "A12"
+      ],
+      "mm": 0.8,
+      "cm_edificio": 8.0,
+      "texto": "0.8 mm",
+      "desde": [
+       0.0739,
+       -0.15
+      ],
+      "hasta": [
+       0.0739,
+       -0.0699
+      ]
+     }
+    ]
+   },
+   "id": 3
+  }
+ ],
+ "problemas": [
+  {
+   "tipo": "superpuestas",
+   "estado": "no_arma",
+   "quien": "decidir",
+   "quien_texto": "Elegí vos: hay más de una forma de resolverlo.",
+   "escala_sugerida": null,
+   "titulo": "A9 y A14 están montadas una sobre otra (2.9 mm)",
+   "detalle": "Son dos piezas paralelas que en el modelo están más cerca que el espesor de la placa: físicamente no hay lugar para las dos. En el edificio son 29 cm.",
+   "cantidad": 1,
+   "peor_mm": 2.94,
+   "peor_cm_edificio": 29.4,
+   "piezas": [
+    "A9",
+    "A14"
+   ],
+   "pieza_comun": null,
+   "punto": {
+    "x": 8.4895,
+    "y": 1.9585,
+    "z": 2.946
+   },
+   "uniones": [
+    39
+   ],
+   "acciones": [
+    {
+     "tipo": "fusionar",
+     "etiqueta": "Cortarlas como una sola pieza (A9 + A14)",
+     "aplicar": {
+      "merges": [
+       [
+        180,
+        182
+       ]
+      ]
+     }
+    },
+    {
+     "tipo": "descartar",
+     "etiqueta": "No cortar A14",
+     "aplicar": {
+      "overrides": {
+       "182": "discard"
+      }
+     }
+    },
+    {
+     "tipo": "cambiar_escala",
+     "etiqueta": "Probar otra escala",
+     "aplicar": null
+    },
+    {
+     "tipo": "revisar_modelo",
+     "etiqueta": "Corregir el modelo 3D en esta zona",
+     "aplicar": null
+    }
+   ],
+   "id": 0
+  },
+  {
+   "tipo": "choque",
+   "estado": "no_arma",
+   "quien": "modelo",
+   "quien_texto": "No encontramos una forma automática de cerrarlo. Suele venir del modelo 3D: conviene revisarlo en esta zona.",
+   "escala_sugerida": null,
+   "titulo": "A9 y A12 se pisan (0.8 mm)",
+   "detalle": "Las dos piezas ocupan el mismo lugar: una de las dos tiene que acortarse o llevar una ranura, y hoy no pasa ninguna de las dos cosas. En el edificio son 8 cm.",
+   "cantidad": 1,
+   "peor_mm": 0.8,
+   "peor_cm_edificio": 8.0,
+   "piezas": [
+    "A9",
+    "A12"
+   ],
+   "pieza_comun": null,
+   "punto": {
+    "x": 5.1393,
+    "y": 0.6452,
+    "z": 2.946
+   },
+   "uniones": [
+    38
+   ],
+   "acciones": [
+    {
+     "tipo": "descartar",
+     "etiqueta": "No cortar A12",
+     "aplicar": {
+      "overrides": {
+       "245": "discard"
+      }
+     }
+    },
+    {
+     "tipo": "cambiar_escala",
+     "etiqueta": "Probar otra escala",
+     "aplicar": null
+    },
+    {
+     "tipo": "revisar_modelo",
+     "etiqueta": "Corregir el modelo 3D en esta zona",
+     "aplicar": null
+    }
+   ],
+   "id": 3
+  },
+  {
+   "tipo": "pieza_fina",
+   "estado": "revisar",
+   "quien": "escala",
+   "quien_texto": "Es de la escala: con otra escala la placa representa otro espesor.",
+   "escala_sugerida": 75,
+   "titulo": "A21 mide 2.8 mm de ancho: menos que la placa",
+   "detalle": "La pieza mide menos que el espesor de la placa: no se puede armar parada. En el edificio son 28 cm.",
+   "cantidad": 1,
+   "peor_mm": 2.79,
+   "peor_cm_edificio": 27.9,
+   "piezas": [
+    "A21"
+   ],
+   "pieza_comun": null,
+   "punto": {
+    "x": 5.2608,
+    "y": 0.3685,
+    "z": 5.6043
+   },
+   "uniones": [],
+   "acciones": [
+    {
+     "tipo": "descartar",
+     "etiqueta": "No cortar A21",
+     "aplicar": {
+      "overrides": {
+       "34": "discard"
+      }
+     }
+    },
+    {
+     "tipo": "cambiar_escala",
+     "etiqueta": "Probar a escala 1:75",
+     "aplicar": {
+      "scale_denom": 75
+     }
+    }
+   ],
+   "id": 4
+  }
+ ],
+ "terminaciones": [
+  {
+   "tipo": "sin_cubrir",
+   "estado": "ok",
+   "quien": null,
+   "quien_texto": null,
+   "escala_sugerida": null,
+   "titulo": "A11: 3 piezas la tocan sólo de canto (hasta 3.0 mm)",
+   "detalle": "Las piezas se tocan sólo por el canto: ninguna de las dos tapa el espesor de la otra, así que queda el canto a la vista o medio apoyo en el aire. Arma igual. En el edificio son 30 cm.",
+   "cantidad": 3,
+   "peor_mm": 3.0,
+   "peor_cm_edificio": 30.0,
+   "piezas": [
+    "A11",
+    "A12",
+    "A23",
+    "B5"
+   ],
+   "pieza_comun": "A11",
+   "punto": {
+    "x": 5.1393,
+    "y": 2.1124,
+    "z": 3.0261
+   },
+   "uniones": [
+    44,
+    46,
+    48
+   ],
+   "acciones": [
+    {
+     "tipo": "cambiar_escala",
+     "etiqueta": "Probar otra escala",
+     "aplicar": null
+    },
+    {
+     "tipo": "revisar_modelo",
+     "etiqueta": "Corregir el modelo 3D en esta zona",
+     "aplicar": null
+    }
+   ],
+   "id": 0
+  }
+ ],
+ "uniones": [
+  {
+   "id": 38,
+   "pieza_a": "A9",
+   "pieza_b": "A12",
+   "grupo_a": 180,
+   "grupo_b": 245,
+   "tipo": "choque",
+   "estado": "no_arma",
+   "terminacion": false,
+   "quien": "modelo",
+   "medida_mm": 0.8,
+   "medida_cm_edificio": 8.0,
+   "largo_m": 0.0,
+   "prevista": false,
+   "pieza_que_ajusta": null,
+   "punto": {
+    "x": 5.1393,
+    "y": 0.6452,
+    "z": 2.946
+   },
+   "segmento": [
+    {
+     "x": 5.1393,
+     "y": 0.6452,
+     "z": 2.946
+    },
+    {
+     "x": 5.1393,
+     "y": 0.6452,
+     "z": 2.946
+    }
+   ]
+  },
+  {
+   "id": 39,
+   "pieza_a": "A9",
+   "pieza_b": "A14",
+   "grupo_a": 180,
+   "grupo_b": 182,
+   "tipo": "superpuestas",
+   "estado": "no_arma",
+   "terminacion": false,
+   "quien": "decidir",
+   "medida_mm": 2.94,
+   "medida_cm_edificio": 29.4,
+   "largo_m": 0.577,
+   "prevista": false,
+   "pieza_que_ajusta": "A14",
+   "punto": {
+    "x": 8.4895,
+    "y": 1.9585,
+    "z": 2.946
+   },
+   "segmento": [
+    {
+     "x": 8.4895,
+     "y": 1.9585,
+     "z": 2.946
+    },
+    {
+     "x": 8.4895,
+     "y": 1.9585,
+     "z": 2.946
+    }
+   ]
+  },
+  {
+   "id": 44,
+   "pieza_a": "A11",
+   "pieza_b": "A12",
+   "grupo_a": 179,
+   "grupo_b": 245,
+   "tipo": "sin_cubrir",
+   "estado": "ok",
+   "terminacion": true,
+   "quien": null,
+   "medida_mm": 3.0,
+   "medida_cm_edificio": 30.0,
+   "largo_m": 2.934,
+   "prevista": true,
+   "pieza_que_ajusta": "A11",
+   "punto": {
+    "x": 5.1393,
+    "y": 2.1124,
+    "z": 3.0261
+   },
+   "segmento": [
+    {
+     "x": 5.1393,
+     "y": 0.6452,
+     "z": 3.0261
+    },
+    {
+     "x": 5.1393,
+     "y": 3.5796,
+     "z": 3.0261
+    }
+   ]
+  },
+  {
+   "id": 46,
+   "pieza_a": "A11",
+   "pieza_b": "A23",
+   "grupo_a": 179,
+   "grupo_b": 244,
+   "tipo": "sin_cubrir",
+   "estado": "ok",
+   "terminacion": true,
+   "quien": null,
+   "medida_mm": 2.25,
+   "medida_cm_edificio": 22.5,
+   "largo_m": 0.219,
+   "prevista": true,
+   "pieza_que_ajusta": "A23",
+   "punto": {
+    "x": 5.1393,
+    "y": 3.6889,
+    "z": 3.0261
+   },
+   "segmento": [
+    {
+     "x": 5.1393,
+     "y": 3.5796,
+     "z": 3.0261
+    },
+    {
+     "x": 5.1393,
+     "y": 3.7982,
+     "z": 3.0261
+    }
+   ]
+  },
+  {
+   "id": 48,
+   "pieza_a": "A11",
+   "pieza_b": "B5",
+   "grupo_a": 179,
+   "grupo_b": 95,
+   "tipo": "sin_cubrir",
+   "estado": "ok",
+   "terminacion": true,
+   "quien": null,
+   "medida_mm": 1.19,
+   "medida_cm_edificio": 11.9,
+   "largo_m": 0.452,
+   "prevista": true,
+   "pieza_que_ajusta": "B5",
+   "punto": {
+    "x": 4.7632,
+    "y": 3.9482,
+    "z": 3.0261
+   },
+   "segmento": [
+    {
+     "x": 4.9893,
+     "y": 3.9482,
+     "z": 3.0261
+    },
+    {
+     "x": 4.5372,
+     "y": 3.9482,
+     "z": 3.0261
+    }
+   ]
+  }
+ ]
+}

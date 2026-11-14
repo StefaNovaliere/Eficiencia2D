@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   aplicarDecisionesPorPar,
+  automaticasPorPar,
+  cedeEfectivo,
   decisionesPorPar,
   remapearDecisiones,
+  soloDecisionesDelUsuario,
 } from "@/core/decisiones-por-par";
 import type { WallWallJoint } from "@/core/assembly-adjuster";
 
@@ -75,5 +78,40 @@ describe("aplicarDecisionesPorPar", () => {
       { group_a: 7, group_b: 8, yield_group_id: 8 },
     ]);
     expect(sinJunta).toHaveLength(1);
+  });
+});
+
+describe("soloDecisionesDelUsuario", () => {
+  /**
+   * Los proyectos guardados traen una decisión por junta porque el front
+   * sembraba las sugerencias. Mandarlas como decisiones del usuario apagaba el
+   * resolvedor del backend (demo.obj: de 10 uniones resueltas solas a 0).
+   */
+  it("descarta las entradas iguales a la sugerencia", () => {
+    const juntas = [
+      { ...junta(0, 10, 20), suggestedYieldGroupId: 20 },
+      { ...junta(1, 20, 30), suggestedYieldGroupId: 30 },
+    ] as WallWallJoint[];
+    expect(soloDecisionesDelUsuario(new Map([[0, 20], [1, 20]]), juntas)).toEqual(
+      new Map([[1, 20]]),
+    );
+    expect(soloDecisionesDelUsuario(undefined, juntas)).toEqual(new Map());
+  });
+});
+
+describe("cedeEfectivo", () => {
+  const ww = { ...junta(0, 174, 232), suggestedYieldGroupId: 232 } as WallWallJoint;
+  const auto = automaticasPorPar([{ group_a: 232, group_b: 174, yield_group_id: 174 }]);
+
+  it("sin decisión del usuario manda la automática, y se marca", () => {
+    expect(cedeEfectivo(ww, new Map(), auto)).toEqual({ cede: 174, automatica: true });
+  });
+
+  it("la decisión del usuario gana siempre", () => {
+    expect(cedeEfectivo(ww, new Map([[0, 232]]), auto)).toEqual({ cede: 232, automatica: false });
+  });
+
+  it("sin nada, la sugerida", () => {
+    expect(cedeEfectivo(ww, new Map(), new Map())).toEqual({ cede: 232, automatica: false });
   });
 });

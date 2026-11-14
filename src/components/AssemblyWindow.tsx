@@ -45,7 +45,7 @@ import { resolveSlabThicknessM } from "@/core/assembly-slab";
 import { buildYieldClipSpecs, type WallWallDecisions } from "@/core/wall-yield-clip";
 import { buildAssemblyDump, logAssemblyDump } from "@/core/assembly-dump";
 import { conEtiquetasDeCorte } from "@/core/assembly-cutset";
-import type { AplicarAccion } from "@/core/verificacion";
+import { focoDe, type AplicarAccion, type ResumenVerificacion } from "@/core/verificacion";
 import VerificacionPanel from "@/components/VerificacionPanel";
 
 /** Espesor del material físico de la maqueta. MDF 3 mm por defecto (futuro:
@@ -357,6 +357,8 @@ export interface AssemblyWindowProps {
    * es la verdad; acá no se lleva la cuenta.
    */
   onAplicarAccion?: (aplicar: AplicarAccion) => Promise<void>;
+  /** Vuelve al estado anterior a la última acción aplicada. */
+  onDeshacerAccion?: () => Promise<void>;
   /** `escala_mas_fina`: cambiar la escala de impresión y volver a verificar. */
   onCambiarEscala?: (denominador: number) => void;
 }
@@ -373,6 +375,7 @@ export default function AssemblyWindow({
   onReload,
   onAplicarAccion,
   onCambiarEscala,
+  onDeshacerAccion,
 }: AssemblyWindowProps) {
   const [selectedPanelId, setSelectedPanelId] = useState<string | null>(null);
   const [view, setView] = useState<"elevations" | "table">("elevations");
@@ -536,18 +539,50 @@ export default function AssemblyWindow({
     () => [...new Set([...phase1.warnings, ...(nestingData?.warnings ?? [])])],
     [phase1.warnings, nestingData?.warnings],
   );
-  const [problemaActivoId, setProblemaActivoId] = useState<number | null>(null);
+  /** Clave de lo abierto en la lista: `n:<id>` un nudo, `p:<id>` un problema. */
+  const [seleccion, setSeleccion] = useState<string | null>(null);
   const [colorPorEstado, setColorPorEstado] = useState(true);
   const [aplicando, setAplicando] = useState(false);
-  // Un reporte nuevo renumera los problemas: la selección vieja no aplica.
-  useEffect(() => setProblemaActivoId(null), [verificacion]);
-  const problemaActivo = useMemo(
-    () => verificacion?.problemas.find((p) => p.id === problemaActivoId) ?? null,
-    [verificacion, problemaActivoId],
-  );
+  // Un reporte nuevo renumera nudos y problemas: la selección vieja no aplica.
+  useEffect(() => setSeleccion(null), [verificacion]);
+  const problemaActivo = useMemo(() => focoDe(verificacion, seleccion), [verificacion, seleccion]);
+
+  /**
+   * Antes y después de una acción (CONTRATO_verificacion §3). Fusionar, descartar
+   * o cambiar la escala afectan todo el modelo: se compara el resumen nuevo con
+   * el anterior para que se vea qué resolvió y si rompió algo en otro lado.
+   */
+  const [antesDeAccion, setAntesDeAccion] = useState<{
+    resumen: ResumenVerificacion;
+    etiqueta: string;
+    /** El reporte vigente al aplicar: hasta que no llegue OTRO no hay "después". */
+    reporte: object;
+  } | null>(null);
+  const [comparacion, setComparacion] = useState<{
+    etiqueta: string;
+    resueltos: number;
+    nuevos: number;
+  } | null>(null);
+  useEffect(() => {
+    // La acción termina antes que la re-verificación (que se dispara después):
+    // comparar contra el reporte de ese momento daría siempre "nada cambió".
+    if (!antesDeAccion || !verificacion || verificacion === antesDeAccion.reporte) return;
+    const ahora = verificacion.resumen;
+    setComparacion({
+      etiqueta: antesDeAccion.etiqueta,
+      resueltos: Math.max(antesDeAccion.resumen.nudos - ahora.nudos, 0),
+      nuevos: Math.max(ahora.unionesNoArma - antesDeAccion.resumen.unionesNoArma, 0),
+    });
+    setAntesDeAccion(null);
+  }, [verificacion, antesDeAccion]);
+
   const aplicarAccion = useCallback(
-    async (aplicar: AplicarAccion) => {
+    async (aplicar: AplicarAccion, etiqueta: string) => {
       if (!onAplicarAccion) return;
+      setComparacion(null);
+      if (verificacion) {
+        setAntesDeAccion({ resumen: verificacion.resumen, etiqueta, reporte: verificacion });
+      }
       setAplicando(true);
       try {
         await onAplicarAccion(aplicar);
@@ -555,8 +590,15 @@ export default function AssemblyWindow({
         setAplicando(false);
       }
     },
-    [onAplicarAccion],
+    [onAplicarAccion, verificacion],
   );
+
+  const deshacer = useCallback(async () => {
+    if (!onDeshacerAccion) return;
+    setComparacion(null);
+    setAntesDeAccion(null);
+    await onDeshacerAccion();
+  }, [onDeshacerAccion]);
 
   const assemblyWarnings = useMemo(
     () => sortWarningsBySeverity(nestingData?.assemblyWarnings ?? []),
@@ -704,10 +746,22 @@ export default function AssemblyWindow({
 
         {/* 3D Viewer panel — hidden on print */}
         <div className="assembly-3d-panel assembly-no-print flex-1 relative border-r border-base-300/30 min-w-0">
-          {loading && (
+          {/*
+            Con datos ya cargados, re-verificar no tapa nada: puede tardar ~20 s
+            en un modelo grande, y desmontar el visor perdía la cámara y la
+            selección en cada acción. El cartel completo es sólo para la primera
+            carga.
+          */}
+          {loading && !displayData && (
             <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-base-200/60 backdrop-blur-sm">
               <span className="loading loading-spinner loading-lg text-primary" />
               <p className="text-sm text-base-content/60">Calculando instructivo…</p>
+            </div>
+          )}
+          {loading && displayData && (
+            <div className="absolute top-14 left-3 z-20 flex items-center gap-2 rounded-lg bg-base-100/90 border border-base-300/50 px-2.5 py-1.5 shadow-lg backdrop-blur-md">
+              <span className="loading loading-spinner loading-xs text-primary" />
+              <span className="text-xs text-base-content/70">Verificando…</span>
             </div>
           )}
 
@@ -731,7 +785,7 @@ export default function AssemblyWindow({
             </div>
           )}
 
-          {displayData && !loading && !error && (
+          {displayData && !error && (
             <ErrorBoundary
               fallback={(reset) => (
                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center px-8">
@@ -769,13 +823,51 @@ export default function AssemblyWindow({
             marcador; acá se listan con su magnitud. Sin avisos, el cartel verde
             es la señal de que se puede mandar a cortar.
           */}
+          {comparacion && (
+            <div className="assembly-no-print shrink-0 flex items-start gap-2 px-3 py-2 border-b border-base-300/30 bg-info/5">
+              <span className="flex-1 text-[11px] leading-snug">
+                <b className="font-medium">{comparacion.etiqueta}:</b>{" "}
+                {comparacion.resueltos > 0
+                  ? `resolvió ${comparacion.resueltos} ${comparacion.resueltos === 1 ? "lugar" : "lugares"}`
+                  : "no resolvió ningún lugar"}
+                {" · "}
+                {comparacion.nuevos > 0 ? (
+                  <span className="text-error">
+                    {comparacion.nuevos === 1
+                      ? "apareció 1 unión nueva que no arma"
+                      : `aparecieron ${comparacion.nuevos} uniones nuevas que no arman`}
+                  </span>
+                ) : (
+                  "no apareció ninguno nuevo"
+                )}
+              </span>
+              {onDeshacerAccion && (
+                <button type="button" className="btn btn-xs btn-ghost" onClick={() => void deshacer()}>
+                  Deshacer
+                </button>
+              )}
+              <button
+                type="button"
+                className="btn btn-xs btn-ghost btn-square"
+                onClick={() => setComparacion(null)}
+                aria-label="Cerrar"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+          )}
+
           {displayData && verificacion !== undefined && (
             <div className="assembly-no-print shrink-0">
               <VerificacionPanel
                 verificacion={verificacion}
-                problemaActivoId={problemaActivoId}
-                onSeleccionar={setProblemaActivoId}
-                onAplicar={onAplicarAccion ? (a) => a.aplicar && void aplicarAccion(a.aplicar) : undefined}
+                seleccion={seleccion}
+                onSeleccionar={setSeleccion}
+                onAplicar={
+                  onAplicarAccion
+                    ? (a) => a.aplicar && void aplicarAccion(a.aplicar, a.etiqueta)
+                    : undefined
+                }
                 onCambiarEscala={onCambiarEscala}
                 aplicando={aplicando}
               />
@@ -892,21 +984,25 @@ export default function AssemblyWindow({
             un muro ajeno en silencio.
           */}
           {avisos.length > 0 && (
-            <div className="shrink-0 border-b border-base-300/30 bg-warning/5 px-3 py-2">
-              <div className="flex items-center gap-2 pb-1">
+            // Plegado: con la verificación los avisos de generación son largos
+            // (fusiones automáticas, piezas finas) y empujaban la lista de
+            // lugares para mirar fuera de la vista.
+            <details className="shrink-0 border-b border-base-300/30 bg-warning/5 px-3 py-2 group">
+              <summary className="flex items-center gap-2 cursor-pointer list-none">
                 <AlertTriangle className="w-3.5 h-3.5 text-warning shrink-0" />
                 <span className="text-xs font-semibold text-warning">
-                  {avisos.length === 1 ? "Aviso del modelo" : "Avisos del modelo"}
+                  {avisos.length === 1 ? "Aviso del modelo" : `Avisos del modelo (${avisos.length})`}
                 </span>
-              </div>
-              <ul className="space-y-1">
+                <ChevronRight className="w-3 h-3 text-warning/70 ml-auto transition-transform group-open:rotate-90" />
+              </summary>
+              <ul className="space-y-1 pt-1">
                 {avisos.map((w, i) => (
                   <li key={i} className="text-[11px] leading-snug text-base-content/65">
                     {w}
                   </li>
                 ))}
               </ul>
-            </div>
+            </details>
           )}
 
           {/* View switcher — screen only */}
@@ -955,7 +1051,7 @@ export default function AssemblyWindow({
           <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar px-3 py-3 space-y-2 print:overflow-visible print:space-y-3">
 
             {/* Loading / error inside sidebar */}
-            {loading && (
+            {loading && !displayData && (
               <div className="flex flex-col items-center justify-center h-40 gap-3">
                 <span className="loading loading-spinner loading-md text-primary" />
                 <p className="text-sm text-base-content/50">Cargando…</p>

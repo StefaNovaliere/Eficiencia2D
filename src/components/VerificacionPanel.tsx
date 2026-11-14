@@ -3,6 +3,7 @@
 import {
   AlertTriangle,
   CheckCircle2,
+  ChevronRight,
   CircleDashed,
   HelpCircle,
   Layers,
@@ -12,19 +13,28 @@ import {
   Zap,
 } from "lucide-react";
 import {
+  claveNudo,
+  claveProblema,
   medidaProblema,
+  problemasSinNudo,
   titularVerificacion,
   type AccionProblema,
   type EstadoVerificacion,
+  type NudoVerificacion,
   type ProblemaVerificacion,
+  type Quien,
   type Verificacion,
 } from "@/core/verificacion";
 import { PRINT_SCALE_OPTIONS, formatPrintScaleRatio } from "@/core/print-scale";
+import DetalleNudoSvg from "@/components/DetalleNudoSvg";
 
 /**
- * Veredicto de la verificación del backend: un titular y la lista corta de
- * problemas agrupados, cada uno con sus acciones. Reemplaza a la lista de
- * `assembly_warnings`, que salía de un chequeo sobre el modelo.
+ * Veredicto de la verificación del backend.
+ *
+ * v2 (CONTRATO_verificacion §8): un titular, la lista de NUDOS — lugares donde
+ * algo falla — en tres bloques según quién lo arregla, una ficha por nudo con
+ * su dibujo 2D, y los avisos de terminación aparte, plegados.
+ * v1: la lista de problemas agrupados por causa.
  *
  * `verificacion === null` es "no se pudo verificar": gris, nunca verde.
  */
@@ -40,6 +50,20 @@ const ESTADO_FONDO: Record<EstadoVerificacion, string> = {
   revisar: "bg-warning/5",
   no_arma: "bg-error/5",
 };
+
+const BLOQUES: Array<{ quien: Quien; titulo: string; ayuda: string }> = [
+  { quien: "decidir", titulo: "Para decidir", ayuda: "Una decisión tuya cambia el resultado." },
+  {
+    quien: "escala",
+    titulo: "Depende de la escala",
+    ayuda: "Sale de cuánto edificio ocupa la placa a esta escala.",
+  },
+  {
+    quien: "modelo",
+    titulo: "Para corregir en el modelo",
+    ayuda: "No encontramos un arreglo automático: conviene revisar el 3D en esa zona.",
+  },
+];
 
 function IconoTipo({ tipo, className }: { tipo: string; className: string }) {
   switch (tipo) {
@@ -60,24 +84,25 @@ function IconoTipo({ tipo, className }: { tipo: string; className: string }) {
 
 export interface VerificacionPanelProps {
   verificacion: Verificacion | null;
-  problemaActivoId?: number | null;
-  onSeleccionar?: (id: number | null) => void;
+  /** Clave del nudo o problema abierto (`n:3`, `p:4`). */
+  seleccion?: string | null;
+  onSeleccionar?: (clave: string | null) => void;
   /** Una acción con `aplicar`: el caller la fusiona con la revisión y re-pide. */
-  onAplicar?: (accion: AccionProblema, problema: ProblemaVerificacion) => void;
+  onAplicar?: (accion: AccionProblema) => void;
   /**
-   * `escala_mas_fina`: cambiar a una escala más fina (denominador menor: la
-   * placa de 3 mm ocupa menos edificio). Se ofrecen las dos siguientes.
+   * Cambio de escala sin valor (v2 `cambiar_escala` con `aplicar: null`, v1
+   * `escala_mas_fina`): se ofrecen las dos escalas más finas.
    */
   onCambiarEscala?: (denominador: number) => void;
-  /** Mientras se aplica una acción (re-pedido en curso): botones deshabilitados. */
+  /** Mientras se re-verifica: botones deshabilitados. */
   aplicando?: boolean;
-  /** Sólo los problemas que no arman (paso de generación). */
+  /** Sólo lo que no arma (paso de generación y 409). */
   soloNoArma?: boolean;
 }
 
 export default function VerificacionPanel({
   verificacion,
-  problemaActivoId = null,
+  seleccion = null,
   onSeleccionar,
   onAplicar,
   onCambiarEscala,
@@ -100,12 +125,116 @@ export default function VerificacionPanel({
 
   const { veredicto } = verificacion;
   const estadoTitular: EstadoVerificacion = veredicto === "listo" ? "ok" : veredicto;
+  const esV2 = verificacion.version >= 2;
   const escalasMasFinas = PRINT_SCALE_OPTIONS.filter((d) => d < verificacion.escala)
     .slice(-2)
     .reverse();
-  const problemas = soloNoArma
-    ? verificacion.problemas.filter((p) => p.estado === "no_arma")
-    : verificacion.problemas;
+
+  const accionesDe = (acciones: AccionProblema[], peorCm: number, piezas: string[]) => (
+    <div className="flex flex-wrap gap-1.5">
+      {acciones.map((a, i) => {
+        if (a.aplicar) {
+          return (
+            <button
+              key={i}
+              type="button"
+              disabled={aplicando || !onAplicar}
+              onClick={() => onAplicar?.(a)}
+              className="btn btn-xs btn-outline btn-primary"
+            >
+              {a.etiqueta}
+            </button>
+          );
+        }
+        if (a.tipo === "cambiar_escala" || a.tipo === "escala_mas_fina") {
+          if (!onCambiarEscala || escalasMasFinas.length === 0) return null;
+          return (
+            <span key={i} className="flex flex-wrap items-center gap-1">
+              <span className="text-[10px] text-base-content/50">{a.etiqueta}:</span>
+              {escalasMasFinas.map((d) => (
+                <button
+                  key={d}
+                  type="button"
+                  disabled={aplicando}
+                  onClick={() => onCambiarEscala(d)}
+                  className="btn btn-xs btn-ghost"
+                >
+                  {formatPrintScaleRatio(d)}
+                </button>
+              ))}
+            </span>
+          );
+        }
+        if (a.tipo === "revisar_modelo") {
+          // Informativa: lo que necesita quien modela es la medida en edificio.
+          return (
+            <span key={i} className="text-[10px] text-base-content/50 px-1 py-0.5">
+              {a.etiqueta}: {peorCm.toLocaleString("es-AR", { maximumFractionDigits: 1 })} cm en{" "}
+              {piezas.join(", ")}
+            </span>
+          );
+        }
+        return null;
+      })}
+    </div>
+  );
+
+  const fila = (
+    clave: string,
+    item: { titulo: string; estado: EstadoVerificacion; peorMm: number; peorCmEdificio: number },
+    tipo: string,
+    ficha: React.ReactNode,
+  ) => {
+    const activo = clave === seleccion;
+    return (
+      <li key={clave}>
+        <button
+          type="button"
+          onClick={() => onSeleccionar?.(activo ? null : clave)}
+          className={`w-full text-left rounded-lg border px-2.5 py-1.5 transition-colors ${
+            activo
+              ? "border-primary/40 bg-base-100 ring-1 ring-primary/30"
+              : "border-transparent hover:bg-base-100/70"
+          }`}
+        >
+          <div className="flex items-start gap-2">
+            <IconoTipo tipo={tipo} className={`w-3.5 h-3.5 shrink-0 mt-0.5 ${ESTADO_TEXTO[item.estado]}`} />
+            <span className="flex-1 text-[11px] leading-snug text-base-content/85">{item.titulo}</span>
+            <span
+              className="text-[10px] tabular-nums text-base-content/45 shrink-0"
+              title="Milímetros de plancha · centímetros de edificio"
+            >
+              {medidaProblema(item)}
+            </span>
+          </div>
+        </button>
+        {activo && <div className="mx-2.5 mb-2 mt-1.5 space-y-2">{ficha}</div>}
+      </li>
+    );
+  };
+
+  const fichaNudo = (n: NudoVerificacion) => (
+    <>
+      {n.detalle && <DetalleNudoSvg detalle={n.detalle} escala={verificacion.escala} />}
+      {n.quienTexto && <p className="text-[11px] leading-snug text-base-content/60">{n.quienTexto}</p>}
+      {accionesDe(n.acciones, n.peorCmEdificio, n.piezas)}
+    </>
+  );
+
+  const fichaProblema = (p: ProblemaVerificacion) => (
+    <>
+      {(p.quienTexto || p.detalle) && (
+        <p className="text-[11px] leading-snug text-base-content/60">{p.quienTexto ?? p.detalle}</p>
+      )}
+      {p.detalle && p.quienTexto && (
+        <p className="text-[11px] leading-snug text-base-content/45">{p.detalle}</p>
+      )}
+      {accionesDe(p.acciones, p.peorCmEdificio, p.piezas)}
+    </>
+  );
+
+  const filtro = <T extends { estado: EstadoVerificacion }>(xs: T[]) =>
+    soloNoArma ? xs.filter((x) => x.estado === "no_arma") : xs;
 
   return (
     <div className={`border-b border-base-300/30 ${ESTADO_FONDO[estadoTitular]}`}>
@@ -131,101 +260,53 @@ export default function VerificacionPanel({
         </div>
       </div>
 
-      {problemas.length > 0 && (
-        <ul className="px-2 pb-2 space-y-1 max-h-[45vh] overflow-y-auto custom-scrollbar">
-          {problemas.map((p) => {
-            const activo = p.id === problemaActivoId;
-            return (
-              <li key={p.id}>
-                <button
-                  type="button"
-                  onClick={() => onSeleccionar?.(activo ? null : p.id)}
-                  className={`w-full text-left rounded-lg border px-2.5 py-1.5 transition-colors ${
-                    activo
-                      ? "border-primary/40 bg-base-100 ring-1 ring-primary/30"
-                      : "border-transparent hover:bg-base-100/70"
-                  }`}
-                >
-                  <div className="flex items-start gap-2">
-                    <IconoTipo
-                      tipo={p.tipo}
-                      className={`w-3.5 h-3.5 shrink-0 mt-0.5 ${ESTADO_TEXTO[p.estado]}`}
-                    />
-                    <span className="flex-1 text-[11px] leading-snug text-base-content/85">
-                      {p.titulo}
-                    </span>
-                    <span
-                      className="text-[10px] tabular-nums text-base-content/45 shrink-0"
-                      title="Milímetros de plancha · centímetros de edificio"
-                    >
-                      {medidaProblema(p)}
-                    </span>
-                  </div>
-                </button>
+      <div className="max-h-[55vh] overflow-y-auto custom-scrollbar pb-2">
+        {esV2 ? (
+          <>
+            {BLOQUES.map((b) => {
+              const nudos = filtro(verificacion.nudos.filter((n) => n.quien === b.quien));
+              const sueltos = filtro(problemasSinNudo(verificacion).filter((p) => p.quien === b.quien));
+              if (nudos.length + sueltos.length === 0) return null;
+              return (
+                <section key={b.quien} className="px-2 pt-1">
+                  <h4
+                    className="px-1 pt-1 pb-0.5 text-[10px] font-semibold uppercase tracking-wider text-base-content/50"
+                    title={b.ayuda}
+                  >
+                    {b.titulo} <span className="font-normal">({nudos.length + sueltos.length})</span>
+                  </h4>
+                  <ul className="space-y-1">
+                    {nudos.map((n) => fila(claveNudo(n.id), n, n.tipos[0] ?? "", fichaNudo(n)))}
+                    {sueltos.map((p) => fila(claveProblema(p.id), p, p.tipo, fichaProblema(p)))}
+                  </ul>
+                </section>
+              );
+            })}
 
-                {activo && (
-                  <div className="mx-2.5 mb-1.5 mt-1 space-y-1.5">
-                    {p.detalle && (
-                      <p className="text-[11px] leading-snug text-base-content/60">{p.detalle}</p>
-                    )}
-                    <div className="flex flex-wrap gap-1.5">
-                      {p.acciones.map((a, i) => {
-                        const informativa = a.aplicar === null;
-                        if (informativa && a.tipo === "revisar_modelo") {
-                          // Ya está resaltado en el visor: el dato que necesita
-                          // quien modela es la medida en el edificio.
-                          return (
-                            <span
-                              key={i}
-                              className="text-[10px] text-base-content/50 px-1 py-0.5"
-                            >
-                              {a.etiqueta}: {p.peorCmEdificio.toLocaleString("es-AR", {
-                                maximumFractionDigits: 1,
-                              })}{" "}
-                              cm en {p.piezas.join(", ")}
-                            </span>
-                          );
-                        }
-                        if (informativa && a.tipo === "escala_mas_fina") {
-                          if (!onCambiarEscala || escalasMasFinas.length === 0) return null;
-                          return (
-                            <span key={i} className="flex flex-wrap items-center gap-1">
-                              <span className="text-[10px] text-base-content/50">{a.etiqueta}:</span>
-                              {escalasMasFinas.map((d) => (
-                                <button
-                                  key={d}
-                                  type="button"
-                                  disabled={aplicando}
-                                  onClick={() => onCambiarEscala(d)}
-                                  className="btn btn-xs btn-ghost"
-                                >
-                                  {formatPrintScaleRatio(d)}
-                                </button>
-                              ))}
-                            </span>
-                          );
-                        }
-                        if (informativa) return null;
-                        return (
-                          <button
-                            key={i}
-                            type="button"
-                            disabled={aplicando || !onAplicar}
-                            onClick={() => onAplicar?.(a, p)}
-                            className="btn btn-xs btn-outline btn-primary"
-                          >
-                            {a.etiqueta}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      )}
+            {!soloNoArma && verificacion.terminaciones.length > 0 && (
+              <details className="px-3 pt-2 group">
+                <summary className="flex items-center gap-1 cursor-pointer list-none text-[11px] text-base-content/55">
+                  <ChevronRight className="w-3 h-3 transition-transform group-open:rotate-90" />
+                  Avisos de terminación: no impiden armar ({verificacion.terminaciones.length})
+                </summary>
+                <ul className="mt-1 space-y-0.5 pl-4">
+                  {verificacion.terminaciones.map((t) => (
+                    <li key={t.id} className="text-[11px] leading-snug text-base-content/55">
+                      {t.titulo}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+          </>
+        ) : (
+          <ul className="px-2 space-y-1">
+            {filtro(verificacion.problemas).map((p) =>
+              fila(claveProblema(p.id), p, p.tipo, fichaProblema(p)),
+            )}
+          </ul>
+        )}
+      </div>
     </div>
   );
 }

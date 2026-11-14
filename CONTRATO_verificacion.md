@@ -1,36 +1,41 @@
-# Contrato backend → front: verificación de la maqueta
+# Contrato backend → front: verificación de la maqueta (versión 2)
 
 Estado del backend: implementado y con tests (`test_verificacion.py`, `test_corpus.py`).
-Nada de lo que sigue rompe al front actual: todos los campos son nuevos u opcionales.
 
-## Para qué
+**Compatibilidad con la versión 1:** no se quitó ni se renombró ninguna clave. Un front que
+ya lee `resumen`, `piezas`, `problemas` y `uniones` sigue funcionando; va a ver menos
+problemas, porque las uniones que sólo se tocan de canto dejaron de contar (§2). Lo nuevo
+es `nudos`, `terminaciones`, `quien` y `decisiones_automaticas`.
 
-Hoy el instructivo muestra una lista de 160 "problemas de ensamble" que salen de un chequeo
-sobre el **modelo** ("Sin apoyo A211, 15,01 m"). No es accionable y contradice al chequeo
-de las piezas que se cortan.
+Un solo cambio de valor: la acción de tipo `escala_mas_fina` ahora se llama
+`cambiar_escala` y puede traer la escala a probar (§3). Si el front tiene un caso para el
+nombre viejo, hay que renombrarlo.
 
-El backend ahora entrega **un solo veredicto**, calculado sobre las piezas tal como van a la
-plancha, midiendo cada unión de forma exacta. La pantalla tiene que pasar de "lista de
-alertas" a:
+## Qué cambia en la pantalla
 
-1. Un titular: `287 de 295 piezas verificadas · 8 para revisar`.
-2. Las piezas pintadas por estado en el visor 3D.
-3. Una lista corta de **problemas agrupados**, cada uno con sus botones de acción.
+| Antes (v1) | Ahora (v2) |
+|---|---|
+| Titular: "151 de 295 piezas verificadas · 144 para revisar" | Titular con lo que **impide armar**. En ese mismo modelo: 206 de 295, y 27 uniones resueltas solas. |
+| Lista de problemas por pieza o por unión | Lista de **nudos**: un lugar, con las 2 a 4 piezas que se encuentran ahí. 50 nudos en ese modelo. |
+| Cada problema con los mismos botones | Cada nudo dice **quién lo arregla**: decidir, escala o modelo. |
+| Sólo vista 3D | Cada nudo trae su **detalle en planta** listo para dibujar en 2D. |
+| "Se tocan de canto" mezclado con lo demás | Sección aparte de **terminaciones**. |
 
 ---
 
 ## 1. Dónde llega
 
-`POST /nesting-preview` → clave nueva `verificacion` en la respuesta.
+`POST /nesting-preview` → clave `verificacion`.
 
-- Es un objeto (ver §2) o `null`.
-- `null` significa **"no se pudo verificar"**. No es lo mismo que "verificado": mostrarlo
-  como estado gris, nunca como verde.
-- Depende de la escala. Hay que volver a pedirlo cuando cambia `scale_denom`, una fusión,
-  un descarte o una decisión de quién cede.
+- Es un objeto (§2) o `null`. `null` significa **"no se pudo verificar"**: estado gris,
+  nunca verde.
+- Depende de la escala y de cada fusión, descarte o decisión: hay que volver a pedirlo.
+- **Tarda más que antes** en modelos grandes, porque ahora el backend prueba decisiones
+  por su cuenta. En un modelo de 300 piezas: unos 20 s (antes 7). Mostrar un estado de
+  "verificando" y no bloquear el resto de la pantalla.
 
-`assembly_warnings` e `interferencias` siguen viniendo por compatibilidad. **El instructivo
-debe dejar de mostrarlos** y usar `verificacion`.
+`assembly_warnings` e `interferencias` siguen viniendo por compatibilidad y **no hay que
+mostrarlos**.
 
 ---
 
@@ -38,7 +43,7 @@ debe dejar de mostrarlos** y usar `verificacion`.
 
 ```jsonc
 {
-  "version": 1,
+  "version": 2,
   "escala": 100.0,
   "espesor_placa_mm": 3.0,
   "tolerancias_mm": { "ok": 0.2, "revisar": 0.75 },
@@ -46,14 +51,21 @@ debe dejar de mostrarlos** y usar `verificacion`.
   "veredicto": "no_arma",            // "listo" | "revisar" | "no_arma"
 
   "resumen": {
-    "piezas": 32, "piezas_ok": 9, "piezas_revisar": 13, "piezas_no_arma": 10,
-    "uniones": 80, "uniones_ok": 49, "uniones_revisar": 24, "uniones_no_arma": 7,
-    "problemas": 23
+    "piezas": 29, "piezas_ok": 15, "piezas_revisar": 7, "piezas_no_arma": 7,
+    "uniones": 69, "uniones_ok": 63, "uniones_revisar": 2, "uniones_no_arma": 4,
+    "problemas": 10,
+    "nudos": 6,
+    "nudos_por_quien": { "decidir": 3, "escala": 0, "modelo": 3 },
+    "terminaciones": 10,
+    "resueltas_solas": 10
   },
 
-  "piezas":    { "A11": { ... } },   // §2.1  una entrada por pieza
-  "problemas": [ { ... } ],          // §2.2  lo que se le muestra a la persona
-  "uniones":   [ { ... } ]           // §2.3  todas las uniones medidas, incluidas las ok
+  "piezas":        { "A9": { ... } },   // §2.1
+  "nudos":         [ { ... } ],         // §2.2  ← la lista principal a mostrar
+  "problemas":     [ { ... } ],         // §2.3  los mismos problemas, agrupados por causa
+  "terminaciones": [ { ... } ],         // §2.4  avisos que no impiden armar
+  "uniones":       [ { ... } ],         // §2.5  todas las uniones medidas
+  "decisiones_automaticas": [ { ... } ] // §4
 }
 ```
 
@@ -61,105 +73,204 @@ debe dejar de mostrarlos** y usar `verificacion`.
 
 | Valor | Significado | Color sugerido |
 |---|---|---|
-| `ok` | Desvío ≤ 0.2 mm de plancha (ruido de corte) | verde |
-| `revisar` | Entre 0.2 y 0.75 mm, o un defecto que arma pero se ve | amarillo |
+| `ok` | Desvío ≤ 0.2 mm de plancha, o sólo un aviso de terminación | verde |
+| `revisar` | Entre 0.2 y 0.75 mm | amarillo |
 | `no_arma` | Más de 0.75 mm: las piezas se pisan o no se tocan | rojo |
 
-`veredicto` es el peor estado entre los problemas; `listo` si no hay ninguno.
+`veredicto` es el peor estado entre los problemas; `listo` si no hay ninguno. Las
+terminaciones no lo cambian.
+
+Titular sugerido, con los campos de `resumen`:
+
+> **206 de 295 piezas verificadas** · 50 lugares para mirar · 27 uniones resueltas
+> automáticamente · 68 avisos de terminación
 
 ### 2.1 `piezas`
 
-Clave: etiqueta de la pieza (`"A11"`, `"B2"`), la misma que `panel_id` en `placements`.
+Clave: etiqueta de la pieza, la misma que `panel_id` en `placements`.
 
 ```json
-"A11": { "grupo": 179, "categoria": "wall", "estado": "no_arma", "uniones": 7, "problemas": 4 }
+"A9": { "grupo": 180, "categoria": "wall", "estado": "no_arma",
+        "uniones": 5, "problemas": 2, "terminaciones": 0 }
 ```
 
-- `grupo` es el id de grupo: la clave de `placements` (como string) y de `groups[].id`.
-  Con eso se pinta la malla correcta.
-- `estado` es el peor de sus uniones.
-- Un grupo que no aparece acá no tiene pieza propia a esta escala: está en
-  `absorbed_groups` (se corta dentro de otra) o descartado. No pintarlo.
+- `grupo`: id de grupo. Es la clave de `placements` (como string) y de `groups[].id`.
+- `estado`: el peor de sus uniones. Con esto se pinta la pieza en el visor.
+- Un grupo que no aparece acá no tiene pieza propia a esta escala (`absorbed_groups`) o
+  está descartado. No pintarlo.
 
-### 2.2 `problemas`
+### 2.2 `nudos` — la lista principal
 
-Ya vienen **agrupados y ordenados** (primero `no_arma`, después por cantidad). Es la lista
-que se muestra, tal cual.
+Un nudo es un **lugar** donde algo falla: una esquina, una T, un apoyo. Vienen ordenados:
+primero los que no arman y, dentro de eso, primero los que se resuelven con una decisión.
 
 ```json
 {
-  "id": 2,
-  "tipo": "superpuestas",
+  "id": 3,
   "estado": "no_arma",
-  "titulo": "A11 y A22 están montadas una sobre otra (1.4 mm)",
-  "detalle": "Son dos piezas paralelas que en el modelo están más cerca que el espesor de la placa: físicamente no hay lugar para las dos. En el edificio son 14 cm.",
-  "cantidad": 1,
-  "peor_mm": 1.45,
-  "peor_cm_edificio": 14.5,
-  "piezas": ["A11", "A22"],
-  "pieza_comun": null,
-  "punto": { "x": 1.1304, "y": 2.0932, "z": 3.1038 },
-  "uniones": [50],
+  "quien": "modelo",
+  "quien_texto": "No encontramos una forma automática de cerrarlo. Suele venir del modelo 3D: conviene revisarlo en esta zona.",
+  "titulo": "A9 · A12: se pisan (0.8 mm)",
+  "tipos": ["choque"],
+  "peor_mm": 0.8,
+  "peor_cm_edificio": 8.0,
+  "piezas": ["A9", "A12"],
+  "punto": { "x": 5.1393, "y": 0.6452, "z": 2.946 },
+  "uniones": [38],
+  "terminaciones": [],
+  "problemas": [3],
   "acciones": [
-    { "tipo": "fusionar",  "etiqueta": "Cortarlas como una sola pieza (A11 + A22)",
-      "aplicar": { "merges": [[179, 211]] } },
-    { "tipo": "descartar", "etiqueta": "No cortar A22",
-      "aplicar": { "overrides": { "211": "discard" } } },
-    { "tipo": "escala_mas_fina", "etiqueta": "Probar una escala más fina (la placa ocupa menos edificio)", "aplicar": null },
-    { "tipo": "revisar_modelo",  "etiqueta": "Corregir el modelo 3D en esta zona", "aplicar": null }
-  ]
+    { "tipo": "descartar", "etiqueta": "No cortar A12", "aplicar": { "overrides": { "245": "discard" } } },
+    { "tipo": "cambiar_escala", "etiqueta": "Probar otra escala", "aplicar": null },
+    { "tipo": "revisar_modelo", "etiqueta": "Corregir el modelo 3D en esta zona", "aplicar": null }
+  ],
+  "detalle": { ... }       // §2.2.1
 }
-```
-
-Un problema agrupado (varias uniones contra una misma pieza):
-
-```json
-{ "id": 0, "tipo": "luz", "estado": "no_arma",
-  "titulo": "A7: 3 piezas no llegan a tocarla (hasta 2.2 mm)",
-  "cantidad": 3, "pieza_comun": "A7", "piezas": ["A3", "A7", "A4", "A18"], "uniones": [9, 15, 33], ... }
 ```
 
 | Campo | Uso |
 |---|---|
-| `titulo`, `detalle` | Texto listo para mostrar. No armar mensajes propios. |
-| `tipo` | `choque`, `luz`, `sin_cubrir`, `superpuestas`, `pieza_fina`. Sirve para el ícono. |
-| `peor_mm` | Milímetros de **plancha**: lo que se va a ver en la mano. |
-| `peor_cm_edificio` | Lo mismo en centímetros de **edificio**: es la cifra para quien corrige el modelo. |
-| `piezas` | Etiquetas involucradas. Al seleccionar el problema: aislar/resaltar éstas. |
-| `pieza_comun` | Si no es `null`, la pieza contra la que chocan todas las demás. |
-| `punto` | Dónde está, en el mismo espacio que `faces_packed` (Y arriba). **Llevar la cámara acá.** |
-| `uniones` | Índices en `verificacion.uniones` para el detalle fino (§2.3). |
-| `acciones` | Botones. Ver §3. |
+| `titulo`, `quien_texto` | Texto listo para mostrar. |
+| `quien` | `decidir`, `escala` o `modelo`. Ver tabla de abajo. Sirve para separar la lista en tres bloques. |
+| `piezas` | Las piezas con problema en este lugar. Al abrir el nudo: mostrar **sólo éstas** en el 3D, en su posición, y ocultar el resto. |
+| `punto` | Centro del nudo, en el espacio de `faces_packed` (Y arriba). Llevar la cámara acá. |
+| `uniones` | Índices en `verificacion.uniones` de lo que falla acá. |
+| `terminaciones` | Índices de uniones de canto en el mismo lugar. Son contexto, no problema. |
+| `problemas` | Índices en `verificacion.problemas` relacionados. |
+| `peor_mm` / `peor_cm_edificio` | La medida en plancha y en edificio. |
+| `acciones` | Botones (§3). |
+| `detalle` | Dibujo 2D del nudo (§2.2.1). Puede ser `null` en casos raros: mostrar sólo el 3D. |
 
-Tipos:
+`quien`:
 
-| `tipo` | Qué pasa |
-|---|---|
-| `choque` | Dos piezas ocupan el mismo material. |
-| `luz` | Se tocan en el modelo y cortadas quedan separadas. |
-| `sin_cubrir` | Se tocan sólo de canto: queda un canto a la vista o medio apoyo en el aire. Nunca pasa de `revisar`. |
-| `superpuestas` | Dos piezas paralelas montadas una sobre otra. |
-| `pieza_fina` | La pieza mide menos que el espesor de la placa. Sin uniones (`uniones: []`). |
+| Valor | Qué significa | Qué mostrar |
+|---|---|---|
+| `decidir` | Hay una acción que el usuario puede tomar y que cambia el resultado (fusionar, descartar, invertir quién cede). | Los botones de `acciones`, arriba de todo. Es lo primero que conviene resolver. |
+| `escala` | El defecto sale de cuánto edificio representa la placa a esta escala (muros más gruesos que la placa, piezas más finas que ella). | Si viene `escala_sugerida` en el problema, el botón "Probar a 1:N". |
+| `modelo` | El backend ya probó lo que podía y no cierra. | `peor_cm_edificio` y las piezas resaltadas, para pasarle a quien modela. Sin botones de arreglo automático. |
 
-### 2.3 `uniones`
+Un nudo es `decidir` si alguna de sus uniones lo es.
 
-Todas las uniones medidas, también las que encajan (`tipo: "encaja"`, `estado: "ok"`).
-Sirve para la vista por planta y para el detalle de un problema.
+#### 2.2.1 `detalle`: el dibujo 2D del nudo
+
+Corte de las placas por un plano perpendicular a la unión, alrededor del nudo. Es para
+dibujar en un SVG o un canvas 2D, **sin** depender de la cámara 3D.
+
+```jsonc
+{
+  "vista": "planta",          // "planta" (unión vertical) | "corte" (unión horizontal)
+  "ventana_m": 1.5,           // el dibujo va de -1.5 a +1.5 en los dos ejes
+  "espesor_m": 0.3,           // espesor de la placa en metros de edificio
+  "ejes": {                   // direcciones del mundo de los ejes del dibujo
+    "a": { "x": 1.0, "y": 0.0, "z": 0.0 },
+    "b": { "x": 0.0, "y": 0.0, "z": 1.0 }
+  },
+  "placas": [
+    { "pieza": "A9",  "grupo": 180, "estado": "no_arma",
+      "poligono": [[-0.0021, -0.15], [-0.0021, 0.15], [1.5, 0.15], [1.5, -0.15]],
+      "centro": [0.7489, 0.0] },
+    { "pieza": "A11", "grupo": 179, "estado": "contexto",
+      "poligono": [[-1.5, -0.0699], [-1.5, 0.2301], [-0.15, 0.2301], [-0.15, -0.0699]],
+      "centro": [-0.825, 0.0801] }
+  ],
+  "solapes": [
+    { "piezas": ["A9", "A12"],
+      "poligono": [[-0.0021, -0.0699], [0.15, -0.0699], [0.15, -0.15], [-0.0021, -0.15]] }
+  ],
+  "cotas": [
+    { "union": 38, "tipo": "choque", "piezas": ["A9", "A12"],
+      "mm": 0.8, "cm_edificio": 8.0, "texto": "0.8 mm",
+      "desde": [0.0739, -0.15], "hasta": [0.0739, -0.0699] }
+  ]
+}
+```
+
+Cómo dibujarlo:
+
+- Coordenadas `[a, b]` en **metros de edificio**, con el origen en el centro del nudo. El
+  área visible es el cuadrado de lado `2 × ventana_m`.
+- `placas`: un polígono relleno por cada placa que pasa por ahí, con su espesor real.
+  Color según `estado`; `"contexto"` es una pieza vecina que no tiene problema en este
+  nudo: dibujarla en gris.
+- `solapes`: lo que dos placas ocupan a la vez. Dibujarlo encima, en rojo o rayado. Es lo
+  que hace visible un choque de un vistazo.
+- Una luz se ve sola: es el hueco entre dos rectángulos que deberían tocarse.
+- `vista: "planta"` se mira desde arriba. En `vista: "corte"` el eje `b` apunta hacia
+  arriba del edificio.
+- Para rotular en milímetros de plancha: `mm = metros × 1000 / escala`.
+- `placas[].centro`: dónde escribir la etiqueta de la pieza. Está dentro de su polígono y
+  el backend ya lo corre cuando dos placas montadas caerían en el mismo punto. Usarlo tal
+  cual en vez de calcular el centro.
+- `cotas`: una por cada unión con problema que se ve en este corte. Dibujar una línea de
+  cota de `desde` a `hasta` y un globo con `texto` al lado. Es lo que dice CUÁNTO.
+  - `texto` y `mm` salen de la medición exacta de la unión, no de medir el dibujo: no
+    recalcularlos a partir de `desde` y `hasta`.
+  - En un `choque` o en dos placas montadas, la línea marca el ancho de lo compartido. En
+    una `luz`, va de una placa a la otra.
+  - Si `desde` y `hasta` coinciden (en este corte las placas se tocan y la luz está en
+    otro punto de la unión), dibujar sólo el globo en ese punto.
+  - `union` es el índice en `verificacion.uniones`; `cm_edificio` es la misma medida para
+    quien corrige el modelo.
+- Las piezas vecinas que apenas rozan la ventana no se mandan: lo que llega se puede
+  dibujar y rotular sin filtrar nada.
+
+### 2.3 `problemas`
+
+Los mismos problemas, agrupados **por causa** en vez de por lugar (30 muros contra la misma
+losa son un solo problema). Misma forma que en la versión 1, con tres campos nuevos:
+`quien`, `quien_texto` y `escala_sugerida`.
+
+```json
+{ "id": 2, "tipo": "superpuestas", "estado": "no_arma",
+  "quien": "decidir", "quien_texto": "Elegí vos: hay más de una forma de resolverlo.",
+  "escala_sugerida": null,
+  "titulo": "A11 y A22 están montadas una sobre otra (1.4 mm)",
+  "detalle": "Son dos piezas paralelas que en el modelo están más cerca que el espesor de la placa: físicamente no hay lugar para las dos. En el edificio son 14 cm.",
+  "cantidad": 1, "peor_mm": 1.45, "peor_cm_edificio": 14.5,
+  "piezas": ["A11", "A22"], "pieza_comun": null,
+  "punto": { "x": 1.1304, "y": 2.0932, "z": 3.1038 },
+  "uniones": [50], "acciones": [ ... ] }
+```
+
+Usar `nudos` como lista principal. `problemas` sirve para una vista alternativa "por
+causa" y para los problemas que no son de un lugar: `pieza_fina` sólo aparece acá.
+
+Tipos de problema: `choque`, `luz`, `superpuestas`, `pieza_fina`.
+
+### 2.4 `terminaciones`
+
+Uniones donde las piezas se tocan sólo de canto. **Arman igual**; queda un canto a la vista
+o medio apoyo en el aire. Misma forma que un problema, con `tipo: "sin_cubrir"` y
+`estado: "ok"`.
+
+```json
+{ "id": 0, "tipo": "sin_cubrir", "estado": "ok",
+  "titulo": "A11: 3 piezas la tocan sólo de canto (hasta 3.0 mm)",
+  "cantidad": 3, "piezas": ["A11", "A12", "A23", "B5"], "uniones": [44, 46, 48], ... }
+```
+
+Mostrarlas en una sección plegada, debajo de los nudos, con un texto del estilo "Avisos de
+terminación: no impiden armar". No pintan las piezas de amarillo.
+
+### 2.5 `uniones`
+
+Todas las uniones medidas, incluidas las que encajan. Campos nuevos respecto de v1:
+`terminacion` y `quien`.
 
 ```json
 { "id": 50, "pieza_a": "A11", "pieza_b": "A22", "grupo_a": 179, "grupo_b": 211,
-  "tipo": "superpuestas", "estado": "no_arma",
+  "tipo": "superpuestas", "estado": "no_arma", "terminacion": false, "quien": "decidir",
   "medida_mm": 1.45, "medida_cm_edificio": 14.5, "largo_m": 1.525,
   "prevista": false, "pieza_que_ajusta": "A22",
   "punto": { "x": 1.1304, "y": 2.0932, "z": 3.1038 },
   "segmento": [ { "x": ..., "y": ..., "z": ... }, { "x": ..., "y": ..., "z": ... } ] }
 ```
 
-- `segmento`: los dos extremos del tramo donde ocurre, en coordenadas del mundo. Dibujarlo
-  como una línea gruesa del color del estado es la forma más directa de mostrar la unión.
-- `prevista`: `true` si la unión existe en el modelo. Un `choque` con `prevista: false` es
-  entre dos piezas que el modelo no une.
-- `pieza_que_ajusta`: la pieza que sobra o que queda corta, cuando se puede decir.
+- `tipo`: `encaja`, `choque`, `luz`, `sin_cubrir`, `superpuestas`.
+- `terminacion: true` sólo en `sin_cubrir`; esas uniones llevan `estado: "ok"`.
+- `quien`: `null` si la unión está bien.
+- `segmento`: los extremos del tramo donde ocurre, en el mundo. Dibujarlo como línea
+  gruesa del color del estado.
 
 ---
 
@@ -168,27 +279,60 @@ Sirve para la vista por planta y para el detalle de un problema.
 Cada acción tiene `tipo`, `etiqueta` (texto del botón) y `aplicar`.
 
 `aplicar` trae **las mismas claves que ya se mandan** a `/recompute`, `/nesting-preview` y
-`/generate`. Aplicar una acción es fusionar ese objeto con el estado de la revisión y volver
-a pedir `/nesting-preview`:
+`/generate`. Aplicar es fusionar ese objeto con el estado de la revisión y volver a pedir:
 
-| Clave en `aplicar` | Cómo se fusiona con el estado del front |
+| Clave en `aplicar` | Cómo se fusiona |
 |---|---|
 | `merges: [[a, b]]` | Agregar el conjunto a `merges`. |
-| `overrides: {"211": "discard"}` | Mezclar en `overrides` (las claves son ids de grupo como string). |
+| `overrides: {"245": "discard"}` | Mezclar en `overrides` (claves: id de grupo como string). |
 | `wall_wall_decisions_by_pair: [{group_a, group_b, yield_group_id}]` | Agregar a la lista; si ya hay una entrada para ese par, reemplazarla. |
+| `scale_denom: 75` | **Nuevo.** Cambiar la escala de la revisión a ese valor. |
 
-Si `aplicar` es `null` la acción es informativa:
+Tipos de acción:
 
-- `escala_mas_fina`: llevar al selector de escala.
-- `revisar_modelo`: mostrar `titulo`, `peor_cm_edificio` y resaltar las piezas, para que
-  quien modela sepa qué corregir. No se modifica nada automáticamente.
+| `tipo` | `aplicar` | Qué hace |
+|---|---|---|
+| `fusionar` | `merges` | Las dos piezas se cortan como una. |
+| `descartar` | `overrides` | No se corta esa pieza. |
+| `invertir_cede` | `wall_wall_decisions_by_pair` | Se acorta la otra pieza. **Sólo se ofrece si el backend no lo probó ya**: si no aparece, es que invertir no mejora. |
+| `cambiar_escala` | `scale_denom` o `null` | Con valor: botón "Probar a 1:N". Con `null`: llevar al selector de escala. (En v1 se llamaba `escala_mas_fina`; ya no se emite.) |
+| `revisar_modelo` | `null` | Informativa: mostrar la medida en cm y las piezas. No modifica nada. |
 
-Después de aplicar, el problema desaparece del reporte nuevo o cambia de estado. No hay que
-llevar la cuenta en el front: el reporte siguiente es la verdad.
+### Antes y después
+
+Cambiar quién cede sólo mueve un extremo de dos piezas, así que su efecto es local. Fusionar,
+descartar y cambiar de escala afectan todo. Para que el usuario no tema "arreglo acá y rompo
+allá", después de aplicar una acción comparar el `resumen` nuevo con el anterior y mostrarlo:
+
+> Resolvió 3 lugares · no apareció ninguno nuevo
+
+Alcanza con restar `resumen.nudos` y `resumen.uniones_no_arma` de antes y después. Guardar
+el estado anterior permite ofrecer **Deshacer** sin pedir nada al backend.
 
 ---
 
-## 4. Quién cede: nuevo campo `wall_wall_decisions_by_pair`
+## 4. Quién cede
+
+### 4.1 Lo que el backend decide solo: `decisiones_automaticas`
+
+Donde la decisión sugerida deja una unión pisándose o con luz, el backend prueba la
+contraria y se queda con la que mide mejor. Nunca cambia una decisión del usuario.
+
+```json
+"decisiones_automaticas": [
+  { "group_a": 174, "group_b": 232, "yield_group_id": 174 }
+]
+```
+
+- Son las decisiones **que se cortan**, y difieren de `suggested_yield_group_id` de
+  `wall_wall_joints`.
+- El selector de "quién cede" tiene que mostrar, para cada unión, en este orden: la
+  decisión del usuario si la hay; si no, la de `decisiones_automaticas`; si no, la sugerida.
+- Conviene marcarlas ("resuelta automáticamente") para que se entienda por qué no coincide
+  con la sugerencia.
+- `resumen.resueltas_solas` es la cantidad.
+
+### 4.2 Lo que decide el usuario: `wall_wall_decisions_by_pair`
 
 Aceptado en `/recompute`, `/nesting-preview` y `/generate`:
 
@@ -198,125 +342,79 @@ Aceptado en `/recompute`, `/nesting-preview` y `/generate`:
 ]
 ```
 
-- Reemplaza a `wall_wall_decisions` (por índice de junta), que **se pierde** con cada
-  fusión, división o cambio de escala porque el índice es posicional.
-- `wall_wall_decisions` se sigue aceptando. Si llegan las dos para la misma unión, manda la
-  del par.
-- Migración: al elegir quién cede en una junta `j` de `wall_wall_joints`, guardar
-  `{group_a: j.group_a, group_b: j.group_b, yield_group_id: elegido}` en vez de
-  `{j.joint_index: elegido}`.
-- Si un id se fundió en otro grupo a esa escala (`absorbed_groups`), el backend lo traduce.
+- Reemplaza a `wall_wall_decisions` (por índice de junta), que se pierde con cada fusión,
+  división o cambio de escala. El formato viejo se sigue aceptando; si llegan los dos para
+  la misma unión, manda el del par.
+- Una unión decidida por el usuario queda fija: el backend no la vuelve a tocar y, si
+  falla, el nudo vuelve como `quien: "decidir"`.
 - Una decisión que ya no corresponde a ninguna unión vuelve como texto en `warnings`.
 
 ---
 
 ## 5. Bloqueo al generar
 
-`POST /generate` acepta dos campos nuevos, ambos `false` por defecto:
-
-| Campo | Efecto |
-|---|---|
-| `bloquear_si_no_arma: true` | Si el veredicto es `no_arma`, **no** se generan archivos. |
-| `forzar: true` | Genera igual aunque no arme. |
-
-Respuesta cuando se bloquea — **HTTP 409**:
+Sin cambios respecto de v1. `POST /generate` acepta `bloquear_si_no_arma` y `forzar`
+(ambos `false` por defecto). Si se pide bloquear y el veredicto es `no_arma`, responde
+**HTTP 409**:
 
 ```json
 { "code": "ensamble_no_arma",
   "message": "La maqueta tiene uniones que no arman. Revisalas o generá igual enviando forzar=true.",
-  "verificacion": { ... }   // el mismo objeto de §2
-}
+  "verificacion": { ... } }
 ```
 
-Flujo esperado:
-
-1. El front manda siempre `bloquear_si_no_arma: true`.
-2. Si responde 409: mostrar los problemas `no_arma` y dos salidas, "Revisar" y
-   "Generar igual". La segunda reenvía el mismo pedido con `forzar: true`.
-3. Con veredicto `revisar` no se bloquea: se genera, y conviene avisar cuántas uniones
-   quedaron para mirar.
-
-Mientras el front no mande `bloquear_si_no_arma`, `/generate` se comporta como siempre.
+Flujo: mandar siempre `bloquear_si_no_arma: true`; ante un 409 mostrar los nudos `no_arma`
+con dos salidas, "Revisar" y "Generar igual" (reenvía con `forzar: true`).
 
 ---
 
 ## 6. Probeta de calibración
 
-`POST /probeta` — no necesita modelo ni `file_id`.
+Sin cambios. `POST /probeta`, sin modelo. Devuelve `zip_base64`, `nesting` (misma forma que
+`wall_nesting`) e `instrucciones` con `pasos` y `lectura` para mostrar tal cual.
 
-Pedido (todo opcional):
-
-```json
-{ "sheet_config": { "width_m": 0.12, "height_m": 0.08, "gap_m": 0.003 }, "paper": "A4" }
-```
-
-Respuesta:
-
-```jsonc
-{
-  "generated_files": ["probeta_calibracion.dxf", "probeta_calibracion.pdf"],
-  "zip_base64": "...",                 // mismo formato que /generate
-  "zip_filename": "probeta_calibracion.zip",
-  "nesting": { "sheets": [ ... ] },    // misma forma que wall_nesting: se dibuja igual
-  "instrucciones": {
-    "espesor_nominal_mm": 3.0,
-    "anchos_mm": [2.8, 2.9, 3.0, 3.1, 3.2, 3.3, 3.4],
-    "pasos": ["Cortá la probeta en la MISMA placa...", "..."],
-    "lectura": "El sistema calcula hoy con placa de 3.0 mm y ranuras de 3.1 mm. ..."
-  }
-}
-```
-
-Son tres piezas en una plancha de 12 × 8 cm: un peine con siete muescas de 2.8 a 3.4 mm,
-las mismas siete como ranuras cerradas, y un testigo de 40 mm con lengüeta.
-
-Dónde ofrecerla: en el paso de generación, antes del botón de descarga de la maqueta
-("¿Primera vez con esta placa o esta máquina? Cortá primero la probeta"). Mostrar `pasos`
-y `lectura` tal cual.
-
-**Límite actual:** el resultado de la probeta todavía no se puede cargar. El espesor y la
-holgura son constantes del backend, no parámetros del pedido. Si la muesca que entra justa
-no es la de 3.1 mm, hoy hay que avisar al equipo; no hay campo para mandarlo.
+Límite actual: el resultado de la probeta todavía no se puede cargar; espesor y holgura son
+constantes del backend.
 
 ---
 
-## 7. Otros campos que ya llegan y hay que usar
-
-Agregados en esta misma tanda de cambios:
+## 7. Otros campos que ya llegan
 
 | Campo | Dónde | Qué es |
 |---|---|---|
-| `absorbed_groups` | `/nesting-preview`, y en `topology` de `/recompute` cuando se manda `scale_denom` | `{ "id absorbido": id del grupo que lo incluye }`. Ese grupo no tiene pieza propia a esta escala. **No dibujarlo aparte ni caer a la malla cruda**: ya está dentro del `placement` del otro. |
-| `warnings` | `/nesting-preview` | Avisos de la generación a esa escala (fusiones automáticas, piezas más finas que la placa, decisiones que no se pudieron aplicar). Antes sólo llegaban los de la subida. |
-| `panel_id_by_group` | `/recompute` | Ahora se calcula a la escala pedida. Las etiquetas `A#`/`B#` **cambian con la escala** porque cambia la cantidad de piezas. |
+| `absorbed_groups` | `/nesting-preview`; `topology` de `/recompute` con `scale_denom` | `{ "id absorbido": id del grupo que lo incluye }`. No dibujarlo aparte ni caer a la malla cruda. |
+| `warnings` | `/nesting-preview` | Avisos de la generación a esa escala. |
+| `panel_id_by_group` | `/recompute` | Calculado a la escala pedida. Las etiquetas cambian con la escala. |
 
 ---
 
 ## 8. Qué construir, en orden
 
-1. **Titular con el veredicto** (`resumen`) en el instructivo y en el paso de generación.
-2. **Reemplazar la lista** de `assembly_warnings` por `problemas`: título, medida, y los
-   botones de `acciones`.
-3. **Pintar las piezas** por `piezas[etiqueta].estado`.
-4. **Al tocar un problema**: cámara a `punto`, aislar `piezas`, dibujar los `segmento` de
-   sus uniones.
-5. **Bloqueo** en `/generate` con el flujo de §5.
-6. **Probeta** en el paso de generación.
-7. **Vista por planta** (opcional, la de más valor para leer rápido): un corte horizontal
-   por nivel con las placas en su espesor real y cada `segmento` coloreado por estado.
-   Todos los datos están en `placements` (contorno y `thickness_m`) y en `uniones`.
+1. **Titular** con `resumen` (texto de §2).
+2. **Lista de nudos** en tres bloques por `quien`: "Para decidir", "Depende de la escala",
+   "Para corregir en el modelo". Cada fila: `titulo`, medida y botones.
+3. **Ficha de nudo** al tocar una fila: a la izquierda el 3D con sólo `piezas` visibles y
+   la cámara en `punto`; a la derecha el `detalle` en 2D. Debajo, `quien_texto` y
+   `acciones`.
+4. **Antes y después** al aplicar una acción, con Deshacer (§3).
+5. **Terminaciones** en sección plegada.
+6. **Selector de quién cede** leyendo `decisiones_automaticas` (§4.1).
+7. **Pintar las piezas** del visor general por `piezas[etiqueta].estado`.
+8. Opcional: la plancha coloreada por estado como índice. Tocar una pieza en la plancha
+   abre el primer nudo de `nudos` que la contenga.
 
 ---
 
 ## 9. Lo que el veredicto no cubre
 
-Para no prometer de más en la interfaz:
-
-- Mide con el espesor **nominal** de la placa. Si el MDF real es otro, lo dice la probeta,
-  no el veredicto.
+- Mide con el espesor **nominal** de la placa. Si el MDF real es otro, lo dice la probeta.
 - Los umbrales (0.2 y 0.75 mm) están puestos a criterio, sin calibrar contra maquetas
   cortadas.
-- `sin_cubrir` aparece mucho en modelos reales. Es un aviso de terminación, no de que la
-  maqueta no arme; por eso nunca pasa de amarillo.
-- Un `listo` dice que las piezas encajan entre sí. No dice que el modelo 3D represente bien
-  el edificio.
+- El resolvedor sólo prueba invertir quién cede. No prueba fusionar ni descartar: eso
+  cambia qué piezas existen y es decisión de la persona.
+- `quien: "modelo"` quiere decir "no encontramos un arreglo automático". A veces la causa
+  es el modelo y a veces un límite del procesamiento; el backend no los distingue todavía.
+- `quien: "escala"` y `escala_sugerida` salen de una cuenta, no de haber probado esa
+  escala: a la escala sugerida ese problema deja de existir, pero pueden aparecer otros.
+- Un `listo` dice que las piezas encajan entre sí. No dice que el modelo 3D represente
+  bien el edificio.

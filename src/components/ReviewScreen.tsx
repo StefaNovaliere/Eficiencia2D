@@ -1,7 +1,13 @@
 "use client";
 
 import type { AplicarAccion } from "@/core/verificacion";
-import { aplicarDecisionesPorPar, remapearDecisiones } from "@/core/decisiones-por-par";
+import {
+  aplicarDecisionesPorPar,
+  automaticasPorPar,
+  cedeEfectivo as cedeEnJunta,
+  remapearDecisiones,
+  soloDecisionesDelUsuario,
+} from "@/core/decisiones-por-par";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from "react-resizable-panels";
@@ -175,7 +181,7 @@ export interface ReviewScreenProps {
   /** Quita la fusión en el índice dado y dispara recompute. */
   onRemoveMerge: (index: number) => void;
   /** Reemplaza la lista completa de fusiones (p. ej. desfusionar un miembro). */
-  onReplaceMerges: (merges: number[][]) => void;
+  onReplaceMerges: (merges: number[][]) => void | Promise<void>;
   /** Registra una división de grupo y dispara recompute. */
   onAddSplit: (groupId: number, mode: "components" | "panels") => void;
   minAreaM2: number;
@@ -572,6 +578,7 @@ export default function ReviewScreen({
     savedColumns,
     setSavedColumns,
     nestingData,
+    setNestingData,
     scale,
   } = useProjectContext();
   const [selectedGroupIds, setSelectedGroupIds] = useState<Set<number>>(
@@ -611,21 +618,31 @@ export default function ReviewScreen({
   const [selectedJointIndex, setSelectedJointIndex] = useState<number | null>(
     null,
   );
-  // Wall-wall joint decisions: jointIndex → groupId that yields. Seeded from
-  // each joint's safe default suggestion (thinner wall yields), overridable.
+  // Quién cede en cada junta pared-pared: jointIndex → grupo que se acorta.
+  // Guarda SÓLO lo que decidió el usuario. Donde no decidió, quien lee cae a la
+  // sugerencia (`?? suggestedYieldGroupId`), y el backend resuelve solo:
+  // "una unión decidida por el usuario queda fija" (CONTRATO_verificacion §4).
+  // Sembrar acá las sugerencias las mandaba como decisiones del usuario y
+  // apagaba el resolvedor automático — medido en demo.obj: de 10 uniones
+  // resueltas solas a 0, y una más que no arma.
   const [wallWallDecisions, setWallWallDecisions] = useState<WallWallDecisions>(
-    () => {
-      if (initialWallWallDecisions && initialWallWallDecisions.size > 0) {
-        return new Map(initialWallWallDecisions);
-      }
-      const m = new Map<number, number>();
-      for (const ww of phase1.wallWallJoints) {
-        if (ww.suggestedYieldGroupId != null)
-          m.set(ww.jointIndex, ww.suggestedYieldGroupId);
-      }
-      return m;
-    },
+    () => soloDecisionesDelUsuario(initialWallWallDecisions, phase1.wallWallJoints ?? []),
   );
+  /**
+   * Quién cede según el backend donde la sugerencia dejaba una unión fallando
+   * (`decisiones_automaticas`, CONTRATO_verificacion §4.1). Son las que se
+   * cortan cuando el usuario no decidió, y difieren de la sugerencia.
+   */
+  const automaticaPorPar = useMemo(
+    () => automaticasPorPar(nestingData?.verificacion?.decisionesAutomaticas ?? []),
+    [nestingData?.verificacion],
+  );
+  /** Lo que se corta en una junta: usuario, si no la automática, si no la sugerida. */
+  const cedeEfectivo = useCallback(
+    (ww: WallWallJoint) => cedeEnJunta(ww, wallWallDecisions, automaticaPorPar),
+    [wallWallDecisions, automaticaPorPar],
+  );
+
   // Mark state: component IDs whose openings (door/window holes) are engraved
   // in red instead of being cut.
   const [markGroupIds, setMarkGroupIds] = useState<Set<number>>(
@@ -1371,15 +1388,10 @@ export default function ReviewScreen({
     // `phase1` cambia con cada fusión, división, cambio de escala y hasta con el
     // refresco de etiquetas, así que elegir quién cede no sobrevivía a casi
     // nada. Ahora cada decisión sigue a su par de grupos; sólo las juntas que no
-    // tenían decisión toman la sugerencia.
-    setWallWallDecisions((prev) => {
-      const m = remapearDecisiones(prev, juntasViejas, phase1.wallWallJoints ?? []);
-      for (const ww of phase1.wallWallJoints ?? []) {
-        if (!m.has(ww.jointIndex) && ww.suggestedYieldGroupId != null)
-          m.set(ww.jointIndex, ww.suggestedYieldGroupId);
-      }
-      return m;
-    });
+    // tenían decisión quedan sin decidir (las resuelve el backend).
+    setWallWallDecisions((prev) =>
+      remapearDecisiones(prev, juntasViejas, phase1.wallWallJoints ?? []),
+    );
   }, [phase1]);
 
   // Clear the highlighted joint when the encounters panel closes.
@@ -2150,8 +2162,7 @@ export default function ReviewScreen({
       (w) => w.jointIndex === selectedJointIndex,
     );
     if (!ww) return [];
-    const effYielder =
-      wallWallDecisions.get(ww.jointIndex) ?? ww.suggestedYieldGroupId;
+    const effYielder = cedeEfectivo(ww).cede;
     const byId = new Map(phase1.groups.map((g) => [g.id, g]));
     const out: LeaderMarker[] = [];
     for (const gid of [ww.groupA, ww.groupB]) {
@@ -2233,8 +2244,32 @@ export default function ReviewScreen({
    * se arma con el estado de ese render.
    */
   const [recargaVerificacion, setRecargaVerificacion] = useState(0);
+  /**
+   * Estado previo a la última acción, para Deshacer (CONTRATO_verificacion §3).
+   * Descartar o cambiar quién cede no cambian la topología: se restauran el
+   * estado y la verificación anterior tal cual, sin pedir nada al backend.
+   * Fusionar o cambiar la escala sí: ahí hay que recalcular.
+   */
+  const previoAccionRef = useRef<{
+    overrides: Map<number, FaceCategory>;
+    decisiones: WallWallDecisions;
+    merges: number[][];
+    escala: number | null;
+    nestingData: typeof nestingData;
+    assemblyData: typeof assemblyData;
+    local: boolean;
+  } | null>(null);
   const handleAplicarAccion = useCallback(
     async (aplicar: AplicarAccion) => {
+      previoAccionRef.current = {
+        overrides: new Map(overrides),
+        decisiones: new Map(wallWallDecisions),
+        merges: merges.map((m) => [...m]),
+        escala: nestingData?.verificacion?.escala ?? null,
+        nestingData,
+        assemblyData,
+        local: !(aplicar.merges?.length || aplicar.scale_denom),
+      };
       pushHistory();
       if (aplicar.overrides) {
         const nuevos = aplicar.overrides;
@@ -2263,10 +2298,43 @@ export default function ReviewScreen({
         if (onAddMerges) await onAddMerges(aplicar.merges);
         else for (const m of aplicar.merges) onAddMerge(m);
       }
+      // v2: "Probar a 1:N" trae la escala en `aplicar`.
+      if (aplicar.scale_denom) onPrintScaleChange(aplicar.scale_denom);
       setRecargaVerificacion((n) => n + 1);
     },
-    [pushHistory, wallWallDecisions, phase1.wallWallJoints, onAddMerges, onAddMerge],
+    [
+      pushHistory,
+      overrides,
+      wallWallDecisions,
+      merges,
+      nestingData,
+      assemblyData,
+      phase1.wallWallJoints,
+      onAddMerges,
+      onAddMerge,
+      onPrintScaleChange,
+    ],
   );
+
+  const handleDeshacerAccion = useCallback(async () => {
+    const previo = previoAccionRef.current;
+    if (!previo) return;
+    previoAccionRef.current = null;
+    setOverrides(previo.overrides);
+    setWallWallDecisions(previo.decisiones);
+    if (previo.local) {
+      setNestingData(previo.nestingData);
+      setAssemblyData(previo.assemblyData);
+      return;
+    }
+    if (JSON.stringify(previo.merges) !== JSON.stringify(merges)) {
+      await onReplaceMerges(previo.merges);
+    }
+    if (previo.escala != null && previo.escala !== nestingData?.verificacion?.escala) {
+      onPrintScaleChange(previo.escala);
+    }
+    setRecargaVerificacion((n) => n + 1);
+  }, [merges, nestingData, onReplaceMerges, onPrintScaleChange, setNestingData]);
 
   const handleCambiarEscalaVerificacion = useCallback(
     (denominador: number) => {
@@ -3255,9 +3323,8 @@ export default function ReviewScreen({
                             ww.groupA === thisId ? labelB : labelA;
                           const thisPid = ww.groupA === thisId ? pidA : pidB;
                           const otherPid = ww.groupA === thisId ? pidB : pidA;
-                          const effYielder =
-                            wallWallDecisions.get(ww.jointIndex) ??
-                            ww.suggestedYieldGroupId;
+                          const { cede: effYielder, automatica: resueltaSola } =
+                            cedeEfectivo(ww);
                           const suggested = ww.suggestedYieldGroupId;
                           const isOpen = selectedJointIndex === ww.jointIndex;
 
@@ -3323,6 +3390,14 @@ export default function ReviewScreen({
                                 <div className="mt-2.5 flex flex-col gap-1.5">
                                   <p className="text-xs font-medium text-base-content/55">
                                     ¿Cuál se acorta?
+                                    {resueltaSola && (
+                                      <span
+                                        className="ml-1.5 text-[10px] font-medium text-info"
+                                        title="La sugerida dejaba esta unión fallando: el backend probó la contraria y midió mejor."
+                                      >
+                                        · resuelta automáticamente
+                                      </span>
+                                    )}
                                   </p>
                                   <button
                                     type="button"
@@ -4178,6 +4253,7 @@ export default function ReviewScreen({
           onClose={() => setAssemblyWindowOpen(false)}
           onReload={() => void loadAssemblyPreview(true)}
           onAplicarAccion={handleAplicarAccion}
+          onDeshacerAccion={handleDeshacerAccion}
           onCambiarEscala={handleCambiarEscalaVerificacion}
         />
       )}
