@@ -19,65 +19,13 @@
   "problemas": 10,
   "nudos": 6,
   "nudos_por_quien": {
-   "decidir": 3,
+   "decidir": 2,
    "escala": 0,
-   "modelo": 3
+   "modelo": 4
   },
   "terminaciones": 10,
   "resueltas_solas": 10
  },
- "decisiones_automaticas": [
-  {
-   "group_a": 174,
-   "group_b": 232,
-   "yield_group_id": 174
-  },
-  {
-   "group_a": 174,
-   "group_b": 244,
-   "yield_group_id": 174
-  },
-  {
-   "group_a": 174,
-   "group_b": 245,
-   "yield_group_id": 174
-  },
-  {
-   "group_a": 174,
-   "group_b": 246,
-   "yield_group_id": 174
-  },
-  {
-   "group_a": 177,
-   "group_b": 244,
-   "yield_group_id": 177
-  },
-  {
-   "group_a": 177,
-   "group_b": 245,
-   "yield_group_id": 177
-  },
-  {
-   "group_a": 177,
-   "group_b": 246,
-   "yield_group_id": 177
-  },
-  {
-   "group_a": 179,
-   "group_b": 244,
-   "yield_group_id": 179
-  },
-  {
-   "group_a": 179,
-   "group_b": 246,
-   "yield_group_id": 179
-  },
-  {
-   "group_a": 213,
-   "group_b": 233,
-   "yield_group_id": 233
-  }
- ],
  "piezas": {
   "A9": {
    "grupo": 180,
@@ -150,6 +98,10 @@
    "piezas": [
     "A9",
     "A14"
+   ],
+   "grupos": [
+    180,
+    182
    ],
    "punto": {
     "x": 8.4895,
@@ -331,6 +283,10 @@
    "piezas": [
     "A9",
     "A12"
+   ],
+   "grupos": [
+    180,
+    245
    ],
    "punto": {
     "x": 5.1393,
@@ -531,6 +487,10 @@
     "A9",
     "A14"
    ],
+   "grupos": [
+    180,
+    182
+   ],
    "pieza_comun": null,
    "punto": {
     "x": 8.4895,
@@ -590,6 +550,10 @@
     "A9",
     "A12"
    ],
+   "grupos": [
+    180,
+    245
+   ],
    "pieza_comun": null,
    "punto": {
     "x": 5.1393,
@@ -636,6 +600,9 @@
    "piezas": [
     "A21"
    ],
+   "grupos": [
+    34
+   ],
    "pieza_comun": null,
    "punto": {
     "x": 5.2608,
@@ -681,6 +648,12 @@
     "A12",
     "A23",
     "B5"
+   ],
+   "grupos": [
+    179,
+    245,
+    244,
+    95
    ],
    "pieza_comun": "A11",
    "punto": {
@@ -873,6 +846,58 @@
      "z": 3.0261
     }
    ]
+  }
+ ],
+ "decisiones_automaticas": [
+  {
+   "group_a": 174,
+   "group_b": 232,
+   "yield_group_id": 174
+  },
+  {
+   "group_a": 174,
+   "group_b": 244,
+   "yield_group_id": 174
+  },
+  {
+   "group_a": 174,
+   "group_b": 245,
+   "yield_group_id": 174
+  },
+  {
+   "group_a": 174,
+   "group_b": 246,
+   "yield_group_id": 174
+  },
+  {
+   "group_a": 177,
+   "group_b": 244,
+   "yield_group_id": 177
+  },
+  {
+   "group_a": 177,
+   "group_b": 245,
+   "yield_group_id": 177
+  },
+  {
+   "group_a": 177,
+   "group_b": 246,
+   "yield_group_id": 177
+  },
+  {
+   "group_a": 179,
+   "group_b": 244,
+   "yield_group_id": 179
+  },
+  {
+   "group_a": 179,
+   "group_b": 246,
+   "yield_group_id": 179
+  },
+  {
+   "group_a": 213,
+   "group_b": 233,
+   "yield_group_id": 233
   }
  ]
 }

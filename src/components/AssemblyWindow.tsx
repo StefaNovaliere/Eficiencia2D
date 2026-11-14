@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, useMemo } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import {
   X,
   Printer,
@@ -45,7 +45,14 @@ import { resolveSlabThicknessM } from "@/core/assembly-slab";
 import { buildYieldClipSpecs, type WallWallDecisions } from "@/core/wall-yield-clip";
 import { buildAssemblyDump, logAssemblyDump } from "@/core/assembly-dump";
 import { conEtiquetasDeCorte } from "@/core/assembly-cutset";
-import { focoDe, type AplicarAccion, type ResumenVerificacion } from "@/core/verificacion";
+import {
+  claveNudo,
+  focoDe,
+  mismoNudo,
+  type AccionProblema,
+  type AplicarAccion,
+  type ResumenVerificacion,
+} from "@/core/verificacion";
 import VerificacionPanel from "@/components/VerificacionPanel";
 
 /** Espesor del material físico de la maqueta. MDF 3 mm por defecto (futuro:
@@ -359,8 +366,6 @@ export interface AssemblyWindowProps {
   onAplicarAccion?: (aplicar: AplicarAccion) => Promise<void>;
   /** Vuelve al estado anterior a la última acción aplicada. */
   onDeshacerAccion?: () => Promise<void>;
-  /** `escala_mas_fina`: cambiar la escala de impresión y volver a verificar. */
-  onCambiarEscala?: (denominador: number) => void;
 }
 
 export default function AssemblyWindow({
@@ -374,7 +379,6 @@ export default function AssemblyWindow({
   onClose,
   onReload,
   onAplicarAccion,
-  onCambiarEscala,
   onDeshacerAccion,
 }: AssemblyWindowProps) {
   const [selectedPanelId, setSelectedPanelId] = useState<string | null>(null);
@@ -542,52 +546,116 @@ export default function AssemblyWindow({
   /** Clave de lo abierto en la lista: `n:<id>` un nudo, `p:<id>` un problema. */
   const [seleccion, setSeleccion] = useState<string | null>(null);
   const [colorPorEstado, setColorPorEstado] = useState(true);
-  const [aplicando, setAplicando] = useState(false);
-  // Un reporte nuevo renumera nudos y problemas: la selección vieja no aplica.
-  useEffect(() => setSeleccion(null), [verificacion]);
   const problemaActivo = useMemo(() => focoDe(verificacion, seleccion), [verificacion, seleccion]);
+  /**
+   * Grupos del nudo abierto. Cada reporte renumera nudos y etiquetas, pero no
+   * los ids de grupo (§2.2): con esto la ficha sigue abierta en el MISMO lugar
+   * después de una acción, o se cierra si ese lugar desapareció.
+   */
+  const gruposSeleccion = useRef<number[] | null>(null);
+  const seleccionar = useCallback(
+    (clave: string | null) => {
+      setSeleccion(clave);
+      const foco = focoDe(verificacion, clave);
+      gruposSeleccion.current =
+        foco?.soloEstas && verificacion
+          ? (verificacion.nudos.find((n) => claveNudo(n.id) === clave)?.grupos ?? null)
+          : null;
+    },
+    [verificacion],
+  );
+  useEffect(() => {
+    const grupos = gruposSeleccion.current;
+    const igual = grupos && verificacion ? mismoNudo(verificacion, grupos) : null;
+    setSeleccion(igual ? claveNudo(igual.id) : null);
+    if (!igual) gruposSeleccion.current = null;
+  }, [verificacion]);
 
   /**
-   * Antes y después de una acción (CONTRATO_verificacion §3). Fusionar, descartar
-   * o cambiar la escala afectan todo el modelo: se compara el resumen nuevo con
-   * el anterior para que se vea qué resolvió y si rompió algo en otro lado.
+   * La acción que está recalculando (§3.1). NO termina cuando vuelve
+   * `onAplicarAccion` — eso sólo dispara la recarga —, sino cuando llega OTRO
+   * reporte, cuando la recarga falla o cuando vence. Antes terminaba enseguida:
+   * los botones volvían a habilitarse mientras el backend seguía calculando.
    */
-  const [antesDeAccion, setAntesDeAccion] = useState<{
-    resumen: ResumenVerificacion;
+  const [enCurso, setEnCurso] = useState<{
+    clave: string;
+    indice: number;
     etiqueta: string;
+    resumen: ResumenVerificacion | null;
+    /** El nudo tocado, para decir "no cambió nada" si sigue igual. */
+    grupos: number[];
+    estado: string | null;
     /** El reporte vigente al aplicar: hasta que no llegue OTRO no hay "después". */
-    reporte: object;
+    reporte: object | null | undefined;
   } | null>(null);
+  const [errorAccion, setErrorAccion] = useState<string | null>(null);
   const [comparacion, setComparacion] = useState<{
     etiqueta: string;
     resueltos: number;
     nuevos: number;
+    sinCambios: boolean;
   } | null>(null);
+
+  // Llegó el reporte nuevo: antes y después (§3).
   useEffect(() => {
-    // La acción termina antes que la re-verificación (que se dispara después):
-    // comparar contra el reporte de ese momento daría siempre "nada cambió".
-    if (!antesDeAccion || !verificacion || verificacion === antesDeAccion.reporte) return;
+    if (!enCurso || !verificacion || verificacion === enCurso.reporte) return;
     const ahora = verificacion.resumen;
-    setComparacion({
-      etiqueta: antesDeAccion.etiqueta,
-      resueltos: Math.max(antesDeAccion.resumen.nudos - ahora.nudos, 0),
-      nuevos: Math.max(ahora.unionesNoArma - antesDeAccion.resumen.unionesNoArma, 0),
-    });
-    setAntesDeAccion(null);
-  }, [verificacion, antesDeAccion]);
+    const igual = mismoNudo(verificacion, enCurso.grupos);
+    if (enCurso.resumen) {
+      setComparacion({
+        etiqueta: enCurso.etiqueta,
+        resueltos: Math.max(enCurso.resumen.nudos - ahora.nudos, 0),
+        nuevos: Math.max(ahora.unionesNoArma - enCurso.resumen.unionesNoArma, 0),
+        sinCambios: igual !== null && igual.estado === enCurso.estado,
+      });
+    }
+    setEnCurso(null);
+  }, [verificacion, enCurso]);
+
+  // Un reporte nuevo (un reintento, o el resultado tardío de uno que venció)
+  // deja sin efecto el aviso de error.
+  useEffect(() => setErrorAccion(null), [verificacion]);
+
+  // Falló la recarga: se rehabilita todo y se dice por qué.
+  useEffect(() => {
+    if (!enCurso || !error) return;
+    setErrorAccion(error);
+    setEnCurso(null);
+  }, [error, enCurso]);
+
+  // Venció: el contrato habla de ~17 s en el primer pedido de un modelo grande.
+  // Pasado un margen amplio, se suelta la pantalla en vez de dejarla trabada.
+  useEffect(() => {
+    if (!enCurso) return;
+    const t = setTimeout(() => {
+      setErrorAccion(
+        "El backend no respondió a tiempo. Podés reintentar; si el resultado llega igual, se va a ver solo.",
+      );
+      setEnCurso(null);
+    }, 90_000);
+    return () => clearTimeout(t);
+  }, [enCurso]);
 
   const aplicarAccion = useCallback(
-    async (aplicar: AplicarAccion, etiqueta: string) => {
-      if (!onAplicarAccion) return;
+    async (accion: AccionProblema, clave: string, indice: number) => {
+      if (!onAplicarAccion || !accion.aplicar) return;
+      const nudo = verificacion?.nudos.find((n) => claveNudo(n.id) === clave) ?? null;
       setComparacion(null);
-      if (verificacion) {
-        setAntesDeAccion({ resumen: verificacion.resumen, etiqueta, reporte: verificacion });
-      }
-      setAplicando(true);
+      setErrorAccion(null);
+      setEnCurso({
+        clave,
+        indice,
+        etiqueta: accion.etiqueta,
+        resumen: verificacion?.resumen ?? null,
+        grupos: nudo?.grupos ?? [],
+        estado: nudo?.estado ?? null,
+        reporte: verificacion,
+      });
       try {
-        await onAplicarAccion(aplicar);
-      } finally {
-        setAplicando(false);
+        await onAplicarAccion(accion.aplicar as AplicarAccion);
+      } catch (e) {
+        setErrorAccion(e instanceof Error ? e.message : "No se pudo aplicar la acción.");
+        setEnCurso(null);
       }
     },
     [onAplicarAccion, verificacion],
@@ -596,7 +664,7 @@ export default function AssemblyWindow({
   const deshacer = useCallback(async () => {
     if (!onDeshacerAccion) return;
     setComparacion(null);
-    setAntesDeAccion(null);
+    setErrorAccion(null);
     await onDeshacerAccion();
   }, [onDeshacerAccion]);
 
@@ -775,7 +843,7 @@ export default function AssemblyWindow({
             </div>
           )}
 
-          {error && !loading && (
+          {error && !loading && !displayData && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 text-center px-8">
               <p className="text-error font-semibold">Error al cargar</p>
               <p className="text-sm text-base-content/50">{error}</p>
@@ -785,7 +853,7 @@ export default function AssemblyWindow({
             </div>
           )}
 
-          {displayData && !error && (
+          {displayData && (
             <ErrorBoundary
               fallback={(reset) => (
                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center px-8">
@@ -827,6 +895,10 @@ export default function AssemblyWindow({
             <div className="assembly-no-print shrink-0 flex items-start gap-2 px-3 py-2 border-b border-base-300/30 bg-info/5">
               <span className="flex-1 text-[11px] leading-snug">
                 <b className="font-medium">{comparacion.etiqueta}:</b>{" "}
+                {comparacion.sinCambios && comparacion.resueltos === 0 && comparacion.nuevos === 0 ? (
+                  "no cambió nada con esa acción."
+                ) : (
+                  <>
                 {comparacion.resueltos > 0
                   ? `resolvió ${comparacion.resueltos} ${comparacion.resueltos === 1 ? "lugar" : "lugares"}`
                   : "no resolvió ningún lugar"}
@@ -839,6 +911,9 @@ export default function AssemblyWindow({
                   </span>
                 ) : (
                   "no apareció ninguno nuevo"
+                )}
+                {comparacion.sinCambios && " · ese lugar sigue igual"}
+                  </>
                 )}
               </span>
               {onDeshacerAccion && (
@@ -857,19 +932,30 @@ export default function AssemblyWindow({
             </div>
           )}
 
+          {(errorAccion || (error && displayData)) && (
+            <div className="assembly-no-print shrink-0 flex items-start gap-2 px-3 py-2 border-b border-base-300/30 bg-error/5">
+              <AlertTriangle className="w-3.5 h-3.5 text-error shrink-0 mt-0.5" />
+              <span className="flex-1 text-[11px] leading-snug text-error/90">
+                {errorAccion ?? error}
+              </span>
+              <button type="button" className="btn btn-xs btn-ghost" onClick={onReload}>
+                Reintentar
+              </button>
+            </div>
+          )}
+
           {displayData && verificacion !== undefined && (
             <div className="assembly-no-print shrink-0">
               <VerificacionPanel
                 verificacion={verificacion}
                 seleccion={seleccion}
-                onSeleccionar={setSeleccion}
+                onSeleccionar={seleccionar}
                 onAplicar={
                   onAplicarAccion
-                    ? (a) => a.aplicar && void aplicarAccion(a.aplicar, a.etiqueta)
+                    ? (a, clave, indice) => void aplicarAccion(a, clave, indice)
                     : undefined
                 }
-                onCambiarEscala={onCambiarEscala}
-                aplicando={aplicando}
+                enCurso={enCurso ? { clave: enCurso.clave, indice: enCurso.indice } : null}
               />
             </div>
           )}
@@ -1058,7 +1144,7 @@ export default function AssemblyWindow({
               </div>
             )}
 
-            {!loading && error && (
+            {!loading && error && !displayData && (
               <div className="flex flex-col items-center justify-center h-40 gap-3 text-center">
                 <p className="text-sm text-error font-semibold">{error}</p>
                 <button type="button" className="btn btn-outline btn-error btn-sm" onClick={onReload}>

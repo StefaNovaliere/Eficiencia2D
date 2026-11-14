@@ -87,15 +87,20 @@ export interface VerificacionPanelProps {
   /** Clave del nudo o problema abierto (`n:3`, `p:4`). */
   seleccion?: string | null;
   onSeleccionar?: (clave: string | null) => void;
-  /** Una acción con `aplicar`: el caller la fusiona con la revisión y re-pide. */
-  onAplicar?: (accion: AccionProblema) => void;
   /**
-   * Cambio de escala sin valor (v2 `cambiar_escala` con `aplicar: null`, v1
-   * `escala_mas_fina`): se ofrecen las dos escalas más finas.
+   * Una acción con `aplicar`: el caller la fusiona con la revisión y re-pide.
+   * `clave` e `indice` identifican el botón, para marcarlo mientras recalcula.
+   * Un cambio de escala sin valor (`cambiar_escala` con `aplicar: null`, v1
+   * `escala_mas_fina`) se ofrece con las dos escalas más finas y llega acá como
+   * una acción con `scale_denom`: así pasa por el mismo antes/después.
    */
-  onCambiarEscala?: (denominador: number) => void;
-  /** Mientras se re-verifica: botones deshabilitados. */
-  aplicando?: boolean;
+  onAplicar?: (accion: AccionProblema, clave: string, indice: number) => void;
+  /**
+   * El botón que se tocó y está recalculando (§3.1). Mientras haya uno, los
+   * demás se deshabilitan y la cabecera lo dice: gris sin explicación parece
+   * trabado.
+   */
+  enCurso?: { clave: string; indice: number } | null;
   /** Sólo lo que no arma (paso de generación y 409). */
   soloNoArma?: boolean;
 }
@@ -105,10 +110,10 @@ export default function VerificacionPanel({
   seleccion = null,
   onSeleccionar,
   onAplicar,
-  onCambiarEscala,
-  aplicando = false,
+  enCurso = null,
   soloNoArma = false,
 }: VerificacionPanelProps) {
+  const aplicando = enCurso !== null;
   if (verificacion === null) {
     return (
       <div className="flex items-start gap-2 px-3 py-2 border-b border-base-300/30 bg-base-200/40">
@@ -130,38 +135,65 @@ export default function VerificacionPanel({
     .slice(-2)
     .reverse();
 
-  const accionesDe = (acciones: AccionProblema[], peorCm: number, piezas: string[]) => (
+  const marcaEnCurso = (
+    <span className="inline-flex items-center gap-1">
+      <span className="loading loading-spinner loading-xs" />
+      Recalculando…
+    </span>
+  );
+
+  const accionesDe = (
+    clave: string,
+    acciones: AccionProblema[],
+    peorCm: number,
+    piezas: string[],
+  ) => (
     <div className="flex flex-wrap gap-1.5">
       {acciones.map((a, i) => {
+        const tocado = enCurso?.clave === clave && enCurso.indice === i;
         if (a.aplicar) {
           return (
             <button
               key={i}
               type="button"
               disabled={aplicando || !onAplicar}
-              onClick={() => onAplicar?.(a)}
+              onClick={() => onAplicar?.(a, clave, i)}
               className="btn btn-xs btn-outline btn-primary"
             >
-              {a.etiqueta}
+              {tocado ? marcaEnCurso : a.etiqueta}
             </button>
           );
         }
         if (a.tipo === "cambiar_escala" || a.tipo === "escala_mas_fina") {
-          if (!onCambiarEscala || escalasMasFinas.length === 0) return null;
+          if (!onAplicar || escalasMasFinas.length === 0) return null;
           return (
             <span key={i} className="flex flex-wrap items-center gap-1">
               <span className="text-[10px] text-base-content/50">{a.etiqueta}:</span>
-              {escalasMasFinas.map((d) => (
-                <button
-                  key={d}
-                  type="button"
-                  disabled={aplicando}
-                  onClick={() => onCambiarEscala(d)}
-                  className="btn btn-xs btn-ghost"
-                >
-                  {formatPrintScaleRatio(d)}
-                </button>
-              ))}
+              {tocado ? (
+                <span className="btn btn-xs btn-ghost btn-disabled">{marcaEnCurso}</span>
+              ) : (
+                escalasMasFinas.map((d) => (
+                  <button
+                    key={d}
+                    type="button"
+                    disabled={aplicando}
+                    onClick={() =>
+                      onAplicar(
+                        {
+                          tipo: "cambiar_escala",
+                          etiqueta: `Probar a ${formatPrintScaleRatio(d)}`,
+                          aplicar: { scale_denom: d },
+                        },
+                        clave,
+                        i,
+                      )
+                    }
+                    className="btn btn-xs btn-ghost"
+                  >
+                    {formatPrintScaleRatio(d)}
+                  </button>
+                ))
+              )}
             </span>
           );
         }
@@ -213,15 +245,15 @@ export default function VerificacionPanel({
     );
   };
 
-  const fichaNudo = (n: NudoVerificacion) => (
+  const fichaNudo = (n: NudoVerificacion, clave: string) => (
     <>
       {n.detalle && <DetalleNudoSvg detalle={n.detalle} escala={verificacion.escala} />}
       {n.quienTexto && <p className="text-[11px] leading-snug text-base-content/60">{n.quienTexto}</p>}
-      {accionesDe(n.acciones, n.peorCmEdificio, n.piezas)}
+      {accionesDe(clave, n.acciones, n.peorCmEdificio, n.piezas)}
     </>
   );
 
-  const fichaProblema = (p: ProblemaVerificacion) => (
+  const fichaProblema = (p: ProblemaVerificacion, clave: string) => (
     <>
       {(p.quienTexto || p.detalle) && (
         <p className="text-[11px] leading-snug text-base-content/60">{p.quienTexto ?? p.detalle}</p>
@@ -229,7 +261,7 @@ export default function VerificacionPanel({
       {p.detalle && p.quienTexto && (
         <p className="text-[11px] leading-snug text-base-content/45">{p.detalle}</p>
       )}
-      {accionesDe(p.acciones, p.peorCmEdificio, p.piezas)}
+      {accionesDe(clave, p.acciones, p.peorCmEdificio, p.piezas)}
     </>
   );
 
@@ -250,6 +282,12 @@ export default function VerificacionPanel({
           <p className={`text-xs font-semibold ${ESTADO_TEXTO[estadoTitular]}`}>
             {titularVerificacion(verificacion)}
           </p>
+          {aplicando && (
+            <p className="text-[11px] text-primary flex items-center gap-1">
+              <span className="loading loading-spinner loading-xs" />
+              Recalculando la verificación… puede tardar unos segundos.
+            </p>
+          )}
           <p className="text-[11px] text-base-content/50">
             {veredicto === "listo"
               ? "Todas las uniones encajan."
@@ -276,8 +314,12 @@ export default function VerificacionPanel({
                     {b.titulo} <span className="font-normal">({nudos.length + sueltos.length})</span>
                   </h4>
                   <ul className="space-y-1">
-                    {nudos.map((n) => fila(claveNudo(n.id), n, n.tipos[0] ?? "", fichaNudo(n)))}
-                    {sueltos.map((p) => fila(claveProblema(p.id), p, p.tipo, fichaProblema(p)))}
+                    {nudos.map((n) =>
+                      fila(claveNudo(n.id), n, n.tipos[0] ?? "", fichaNudo(n, claveNudo(n.id))),
+                    )}
+                    {sueltos.map((p) =>
+                      fila(claveProblema(p.id), p, p.tipo, fichaProblema(p, claveProblema(p.id))),
+                    )}
                   </ul>
                 </section>
               );
@@ -302,7 +344,7 @@ export default function VerificacionPanel({
         ) : (
           <ul className="px-2 space-y-1">
             {filtro(verificacion.problemas).map((p) =>
-              fila(claveProblema(p.id), p, p.tipo, fichaProblema(p)),
+              fila(claveProblema(p.id), p, p.tipo, fichaProblema(p, claveProblema(p.id))),
             )}
           </ul>
         )}
