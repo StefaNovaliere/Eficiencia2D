@@ -82,6 +82,26 @@ function wallOrientation(normal: Vec3): { key: string; label: string } {
     : { key: "south", label: "Muros (Sur)" };
 }
 
+/** Categoría de una pieza del set de corte: la que trae; si no, la local. */
+function categoriaDeCorte(
+  corte: NestingPlacement,
+  local: FaceCategory,
+): Exclude<FaceCategory, "discard"> {
+  if (corte.category === "wall" || corte.category === "floor") return corte.category;
+  return local === "floor" ? "floor" : "wall";
+}
+
+/** Centro del rectángulo del marco de un placement, en el mundo. */
+export function centroDePlacement(pl: NestingPlacement): Vec3 {
+  const u = pl.widthM / 2;
+  const v = pl.heightM / 2;
+  return {
+    x: pl.origin.x + pl.uAxis.x * u + pl.vAxis.x * v,
+    y: pl.origin.y + pl.uAxis.y * u + pl.vAxis.y * v,
+    z: pl.origin.z + pl.uAxis.z * u + pl.vAxis.z * v,
+  };
+}
+
 /**
  * Construye la guía de armado desde la topología (sin llamar al backend).
  * `placement.widthM/heightM` se prefiere para las dimensiones; si no hay
@@ -98,11 +118,30 @@ export function buildAssemblyGuideFromTopology(
   const floorIds: string[] = [];
   const wallBuckets = new Map<string, { label: string; ids: string[] }>();
 
+  const agregar = (panel: AssemblyPanel) => {
+    panels.push(panel);
+    if (panel.category === "floor") {
+      floorIds.push(panel.id);
+    } else {
+      const bucket = wallOrientation(panel.normal);
+      const entry = wallBuckets.get(bucket.key) ?? { label: bucket.label, ids: [] };
+      entry.ids.push(panel.id);
+      wallBuckets.set(bucket.key, entry);
+    }
+  };
+
+  const conGrupo = new Set<number>();
   for (const group of phase1.groups) {
-    const category = getEffectiveCategory(group, overrides);
-    if (category === "discard") continue;
+    conGrupo.add(group.id);
     const corte = setDeCorte?.get(group.id);
+    // Con set de corte, ÉL decide qué piezas hay (CONTRATO_verificacion §0.3):
+    // lo que está en `placements` se dibuja; lo que no, o está dentro de otra
+    // pieza (`absorbed_groups`) o no se corta. La categoría local sólo decide
+    // cuando no hay set de corte.
     if (setDeCorte && !corte) continue;
+    const local = getEffectiveCategory(group, overrides);
+    const category = corte ? categoriaDeCorte(corte, local) : local;
+    if (category === "discard") continue;
 
     const label = groupLabel(group, phase1.panelIdByGroup);
     const placement = corte ?? placements?.[group.id];
@@ -110,7 +149,7 @@ export function buildAssemblyGuideFromTopology(
       ? { width: placement.widthM, height: placement.heightM }
       : groupSize(group, phase1.faces);
 
-    panels.push({
+    agregar({
       id: label,
       category,
       source_group_id: group.id,
@@ -124,15 +163,25 @@ export function buildAssemblyGuideFromTopology(
       normal: group.representativeNormal,
       label,
     });
+  }
 
-    if (category === "floor") {
-      floorIds.push(label);
-    } else {
-      const bucket = wallOrientation(group.representativeNormal);
-      const entry = wallBuckets.get(bucket.key) ?? { label: bucket.label, ids: [] };
-      entry.ids.push(label);
-      wallBuckets.set(bucket.key, entry);
-    }
+  // Piezas del set de corte cuyo grupo no figura en la topología que tiene el
+  // front (quedó atrás de una fusión, por ejemplo). Se cortan, así que van: el
+  // placement trae todo lo necesario para ubicarlas y nombrarlas.
+  for (const [groupId, corte] of setDeCorte ?? []) {
+    if (conGrupo.has(groupId)) continue;
+    const label = corte.panelId || `G${groupId}`;
+    agregar({
+      id: label,
+      category: categoriaDeCorte(corte, "wall"),
+      source_group_id: groupId,
+      width_m: corte.widthM,
+      height_m: corte.heightM,
+      area_m2: corte.areaM2 > 0 ? corte.areaM2 : corte.widthM * corte.heightM,
+      centroid: centroDePlacement(corte),
+      normal: corte.normal,
+      label,
+    });
   }
 
   // Elevations (vista "Por cara" del panel lateral): pisos + muros por orientación.

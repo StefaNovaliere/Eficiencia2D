@@ -2364,12 +2364,27 @@ export default function ReviewScreen({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recargaVerificacion]);
 
-  // Recargar siempre al abrir la ventana — refleja overrides, cortes y fusiones actuales.
+  /**
+   * Al abrir el instructivo SIEMPRE se pide con el estado actual de la revisión
+   * (CONTRATO_verificacion §0.3): las fusiones, reclasificaciones y descartes
+   * hechos en el visor tienen que verse. Antes se reusaba la guía de la última
+   * vez que se abrió, y lo que se cambiaba después en el visor no llegaba nunca
+   * — ni siquiera se le pedía al backend. Si no cambió nada, el backend
+   * responde de memoria al instante.
+   *
+   * También cuando cambia la topología con la ventana abierta (un recálculo que
+   * estaba en vuelo al abrirla): la guía se arma con sus grupos.
+   *
+   * La guía guardada sólo se usa si no hay cómo pedirla.
+   */
   useEffect(() => {
     if (!assemblyWindowOpen) return;
     if (!onRequestAssemblyPreview && !assemblyGuideData) return;
-    void loadAssemblyPreview();
-  }, [assemblyWindowOpen, onRequestAssemblyPreview, assemblyGuideData, loadAssemblyPreview]);
+    void loadAssemblyPreview(Boolean(onRequestAssemblyPreview));
+    // `loadAssemblyPreview` cambia con cada edición de la revisión: lo que
+    // dispara una carga es abrir la ventana o que cambie la topología.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assemblyWindowOpen, phase1]);
 
   const viewToolBtn =
     "btn btn-sm btn-ghost h-9 min-h-9 w-9 px-0 rounded-lg hover:bg-base-200/80";

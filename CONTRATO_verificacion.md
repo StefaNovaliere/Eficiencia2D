@@ -96,6 +96,52 @@ instructivo es la que sale grabada en la plancha.
 - Después de una acción usar `panel_id_by_group` de `/verificacion`. El de `/recompute`
   no conoce esta numeración: no mezclarlos.
 
+### 0.3 Lo que se cambia en el visor 3D tiene que llegar al instructivo
+
+El instructivo refleja las fusiones, reclasificaciones y descartes hechos en el visor
+**sólo si el pedido los trae**. `/verificacion`, `/nesting-preview`, `/generate` y
+`/recompute` tienen que recibir siempre el MISMO estado de revisión:
+
+- `merges`: todas las fusiones hechas en el visor, `[[id, id, …], …]`.
+- `overrides`: todas las reclasificaciones, `{"id": "wall" | "floor" | "discard"}`. Un
+  descartado que el usuario pasa a pared va como `"wall"`, no alcanza con quitarlo.
+- `wall_wall_decisions_by_pair`.
+
+Para comprobarlo sin adivinar, `/verificacion` devuelve cuánto recibió:
+
+```jsonc
+"servidor": { "recibido": { "overrides": 1, "merges": 1, "decisiones": 0 }, … }
+```
+
+Si el usuario fusionó algo en el visor y `recibido.merges` es 0, el front no lo mandó.
+
+**Piezas fusionadas.** Cuando se fusionan cuatro tramos, la pieza resultante conserva el
+id de UNO (el de mayor área). Los otros tres no tienen entrada en `placements`: figuran en
+`absorbed_groups` apuntando al que quedó.
+
+```jsonc
+"placements":      { "180": { … } },                       // la pieza fusionada, entera
+"absorbed_groups": { "179": 180, "236": 180, "181": 180 }  // están DENTRO de la 180
+```
+
+`absorbed_groups` ahora incluye las fusiones del usuario además de las automáticas por
+escala (antes sólo las automáticas: los tramos fusionados "desaparecían"). Regla para
+dibujar un grupo `g` en el instructivo:
+
+1. Si está en `placements` → dibujar ese placement.
+2. Si está en `absorbed_groups` → no dibujar nada propio: ya está dentro del placement
+   del grupo indicado. Al seleccionarlo, resaltar ese.
+3. Si no está en ninguno → no se corta (descartado, o más chico que el mínimo).
+
+**`/recompute` con `scale_denom`** devuelve en `topology` exactamente los mismos
+`placements`, `panel_id_by_group` y `absorbed_groups` que `/verificacion` para el mismo
+estado (antes los calculaba aparte y el visor podía llamar A13 a la pieza que la plancha
+llama A14). `topology.groups` sigue listando los grupos del modelo; para saber qué se
+corta, mirar `placements` y `absorbed_groups`.
+
+Una pieza fusionada puede estar formada por dos o tres contornos que no se tocan (tramos
+separados por un vano): se corta como varias partes con una sola etiqueta.
+
 ---
 
 ## 1. Dónde llega
@@ -548,7 +594,7 @@ constantes del backend.
 
 | Campo | Dónde | Qué es |
 |---|---|---|
-| `absorbed_groups` | `/nesting-preview`; `topology` de `/recompute` con `scale_denom` | `{ "id absorbido": id del grupo que lo incluye }`. No dibujarlo aparte ni caer a la malla cruda. |
+| `absorbed_groups` | `/verificacion`; `/nesting-preview`; `topology` de `/recompute` con `scale_denom` | `{ "id absorbido": id del grupo que lo incluye }`, por fusión automática **o del usuario** (§0.3). No dibujarlo aparte ni caer a la malla cruda. |
 | `warnings` | `/nesting-preview` | Avisos de la generación a esa escala. |
 | `panel_id_by_group` | `/verificacion` (usar éste después de una acción, §0.2); `/recompute` | Calculado a la escala pedida. Las etiquetas cambian con la escala. |
 
