@@ -1,6 +1,9 @@
 # Contrato backend → front: verificación de la maqueta (versión 2)
 
-Estado del backend: implementado y con tests (`test_verificacion.py`, `test_corpus.py`).
+Estado del backend: implementado y con tests (`test_verificacion.py`, `test_corpus.py`
+y, de punta a punta por HTTP, `test_api.py`).
+
+**Lo primero que hay que hacer está en §0.**
 
 **Compatibilidad con la versión 1:** no se quitó ni se renombró ninguna clave. Un front que
 ya lee `resumen`, `piezas`, `problemas` y `uniones` sigue funcionando; va a ver menos
@@ -23,19 +26,88 @@ nombre viejo, hay que renombrarlo.
 
 ---
 
+## 0. CAMBIO URGENTE: qué pedir después de cada botón
+
+**Después de que el usuario toca una acción, pedir `POST /api/verificacion`. No pedir
+`/recompute` ni `/nesting-preview`.** Es lo que hacía aparecer "El backend no respondió a
+tiempo": esos dos pedidos tardaban 16 a 43 s y devolvían hasta 121 MB.
+
+| Momento | Pedido |
+|---|---|
+| Se carga el modelo o cambia eje / área mínima / divisiones | `/upload`, `/recompute` (como hoy) |
+| Se abre el instructivo, o cambia la escala | `/verificacion` |
+| **El usuario toca una acción (fusionar, no cortar, invertir, deshacer)** | **`/verificacion`** |
+| Se abre la pantalla de planchas | `/nesting-preview` (como hoy) |
+| Generar | `/generate` (como hoy) |
+
+Medido de punta a punta sobre un modelo de 295 piezas a 1:100:
+
+| Pedido | Tiempo | Tamaño |
+|---|---|---|
+| `/verificacion`, primera vez para ese modelo y escala | 9 a 19 s | 1 MB |
+| `/verificacion` después de un clic cuyo efecto ya estaba previsto (§3.2) | **menos de 0.3 s** | 1 MB |
+| `/verificacion` después de un clic todavía no previsto | 4 a 8 s | 1 MB |
+| `/verificacion` volviendo a un estado anterior (Deshacer) | menos de 0.3 s | 1 MB |
+
+**Subir el tiempo de espera del front a 60 s** para `/verificacion`, `/nesting-preview`,
+`/recompute` y `/generate`. El primer pedido de un modelo grande sigue tardando.
+
+### 0.1 `POST /api/verificacion`
+
+**Cuerpo:** exactamente el mismo que `/nesting-preview` (`file_id` o `proyecto_id`,
+`scale_denom`, `min_area_m2`, `axis`, `splits`, `overrides`, `merges`,
+`wall_wall_decisions`, `wall_wall_decisions_by_pair`, `marks`, `user_cuts`, `flex`,
+`mark_lines`, `ribs`, `columns`…). Los campos de plancha se ignoran.
+
+**Respuesta:**
+
+```jsonc
+{
+  "verificacion": { … },            // §2. Reemplazar la anterior entera.
+  "placements": { "245": { … } },   // piezas YA RECORTADAS, igual que /nesting-preview
+  "panel_id_by_group": { "245": "A84" },   // etiqueta de cada grupo (ESTABLE, §0.2)
+  "absorbed_groups": { "301": 245 },
+  "warnings": [ "…" ],
+  "plate_thickness_m": 0.3,
+  "plate_joints": [ … ],
+  "efectos": { "listo": false, "calculadas": 3, "total": 18, "efectos": { … } },  // §3.2
+  "servidor": { "ms": 4715, "ya_calculada": false, "espera_ms": 473 }   // diagnóstico
+}
+```
+
+No trae caras del modelo ni planchas: las caras no cambian con una acción (usar las de
+`/upload`) y la plancha se pide cuando el usuario va a esa pantalla.
+
+`verificacion`, `placements` y `absorbed_groups` son **idénticos** a los que devolvería
+`/nesting-preview` para el mismo cuerpo. Hay una prueba automática que lo comprueba.
+
+### 0.2 Las etiquetas ya no se renumeran
+
+Una pieza conserva su etiqueta aunque el usuario fusione o descarte otras: si descarta
+`A14`, la `A15` sigue siendo `A15` (queda un hueco en la numeración). Vale para
+`/verificacion`, `/nesting-preview` y `/generate`: la etiqueta que el usuario ve en el
+instructivo es la que sale grabada en la plancha.
+
+- Una pieza que nace de una fusión conserva la etiqueta de una de las dos; la otra
+  etiqueta desaparece.
+- Una pieza que no existía antes (un descartado que el usuario rescata) recibe un número
+  nuevo, después del último.
+- Las etiquetas **sí** cambian con la escala, el eje, el área mínima y las divisiones.
+- Después de una acción usar `panel_id_by_group` de `/verificacion`. El de `/recompute`
+  no conoce esta numeración: no mezclarlos.
+
+---
+
 ## 1. Dónde llega
 
-`POST /nesting-preview` → clave `verificacion`.
+`POST /verificacion` → clave `verificacion` (también viene en `/nesting-preview`).
 
 - Es un objeto (§2) o `null`. `null` significa **"no se pudo verificar"**: estado gris,
   nunca verde.
 - Depende de la escala y de cada fusión, descarte o decisión: hay que volver a pedirlo.
-- **Tiempos**, medidos en un modelo de 300 piezas:
-  - El **primer** pedido de un modelo a una escala: unos 17 s. El backend prueba
-    decisiones por su cuenta.
-  - Cada pedido **siguiente** (después de que el usuario toca un botón): unos 7 s. El
-    backend recuerda lo que ya resolvió para ese modelo y esa escala.
-  - Cambiar de escala, o reiniciar el servidor, vuelve a ser un primer pedido.
+- El resultado depende **sólo** del estado enviado, no del orden en que el usuario tocó
+  los botones ni de lo que se pidió antes.
+- Cambiar de escala, o reiniciar el servidor, vuelve a ser un primer pedido (lento).
 - Mientras espera, **no dejar los botones grises sin explicación** (ver §3.1).
 
 `assembly_warnings` e `interferencias` siguen viniendo por compatibilidad y **no hay que
@@ -282,10 +354,15 @@ Todas las uniones medidas, incluidas las que encajan. Campos nuevos respecto de 
 
 ## 3. Acciones
 
-Cada acción tiene `tipo`, `etiqueta` (texto del botón) y `aplicar`.
+Cada acción tiene `tipo`, `etiqueta` (texto del botón), `aplicar` e `id`.
 
-`aplicar` trae **las mismas claves que ya se mandan** a `/recompute`, `/nesting-preview` y
-`/generate`. Aplicar es fusionar ese objeto con el estado de la revisión y volver a pedir:
+`id` es un texto estable (`"3f9a1c0b7e2d"`) que identifica **el cambio**: la misma acción
+tiene el mismo `id` en cualquier nudo y en cualquier pedido. Es `null` en las acciones
+informativas. Sirve para buscar su efecto previsto (§3.2).
+
+`aplicar` trae **las mismas claves que ya se mandan** a `/verificacion`, `/nesting-preview`
+y `/generate`. Aplicar es fusionar ese objeto con el estado de la revisión y pedir
+`/verificacion` (§0):
 
 | Clave en `aplicar` | Cómo se fusiona |
 |---|---|
@@ -310,12 +387,13 @@ Las acciones que llegan son las que **sirven**:
   separados por una losa, el backend la rechazaba y el problema volvía igual.)
 - `invertir_cede` sólo se ofrece en uniones que el backend **no** evaluó. Si no aparece,
   invertir ya se probó y no mejora, o es una unión que el backend ya dejó invertida.
-- Una acción puede igual no mejorar el conjunto, o empeorarlo: el backend no la prueba
-  antes de ofrecerla. Por eso hace falta el antes y después de abajo.
+- Una acción puede igual no mejorar el conjunto, o empeorarlo. El backend ahora la
+  **prueba en segundo plano** y avisa qué va a pasar antes de que el usuario la toque
+  (§3.2).
 
 ### 3.1 Mientras se recalcula
 
-Aplicar una acción dispara un pedido que tarda varios segundos (§1). En ese lapso:
+Aplicar una acción dispara un pedido que puede tardar varios segundos (§0). En ese lapso:
 
 1. Marcar **el botón tocado** con un indicador de progreso ("Recalculando…").
 2. Deshabilitar los demás botones de acción, pero con el mismo indicador visible en la
@@ -327,8 +405,63 @@ Aplicar una acción dispara un pedido que tarda varios segundos (§1). En ese la
 5. Si el nudo sigue igual (mismos `grupos`, mismo `estado`), decirlo: "No cambió nada con
    esa acción". Es mejor que dejar a la persona mirando una pantalla idéntica.
 
-Recordar que después de fusionar o descartar **las etiquetas se renumeran**: la pieza que
-era `A84` puede pasar a ser `A83`. No guardar la selección por etiqueta.
+Las etiquetas ya **no** se renumeran después de fusionar o descartar (§0.2).
+
+### 3.2 Efecto previsto de cada botón
+
+Apenas responde `/verificacion`, el backend empieza a calcular en segundo plano qué pasa
+con cada acción de los nudos **"para decidir"** (no las de cambiar de escala). Dos
+consecuencias:
+
+1. **El clic es inmediato**: cuando el usuario toca un botón cuyo efecto ya se calculó,
+   `/verificacion` responde en menos de 0.3 s (`servidor.ya_calculada: true`).
+2. **El botón puede decir qué va a pasar** antes de tocarlo.
+
+Los efectos llegan en `efectos` dentro de la respuesta de `/verificacion` (los que ya
+estén) y completos en:
+
+`POST /api/verificacion/efectos` — mismo cuerpo que `/verificacion`. No calcula nada,
+responde al instante. Consultar cada 1 a 2 s hasta que `listo` sea `true`.
+
+```jsonc
+{
+  "listo": false,          // true = ya están todos
+  "calculadas": 7,
+  "total": 18,
+  "efectos": {
+    "3f9a1c0b7e2d": {      // clave: accion.id
+      "resultado": "mejora",        // "mejora" | "igual" | "empeora" | "desconocido"
+      "este_lugar": "resuelto",     // "resuelto" | "sigue" | null
+      "texto": "Resuelve este lugar y 1 otro más",   // listo para mostrar
+      "veredicto": "no_arma",       // veredicto que quedaría
+      "uniones_no_arma": -1,        // diferencias contra el estado actual
+      "uniones_revisar": 0,
+      "nudos": -2,
+      "piezas_ok": 2
+    }
+  }
+}
+```
+
+Si llega `"sin_sesion": true`, todavía no se pidió `/verificacion` para ese modelo (o el
+servidor se reinició): pedirla.
+
+Cómo mostrarlo, debajo o al lado de cada botón:
+
+| `resultado` | Sugerencia |
+|---|---|
+| `mejora` | Texto en verde: "Resuelve este lugar". Si hay una sola acción que mejora, destacarla. |
+| `igual` | Texto gris: "No cambia el resultado…". |
+| `empeora` | Texto en rojo y botón atenuado (no deshabilitado): "Empeora: 2 uniones más no arman". |
+| sin entrada todavía | Nada, o un punto de carga. El botón funciona igual. |
+
+En el modelo de 295 piezas son 18 acciones y terminan de calcularse en unos 90 s; se van
+completando de a una, en el orden de la lista de nudos. Si el usuario toca un botón antes,
+el backend interrumpe lo que estaba previendo, atiende el clic y sigue con el estado nuevo.
+
+Ejemplo real de ese modelo: en un nudo, "Cortarlas como una sola pieza" **empeora** (2
+uniones más no arman) y "No cortar A176" **resuelve ese lugar y otro más**. Sin este dato
+el usuario no tiene cómo saberlo.
 
 ### Antes y después
 
@@ -338,8 +471,9 @@ allá", después de aplicar una acción comparar el `resumen` nuevo con el anter
 
 > Resolvió 3 lugares · no apareció ninguno nuevo
 
-Alcanza con restar `resumen.nudos` y `resumen.uniones_no_arma` de antes y después. Guardar
-el estado anterior permite ofrecer **Deshacer** sin pedir nada al backend.
+Alcanza con restar `resumen.nudos` y `resumen.uniones_no_arma` de antes y después (es lo
+mismo que anticipa `efectos`). **Deshacer** es volver a mandar el estado anterior a
+`/verificacion`: el backend lo tiene guardado y responde al instante.
 
 ---
 
@@ -416,19 +550,22 @@ constantes del backend.
 |---|---|---|
 | `absorbed_groups` | `/nesting-preview`; `topology` de `/recompute` con `scale_denom` | `{ "id absorbido": id del grupo que lo incluye }`. No dibujarlo aparte ni caer a la malla cruda. |
 | `warnings` | `/nesting-preview` | Avisos de la generación a esa escala. |
-| `panel_id_by_group` | `/recompute` | Calculado a la escala pedida. Las etiquetas cambian con la escala. |
+| `panel_id_by_group` | `/verificacion` (usar éste después de una acción, §0.2); `/recompute` | Calculado a la escala pedida. Las etiquetas cambian con la escala. |
 
 ---
 
 ## 8. Qué construir, en orden
 
+0. **Cambiar el pedido de las acciones a `/verificacion` y subir el tiempo de espera a
+   60 s (§0).** Sin esto nada de lo demás se ve.
 1. **Titular** con `resumen` (texto de §2).
 2. **Lista de nudos** en tres bloques por `quien`: "Para decidir", "Depende de la escala",
    "Para corregir en el modelo". Cada fila: `titulo`, medida y botones.
 3. **Ficha de nudo** al tocar una fila: a la izquierda el 3D con sólo `piezas` visibles y
    la cámara en `punto`; a la derecha el `detalle` en 2D. Debajo, `quien_texto` y
    `acciones`.
-4. **Antes y después** al aplicar una acción, con Deshacer (§3).
+4. **Antes y después** al aplicar una acción, con Deshacer (§3), y el **efecto previsto**
+   en cada botón (§3.2).
 5. **Terminaciones** en sección plegada.
 6. **Selector de quién cede** leyendo `decisiones_automaticas` (§4.1).
 7. **Pintar las piezas** del visor general por `piezas[etiqueta].estado`.

@@ -176,8 +176,13 @@ export interface ReviewScreenProps {
   onRotateAxis: () => void;
   /** Agrega una fusión y dispara recompute. */
   onAddMerge: (cluster: number[]) => void;
-  /** Fusiones de una acción de la verificación; resuelve cuando terminó el recálculo. */
-  onAddMerges?: (clusters: number[][]) => Promise<void>;
+  /**
+   * Fusiones que deja una acción de la verificación (aplicar o deshacer). No
+   * recalcula la topología: el instructivo re-pide `/verificacion` con ellas.
+   */
+  onMergesDeInstructivo?: (merges: number[][]) => void;
+  /** Avisa cuando se abre o se cierra el instructivo. */
+  onInstructivoAbierto?: (abierto: boolean) => void;
   /** Quita la fusión en el índice dado y dispara recompute. */
   onRemoveMerge: (index: number) => void;
   /** Reemplaza la lista completa de fusiones (p. ej. desfusionar un miembro). */
@@ -213,6 +218,10 @@ export interface ReviewScreenProps {
   onRequestAssemblyPreview?: (
     request: import("@/services/api").AssemblyPreviewRequest,
   ) => Promise<import("@/services/api").AssemblyPreviewData>;
+  /** Efectos previstos de las acciones, para el estado actual de la revisión. */
+  onRequestEfectos?: (
+    request: import("@/services/api").AssemblyPreviewRequest,
+  ) => Promise<import("@/core/verificacion").EfectosVerificacion>;
   /** Abre la ventana del instructivo al montar (p. ej. desde la pantalla de descarga). */
   openAssemblyInstructivo?: boolean;
 }
@@ -545,7 +554,8 @@ export default function ReviewScreen({
   onCancel,
   onRotateAxis,
   onAddMerge,
-  onAddMerges,
+  onMergesDeInstructivo,
+  onInstructivoAbierto,
   onRemoveMerge,
   onReplaceMerges,
   onAddSplit,
@@ -564,6 +574,7 @@ export default function ReviewScreen({
   onPrintScaleChange,
   onEditingStateChange,
   onRequestAssemblyPreview,
+  onRequestEfectos,
   openAssemblyInstructivo = false,
 }: ReviewScreenProps) {
   const {
@@ -578,7 +589,7 @@ export default function ReviewScreen({
     savedColumns,
     setSavedColumns,
     nestingData,
-    setNestingData,
+    instructivoData,
     scale,
   } = useProjectContext();
   const [selectedGroupIds, setSelectedGroupIds] = useState<Set<number>>(
@@ -634,8 +645,11 @@ export default function ReviewScreen({
    * cortan cuando el usuario no decidió, y difieren de la sugerencia.
    */
   const automaticaPorPar = useMemo(
-    () => automaticasPorPar(nestingData?.verificacion?.decisionesAutomaticas ?? []),
-    [nestingData?.verificacion],
+    () =>
+      automaticasPorPar(
+        (instructivoData ?? nestingData)?.verificacion?.decisionesAutomaticas ?? [],
+      ),
+    [instructivoData, nestingData],
   );
   /** Lo que se corta en una junta: usuario, si no la automática, si no la sugerida. */
   const cedeEfectivo = useCallback(
@@ -964,10 +978,12 @@ export default function ReviewScreen({
   // y caer a los joints de phase1 cuando nestingData aún no está disponible.
   const effectivePlateJoints = useMemo(
     () =>
-      nestingData?.plateJoints?.length
-        ? nestingData.plateJoints
-        : jointsToPlateJoints(phase1.joints ?? []),
-    [nestingData, phase1.joints],
+      instructivoData?.plateJoints?.length
+        ? instructivoData.plateJoints
+        : nestingData?.plateJoints?.length
+          ? nestingData.plateJoints
+          : jointsToPlateJoints(phase1.joints ?? []),
+    [instructivoData, nestingData, phase1.joints],
   );
 
   const handleAddRib = useCallback(() => {
@@ -2190,39 +2206,45 @@ export default function ReviewScreen({
   // Assembly guide
   // ---------------------------------------------------------------------------
 
+  /** El estado de la revisión con la forma que piden los pedidos del instructivo. */
+  const estadoParaInstructivo = useCallback((): import("@/services/api").AssemblyPreviewRequest => {
+    const overrideList: ClassificationOverride[] = [];
+    for (const [groupId, newCategory] of overrides.entries()) {
+      overrideList.push({ groupId, newCategory });
+    }
+    return { overrides: overrideList, wallWallDecisions, marks: [...markGroupIds], userCuts };
+  }, [overrides, wallWallDecisions, markGroupIds, userCuts]);
+
+  // Sólo la última carga pedida escribe el resultado: una respuesta que llega
+  // tarde (una acción que venció, y después se deshizo) no pisa a la siguiente.
+  const cargaInstructivoSeq = useRef(0);
   const loadAssemblyPreview = useCallback(async (forceApi = false) => {
+    // Con la guía ya cargada no hay pedido: no cuenta como una carga nueva.
+    // Este camino corre con cada edición de la revisión, también mientras una
+    // acción espera su respuesta, y no tiene que pisarle el resultado.
+    if (!forceApi && assemblyGuideData) {
+      setAssemblyData(assemblyGuideData);
+      return;
+    }
+    const seq = ++cargaInstructivoSeq.current;
     setAssemblyLoading(true);
     setAssemblyError(null);
     try {
-      if (!forceApi && assemblyGuideData) {
-        setAssemblyData(assemblyGuideData);
-        return;
-      }
       if (!onRequestAssemblyPreview) return;
-      const overrideList: ClassificationOverride[] = [];
-      for (const [groupId, newCategory] of overrides.entries()) {
-        overrideList.push({ groupId, newCategory });
-      }
-      const data = await onRequestAssemblyPreview({
-        overrides: overrideList,
-        wallWallDecisions,
-        marks: [...markGroupIds],
-        userCuts,
-      });
+      const data = await onRequestAssemblyPreview(estadoParaInstructivo());
+      if (seq !== cargaInstructivoSeq.current) return;
       setAssemblyData(data);
       setAssemblyGuideData(data);
     } catch (err: unknown) {
+      if (seq !== cargaInstructivoSeq.current) return;
       setAssemblyError(err instanceof Error ? err.message : "Error desconocido");
     } finally {
-      setAssemblyLoading(false);
+      if (seq === cargaInstructivoSeq.current) setAssemblyLoading(false);
     }
   }, [
     assemblyGuideData,
     onRequestAssemblyPreview,
-    overrides,
-    wallWallDecisions,
-    markGroupIds,
-    userCuts,
+    estadoParaInstructivo,
     setAssemblyGuideData,
   ]);
 
@@ -2233,31 +2255,38 @@ export default function ReviewScreen({
     setAssemblyWindowOpen(true);
   }, [openAssemblyInstructivo]);
 
+  const pedirEfectos = useMemo(
+    () => (onRequestEfectos ? () => onRequestEfectos(estadoParaInstructivo()) : undefined),
+    [onRequestEfectos, estadoParaInstructivo],
+  );
+
+  useEffect(() => {
+    onInstructivoAbierto?.(assemblyWindowOpen);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assemblyWindowOpen]);
+
   /**
    * Acciones de la verificación (CONTRATO_verificacion.md §3). `aplicar` trae las
    * mismas claves que ya viajan al backend: se fusiona con el estado de la
-   * revisión y se vuelve a pedir el nesting. El reporte siguiente es la verdad,
-   * así que acá no se lleva la cuenta de qué problema se resolvió.
+   * revisión y se pide `/verificacion` — nunca `/recompute` ni
+   * `/nesting-preview` (§0). El reporte siguiente es la verdad, así que acá no
+   * se lleva la cuenta de qué problema se resolvió.
    *
    * La recarga va por un contador y no directo: tiene que correr después del
-   * render que ya tiene los descartes y las decisiones nuevas, porque el pedido
-   * se arma con el estado de ese render.
+   * render que ya tiene los descartes, las decisiones, las fusiones y la escala
+   * nuevos, porque el pedido se arma con el estado de ese render. Por eso acá
+   * no hay ningún `await` antes de pedirla: todo entra en el mismo render.
    */
   const [recargaVerificacion, setRecargaVerificacion] = useState(0);
   /**
-   * Estado previo a la última acción, para Deshacer (CONTRATO_verificacion §3).
-   * Descartar o cambiar quién cede no cambian la topología: se restauran el
-   * estado y la verificación anterior tal cual, sin pedir nada al backend.
-   * Fusionar o cambiar la escala sí: ahí hay que recalcular.
+   * Estado previo a la última acción, para Deshacer (§3): es volver a mandar ese
+   * estado a `/verificacion`. El backend lo tiene guardado y responde al instante.
    */
   const previoAccionRef = useRef<{
     overrides: Map<number, FaceCategory>;
     decisiones: WallWallDecisions;
     merges: number[][];
-    escala: number | null;
-    nestingData: typeof nestingData;
-    assemblyData: typeof assemblyData;
-    local: boolean;
+    escala: number;
   } | null>(null);
   const handleAplicarAccion = useCallback(
     async (aplicar: AplicarAccion) => {
@@ -2265,10 +2294,7 @@ export default function ReviewScreen({
         overrides: new Map(overrides),
         decisiones: new Map(wallWallDecisions),
         merges: merges.map((m) => [...m]),
-        escala: nestingData?.verificacion?.escala ?? null,
-        nestingData,
-        assemblyData,
-        local: !(aplicar.merges?.length || aplicar.scale_denom),
+        escala: scale,
       };
       pushHistory();
       if (aplicar.overrides) {
@@ -2295,10 +2321,10 @@ export default function ReviewScreen({
         setWallWallDecisions(decisiones);
       }
       if (aplicar.merges && aplicar.merges.length > 0) {
-        if (onAddMerges) await onAddMerges(aplicar.merges);
+        if (onMergesDeInstructivo) onMergesDeInstructivo([...merges, ...aplicar.merges]);
         else for (const m of aplicar.merges) onAddMerge(m);
       }
-      // v2: "Probar a 1:N" trae la escala en `aplicar`.
+      // "Probar a 1:N" trae la escala en `aplicar`.
       if (aplicar.scale_denom) onPrintScaleChange(aplicar.scale_denom);
       setRecargaVerificacion((n) => n + 1);
     },
@@ -2307,10 +2333,9 @@ export default function ReviewScreen({
       overrides,
       wallWallDecisions,
       merges,
-      nestingData,
-      assemblyData,
+      scale,
       phase1.wallWallJoints,
-      onAddMerges,
+      onMergesDeInstructivo,
       onAddMerge,
       onPrintScaleChange,
     ],
@@ -2318,23 +2343,18 @@ export default function ReviewScreen({
 
   const handleDeshacerAccion = useCallback(async () => {
     const previo = previoAccionRef.current;
-    if (!previo) return;
+    if (!previo) return false;
     previoAccionRef.current = null;
     setOverrides(previo.overrides);
     setWallWallDecisions(previo.decisiones);
-    if (previo.local) {
-      setNestingData(previo.nestingData);
-      setAssemblyData(previo.assemblyData);
-      return;
-    }
     if (JSON.stringify(previo.merges) !== JSON.stringify(merges)) {
-      await onReplaceMerges(previo.merges);
+      if (onMergesDeInstructivo) onMergesDeInstructivo(previo.merges);
+      else void onReplaceMerges(previo.merges);
     }
-    if (previo.escala != null && previo.escala !== nestingData?.verificacion?.escala) {
-      onPrintScaleChange(previo.escala);
-    }
+    if (previo.escala !== scale) onPrintScaleChange(previo.escala);
     setRecargaVerificacion((n) => n + 1);
-  }, [merges, nestingData, onReplaceMerges, onPrintScaleChange, setNestingData]);
+    return true;
+  }, [merges, scale, onMergesDeInstructivo, onReplaceMerges, onPrintScaleChange]);
 
   useEffect(() => {
     if (recargaVerificacion === 0 || !assemblyWindowOpen) return;
@@ -4246,6 +4266,7 @@ export default function ReviewScreen({
           onReload={() => void loadAssemblyPreview(true)}
           onAplicarAccion={handleAplicarAccion}
           onDeshacerAccion={handleDeshacerAccion}
+          onPedirEfectos={pedirEfectos}
         />
       )}
 

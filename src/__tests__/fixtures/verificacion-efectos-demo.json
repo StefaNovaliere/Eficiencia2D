@@ -1,0 +1,47 @@
+{
+ "listo": true,
+ "calculadas": 4,
+ "total": 4,
+ "efectos": {
+  "b60ff963a827": {
+   "resultado": "mejora",
+   "este_lugar": "resuelto",
+   "texto": "Resuelve este lugar",
+   "veredicto": "no_arma",
+   "uniones_no_arma": -1,
+   "uniones_revisar": 0,
+   "nudos": -1,
+   "piezas_ok": 0
+  },
+  "e28048d2f875": {
+   "resultado": "mejora",
+   "este_lugar": "resuelto",
+   "texto": "Resuelve este lugar",
+   "veredicto": "no_arma",
+   "uniones_no_arma": -1,
+   "uniones_revisar": 0,
+   "nudos": -1,
+   "piezas_ok": 0
+  },
+  "cb5ee2f91903": {
+   "resultado": "mejora",
+   "este_lugar": "resuelto",
+   "texto": "Resuelve este lugar",
+   "veredicto": "no_arma",
+   "uniones_no_arma": -1,
+   "uniones_revisar": 0,
+   "nudos": -1,
+   "piezas_ok": 1
+  },
+  "0e9a60050240": {
+   "resultado": "mejora",
+   "este_lugar": "resuelto",
+   "texto": "Resuelve este lugar",
+   "veredicto": "no_arma",
+   "uniones_no_arma": -1,
+   "uniones_revisar": 0,
+   "nudos": -1,
+   "piezas_ok": 1
+  }
+ }
+}

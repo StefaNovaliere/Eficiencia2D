@@ -50,6 +50,7 @@ import {
   focoDe,
   mismoNudo,
   type AccionProblema,
+  type EfectosVerificacion,
   type AplicarAccion,
   type ResumenVerificacion,
 } from "@/core/verificacion";
@@ -364,8 +365,16 @@ export interface AssemblyWindowProps {
    * es la verdad; acá no se lleva la cuenta.
    */
   onAplicarAccion?: (aplicar: AplicarAccion) => Promise<void>;
-  /** Vuelve al estado anterior a la última acción aplicada. */
-  onDeshacerAccion?: () => Promise<void>;
+  /**
+   * Vuelve al estado anterior a la última acción aplicada y re-pide la
+   * verificación. Resuelve `false` si no había nada que deshacer.
+   */
+  onDeshacerAccion?: () => Promise<boolean>;
+  /**
+   * Efectos previstos de las acciones del estado actual (§3.2). El backend los
+   * calcula en segundo plano: se consulta hasta que estén todos.
+   */
+  onPedirEfectos?: () => Promise<EfectosVerificacion>;
 }
 
 export default function AssemblyWindow({
@@ -380,10 +389,13 @@ export default function AssemblyWindow({
   onReload,
   onAplicarAccion,
   onDeshacerAccion,
+  onPedirEfectos,
 }: AssemblyWindowProps) {
   const [selectedPanelId, setSelectedPanelId] = useState<string | null>(null);
   const [view, setView] = useState<"elevations" | "table">("elevations");
-  const { nestingData, scale } = useProjectContext();
+  // Reporte y piezas recortadas de `/verificacion`. Se llama `nestingData` en
+  // lo que sigue porque tiene la misma forma, sin las planchas.
+  const { instructivoData: nestingData, scale } = useProjectContext();
   // Espesor MDF 3 mm a escala de impresión (fiel a la maqueta física).
   // El backend manda el espesor en metros de edificio junto con la topología
   // fiel; sólo si no viene se deriva de la escala en el front.
@@ -587,8 +599,15 @@ export default function AssemblyWindow({
     estado: string | null;
     /** El reporte vigente al aplicar: hasta que no llegue OTRO no hay "después". */
     reporte: object | null | undefined;
+    /** Deshacer: recalcula igual, pero no hay un antes y después que contar. */
+    sinComparar?: boolean;
   } | null>(null);
   const [errorAccion, setErrorAccion] = useState<string | null>(null);
+  /**
+   * Una acción falló o venció: el cambio ya quedó en la revisión pero el
+   * reporte que se ve es el anterior. Se ofrece deshacerla además de reintentar.
+   */
+  const [accionFallida, setAccionFallida] = useState(false);
   const [comparacion, setComparacion] = useState<{
     etiqueta: string;
     resueltos: number;
@@ -601,7 +620,7 @@ export default function AssemblyWindow({
     if (!enCurso || !verificacion || verificacion === enCurso.reporte) return;
     const ahora = verificacion.resumen;
     const igual = mismoNudo(verificacion, enCurso.grupos);
-    if (enCurso.resumen) {
+    if (enCurso.resumen && !enCurso.sinComparar) {
       setComparacion({
         etiqueta: enCurso.etiqueta,
         resueltos: Math.max(enCurso.resumen.nudos - ahora.nudos, 0),
@@ -614,23 +633,29 @@ export default function AssemblyWindow({
 
   // Un reporte nuevo (un reintento, o el resultado tardío de uno que venció)
   // deja sin efecto el aviso de error.
-  useEffect(() => setErrorAccion(null), [verificacion]);
+  useEffect(() => {
+    setErrorAccion(null);
+    setAccionFallida(false);
+  }, [verificacion]);
 
   // Falló la recarga: se rehabilita todo y se dice por qué.
   useEffect(() => {
     if (!enCurso || !error) return;
     setErrorAccion(error);
+    setAccionFallida(!enCurso.sinComparar);
     setEnCurso(null);
   }, [error, enCurso]);
 
-  // Venció: el contrato habla de ~17 s en el primer pedido de un modelo grande.
-  // Pasado un margen amplio, se suelta la pantalla en vez de dejarla trabada.
+  // Venció. El contrato pide esperar al menos 60 s: el primer pedido de un
+  // modelo grande tarda 9 a 19 s y uno no previsto 4 a 8 s. Pasado un margen
+  // amplio, se suelta la pantalla en vez de dejarla trabada.
   useEffect(() => {
     if (!enCurso) return;
     const t = setTimeout(() => {
       setErrorAccion(
         "El backend no respondió a tiempo. Podés reintentar; si el resultado llega igual, se va a ver solo.",
       );
+      setAccionFallida(!enCurso.sinComparar);
       setEnCurso(null);
     }, 90_000);
     return () => clearTimeout(t);
@@ -642,6 +667,7 @@ export default function AssemblyWindow({
       const nudo = verificacion?.nudos.find((n) => claveNudo(n.id) === clave) ?? null;
       setComparacion(null);
       setErrorAccion(null);
+      setAccionFallida(false);
       setEnCurso({
         clave,
         indice,
@@ -661,12 +687,94 @@ export default function AssemblyWindow({
     [onAplicarAccion, verificacion],
   );
 
+  // Deshacer es volver a mandar el estado anterior a `/verificacion` (§3): el
+  // backend lo tiene guardado y responde al instante, pero es un pedido, así
+  // que pasa por el mismo "Recalculando…" que una acción.
   const deshacer = useCallback(async () => {
     if (!onDeshacerAccion) return;
     setComparacion(null);
     setErrorAccion(null);
-    await onDeshacerAccion();
-  }, [onDeshacerAccion]);
+    setAccionFallida(false);
+    setEnCurso({
+      clave: "",
+      indice: -1,
+      etiqueta: "Deshacer",
+      resumen: verificacion?.resumen ?? null,
+      grupos: [],
+      estado: null,
+      reporte: verificacion,
+      sinComparar: true,
+    });
+    try {
+      // Sin nada que deshacer no va a llegar ningún reporte: no se espera.
+      if (!(await onDeshacerAccion())) setEnCurso(null);
+    } catch (e) {
+      setErrorAccion(e instanceof Error ? e.message : "No se pudo deshacer.");
+      setEnCurso(null);
+    }
+  }, [onDeshacerAccion, verificacion]);
+
+  /**
+   * Efecto previsto de cada botón (§3.2). Con la respuesta de `/verificacion`
+   * llegan los que ya estaban calculados; el resto se consulta cada 1,5 s hasta
+   * que estén todos. Lo consultado vale sólo para el reporte con el que se
+   * pidió: otro reporte es otro estado, con otros efectos.
+   */
+  const [consultados, setConsultados] = useState<{
+    reporte: object;
+    efectos: EfectosVerificacion;
+  } | null>(null);
+  const efectosIniciales = nestingData?.efectos;
+  const efectos =
+    consultados && consultados.reporte === verificacion ? consultados.efectos : efectosIniciales;
+  const reintentoSinSesion = useRef(false);
+  const accionEnCurso = enCurso !== null;
+  useEffect(() => {
+    // Mientras recalcula no se consulta: el pedido ya iría con el estado nuevo
+    // y borraría los textos de los botones que todavía se ven.
+    if (!verificacion || !onPedirEfectos || accionEnCurso) return;
+    if (!efectosIniciales || efectosIniciales.listo) return;
+    const reporte = verificacion;
+    let vivo = true;
+    let fallos = 0;
+    let consultas = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const consultar = async () => {
+      consultas += 1;
+      try {
+        const e = await onPedirEfectos();
+        if (!vivo) return;
+        fallos = 0;
+        if (e.sinSesion) {
+          // El backend perdió la memoria de este modelo (se reinició): se
+          // vuelve a pedir la verificación, una sola vez.
+          if (!reintentoSinSesion.current) {
+            reintentoSinSesion.current = true;
+            onReload();
+          }
+          return;
+        }
+        reintentoSinSesion.current = false;
+        setConsultados({ reporte, efectos: e });
+        if (e.listo) return;
+      } catch {
+        if (!vivo) return;
+        fallos += 1;
+        // Los botones funcionan igual sin el texto: no se insiste.
+        if (fallos >= 3) return;
+      }
+      // En el modelo grande del contrato terminan en ~90 s; el tope es amplio.
+      if (consultas < 240) timer = setTimeout(consultar, 1500);
+    };
+    timer = setTimeout(consultar, 1000);
+    return () => {
+      vivo = false;
+      clearTimeout(timer);
+    };
+    // `onPedirEfectos` y `onReload` cambian con cada edición de la revisión;
+    // lo que define una ronda de consultas es el reporte.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [verificacion, accionEnCurso, efectosIniciales]);
 
   const assemblyWarnings = useMemo(
     () => sortWarningsBySeverity(nestingData?.assemblyWarnings ?? []),
@@ -937,10 +1045,20 @@ export default function AssemblyWindow({
               <AlertTriangle className="w-3.5 h-3.5 text-error shrink-0 mt-0.5" />
               <span className="flex-1 text-[11px] leading-snug text-error/90">
                 {errorAccion ?? error}
+                {accionFallida && onDeshacerAccion && (
+                  <span className="block mt-0.5">
+                    El cambio quedó aplicado en la revisión: podés reintentar o deshacerlo.
+                  </span>
+                )}
               </span>
               <button type="button" className="btn btn-xs btn-ghost" onClick={onReload}>
                 Reintentar
               </button>
+              {accionFallida && onDeshacerAccion && (
+                <button type="button" className="btn btn-xs btn-ghost" onClick={() => void deshacer()}>
+                  Deshacer
+                </button>
+              )}
             </div>
           )}
 
@@ -956,6 +1074,7 @@ export default function AssemblyWindow({
                     : undefined
                 }
                 enCurso={enCurso ? { clave: enCurso.clave, indice: enCurso.indice } : null}
+                efectos={efectos ?? null}
               />
             </div>
           )}

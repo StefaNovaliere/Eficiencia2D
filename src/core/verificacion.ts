@@ -51,6 +51,37 @@ export interface AccionProblema {
   etiqueta: string;
   /** `null`: la acción es informativa, no cambia nada. */
   aplicar: AplicarAccion | null;
+  /**
+   * Identifica EL CAMBIO (§3): la misma acción tiene el mismo id en cualquier
+   * nudo y en cualquier pedido. Es la clave de su efecto previsto. `null` en
+   * las informativas y en backends anteriores.
+   */
+  id?: string | null;
+}
+
+/** Qué pasaría con el conjunto si se aplica una acción (§3.2). */
+export type ResultadoEfecto = "mejora" | "igual" | "empeora" | "desconocido";
+
+export interface EfectoAccion {
+  resultado: ResultadoEfecto;
+  /** Qué pasa con el nudo desde el que se ofrece. */
+  esteLugar: "resuelto" | "sigue" | null;
+  /** Listo para mostrar: "Resuelve este lugar y 1 otro más". */
+  texto: string;
+}
+
+/**
+ * Efectos previstos de las acciones "para decidir". El backend los calcula en
+ * segundo plano y se van completando: `listo` dice cuándo están todos.
+ */
+export interface EfectosVerificacion {
+  listo: boolean;
+  calculadas: number;
+  total: number;
+  /** Por `accion.id`. */
+  efectos: Map<string, EfectoAccion>;
+  /** Todavía no se pidió `/verificacion` para este modelo, o el servidor se reinició. */
+  sinSesion: boolean;
 }
 
 export interface ProblemaVerificacion {
@@ -276,7 +307,12 @@ function acciones(v: unknown): AccionProblema[] {
   return (Array.isArray(v) ? v : [])
     .map(rec)
     .filter((a): a is Rec => a !== null)
-    .map((a) => ({ tipo: str(a.tipo), etiqueta: str(a.etiqueta), aplicar: aplicar(a.aplicar) }));
+    .map((a) => ({
+      tipo: str(a.tipo),
+      etiqueta: str(a.etiqueta),
+      aplicar: aplicar(a.aplicar),
+      id: typeof a.id === "string" && a.id ? a.id : null,
+    }));
 }
 
 function detalle(v: unknown): DetalleNudo | null {
@@ -601,3 +637,35 @@ export function mismoNudo(v: Verificacion, grupos: number[]): NudoVerificacion |
   return v.nudos.find((n) => claveGrupos(n.grupos) === k) ?? null;
 }
 
+
+
+const RESULTADOS: ResultadoEfecto[] = ["mejora", "igual", "empeora", "desconocido"];
+
+/**
+ * Respuesta de `/verificacion/efectos` (o la clave `efectos` de `/verificacion`).
+ * `undefined` si no vino nada con esa forma: backend que no prevé efectos.
+ */
+export function parseEfectos(raw: unknown): EfectosVerificacion | undefined {
+  const r = rec(raw);
+  if (!r) return undefined;
+  const efectos = new Map<string, EfectoAccion>();
+  for (const [id, valor] of Object.entries(rec(r.efectos) ?? {})) {
+    const e = rec(valor);
+    if (!e) continue;
+    const resultado = RESULTADOS.includes(e.resultado as ResultadoEfecto)
+      ? (e.resultado as ResultadoEfecto)
+      : "desconocido";
+    efectos.set(id, {
+      resultado,
+      esteLugar: e.este_lugar === "resuelto" || e.este_lugar === "sigue" ? e.este_lugar : null,
+      texto: str(e.texto),
+    });
+  }
+  return {
+    listo: r.listo === true,
+    calculadas: num(r.calculadas),
+    total: num(r.total),
+    efectos,
+    sinSesion: r.sin_sesion === true,
+  };
+}

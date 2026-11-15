@@ -13,6 +13,9 @@ import { conEtiquetasDeCorte } from "@/core/assembly-cutset";
 import {
   recomputeTopology,
   fetchNestingPreview,
+  fetchVerificacion,
+  fetchEfectosVerificacion,
+  type NestingPreviewPayload,
   userCutsForApi,
   groupNotesForApi,
   flexForApi,
@@ -81,6 +84,7 @@ function ReviewPageContent() {
     pdfPageMode,
     combineSheets,
     setNestingData,
+    setInstructivoData,
     isLoadingSession,
     resetProject,
   } = useProjectContext();
@@ -168,6 +172,18 @@ function ReviewPageContent() {
   // vuelve un refresco, gana el último pedido.
   const labelRefreshSeq = useRef(0);
 
+  /**
+   * Mientras el instructivo está abierto no se pide `/recompute`
+   * (CONTRATO_verificacion §0): cada acción se resuelve con `/verificacion`, que
+   * trae las piezas recortadas y sus etiquetas. La topología de la revisión —
+   * que el instructivo no usa para dibujar — se pone al día al cerrarlo.
+   *
+   * `mergesDeLaTopologia`: las fusiones que refleja `phase1Result` cuando el
+   * instructivo aplicó otras; `null` = está al día.
+   */
+  const [instructivoAbierto, setInstructivoAbierto] = useState(false);
+  const mergesDeLaTopologia = useRef<string | null>(null);
+
   // Toda edición geométrica (eje, área, fusión, división) re-deriva la
   // topología en el backend, que es la fuente de verdad. El front sólo arma el
   // payload con el estado actual + el cambio puntual.
@@ -211,6 +227,7 @@ function ReviewPageContent() {
           wallWallDecisions: payload.wall_wall_decisions ?? {},
         });
         labelRefreshSeq.current += 1; // invalida cualquier refresco en vuelo
+        mergesDeLaTopologia.current = null; // la topología ya refleja estas fusiones
         setPhase1Result(updated);
         saveGeometryState({
           axis: payload.axis,
@@ -245,6 +262,11 @@ function ReviewPageContent() {
    */
   useEffect(() => {
     if (!fileId || !phase1Result) return;
+    // Con el instructivo abierto las etiquetas salen del set de corte, no de
+    // acá: este pedido (16 a 43 s en un modelo grande) corría después de cada
+    // botón y competía con la verificación. Se hace al cerrar. Si además hay
+    // fusiones pendientes, el recálculo completo ya trae las etiquetas.
+    if (instructivoAbierto || mergesDeLaTopologia.current !== null) return;
 
     const signature = topologySignature({
       overrides: overridesToRecord(savedOverrides),
@@ -316,6 +338,7 @@ function ReviewPageContent() {
     savedWallWallDecisions,
     token,
     setPhase1Result,
+    instructivoAbierto,
   ]);
 
   const handleRotateAxis = useCallback(() => {
@@ -370,19 +393,31 @@ function ReviewPageContent() {
   );
 
   /**
-   * Fusiones que pide una acción de la verificación. A diferencia de
-   * `handleAddMerge`, espera al recálculo: el nesting que se pide después tiene
-   * que ver la topología ya fusionada.
+   * Fusiones que cambia una acción de la verificación (aplicar o deshacer). No
+   * recalcula la topología: el instructivo pide `/verificacion` con estas
+   * fusiones y dibuja con lo que vuelve. Queda anotado que la topología de la
+   * revisión está atrasada, para ponerla al día al cerrar el instructivo.
    */
-  const handleAddMerges = useCallback(
-    async (clusters: number[][]) => {
-      if (clusters.length === 0) return;
-      const next = [...savedMerges, ...clusters];
+  const handleMergesDeInstructivo = useCallback(
+    (next: number[][]) => {
+      const nuevas = JSON.stringify(next);
+      if (mergesDeLaTopologia.current === null) {
+        mergesDeLaTopologia.current = JSON.stringify(savedMerges);
+      }
+      // Volver a las fusiones que la topología ya tiene (Deshacer) la deja al día.
+      if (mergesDeLaTopologia.current === nuevas) mergesDeLaTopologia.current = null;
       setSavedMerges(next);
-      await runRecompute({ merges: next });
+      saveGeometryState({ merges: next });
     },
-    [savedMerges, setSavedMerges, runRecompute],
+    [savedMerges, setSavedMerges, saveGeometryState],
   );
+
+  useEffect(() => {
+    if (instructivoAbierto || mergesDeLaTopologia.current === null) return;
+    void runRecompute({ merges: savedMerges });
+    // Sólo al cerrar el instructivo: `runRecompute` cambia con cada edición.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [instructivoAbierto]);
 
   const handleRemoveMerge = useCallback(
     (index: number) => {
@@ -567,84 +602,43 @@ function ReviewPageContent() {
     ],
   );
 
-  // El instructivo usa la misma geometría que nesting/impresión: al abrirlo
-  // refrescamos `/api/nesting-preview` con las wall_wall_decisions actuales
-  // (quién cede / quién manda) y después lifteamos esos contornos a 3D.
-  const handleRequestAssemblyPreview = useCallback(
-    async (request: AssemblyPreviewRequest) => {
-      if (!phase1Result) throw new Error("Proyecto no cargado");
-      const overridesMap = new Map<number, FaceCategory>();
-      for (const o of request.overrides) {
-        overridesMap.set(o.groupId, o.newCategory as FaceCategory);
-      }
-
-      if (fileId) {
-        try {
-          const originalFilename = resolveOriginalFilename(
-            projectFileName,
-            phase1Result.stem,
-          );
-          const nesting = await fetchNestingPreview(
-            {
-              file_id: fileId,
-              original_filename: originalFilename,
-              axis: phase1Result.appliedAxis,
-              min_area_m2: minAreaM2,
-              merges: savedMerges,
-              splits: savedSplits.map(
-                (s): SplitOperation => ({ group_id: s.groupId, mode: s.mode }),
-              ),
-              overrides: overridesToRecord(request.overrides),
-              wall_wall_decisions: decisionsToRecord(request.wallWallDecisions),
-              wall_wall_decisions_by_pair: decisionesPorPar(
-                request.wallWallDecisions,
-                phase1Result.wallWallJoints ?? [],
-              ),
-              marks: request.marks,
-              sheet_config: {
-                width_m: sheetConfig.widthM,
-                height_m: sheetConfig.heightM,
-                gap_m: sheetConfig.gapM,
-              },
-              scale_denom: scale,
-              paper,
-              page_mode: pdfPageMode,
-              user_cuts: userCutsForApi(request.userCuts),
-              flex: flexForApi(savedFlex),
-              mark_lines: markLinesForApi(savedMarkLines),
-              ribs: ribsForApi(savedRibs),
-              columns: columnsForApi(savedColumns),
-            },
-            token,
-          );
-          setNestingData(nesting);
-          // La guía sale del SET DE CORTE: las mismas piezas que el DXF, con
-          // los nombres de la plancha. La topología numera distinto (cuenta
-          // grupos que el corte descarta), y cruzar por etiqueta le asignaba a
-          // cada pieza el contorno y el nombre de otra.
-          const setDeCorte = nesting.nestingPlacements;
-          if (setDeCorte && setDeCorte.size > 0) {
-            return buildAssemblyGuideFromTopology(
-              conEtiquetasDeCorte(phase1Result, setDeCorte),
-              { overrides: overridesMap, setDeCorte },
-            );
-          }
-          throw new Error(
-            "El backend no devolvió las piezas recortadas (placements del nesting).",
-          );
-        } catch (err) {
-          console.warn("[instructivo] no se pudo obtener el set de corte.", err);
-          // El motivo real (timeout, 500 con su detalle) va al final: sin él
-          // no hay forma de saber si conviene reintentar o avisar al backend.
-          const motivo = err instanceof Error && err.message ? ` Motivo: ${err.message}` : "";
-          throw new Error(
-            `No se pudo obtener el set de corte del backend. Sin las piezas recortadas el instructivo no puede mostrar la maqueta real.${motivo}`,
-          );
-        }
-      }
-
-      // Sin modelo en el backend no hay set de corte que mostrar.
-      throw new Error("Proyecto sin modelo en el backend: no hay set de corte.");
+  /**
+   * Cuerpo de `/verificacion` y `/verificacion/efectos`: el mismo que
+   * `/nesting-preview`, con el estado actual de la revisión.
+   */
+  const payloadDelInstructivo = useCallback(
+    (request: AssemblyPreviewRequest): NestingPreviewPayload | null => {
+      if (!phase1Result || !fileId) return null;
+      return {
+        file_id: fileId,
+        original_filename: resolveOriginalFilename(projectFileName, phase1Result.stem),
+        axis: phase1Result.appliedAxis,
+        min_area_m2: minAreaM2,
+        merges: savedMerges,
+        splits: savedSplits.map(
+          (s): SplitOperation => ({ group_id: s.groupId, mode: s.mode }),
+        ),
+        overrides: overridesToRecord(request.overrides),
+        wall_wall_decisions: decisionsToRecord(request.wallWallDecisions),
+        wall_wall_decisions_by_pair: decisionesPorPar(
+          request.wallWallDecisions,
+          phase1Result.wallWallJoints ?? [],
+        ),
+        marks: request.marks,
+        sheet_config: {
+          width_m: sheetConfig.widthM,
+          height_m: sheetConfig.heightM,
+          gap_m: sheetConfig.gapM,
+        },
+        scale_denom: scale,
+        paper,
+        page_mode: pdfPageMode,
+        user_cuts: userCutsForApi(request.userCuts),
+        flex: flexForApi(savedFlex),
+        mark_lines: markLinesForApi(savedMarkLines),
+        ribs: ribsForApi(savedRibs),
+        columns: columnsForApi(savedColumns),
+      };
     },
     [
       phase1Result,
@@ -661,9 +655,63 @@ function ReviewPageContent() {
       scale,
       paper,
       pdfPageMode,
-      setNestingData,
-      token,
     ],
+  );
+
+  const pedidoInstructivo = useRef(0);
+  // El instructivo muestra las piezas tal como se cortan: al abrirlo, al cambiar
+  // la escala y después de cada acción se pide `/verificacion` (reporte + piezas
+  // recortadas, sin planchas ni caras) y esos contornos se llevan a 3D.
+  const handleRequestAssemblyPreview = useCallback(
+    async (request: AssemblyPreviewRequest) => {
+      if (!phase1Result) throw new Error("Proyecto no cargado");
+      const payload = payloadDelInstructivo(request);
+      // Sin modelo en el backend no hay set de corte que mostrar.
+      if (!payload) throw new Error("Proyecto sin modelo en el backend: no hay set de corte.");
+
+      const overridesMap = new Map<number, FaceCategory>();
+      for (const o of request.overrides) {
+        overridesMap.set(o.groupId, o.newCategory as FaceCategory);
+      }
+      const pedido = ++pedidoInstructivo.current;
+      try {
+        const datos = await fetchVerificacion(payload, token);
+        // Llegó tarde: ya se pidió otro estado y este reporte no le corresponde.
+        if (pedido !== pedidoInstructivo.current) throw new Error("Pedido superado por uno más nuevo.");
+        setInstructivoData(datos);
+        // La guía sale del SET DE CORTE: las mismas piezas que el DXF, con
+        // los nombres de la plancha. La topología numera distinto (cuenta
+        // grupos que el corte descarta), y cruzar por etiqueta le asignaba a
+        // cada pieza el contorno y el nombre de otra.
+        const setDeCorte = datos.nestingPlacements;
+        if (setDeCorte && setDeCorte.size > 0) {
+          return buildAssemblyGuideFromTopology(
+            conEtiquetasDeCorte(phase1Result, setDeCorte),
+            { overrides: overridesMap, setDeCorte },
+          );
+        }
+        throw new Error("El backend no devolvió las piezas recortadas (placements).");
+      } catch (err) {
+        console.warn("[instructivo] no se pudo obtener el set de corte.", err);
+        // El motivo real (timeout, 500 con su detalle) va al final: sin él
+        // no hay forma de saber si conviene reintentar o avisar al backend.
+        const motivo = err instanceof Error && err.message ? ` Motivo: ${err.message}` : "";
+        throw new Error(
+          `No se pudo obtener el set de corte del backend. Sin las piezas recortadas el instructivo no puede mostrar la maqueta real.${motivo}`,
+        );
+      }
+    },
+    [phase1Result, payloadDelInstructivo, setInstructivoData, token],
+  );
+
+  /** Efectos previstos de las acciones del estado actual (§3.2). */
+  const handleRequestEfectos = useCallback(
+    async (request: AssemblyPreviewRequest) => {
+      const payload = payloadDelInstructivo(request);
+      if (!payload) throw new Error("Proyecto sin modelo en el backend.");
+      return fetchEfectosVerificacion(payload, token);
+    },
+    [payloadDelInstructivo, token],
   );
 
   if (isLoadingSession) return null;
@@ -677,7 +725,8 @@ function ReviewPageContent() {
       onCancel={handleReviewCancel}
       onRotateAxis={handleRotateAxis}
       onAddMerge={handleAddMerge}
-      onAddMerges={handleAddMerges}
+      onMergesDeInstructivo={handleMergesDeInstructivo}
+      onInstructivoAbierto={setInstructivoAbierto}
       onRemoveMerge={handleRemoveMerge}
       onReplaceMerges={handleReplaceMerges}
       onAddSplit={handleAddSplit}
@@ -699,6 +748,7 @@ function ReviewPageContent() {
       }}
       onEditingStateChange={handleEditingStateChange}
       onRequestAssemblyPreview={handleRequestAssemblyPreview}
+      onRequestEfectos={handleRequestEfectos}
       openAssemblyInstructivo={openAssemblyInstructivo}
     />
   );
