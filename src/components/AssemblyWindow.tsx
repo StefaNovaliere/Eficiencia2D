@@ -29,7 +29,7 @@ import {
   resolveAssemblySteps,
   type AssemblyLiftContext,
 } from "@/core/assembly-sequence";
-import { groupLabel, stepsFromAssemblySteps } from "@/core/assembly-guide-build";
+import { centroDePlacement, groupLabel, stepsFromAssemblySteps } from "@/core/assembly-guide-build";
 import { useProjectContext } from "@/context/ProjectContext";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import InteractiveAssemblyViewer from "@/components/InteractiveAssemblyViewer";
@@ -73,6 +73,8 @@ function filterAssemblyData(
   data: AssemblyPreviewData,
   phase1: Phase1Result,
   categoryOverrides: Map<number, FaceCategory>,
+  /** Grupos que se cortan. Con esto, la categoría automática ya no decide. */
+  gruposDeCorte?: Set<number>,
 ): AssemblyPreviewData {
   const normalized = normalizeAssemblyPreviewData(data);
 
@@ -108,6 +110,13 @@ function filterAssemblyData(
   const sourcePanels = normalized.panels;
   const panels = sourcePanels.filter((p) => {
     if (p.source_group_id <= 0) return true;
+    // Una pieza del set de corte se dibuja (§0.3), aunque su grupo figure como
+    // descartado en la topología: pasa cuando queda como dueña de una fusión.
+    // Sólo la esconde un descarte que el usuario acaba de pedir, mientras
+    // llega el reporte que lo confirma.
+    if (gruposDeCorte?.has(p.source_group_id)) {
+      return categoryOverrides.get(p.source_group_id) !== "discard";
+    }
     const group = groupById.get(p.source_group_id);
     if (!group) return true;
     return getEffectiveCategory(group, categoryOverrides) !== "discard";
@@ -443,8 +452,16 @@ export default function AssemblyWindow({
   }, [data, phase1.assemblySteps]);
 
   const displayData = useMemo(
-    () => (data ? filterAssemblyData(data, phase1, categoryOverrides) : null),
-    [data, phase1, categoryOverrides],
+    () =>
+      data
+        ? filterAssemblyData(
+            data,
+            phase1,
+            categoryOverrides,
+            hayCorte && setDeCorte ? new Set(setDeCorte.keys()) : undefined,
+          )
+        : null,
+    [data, phase1, categoryOverrides, hayCorte, setDeCorte],
   );
 
   const panelMap = useMemo(
@@ -485,6 +502,16 @@ export default function AssemblyWindow({
       cx += g.centroid.x;
       cy += g.centroid.y;
       cz += g.centroid.z;
+    }
+    // Piezas del set de corte sin grupo en la topología del front: se cortan,
+    // así que también tienen que poder ubicarse por su etiqueta.
+    if (hayCorte && setDeCorte) {
+      for (const [groupId, pl] of setDeCorte) {
+        if (groupById.has(groupId)) continue;
+        labelToGroupId.set(pl.panelId || `G${groupId}`, groupId);
+        normalByGroupId.set(groupId, pl.normal);
+        centroidByGroupId.set(groupId, centroDePlacement(pl));
+      }
     }
     const n = Math.max(phase1.groups.length, 1);
     const buildingCentroid = { x: cx / n, y: cy / n, z: cz / n };

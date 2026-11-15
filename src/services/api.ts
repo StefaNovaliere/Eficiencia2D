@@ -619,6 +619,36 @@ function camposDelCorte(
 }
 
 /**
+ * Compara el estado de revisión enviado con lo que el backend dice haber
+ * recibido (`servidor.recibido`, CONTRATO_verificacion §0.3). Devuelve qué llegó
+ * de menos; vacío si coincide o si el backend no informa.
+ */
+export function estadoNoRecibido(
+  payload: Pick<
+    NestingPreviewPayload,
+    "overrides" | "merges" | "wall_wall_decisions" | "wall_wall_decisions_by_pair"
+  >,
+  servidor: unknown,
+): string[] {
+  const recibido = (servidor as { recibido?: Record<string, unknown> } | null | undefined)
+    ?.recibido;
+  if (!recibido || typeof recibido !== "object") return [];
+  const enviado = {
+    overrides: Object.keys(payload.overrides ?? {}).length,
+    merges: (payload.merges ?? []).length,
+    decisiones:
+      Object.keys(payload.wall_wall_decisions ?? {}).length +
+      (payload.wall_wall_decisions_by_pair ?? []).length,
+  };
+  const out: string[] = [];
+  for (const [clave, n] of Object.entries(enviado)) {
+    const llego = Number(recibido[clave]);
+    if (Number.isFinite(llego) && llego < n) out.push(`${clave}: enviados ${n}, recibidos ${llego}`);
+  }
+  return out;
+}
+
+/**
  * Reporte y piezas recortadas para el instructivo (`POST /api/verificacion`,
  * CONTRATO_verificacion §0). Mismo cuerpo que `/nesting-preview`; no calcula
  * planchas ni devuelve las caras del modelo, así que es lo que se pide al
@@ -647,6 +677,12 @@ export async function fetchVerificacion(
     await parseApiError(res, `Error al verificar: ${res.statusText}`);
   }
   const raw = (await res.json()) as Record<string, unknown>;
+  const faltantes = estadoNoRecibido(payload, raw.servidor);
+  if (faltantes.length > 0) {
+    // §0.3: el instructivo sólo refleja lo que el pedido lleva. Si el backend
+    // cuenta menos de lo que se mandó, algo se perdió en el camino.
+    console.warn("[verificación] el backend recibió menos estado del que se envió:", faltantes);
+  }
   const plateJoints = Array.isArray(raw.plate_joints)
     ? (toCamelCase(raw.plate_joints) as PlateJoint[])
     : undefined;
