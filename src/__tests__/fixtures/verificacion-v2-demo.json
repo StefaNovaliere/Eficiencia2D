@@ -126,7 +126,8 @@
         182
        ]
       ]
-     }
+     },
+     "id": "b60ff963a827"
     },
     {
      "tipo": "descartar",
@@ -135,17 +136,20 @@
       "overrides": {
        "182": "discard"
       }
-     }
+     },
+     "id": "e28048d2f875"
     },
     {
      "tipo": "cambiar_escala",
      "etiqueta": "Probar otra escala",
-     "aplicar": null
+     "aplicar": null,
+     "id": null
     },
     {
      "tipo": "revisar_modelo",
      "etiqueta": "Corregir el modelo 3D en esta zona",
-     "aplicar": null
+     "aplicar": null,
+     "id": null
     }
    ],
    "detalle": {
@@ -308,17 +312,20 @@
       "overrides": {
        "245": "discard"
       }
-     }
+     },
+     "id": "5ac870bc2ebd"
     },
     {
      "tipo": "cambiar_escala",
      "etiqueta": "Probar otra escala",
-     "aplicar": null
+     "aplicar": null,
+     "id": null
     },
     {
      "tipo": "revisar_modelo",
      "etiqueta": "Corregir el modelo 3D en esta zona",
-     "aplicar": null
+     "aplicar": null,
+     "id": null
     }
    ],
    "detalle": {
@@ -511,7 +518,8 @@
         182
        ]
       ]
-     }
+     },
+     "id": "b60ff963a827"
     },
     {
      "tipo": "descartar",
@@ -520,17 +528,20 @@
       "overrides": {
        "182": "discard"
       }
-     }
+     },
+     "id": "e28048d2f875"
     },
     {
      "tipo": "cambiar_escala",
      "etiqueta": "Probar otra escala",
-     "aplicar": null
+     "aplicar": null,
+     "id": null
     },
     {
      "tipo": "revisar_modelo",
      "etiqueta": "Corregir el modelo 3D en esta zona",
-     "aplicar": null
+     "aplicar": null,
+     "id": null
     }
    ],
    "id": 0
@@ -571,17 +582,20 @@
       "overrides": {
        "245": "discard"
       }
-     }
+     },
+     "id": "5ac870bc2ebd"
     },
     {
      "tipo": "cambiar_escala",
      "etiqueta": "Probar otra escala",
-     "aplicar": null
+     "aplicar": null,
+     "id": null
     },
     {
      "tipo": "revisar_modelo",
      "etiqueta": "Corregir el modelo 3D en esta zona",
-     "aplicar": null
+     "aplicar": null,
+     "id": null
     }
    ],
    "id": 3
@@ -618,14 +632,16 @@
       "overrides": {
        "34": "discard"
       }
-     }
+     },
+     "id": "56eeb9d27561"
     },
     {
      "tipo": "cambiar_escala",
      "etiqueta": "Probar a escala 1:75",
      "aplicar": {
       "scale_denom": 75
-     }
+     },
+     "id": "980e5c1ac933"
     }
    ],
    "id": 4

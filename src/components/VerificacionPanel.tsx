@@ -19,6 +19,8 @@ import {
   problemasSinNudo,
   titularVerificacion,
   type AccionProblema,
+  type EfectoAccion,
+  type EfectosVerificacion,
   type EstadoVerificacion,
   type NudoVerificacion,
   type ProblemaVerificacion,
@@ -101,9 +103,22 @@ export interface VerificacionPanelProps {
    * trabado.
    */
   enCurso?: { clave: string; indice: number } | null;
+  /**
+   * Efecto previsto de cada acción, por `accion.id` (§3.2): el botón dice qué
+   * va a pasar antes de tocarlo. Se va completando; sin entrada, el botón
+   * funciona igual.
+   */
+  efectos?: EfectosVerificacion | null;
   /** Sólo lo que no arma (paso de generación y 409). */
   soloNoArma?: boolean;
 }
+
+const EFECTO_TEXTO: Record<EfectoAccion["resultado"], string> = {
+  mejora: "text-success",
+  igual: "text-base-content/45",
+  empeora: "text-error",
+  desconocido: "text-base-content/45",
+};
 
 export default function VerificacionPanel({
   verificacion,
@@ -111,6 +126,7 @@ export default function VerificacionPanel({
   onSeleccionar,
   onAplicar,
   enCurso = null,
+  efectos = null,
   soloNoArma = false,
 }: VerificacionPanelProps) {
   const aplicando = enCurso !== null;
@@ -142,26 +158,57 @@ export default function VerificacionPanel({
     </span>
   );
 
+  /** El id de la única acción con efecto "mejora" entre las de un lugar, si es una sola. */
+  const unicaQueMejora = (acciones: AccionProblema[]): string | null => {
+    const mejoran = acciones.filter(
+      (a) => a.id && efectos?.efectos.get(a.id)?.resultado === "mejora",
+    );
+    return mejoran.length === 1 ? (mejoran[0].id ?? null) : null;
+  };
+
   const accionesDe = (
     clave: string,
     acciones: AccionProblema[],
     peorCm: number,
     piezas: string[],
   ) => (
-    <div className="flex flex-wrap gap-1.5">
+    <div className="flex flex-wrap items-start gap-1.5">
       {acciones.map((a, i) => {
         const tocado = enCurso?.clave === clave && enCurso.indice === i;
         if (a.aplicar) {
+          const efecto = a.id ? efectos?.efectos.get(a.id) : undefined;
+          // Se está calculando: el backend prevé las acciones "para decidir",
+          // no los cambios de escala.
+          const previendo =
+            !efecto && !!a.id && !!efectos && !efectos.listo && !a.aplicar.scale_denom;
+          // Si una sola acción de este lugar mejora, es la que conviene: se destaca.
+          const destacar = efecto?.resultado === "mejora" && unicaQueMejora(acciones) === a.id;
           return (
-            <button
-              key={i}
-              type="button"
-              disabled={aplicando || !onAplicar}
-              onClick={() => onAplicar?.(a, clave, i)}
-              className="btn btn-xs btn-outline btn-primary"
-            >
-              {tocado ? marcaEnCurso : a.etiqueta}
-            </button>
+            <span key={i} className="flex flex-col items-start gap-0.5 max-w-full">
+              <button
+                type="button"
+                disabled={aplicando || !onAplicar}
+                onClick={() => onAplicar?.(a, clave, i)}
+                className={`btn btn-xs btn-primary ${destacar ? "" : "btn-outline"} ${
+                  // Atenuado, no deshabilitado: la decisión sigue siendo de la persona.
+                  efecto?.resultado === "empeora" ? "opacity-50" : ""
+                }`}
+              >
+                {tocado ? marcaEnCurso : a.etiqueta}
+              </button>
+              {efecto?.texto ? (
+                <span className={`px-1 text-[10px] leading-tight ${EFECTO_TEXTO[efecto.resultado]}`}>
+                  {efecto.texto}
+                </span>
+              ) : previendo ? (
+                <span
+                  className="px-1 text-[10px] leading-tight text-base-content/35"
+                  title="Calculando qué pasa si se aplica. El botón funciona igual."
+                >
+                  <span className="loading loading-dots loading-xs align-middle" />
+                </span>
+              ) : null}
+            </span>
           );
         }
         if (a.tipo === "cambiar_escala" || a.tipo === "escala_mas_fina") {

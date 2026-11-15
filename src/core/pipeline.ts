@@ -18,7 +18,7 @@ import type {
   FinalPiece,
   NestingPlacement,
 } from "./final-pieces";
-import type { Verificacion } from "./verificacion";
+import type { EfectosVerificacion, Verificacion } from "./verificacion";
 
 /**
  * Pose 3D de una pieza (grupo) provista por el backend en `topology.placements`.
@@ -207,4 +207,23 @@ export interface NestingPreviewData {
   absorbedGroups?: Map<number, number>;
   /** Avisos de la generación a esta escala (fusiones automáticas, piezas finas…). */
   warnings?: string[];
+}
+
+/**
+ * Lo que el instructivo necesita del backend (`POST /verificacion`): el reporte
+ * y las piezas ya recortadas. Es lo que una decisión puede cambiar. No trae
+ * planchas — ésas se piden cuando el usuario va a esa pantalla — y por eso vive
+ * aparte de `NestingPreviewData`: guardarlo en el mismo lugar le dejaba a la
+ * pantalla de planchas un nesting sin planchas.
+ */
+export interface InstructivoData
+  extends Omit<NestingPreviewData, "wallNesting" | "floorNesting" | "config"> {
+  /** Sólo si la respuesta salió de `/nesting-preview` (backend sin `/verificacion`). */
+  wallNesting?: NestingResult;
+  floorNesting?: NestingResult;
+  /**
+   * Efectos previstos que ya estaban calculados al responder. `undefined`:
+   * backend que no los prevé.
+   */
+  efectos?: EfectosVerificacion;
 }

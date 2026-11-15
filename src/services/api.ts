@@ -1,5 +1,11 @@
 import { decodePackedFaces } from "@/core/packed-faces";
-import type { Phase1Result, NestingPreviewData, ClassificationOverride } from "@/core/pipeline";
+import type {
+  Phase1Result,
+  NestingPreviewData,
+  InstructivoData,
+  ClassificationOverride,
+  PlateJoint,
+} from "@/core/pipeline";
 import type { UserCut } from "@/core/user-cuts";
 import { serializeUserCutsForApi } from "@/core/user-cuts";
 import type { FlexSpec } from "@/core/flex-bending";
@@ -19,7 +25,13 @@ import {
   parseFinalPieces,
   parseNestingPlacements,
 } from "@/core/final-pieces";
-import { parseVerificacion, type DecisionPorPar, type Verificacion } from "@/core/verificacion";
+import {
+  parseEfectos,
+  parseVerificacion,
+  type DecisionPorPar,
+  type EfectosVerificacion,
+  type Verificacion,
+} from "@/core/verificacion";
 import { parseApiError } from "@/services/api-errors";
 import { parseSavedState, type ProjectSavedState } from "@/services/project-state";
 
@@ -578,6 +590,106 @@ export async function recomputeTopology(
   return mapTopology(topo);
 }
 
+/**
+ * Lo que `/nesting-preview` y `/verificacion` devuelven IGUAL para el mismo
+ * cuerpo: el set de corte, el reporte, los grupos absorbidos y los avisos.
+ * Parseado a mano: el camelizado genérico tocaría también las claves de
+ * `aplicar`, que hay que devolverle al backend tal cual llegaron.
+ */
+function camposDelCorte(
+  raw: Record<string, unknown>,
+): Pick<NestingPreviewData, "nestingPlacements" | "verificacion" | "absorbedGroups" | "warnings"> {
+  const nestingPlacements = parseNestingPlacements(raw.placements);
+  const absorbedGroups = new Map<number, number>();
+  for (const [k, v] of Object.entries((raw.absorbed_groups ?? {}) as Record<string, unknown>)) {
+    const absorbido = Number(k);
+    const dueño = Number(v);
+    if (Number.isFinite(absorbido) && Number.isFinite(dueño)) {
+      absorbedGroups.set(absorbido, dueño);
+    }
+  }
+  return {
+    nestingPlacements: nestingPlacements.size > 0 ? nestingPlacements : undefined,
+    verificacion: parseVerificacion(raw.verificacion),
+    absorbedGroups: absorbedGroups.size > 0 ? absorbedGroups : undefined,
+    warnings: Array.isArray(raw.warnings)
+      ? raw.warnings.filter((w: unknown): w is string => typeof w === "string")
+      : undefined,
+  };
+}
+
+/**
+ * Reporte y piezas recortadas para el instructivo (`POST /api/verificacion`,
+ * CONTRATO_verificacion §0). Mismo cuerpo que `/nesting-preview`; no calcula
+ * planchas ni devuelve las caras del modelo, así que es lo que se pide al
+ * abrir el instructivo y después de cada acción.
+ *
+ * Un backend que todavía no tiene el endpoint (404/405) se atiende con
+ * `/nesting-preview`, que trae lo mismo y más: más lento, pero funciona.
+ */
+export async function fetchVerificacion(
+  payload: NestingPreviewPayload,
+  token?: string | null,
+): Promise<InstructivoData> {
+  const res = await apiFetch(
+    "/api/verificacion",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: serializePipelineBody(payload as unknown as Record<string, unknown>, token),
+    },
+    token ? { token } : undefined,
+  );
+  if (res.status === 404 || res.status === 405) {
+    return fetchNestingPreview(payload, token);
+  }
+  if (!res.ok) {
+    await parseApiError(res, `Error al verificar: ${res.statusText}`);
+  }
+  const raw = (await res.json()) as Record<string, unknown>;
+  const plateJoints = Array.isArray(raw.plate_joints)
+    ? (toCamelCase(raw.plate_joints) as PlateJoint[])
+    : undefined;
+  return {
+    ...camposDelCorte(raw),
+    plateJoints,
+    // Siempre definido acá: `undefined` queda para el backend que no prevé.
+    efectos: parseEfectos(raw.efectos) ?? {
+      listo: true,
+      calculadas: 0,
+      total: 0,
+      efectos: new Map(),
+      sinSesion: false,
+    },
+  };
+}
+
+/**
+ * Efecto previsto de cada acción del estado enviado (`POST
+ * /api/verificacion/efectos`, §3.2). No calcula nada: informa lo que el backend
+ * lleva hecho en segundo plano. Mismo cuerpo que `/verificacion`.
+ */
+export async function fetchEfectosVerificacion(
+  payload: NestingPreviewPayload,
+  token?: string | null,
+): Promise<EfectosVerificacion> {
+  const res = await apiFetch(
+    "/api/verificacion/efectos",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: serializePipelineBody(payload as unknown as Record<string, unknown>, token),
+    },
+    token ? { token } : undefined,
+  );
+  if (!res.ok) {
+    await parseApiError(res, `Error al consultar los efectos: ${res.statusText}`);
+  }
+  const efectos = parseEfectos(await res.json());
+  if (!efectos) throw new Error("Respuesta de efectos con forma inesperada.");
+  return efectos;
+}
+
 /** Pide al backend el layout de planchas (nesting) para previsualizar. */
 export async function fetchNestingPreview(
   payload: NestingPreviewPayload,
@@ -623,35 +735,13 @@ export async function fetchNestingPreview(
       const assemblyWarnings = parseAssemblyWarnings(
         data.assemblyWarnings ?? raw.assembly_warnings,
       );
-      const nestingPlacements = parseNestingPlacements(raw.placements);
-      const verificacion = parseVerificacion(raw.verificacion);
-      const absorbedGroups = new Map<number, number>();
-      for (const [k, v] of Object.entries(
-        (raw.absorbed_groups ?? {}) as Record<string, unknown>,
-      )) {
-        const absorbido = Number(k);
-        const dueño = Number(v);
-        if (Number.isFinite(absorbido) && Number.isFinite(dueño)) {
-          absorbedGroups.set(absorbido, dueño);
-        }
-      }
-      const warnings = Array.isArray(raw.warnings)
-        ? raw.warnings.filter((w: unknown): w is string => typeof w === "string")
-        : undefined;
       return {
         ...data,
         ...(finalPieces.length > 0 ? { finalPieces } : { finalPieces: undefined }),
         ...(assemblyWarnings.length > 0
           ? { assemblyWarnings }
           : { assemblyWarnings: undefined }),
-        ...(nestingPlacements.size > 0
-          ? { nestingPlacements }
-          : { nestingPlacements: undefined }),
-        // Parseado aparte: el camelizado genérico tocaría también las claves de
-        // `aplicar`, que hay que devolverle al backend tal cual llegaron.
-        verificacion,
-        absorbedGroups: absorbedGroups.size > 0 ? absorbedGroups : undefined,
-        warnings,
+        ...camposDelCorte(raw),
       };
     }
 

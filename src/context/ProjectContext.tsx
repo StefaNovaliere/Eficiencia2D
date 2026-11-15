@@ -5,6 +5,7 @@ import type {
   Phase1Result,
   ClassificationOverride,
   NestingPreviewData,
+  InstructivoData,
   SplitOp,
 } from "@/core/pipeline";
 import { DEFAULT_SHEET } from "@/core/sheet-nester";
@@ -74,6 +75,13 @@ interface ProjectContextType {
   setPhase1Result: (res: Phase1Result | null) => void;
   nestingData: NestingPreviewData | null;
   setNestingData: (data: NestingPreviewData | null) => void;
+  /**
+   * Reporte y piezas recortadas del instructivo (`/verificacion`). Aparte de
+   * `nestingData`: no trae planchas, y la pantalla de planchas no tiene que
+   * encontrarse con un nesting que salió de abrir el instructivo.
+   */
+  instructivoData: InstructivoData | null;
+  setInstructivoData: (data: InstructivoData | null) => void;
   sheetConfig: SheetConfig;
   setSheetConfig: (config: SheetConfig) => void;
   savedOverrides: ClassificationOverride[];
@@ -122,6 +130,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const [pinTools, setPinTools] = useState(false);
   const [phase1Result, setPhase1Result] = useState<Phase1Result | null>(null);
   const [nestingData, setNestingData] = useState<NestingPreviewData | null>(null);
+  const [instructivoData, setInstructivoData] = useState<InstructivoData | null>(null);
   const [savedOverrides, setSavedOverrides] = useState<ClassificationOverride[]>([]);
   const [savedWallWallDecisions, setSavedWallWallDecisions] = useState<Map<number, number>>(new Map());
   const [savedMerges, setSavedMerges] = useState<number[][]>([]);
@@ -254,6 +263,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     setPinTools(false);
     setPhase1Result(null);
     setNestingData(null);
+    setInstructivoData(null);
     setSavedOverrides([]);
     setSavedWallWallDecisions(new Map());
     setSavedMerges([]);
@@ -286,6 +296,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         pinTools, setPinTools,
         phase1Result, setPhase1Result,
         nestingData, setNestingData,
+        instructivoData, setInstructivoData,
         sheetConfig, setSheetConfig,
         savedOverrides, setSavedOverrides,
         savedWallWallDecisions, setSavedWallWallDecisions,
