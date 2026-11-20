@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -13,15 +14,18 @@ import {
   Zap,
 } from "lucide-react";
 import {
+  claveHueco,
   claveNudo,
   claveProblema,
   medidaProblema,
   problemasSinNudo,
   titularVerificacion,
+  tituloHueco,
   type AccionProblema,
   type EfectoAccion,
   type EfectosVerificacion,
   type EstadoVerificacion,
+  type HuecoVerificacion,
   type NudoVerificacion,
   type ProblemaVerificacion,
   type Quien,
@@ -130,6 +134,9 @@ export default function VerificacionPanel({
   soloNoArma = false,
 }: VerificacionPanelProps) {
   const aplicando = enCurso !== null;
+  // Plegados (§2.6: en un modelo grande son ~100). Se abren solos si lo
+  // seleccionado es un hueco, por ejemplo al volver a encontrarlo tras una acción.
+  const [verHuecos, setVerHuecos] = useState(false);
   if (verificacion === null) {
     return (
       <div className="flex items-start gap-2 px-3 py-2 border-b border-base-300/30 bg-base-200/40">
@@ -260,7 +267,7 @@ export default function VerificacionPanel({
 
   const fila = (
     clave: string,
-    item: { titulo: string; estado: EstadoVerificacion; peorMm: number; peorCmEdificio: number },
+    item: { titulo: string; estado: EstadoVerificacion | null; peorMm: number; peorCmEdificio: number },
     tipo: string,
     ficha: React.ReactNode,
   ) => {
@@ -277,7 +284,10 @@ export default function VerificacionPanel({
           }`}
         >
           <div className="flex items-start gap-2">
-            <IconoTipo tipo={tipo} className={`w-3.5 h-3.5 shrink-0 mt-0.5 ${ESTADO_TEXTO[item.estado]}`} />
+            <IconoTipo
+              tipo={tipo}
+              className={`w-3.5 h-3.5 shrink-0 mt-0.5 ${item.estado ? ESTADO_TEXTO[item.estado] : "text-info"}`}
+            />
             <span className="flex-1 text-[11px] leading-snug text-base-content/85">{item.titulo}</span>
             <span
               className="text-[10px] tabular-nums text-base-content/45 shrink-0"
@@ -297,6 +307,14 @@ export default function VerificacionPanel({
       {n.detalle && <DetalleNudoSvg detalle={n.detalle} escala={verificacion.escala} />}
       {n.quienTexto && <p className="text-[11px] leading-snug text-base-content/60">{n.quienTexto}</p>}
       {accionesDe(clave, n.acciones, n.peorCmEdificio, n.piezas)}
+    </>
+  );
+
+  // Sin acciones: un hueco se arregla en el modelo (§2.6).
+  const fichaHueco = (h: HuecoVerificacion) => (
+    <>
+      <p className="text-[11px] leading-snug text-base-content/75">{h.texto}</p>
+      <p className="text-[11px] leading-snug text-base-content/55">{h.pregunta}</p>
     </>
   );
 
@@ -371,6 +389,48 @@ export default function VerificacionPanel({
                 </section>
               );
             })}
+
+            {!soloNoArma && verificacion.huecos.length > 0 && (
+              <section className="px-2 pt-2">
+                <button
+                  type="button"
+                  aria-expanded={verHuecos || seleccion?.startsWith("h:")}
+                  onClick={() => setVerHuecos((v) => !v)}
+                  className="w-full flex items-center gap-1 px-1 pt-1 pb-0.5 text-[10px] font-semibold uppercase tracking-wider text-base-content/50"
+                >
+                  <ChevronRight
+                    className={`w-3 h-3 transition-transform ${
+                      verHuecos || seleccion?.startsWith("h:") ? "rotate-90" : ""
+                    }`}
+                  />
+                  Huecos que quedan en la maqueta{" "}
+                  <span className="font-normal">({verificacion.huecos.length})</span>
+                </button>
+                {(verHuecos || seleccion?.startsWith("h:")) && (
+                  <>
+                    <p className="px-1 pb-1 text-[11px] leading-snug text-base-content/50">
+                      Puede ser diseño (un vano, una junta) o un error del modelo. Revisalos antes de
+                      cortar.
+                    </p>
+                    <ul className="space-y-1">
+                      {verificacion.huecos.map((h) =>
+                        fila(
+                          claveHueco(h.id),
+                          {
+                            titulo: tituloHueco(h),
+                            estado: null,
+                            peorMm: h.medidaMm,
+                            peorCmEdificio: h.medidaCmEdificio,
+                          },
+                          "luz",
+                          fichaHueco(h),
+                        ),
+                      )}
+                    </ul>
+                  </>
+                )}
+              </section>
+            )}
 
             {!soloNoArma && verificacion.terminaciones.length > 0 && (
               <details className="px-3 pt-2 group">
