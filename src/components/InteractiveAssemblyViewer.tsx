@@ -862,7 +862,11 @@ export default function InteractiveAssemblyViewer({
           {problemaActivo ? (
             <>
               <p className="text-[10px] font-semibold uppercase tracking-widest text-primary/70 mb-0.5">
-                {problemaActivo.soloEstas ? "Lugar · sólo sus piezas" : "Problema · maqueta completa"}
+                {problemaActivo.clave.startsWith("h:")
+                  ? "Hueco · sólo sus piezas"
+                  : problemaActivo.soloEstas
+                    ? "Lugar · sólo sus piezas"
+                    : "Problema · maqueta completa"}
               </p>
               <h2 className="text-sm font-bold text-base-content leading-tight">
                 {problemaActivo.titulo}

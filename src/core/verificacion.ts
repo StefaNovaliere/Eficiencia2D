@@ -215,6 +215,28 @@ export interface ResumenVerificacion {
   nudosPorQuien: Record<Quien, number>;
   terminaciones: number;
   resueltasSolas: number;
+  /** Huecos que el modelo deja abiertos en la maqueta (§2.6). 0 en backends anteriores. */
+  huecos: number;
+}
+
+/**
+ * Un lugar donde dos piezas casi se tocan y en la maqueta queda un hueco
+ * (§2.6). No cambia el veredicto: puede ser diseño (un vano, una junta) o un
+ * error del modelo. No tiene acciones: se arregla en el modelo.
+ */
+export interface HuecoVerificacion {
+  id: number;
+  piezas: string[];
+  /** Ids de grupo de las dos piezas: identifican el hueco entre reportes. */
+  grupos: number[];
+  medidaCmEdificio: number;
+  medidaMm: number;
+  largoCmEdificio: number;
+  punto: Vec3 | null;
+  /** Listo para mostrar. */
+  texto: string;
+  /** Listo para mostrar: la pregunta a hacerse antes de cortar. */
+  pregunta: string;
 }
 
 export interface Verificacion {
@@ -236,6 +258,8 @@ export interface Verificacion {
   uniones: Map<number, UnionVerificacion>;
   /** v2: quién cede, decidido por el backend donde la sugerencia fallaba. */
   decisionesAutomaticas: DecisionPorPar[];
+  /** Ordenados del más grande al más chico. Vacío en backends anteriores. */
+  huecos: HuecoVerificacion[];
 }
 
 // ---------------------------------------------------------------------------
@@ -458,6 +482,18 @@ export function parseVerificacion(raw: unknown): Verificacion | null | undefined
     detalle: detalle(n.detalle),
   }));
 
+  const huecos: HuecoVerificacion[] = lista(o.huecos).map((h, i) => ({
+    id: num(h.id, i),
+    piezas: Array.isArray(h.piezas) ? h.piezas.map((x) => str(x)) : [],
+    grupos: numeros(h.grupos),
+    medidaCmEdificio: num(h.medida_cm_edificio),
+    medidaMm: num(h.medida_mm),
+    largoCmEdificio: num(h.largo_cm_edificio),
+    punto: vec(h.punto),
+    texto: str(h.texto),
+    pregunta: str(h.pregunta),
+  }));
+
   const uniones = new Map<number, UnionVerificacion>();
   for (const val of Array.isArray(o.uniones) ? o.uniones : []) {
     const u = rec(val);
@@ -512,6 +548,7 @@ export function parseVerificacion(raw: unknown): Verificacion | null | undefined
       },
       terminaciones: num(r.terminaciones),
       resueltasSolas: num(r.resueltas_solas),
+      huecos: num(r.huecos, huecos.length),
     },
     piezas,
     problemas,
@@ -519,6 +556,7 @@ export function parseVerificacion(raw: unknown): Verificacion | null | undefined
     terminaciones,
     uniones,
     decisionesAutomaticas: decisionesPar(o.decisiones_automaticas),
+    huecos,
   };
 }
 
@@ -597,10 +635,24 @@ export interface FocoVerificacion {
 
 export const claveNudo = (id: number) => `n:${id}`;
 export const claveProblema = (id: number) => `p:${id}`;
+export const claveHueco = (id: number) => `h:${id}`;
+
+/** Título corto de un hueco para la lista y el visor: "A12 · B1: hueco de 28 cm". */
+export function tituloHueco(h: HuecoVerificacion): string {
+  const cm = h.medidaCmEdificio.toLocaleString("es-AR", { maximumFractionDigits: 0 });
+  return `${h.piezas.join(" · ")}: hueco de ${cm} cm`;
+}
 
 export function focoDe(v: Verificacion | null | undefined, clave: string | null): FocoVerificacion | null {
   if (!v || !clave) return null;
   const id = Number(clave.slice(2));
+  if (clave.startsWith("h:")) {
+    // Un hueco se mira como un nudo: sólo sus dos piezas, en su lugar (§2.6).
+    const h = v.huecos.find((x) => x.id === id);
+    return h
+      ? { clave, titulo: tituloHueco(h), piezas: h.piezas, punto: h.punto, uniones: [], soloEstas: true }
+      : null;
+  }
   if (clave.startsWith("n:")) {
     const n = v.nudos.find((x) => x.id === id);
     return n
@@ -637,6 +689,33 @@ export function mismoNudo(v: Verificacion, grupos: number[]): NudoVerificacion |
   return v.nudos.find((n) => claveGrupos(n.grupos) === k) ?? null;
 }
 
+/** Grupos de lo seleccionado (un nudo o un hueco), para volver a encontrarlo en otro reporte. */
+export function gruposDeClave(v: Verificacion | null | undefined, clave: string | null): number[] | null {
+  if (!v || !clave) return null;
+  const id = Number(clave.slice(2));
+  if (clave.startsWith("n:")) return v.nudos.find((n) => n.id === id)?.grupos ?? null;
+  if (clave.startsWith("h:")) return v.huecos.find((h) => h.id === id)?.grupos ?? null;
+  return null;
+}
+
+/**
+ * La misma selección en otro reporte: el nudo o el hueco con esos grupos.
+ * `tipo` es el prefijo de la clave seleccionada (`n` o `h`).
+ */
+export function mismaSeleccion(v: Verificacion, tipo: string, grupos: number[]): string | null {
+  if (grupos.length === 0) return null;
+  if (tipo === "n") {
+    const n = mismoNudo(v, grupos);
+    return n ? claveNudo(n.id) : null;
+  }
+  if (tipo === "h") {
+    const k = claveGrupos(grupos);
+    const h = v.huecos.find((x) => claveGrupos(x.grupos) === k);
+    return h ? claveHueco(h.id) : null;
+  }
+  return null;
+}
+
 
 
 const RESULTADOS: ResultadoEfecto[] = ["mejora", "igual", "empeora", "desconocido"];
@@ -668,4 +747,13 @@ export function parseEfectos(raw: unknown): EfectosVerificacion | undefined {
     efectos,
     sinSesion: r.sin_sesion === true,
   };
+}
+
+/**
+ * El aviso de `warnings` que dice que hay aberturas que salen cerradas porque
+ * el modelo tiene algo dentro del vano (§0.4). Se reconoce por su texto: no
+ * viene con un código.
+ */
+export function esAvisoAberturasCerradas(aviso: string): boolean {
+  return /abertura\(s\) salen cerradas/i.test(aviso);
 }

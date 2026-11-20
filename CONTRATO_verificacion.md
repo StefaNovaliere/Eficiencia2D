@@ -142,6 +142,24 @@ corta, mirar `placements` y `absorbed_groups`.
 Una pieza fusionada puede estar formada por dos o tres contornos que no se tocan (tramos
 separados por un vano): se corta como varias partes con una sola etiqueta.
 
+### 0.4 Aberturas: ventanas abiertas y ventanas cerradas
+
+Las aberturas cerradas del modelo (ventanas, huecos de escalera) ahora salen **cortadas**
+en la pieza. Antes se perdían: `placements[..].outline` y la plancha traían el muro
+macizo. El front no tiene que cambiar nada para esto: los contornos ya traen las aristas
+con `hole: true`, sólo que ahora llegan.
+
+Excepción, con aviso: si el modelo tiene algo **dentro** del vano (un vidrio, una
+carpintería, los paños de un frente vidriado), ese elemento ocupa la misma placa que el
+muro y la abertura sale **cerrada**. Llega en `warnings`:
+
+> 5 abertura(s) salen CERRADAS: el modelo tiene algo dentro del vano (vidrios,
+> carpinterías, paños) y eso ocupa la misma placa que el muro. Para que salgan abiertas,
+> descartá esos elementos en el visor o quitalos del modelo. Pared Vertical - Norte #194: 4
+
+Conviene mostrar este aviso en el instructivo, no sólo en la pantalla de planchas: es la
+diferencia entre una maqueta con ventanas y una sin ventanas.
+
 ---
 
 ## 1. Dónde llega
@@ -395,6 +413,54 @@ Todas las uniones medidas, incluidas las que encajan. Campos nuevos respecto de 
 - `quien`: `null` si la unión está bien.
 - `segmento`: los extremos del tramo donde ocurre, en el mundo. Dibujarlo como línea
   gruesa del color del estado.
+
+---
+
+### 2.6 `huecos` — lo que el modelo deja abierto en la maqueta
+
+**Nuevo.** Lista aparte, con su cuenta en `resumen.huecos`. **No cambia el veredicto**: un
+modelo con huecos puede dar "listo".
+
+Por qué existe: el veredicto contesta "¿las piezas encajan tal como las une el modelo?".
+Si el modelo tiene un muro que no llega a la esquina, para el veredicto esas dos piezas no
+tienen por qué tocarse (podría ser un vano) y da "listo". En la maqueta queda el hueco.
+Esto lo avisa.
+
+```jsonc
+{
+  "id": 0,
+  "tipo": "hueco",
+  "piezas": ["A3", "A5"],        // las dos piezas que casi se tocan
+  "grupos": [84, 89],
+  "medida_cm_edificio": 10.0,     // separación entre las dos
+  "medida_mm": 2.0,               // la misma, en la maqueta
+  "largo_cm_edificio": 277.5,     // a lo largo de cuánto
+  "punto": {"x": 9.85, "y": 4.2, "z": 0.2},   // dónde, para la cámara
+  "texto": "A3 y A5 casi se tocan: queda un hueco de 10 cm (2.0 mm en la maqueta) a lo largo de 278 cm.",
+  "pregunta": "¿Tienen que encontrarse? Si es un error del modelo (un muro corto, una esquina abierta, un muro que no apoya), corregilo en el modelo: en la maqueta queda ese hueco."
+}
+```
+
+Ordenados del más grande al más chico (separación × largo).
+
+Cómo mostrarlo: una sección propia, **después** de los nudos, con el título "Huecos que
+quedan en la maqueta" y una línea de explicación: "Puede ser diseño (un vano, una junta) o
+un error del modelo. Revisalos antes de cortar". Al tocar uno: el 3D con las dos piezas y
+la cámara en `punto`. No hay acciones: se arregla en el modelo.
+
+Qué se avisa y qué no (medido con dos edificios armados con 16 errores a propósito):
+
+| Caso | ¿Se avisa? |
+|---|---|
+| Modelo correcto | No (0 avisos en todos los modelos de prueba, a 1:50 y 1:100) |
+| Muro corto, esquina abierta, tabique que no llega, muro levantado, muro corrido | Sí, si el hueco sobrevive en las piezas |
+| Hueco más chico que lo que cubre la placa a esa escala (5 cm a 1:100) | No: en la maqueta no queda hueco |
+| Error que el motor corrige solo (piel duplicada, losa unos cm corta) | No: la maqueta sale bien |
+| Error que las piezas reproducen tal cual y encajan (un muro corrido hacia adentro, un tabique sobre el hueco de la escalera) | No: no se puede saber si era la idea |
+| Hueco de menos de 50 cm de largo | No: son los encuentros de esquina |
+
+En un modelo grande real (`Prueba app.obj`, 295 piezas) da unos 100 avisos: no todos se
+pudieron revisar a mano. Conviene mostrarlos plegados con la cuenta en el título.
 
 ---
 

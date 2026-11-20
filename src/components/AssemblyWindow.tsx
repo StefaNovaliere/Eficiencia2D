@@ -47,7 +47,10 @@ import { buildAssemblyDump, logAssemblyDump } from "@/core/assembly-dump";
 import { conEtiquetasDeCorte } from "@/core/assembly-cutset";
 import {
   claveNudo,
+  esAvisoAberturasCerradas,
   focoDe,
+  gruposDeClave,
+  mismaSeleccion,
   mismoNudo,
   type AccionProblema,
   type EfectosVerificacion,
@@ -578,10 +581,17 @@ export default function AssemblyWindow({
    * automáticas, piezas más finas que la placa). Antes sólo se veían los de la
    * subida, que no dependen de la escala.
    */
-  const avisos = useMemo(
+  const avisosTodos = useMemo(
     () => [...new Set([...phase1.warnings, ...(nestingData?.warnings ?? [])])],
     [phase1.warnings, nestingData?.warnings],
   );
+  /**
+   * Aberturas que salen CERRADAS (§0.4): algo del modelo dentro del vano ocupa
+   * la placa del muro. Va a la vista, fuera de los avisos plegados: es la
+   * diferencia entre una maqueta con ventanas y una sin ventanas.
+   */
+  const avisoAberturas = avisosTodos.find((w) => esAvisoAberturasCerradas(w)) ?? null;
+  const avisos = avisoAberturas ? avisosTodos.filter((w) => w !== avisoAberturas) : avisosTodos;
   /** Clave de lo abierto en la lista: `n:<id>` un nudo, `p:<id>` un problema. */
   const [seleccion, setSeleccion] = useState<string | null>(null);
   const [colorPorEstado, setColorPorEstado] = useState(true);
@@ -591,22 +601,20 @@ export default function AssemblyWindow({
    * los ids de grupo (§2.2): con esto la ficha sigue abierta en el MISMO lugar
    * después de una acción, o se cierra si ese lugar desapareció.
    */
-  const gruposSeleccion = useRef<number[] | null>(null);
+  const gruposSeleccion = useRef<{ tipo: string; grupos: number[] } | null>(null);
   const seleccionar = useCallback(
     (clave: string | null) => {
       setSeleccion(clave);
-      const foco = focoDe(verificacion, clave);
-      gruposSeleccion.current =
-        foco?.soloEstas && verificacion
-          ? (verificacion.nudos.find((n) => claveNudo(n.id) === clave)?.grupos ?? null)
-          : null;
+      const grupos = gruposDeClave(verificacion, clave);
+      gruposSeleccion.current = grupos && clave ? { tipo: clave[0], grupos } : null;
     },
     [verificacion],
   );
+  // Un nudo o un hueco se vuelve a encontrar por sus grupos (§2.2, §2.6).
   useEffect(() => {
-    const grupos = gruposSeleccion.current;
-    const igual = grupos && verificacion ? mismoNudo(verificacion, grupos) : null;
-    setSeleccion(igual ? claveNudo(igual.id) : null);
+    const sel = gruposSeleccion.current;
+    const igual = sel && verificacion ? mismaSeleccion(verificacion, sel.tipo, sel.grupos) : null;
+    setSeleccion(igual);
     if (!igual) gruposSeleccion.current = null;
   }, [verificacion]);
 
@@ -1215,6 +1223,16 @@ export default function AssemblyWindow({
             posicional, y editar el modelo puede correrlas). Antes eso recortaba
             un muro ajeno en silencio.
           */}
+          {avisoAberturas && (
+            <div className="assembly-no-print shrink-0 flex items-start gap-2 border-b border-base-300/30 bg-warning/10 px-3 py-2">
+              <AlertTriangle className="w-3.5 h-3.5 text-warning shrink-0 mt-0.5" />
+              <span className="text-[11px] leading-snug text-base-content/80">
+                <b className="font-semibold text-warning">Ventanas que salen cerradas.</b>{" "}
+                {avisoAberturas}
+              </span>
+            </div>
+          )}
+
           {avisos.length > 0 && (
             // Plegado: con la verificación los avisos de generación son largos
             // (fusiones automáticas, piezas finas) y empujaban la lista de

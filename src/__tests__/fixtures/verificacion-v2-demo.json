@@ -24,7 +24,8 @@
    "modelo": 4
   },
   "terminaciones": 10,
-  "resueltas_solas": 10
+  "resueltas_solas": 10,
+  "huecos": 2
  },
  "piezas": {
   "A9": {
@@ -914,6 +915,52 @@
    "group_a": 213,
    "group_b": 233,
    "yield_group_id": 233
+  }
+ ],
+ "huecos": [
+  {
+   "tipo": "hueco",
+   "piezas": [
+    "A12",
+    "B1"
+   ],
+   "grupos": [
+    245,
+    89
+   ],
+   "medida_cm_edificio": 27.7,
+   "medida_mm": 2.77,
+   "largo_cm_edificio": 422.3,
+   "punto": {
+    "x": 5.699,
+    "y": 0.432,
+    "z": 0.765
+   },
+   "texto": "A12 y B1 casi se tocan: queda un hueco de 28 cm (2.8 mm en la maqueta) a lo largo de 422 cm.",
+   "pregunta": "¿Tienen que encontrarse? Si es un error del modelo (un muro corto, una esquina abierta, un muro que no apoya), corregilo en el modelo: en la maqueta queda ese hueco.",
+   "id": 0
+  },
+  {
+   "tipo": "hueco",
+   "piezas": [
+    "A1",
+    "A18"
+   ],
+   "grupos": [
+    233,
+    192
+   ],
+   "medida_cm_edificio": 23.6,
+   "medida_mm": 2.36,
+   "largo_cm_edificio": 248.1,
+   "punto": {
+    "x": 4.867,
+    "y": 7.562,
+    "z": 2.269
+   },
+   "texto": "A1 y A18 casi se tocan: queda un hueco de 24 cm (2.4 mm en la maqueta) a lo largo de 248 cm.",
+   "pregunta": "¿Tienen que encontrarse? Si es un error del modelo (un muro corto, una esquina abierta, un muro que no apoya), corregilo en el modelo: en la maqueta queda ese hueco.",
+   "id": 1
   }
  ]
 }

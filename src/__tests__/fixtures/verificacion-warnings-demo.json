@@ -1,0 +1,9 @@
+{
+ "_origen": "warnings reales de POST /api/verificacion (demo.obj, 1:100)",
+ "warnings": [
+  "13 superficie(s) vertical(es) son el canto de una losa (caben enteras dentro de su espesor) y no se cortan como pieza: ese canto lo da la placa de la losa. Si alguna es una pieza real, reclasificala a mano.",
+  "5 abertura(s) salen CERRADAS: el modelo tiene algo dentro del vano (vidrios, carpinterías, paños) y eso ocupa la misma placa que el muro. Para que salgan abiertas, descartá esos elementos en el visor o quitalos del modelo. Pared Vertical - Norte #194: 4; Pared Vertical - Norte #179 (1/2): 1",
+  "A escala 1:100 la placa de 3 mm ocupa 30 cm de edificio: 10 superficie(s) paralela(s) que en el modelo están más cerca que eso se cortan como UNA sola pieza con su vecina (no hay lugar físico para dos). Pared Vertical - Oeste #184 absorbe Pared Vertical - Oeste #6; Pared Vertical - Norte #2 absorbe Pared Vertical - Norte #10 (2/2), Pared Vertical - Norte #11 (2/2); Pared Vertical - Norte #180 absorbe Pared Vertical - Norte #183 (1/2); Pared Vertical - Norte #179 (1/2) absorbe Pared Vertical - Norte #211…",
+  "4 pieza(s) miden menos que el espesor de la placa (3 mm = 30 cm de edificio a 1:100) y no se pueden armar como placa: A23 (4.68 m × 22 cm de edificio = 2.2 mm de plancha); A24 (3.14 m × 24 cm de edificio = 2.4 mm de plancha); A22 (4.68 m × 28 cm de edificio = 2.8 mm de plancha); A21 (3.43 m × 28 cm de edificio = 2.8 mm de plancha). Conviene descartarlas, engrosarlas en el modelo o usar una escala más fina."
+ ]
+}
